@@ -95,6 +95,10 @@ final class Store {
     var isSnoozed: Bool { (settings.snoozeUntil ?? .distantPast) > Date() }
     var ciRepos: [RepoConfig] { repos.filter { $0.events.contains(.ciMain) } }
 
+    func ciRepos(in state: CIState) -> [RepoConfig] {
+        ciRepos.filter { ci[$0.fullName]?.state == state }
+    }
+
     func isLowPriority(_ item: InboxItem) -> Bool {
         let author = item.author.lowercased()
         if settings.treatAppsAsBots && item.authorIsApp { return true }

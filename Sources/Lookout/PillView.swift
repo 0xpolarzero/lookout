@@ -15,12 +15,9 @@ struct PillView: View {
             }
             if !store.ciRepos.isEmpty {
                 group {
-                    VStack(spacing: 8) {
-                        ForEach(store.ciRepos) { repo in
-                            let status = store.ci[repo.fullName]
-                            CIDot(state: status?.state ?? .none)
-                                .frame(width: 32, height: 10)
-                                .help("\(repo.fullName) · \(status?.branch ?? "main") \(status?.state.label ?? "…")")
+                    VStack(spacing: 6) {
+                        ForEach([CIState.success, .failure, .pending], id: \.self) { state in
+                            ciCount(state)
                         }
                     }
                     .padding(.vertical, 8)
@@ -90,6 +87,20 @@ struct PillView: View {
         }
         .overlay(alignment: .bottomTrailing) { statusBadge.offset(x: 4, y: 4) }
         .animation(.spring(duration: 0.3), value: unread)
+    }
+
+    /// One row per CI state with the number of repos in it; hover lists them.
+    private func ciCount(_ state: CIState) -> some View {
+        let repos = store.ciRepos(in: state)
+        let names = repos.map { "\($0.fullName) (\(store.ci[$0.fullName]?.branch ?? "main"))" }
+        return HStack(spacing: 5) {
+            CIDot(state: repos.isEmpty ? .none : state, size: 7)
+            Text("\(repos.count)")
+                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .foregroundStyle(repos.isEmpty ? Theme.tertiary : Theme.text)
+        }
+        .frame(width: 32, height: 16)
+        .help(repos.isEmpty ? "No repos \(state.label)" : "\(state.label.capitalized) on main:\n" + names.joined(separator: "\n"))
     }
 
     /// Settings live in the panel; the pill only surfaces problems and snooze.
