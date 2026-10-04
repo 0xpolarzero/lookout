@@ -1,0 +1,236 @@
+import Foundation
+import Security
+
+// MARK: - API types
+
+struct GHUser: Codable, Hashable {
+    let login: String
+    let avatarUrl: URL?
+    let type: String?
+
+    var isApp: Bool { type == "Bot" || login.hasSuffix("[bot]") }
+}
+
+struct GHIssue: Decodable {
+    struct PRLink: Decodable { let url: URL? }
+    let id: Int
+    let number: Int
+    let title: String
+    let body: String?
+    let user: GHUser?
+    let htmlUrl: URL
+    let createdAt: Date
+    let updatedAt: Date
+    let pullRequest: PRLink?
+    let repositoryUrl: URL?
+}
+
+struct GHComment: Decodable {
+    let id: Int
+    let body: String?
+    let user: GHUser?
+    let htmlUrl: URL
+    let createdAt: Date
+    let updatedAt: Date
+    let issueUrl: URL?
+    let pullRequestUrl: URL?
+    let inReplyToId: Int?
+    let path: String?
+}
+
+struct GHRepo: Decodable {
+    let fullName: String
+    let defaultBranch: String
+}
+
+struct GHSearch<T: Decodable>: Decodable {
+    let items: [T]
+}
+
+struct GHWorkflowRuns: Decodable {
+    struct Run: Decodable {
+        let name: String
+        let workflowId: Int
+        let headSha: String
+        let status: String
+        let conclusion: String?
+    }
+    let workflowRuns: [Run]
+}
+
+struct GHCheckRuns: Decodable {
+    struct App: Decodable { let slug: String? }
+    struct Run: Decodable {
+        let app: App?
+        let name: String
+        let status: String
+        let conclusion: String?
+        let headSha: String
+    }
+    let totalCount: Int
+    let checkRuns: [Run]
+}
+
+struct GHCombinedStatus: Decodable {
+    struct Status: Decodable {
+        let context: String
+        let state: String
+    }
+    let state: String
+    let totalCount: Int
+    let sha: String
+    let statuses: [Status]
+}
+
+struct GitHubError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
+// MARK: - Client
+
+/// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
+final class GitHubClient: @unchecked Sendable {
+    var token: String?
+    private(set) var rateRemaining: Int?
+    private var etags: [String: (etag: String, data: Data)] = [:]
+    private let lock = NSLock()
+
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.keyDecodingStrategy = .convertFromSnakeCase
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
+    func get<T: Decodable>(_ path: String, _ query: [String: String] = [:], as type: T.Type = T.self) async throws -> T {
+        let data = try await raw(path, query)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw GitHubError(message: "Unexpected response from \(path)")
+        }
+    }
+
+    func raw(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
+        var comps = URLComponents(string: "https://api.github.com" + path)!
+        if !query.isEmpty {
+            comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        let url = comps.url!
+        var req = request(url)
+        let key = url.absoluteString
+        let cached = lock.withLock { etags[key] }
+        if let cached { req.setValue(cached.etag, forHTTPHeaderField: "If-None-Match") }
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let http = resp as! HTTPURLResponse
+        trackRate(http)
+        if http.statusCode == 304, let cached { return cached.data }
+        try check(http, data)
+        if let etag = http.value(forHTTPHeaderField: "ETag") {
+            lock.withLock { etags[key] = (etag, data) }
+        }
+        return data
+    }
+
+    func graphql(_ query: String) async throws -> [String: Any] {
+        var req = request(URL(string: "https://api.github.com/graphql")!)
+        req.httpMethod = "POST"
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try check(resp as! HTTPURLResponse, data)
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw GitHubError(message: "Bad GraphQL response")
+        }
+        return json
+    }
+
+    private func request(_ url: URL) -> URLRequest {
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        req.setValue("Lookout", forHTTPHeaderField: "User-Agent")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return req
+    }
+
+    private func trackRate(_ http: HTTPURLResponse) {
+        guard http.value(forHTTPHeaderField: "x-ratelimit-resource") == "core" else { return }
+        if let r = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) {
+            rateRemaining = r
+        }
+    }
+
+    private func check(_ http: HTTPURLResponse, _ data: Data) throws {
+        guard !(200..<300).contains(http.statusCode) else { return }
+        let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
+        switch http.statusCode {
+        case 401: throw GitHubError(message: "GitHub rejected the token")
+        case 404: throw GitHubError(message: "Not found (or no access)")
+        default: throw GitHubError(message: message ?? "GitHub error \(http.statusCode)")
+        }
+    }
+}
+
+// MARK: - Token
+
+enum TokenSource: String {
+    case keychain = "Keychain"
+    case environment = "environment"
+    case ghCLI = "gh CLI"
+}
+
+enum TokenProvider {
+    static func resolve() -> (String, TokenSource)? {
+        if let t = Keychain.read(), !t.isEmpty { return (t, .keychain) }
+        let env = ProcessInfo.processInfo.environment
+        if let t = env["GH_TOKEN"] ?? env["GITHUB_TOKEN"], !t.isEmpty { return (t, .environment) }
+        if let t = ghCLIToken(), !t.isEmpty { return (t, .ghCLI) }
+        return nil
+    }
+
+    private static func ghCLIToken() -> String? {
+        let candidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+        guard let path = candidates.first(where: FileManager.default.isExecutableFile) else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = ["auth", "token"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum Keychain {
+    private static let base: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "dev.polarzero.lookout",
+        kSecAttrAccount as String: "github-token",
+    ]
+
+    static func read() -> String? {
+        var q = base
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func write(_ token: String) {
+        delete()
+        var q = base
+        q[kSecValueData as String] = Data(token.utf8)
+        SecItemAdd(q as CFDictionary, nil)
+    }
+
+    static func delete() {
+        SecItemDelete(base as CFDictionary)
+    }
+}
