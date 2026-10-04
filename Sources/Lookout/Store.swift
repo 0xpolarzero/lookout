@@ -245,6 +245,12 @@ final class Store {
         }
     }
 
+    func toggleAllComments(_ repo: RepoConfig) {
+        guard let i = repos.firstIndex(where: { $0.id == repo.id }) else { return }
+        repos[i].allComments.toggle()
+        save()
+    }
+
     func loadSuggestions() async {
         guard suggestions.isEmpty else { return }
         if me == nil { await authenticate() }
@@ -307,6 +313,7 @@ final class Store {
         }
 
         var fresh: [InboxItem] = []
+        var mentioned = Set<String>()
         var titles: [Int: String] = [:]
         // (number, my comment date, thread root) — applied after new items merge.
         var myReplies: [(number: Int, at: Date, root: Int?)] = []
@@ -336,6 +343,7 @@ final class Store {
                 }
                 let kind: EventKind = c.htmlUrl.path.contains("/pull/") ? .prComment : .issueComment
                 guard ev.contains(kind), c.createdAt >= cursor("comments").addingTimeInterval(-1) else { continue }
+                if mentionsMe(c.body, me) { mentioned.insert("\(name)#c#\(c.id)") }
                 fresh.append(InboxItem(
                     id: "\(name)#c#\(c.id)", repo: name, kind: kind, number: number,
                     title: title(for: number, in: name, titles), snippet: snippet(c.body), author: user.login,
@@ -354,6 +362,7 @@ final class Store {
                     continue
                 }
                 guard c.createdAt >= cursor("review").addingTimeInterval(-1) else { continue }
+                if mentionsMe(c.body, me) { mentioned.insert("\(name)#r#\(c.id)") }
                 fresh.append(InboxItem(
                     id: "\(name)#r#\(c.id)", repo: name, kind: .reviewComment, number: number,
                     title: title(for: number, in: name, titles), snippet: snippet(c.body), author: user.login,
@@ -365,9 +374,19 @@ final class Store {
 
         let known = Set(items.map(\.id))
         var added = fresh.filter { !known.contains($0.id) }
-        let untitled = Set(added.filter { $0.title == "#\($0.number)" }.map(\.number))
-        if !untitled.isEmpty, let found = try? await fetchTitles(name, Array(untitled)) {
-            for i in added.indices { added[i].title = found[added[i].number] ?? added[i].title }
+        let commentKinds: Set<EventKind> = [.issueComment, .prComment, .reviewComment]
+        let filtering = !repo.allComments
+        let needInfo = Set(added.filter { $0.title == "#\($0.number)" || (filtering && commentKinds.contains($0.kind)) }.map(\.number))
+        let reviewNumbers = Set(added.filter { filtering && $0.kind == .reviewComment }.map(\.number))
+        let info: [Int: ThreadInfo]? = needInfo.isEmpty ? [:]
+            : try? await fetchThreads(name, Array(needInfo), participation: filtering, reviewThreads: reviewNumbers, me: me)
+        for i in added.indices {
+            if let title = info?[added[i].number]?.title { added[i].title = title }
+        }
+        // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
+        // If the lookup failed, keep everything rather than silently dropping something addressed to me.
+        if filtering, let info {
+            added = added.filter { Self.isRelevant($0, thread: info[$0.number], mentioned: mentioned.contains($0.id), me: me) }
         }
         items.append(contentsOf: added)
 
@@ -386,22 +405,78 @@ final class Store {
         announce(added.filter { $0.state == .unread && $0.createdAt > repo.addedAt })
     }
 
-    /// Comments on threads that weren't in this page of /issues: fetch their titles in one GraphQL call.
-    private func fetchTitles(_ name: String, _ numbers: [Int]) async throws -> [Int: String] {
+    struct ThreadInfo {
+        var title: String?
+        var author: String?
+        /// When I commented on (or reviewed) the issue/PR.
+        var activity: [Date] = []
+        /// Review thread root comment id → when I posted in that thread.
+        var reviewActivity: [Int: [Date]] = [:]
+    }
+
+    /// One GraphQL call for the threads new comments landed on: titles, authors and my participation.
+    func fetchThreads(_ name: String, _ numbers: [Int], participation: Bool, reviewThreads: Set<Int>,
+                              me: String) async throws -> [Int: ThreadInfo] {
         let parts = name.split(separator: "/")
+        let common = participation ? "title author { login } comments(last: 100) { nodes { author { login } createdAt } }" : "title"
         var q = "query { repository(owner: \"\(parts[0])\", name: \"\(parts[1])\") {"
-        for n in numbers.sorted().suffix(60) {
-            q += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { title } ... on PullRequest { title } }"
+        for n in numbers.sorted().suffix(40) {
+            var pr = common
+            if participation { pr += " reviews(last: 50) { nodes { author { login } submittedAt } }" }
+            if reviewThreads.contains(n) {
+                pr += " reviewThreads(last: 60) { nodes { comments(first: 50) { nodes { databaseId author { login } createdAt } } } }"
+            }
+            q += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { \(common) } ... on PullRequest { \(pr) } }"
         }
         q += " } }"
         let json = try await gh.graphql(q)
-        guard let repoObj = (json["data"] as? [String: Any])?["repository"] as? [String: Any] else { return [:] }
-        var titles: [Int: String] = [:]
-        for (key, value) in repoObj {
-            if let n = Int(key.dropFirst()), let title = (value as? [String: Any])?["title"] as? String { titles[n] = title }
+        guard let repoObj = (json["data"] as? [String: Any])?["repository"] as? [String: Any] else {
+            throw GitHubError(message: "Couldn't load threads for \(name)")
         }
-        return titles
+
+        func nodes(_ obj: Any?, _ key: String) -> [[String: Any]] {
+            ((obj as? [String: Any])?[key] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
+        }
+        func login(_ node: [String: Any]) -> String? { ((node["author"] as? [String: Any])?["login"] as? String)?.lowercased() }
+        func date(_ node: [String: Any], _ key: String) -> Date? { (node[key] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } }
+
+        var result: [Int: ThreadInfo] = [:]
+        for (key, value) in repoObj {
+            guard let n = Int(key.dropFirst()), let obj = value as? [String: Any] else { continue }
+            var info = ThreadInfo(title: obj["title"] as? String, author: login(obj))
+            info.activity = nodes(obj, "comments").filter { login($0) == me }.compactMap { date($0, "createdAt") }
+                + nodes(obj, "reviews").filter { login($0) == me }.compactMap { date($0, "submittedAt") }
+            for thread in nodes(obj, "reviewThreads") {
+                let comments = nodes(thread, "comments")
+                guard let root = comments.first?["databaseId"] as? Int else { continue }
+                info.reviewActivity[root] = comments.filter { login($0) == me }.compactMap { date($0, "createdAt") }
+            }
+            result[n] = info
+        }
+        return result
     }
+
+    /// The "comments that are for me" rule (used when a repo's All comments switch is off).
+    nonisolated static func isRelevant(_ item: InboxItem, thread: ThreadInfo?, mentioned: Bool, me: String) -> Bool {
+        guard [.issueComment, .prComment, .reviewComment].contains(item.kind), !mentioned else { return true }
+        guard let thread else { return false }
+        if thread.author == me { return true }
+        if item.kind == .reviewComment {
+            return thread.reviewActivity[item.threadRoot ?? -1]?.contains { $0 < item.createdAt } ?? false
+        }
+        return thread.activity.contains { $0 < item.createdAt }
+    }
+
+    nonisolated static func mentions(_ body: String?, _ me: String) -> Bool {
+        guard let body else { return false }
+        let pattern = "(?<![\\w/@-])@" + NSRegularExpression.escapedPattern(for: me) + "(?![\\w-])"
+        return body.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    private func mentionsMe(_ body: String?, _ me: String) -> Bool {
+        Self.mentions(body, me)
+    }
+
 
     /// Review threads: resolution state lives only in GraphQL.
     private func syncThreads(_ name: String) async throws {

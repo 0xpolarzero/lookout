@@ -18,7 +18,7 @@ enum Demo {
         store.rateRemaining = 4812
         store.settings.botHandles = ["vercel", "netlify"]
         store.repos = [
-            RepoConfig(fullName: "0xpolarzero/lookout"),
+            RepoConfig(fullName: "0xpolarzero/lookout", allComments: true),
             RepoConfig(fullName: "apple/swift-format"),
             RepoConfig(fullName: "ziglang/zig", events: [.prComment, .reviewComment, .ciMain]),
         ]
@@ -212,10 +212,28 @@ enum Check {
         store.persists = false
         Task {
             await store.authenticate()
+            if let i = CommandLine.arguments.firstIndex(of: "--thread"), let n = Int(CommandLine.arguments[i + 1]) {
+                let me = store.me?.login.lowercased() ?? ""
+                let info = try? await store.fetchThreads(repo, [n], participation: true, reviewThreads: [n], me: me)
+                let t = info?[n]
+                print("#\(n) title=\(t?.title ?? "nil") author=\(t?.author ?? "nil") myActivity=\(t?.activity ?? []) reviewThreadsWithMe=\(t?.reviewActivity.filter { !$0.value.isEmpty }.count ?? 0)")
+                exit(0)
+            }
             print("auth:", store.me?.login ?? "nil", store.tokenSource?.rawValue ?? "", store.authError ?? "")
             if let err = await store.addRepo(repo) { print("add error:", err) }
+            if CommandLine.arguments.contains("--all"), let r = store.repos.first {
+                store.toggleAllComments(r)
+                store.repos[0].cursors = [:]
+                store.items = []
+            }
+            if let i = CommandLine.arguments.firstIndex(of: "--days"), let days = Double(CommandLine.arguments[i + 1]) {
+                store.repos[0].addedAt = Date().addingTimeInterval(-(days - 1) * 86400)
+                store.repos[0].cursors = [:]
+                store.items = []
+            }
+            print("allComments:", store.repos.first?.allComments ?? false)
             await store.pollAll()
-            for item in store.items.sorted(by: { $0.createdAt > $1.createdAt }).prefix(25) {
+            for item in store.items.sorted(by: { $0.createdAt > $1.createdAt }).filter({ $0.kind != .issueOpened && $0.kind != .prOpened }).prefix(25) {
                 print(String(format: "%-15@ %-10@ #%-6d %@ @%@ low=%d  %@", item.kind.rawValue, item.state.rawValue, item.number,
                              shortAgo(item.createdAt), item.author, store.isLowPriority(item) ? 1 : 0, String(item.title.prefix(50))))
             }

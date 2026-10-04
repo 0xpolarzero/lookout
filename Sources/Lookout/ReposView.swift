@@ -166,6 +166,7 @@ struct RepoCard: View {
                     EventToggle(kind: kind, isOn: repo.events.contains(kind)) { store.toggle(kind, on: repo) }
                 }
             }
+            allCommentsRow
             if let error = store.repoErrors[repo.fullName] {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
@@ -173,6 +174,29 @@ struct RepoCard: View {
             }
         }
         .card()
+    }
+}
+
+extension RepoCard {
+    private var allCommentsRow: some View {
+        let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("All comments").font(.system(size: 12.5, weight: .medium))
+                Text(repo.allComments ? "Every comment in this repo"
+                                      : "Only on your issues & PRs, @mentions, and replies after you")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.tertiary)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(get: { repo.allComments }, set: { _ in store.toggleAllComments(repo) }))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+        }
+        .padding(.horizontal, 2)
+        .opacity(hasComments ? 1 : 0.4)
+        .disabled(!hasComments)
     }
 }
 

@@ -74,11 +74,26 @@ struct RepoConfig: Codable, Identifiable, Hashable {
     /// Per-endpoint `since` cursors (max `updated_at` seen). Stable cursors keep URLs stable, so ETags give free 304s.
     var cursors: [String: Date] = [:]
     var addedAt: Date = Date()
+    /// Off: only comments on my issues/PRs, mentioning me, or after I joined the thread.
+    var allComments = false
 
     var id: String { fullName }
     var owner: String { String(fullName.split(separator: "/").first ?? "") }
     var name: String { String(fullName.split(separator: "/").last ?? "") }
     var url: URL { URL(string: "https://github.com/\(fullName)")! }
+}
+
+extension RepoConfig {
+    /// Tolerates state files written before newer fields existed.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fullName = try c.decode(String.self, forKey: .fullName)
+        events = try c.decodeIfPresent(Set<EventKind>.self, forKey: .events) ?? Set(EventKind.repoToggles)
+        defaultBranch = try c.decodeIfPresent(String.self, forKey: .defaultBranch)
+        cursors = try c.decodeIfPresent([String: Date].self, forKey: .cursors) ?? [:]
+        addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt) ?? Date()
+        allComments = try c.decodeIfPresent(Bool.self, forKey: .allComments) ?? false
+    }
 }
 
 struct InboxItem: Codable, Identifiable, Hashable {
