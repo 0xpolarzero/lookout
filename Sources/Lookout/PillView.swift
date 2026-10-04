@@ -28,18 +28,6 @@ struct PillView: View {
                     .onTapGesture { actions.toggle(.repos) }
                 }
             }
-            group {
-                IconButton(symbol: store.isSnoozed ? "moon.fill" : "gearshape.fill", help: "Settings", size: 32,
-                           tint: store.isSnoozed ? Theme.purple : Theme.secondary,
-                           active: ui.isOpen && ui.tab == .settings) {
-                    actions.toggle(.settings)
-                }
-                .overlay(alignment: .topTrailing) {
-                    if store.authError != nil || !store.repoErrors.isEmpty {
-                        Circle().fill(Theme.red).frame(width: 7, height: 7).offset(x: -3, y: 3)
-                    }
-                }
-            }
         }
         .padding(10)
         .fixedSize()
@@ -100,7 +88,27 @@ struct PillView: View {
                     .help("\(botUnread) from bots")
             }
         }
+        .overlay(alignment: .bottomTrailing) { statusBadge.offset(x: 4, y: 4) }
         .animation(.spring(duration: 0.3), value: unread)
+    }
+
+    /// Settings live in the panel; the pill only surfaces problems and snooze.
+    @ViewBuilder private var statusBadge: some View {
+        if store.authError != nil || !store.repoErrors.isEmpty {
+            badgeIcon("exclamationmark", Theme.red)
+                .help(store.authError ?? "Some repositories failed to sync")
+        } else if store.isSnoozed {
+            badgeIcon("moon.fill", Theme.purple).help("Notifications snoozed")
+        }
+    }
+
+    private func badgeIcon(_ symbol: String, _ color: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 7, weight: .black))
+            .foregroundStyle(Color.black.opacity(0.85))
+            .frame(width: 14, height: 14)
+            .background(Circle().fill(color))
+            .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
     }
 
     private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

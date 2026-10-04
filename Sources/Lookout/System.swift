@@ -85,18 +85,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         store = Store()
+        if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
+            Snapshot.run(to: CommandLine.arguments[i + 1])
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--check"), i + 1 < CommandLine.arguments.count {
             Check.run(store: store, repo: CommandLine.arguments[i + 1])
             return
         }
-        if CommandLine.arguments.contains("--demo") {
-            Demo.populate(store)
+        if let i = CommandLine.arguments.firstIndex(of: "--demo") {
+            let name = CommandLine.arguments.dropFirst(i + 1).first ?? ""
+            Demo.populate(store, Demo.Scenario(rawValue: name) ?? .busy)
         } else {
             store.start()
-        }
-        if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
-            Snapshot.run(store: store, to: CommandLine.arguments[i + 1])
-            return
         }
         controller = UIController(store: store)
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak self] in

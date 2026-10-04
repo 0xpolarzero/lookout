@@ -93,6 +93,7 @@ struct InboxView: View {
     let close: () -> Void
     @State private var selection: String?
     @FocusState private var focused: Bool
+    @Environment(\.previewSelection) private var previewSelection
 
     var body: some View {
         let list = store.list(ui.filter)
@@ -131,7 +132,10 @@ struct InboxView: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            if selection == nil { selection = previewSelection }
+        }
         .onKeyPress(.downArrow) { move(1, in: list); return .handled }
         .onKeyPress(.upArrow) { move(-1, in: list); return .handled }
         .onKeyPress(.return) {
@@ -202,7 +206,9 @@ struct ItemRow: View {
     let store: Store
     let selected: Bool
     let low: Bool
-    @State private var hover = false
+    @State private var isHovering = false
+    @Environment(\.previewHover) private var previewHover
+    private var hover: Bool { isHovering || previewHover == item.id }
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
@@ -278,7 +284,7 @@ struct ItemRow: View {
         .opacity(item.state == .unread || hover || selected ? 1 : 0.72)
         .contentShape(Rectangle())
         .onTapGesture { store.open(item) }
-        .onHover { hover = $0 }
+        .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
         .contextMenu { menu }
     }
@@ -340,4 +346,10 @@ struct ItemRow: View {
             }
         }
     }
+}
+
+// Demo/snapshot only: force a row to look hovered or keyboard-selected.
+extension EnvironmentValues {
+    @Entry var previewHover: String? = nil
+    @Entry var previewSelection: String? = nil
 }

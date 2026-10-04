@@ -1,92 +1,207 @@
+import AppKit
 import Foundation
+import SwiftUI
 
-/// `--demo`: fake data for trying the UI without touching GitHub or the saved state.
+/// `--demo [scenario]`: fake data for trying the UI without touching GitHub or the saved state.
 @MainActor
 enum Demo {
-    static func populate(_ store: Store) {
+    enum Scenario: String, CaseIterable {
+        case busy, botsOnly, allClear, snoozed, error, empty
+    }
+
+    static func populate(_ store: Store, _ scenario: Scenario = .busy) {
         store.persists = false
         let now = Date()
-        func avatar(_ login: String) -> URL? { URL(string: "https://github.com/\(login).png") }
-        func item(_ kind: EventKind, _ repo: String, _ n: Int, _ title: String, _ author: String, _ snippet: String,
-                  _ minutesAgo: Double, _ state: ItemState = .unread, app: Bool = false, path: String? = nil) -> InboxItem {
-            InboxItem(id: UUID().uuidString, repo: repo, kind: kind, number: n, title: title, snippet: snippet,
-                      author: author, avatar: avatar(author.replacingOccurrences(of: "[bot]", with: "")), authorIsApp: app,
-                      url: URL(string: "https://github.com/\(repo)/issues/\(n)")!,
-                      createdAt: now.addingTimeInterval(-minutesAgo * 60), state: state, path: path)
-        }
+        store.me = GHUser(login: "0xpolarzero", avatarUrl: URL(string: "https://avatars.githubusercontent.com/u/0?v=4"), type: "User")
+        store.tokenSource = .ghCLI
+        store.lastSync = now.addingTimeInterval(-20)
+        store.rateRemaining = 4812
+        store.settings.botHandles = ["vercel", "netlify"]
         store.repos = [
-            RepoConfig(fullName: "polarzero/lookout"),
+            RepoConfig(fullName: "0xpolarzero/lookout"),
             RepoConfig(fullName: "apple/swift-format"),
             RepoConfig(fullName: "ziglang/zig", events: [.prComment, .reviewComment, .ciMain]),
         ]
         store.ci = [
-            "polarzero/lookout": CIStatus(state: .success, branch: "main", failing: [], checkedAt: now),
+            "0xpolarzero/lookout": CIStatus(state: .success, branch: "main", failing: [], checkedAt: now),
             "apple/swift-format": CIStatus(state: .failure, branch: "main", failing: ["Linux / build", "Windows / test"], checkedAt: now),
             "ziglang/zig": CIStatus(state: .pending, branch: "master", failing: [], checkedAt: now),
         ]
-        store.items = [
+        store.items = items(now)
+
+        switch scenario {
+        case .busy:
+            break
+        case .botsOnly:
+            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+        case .allClear:
+            store.items = store.items.filter { !$0.state.isOpen }
+            for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+        case .snoozed:
+            store.settings.snoozeUntil = Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: now)
+                .map { $0 > now ? $0 : now.addingTimeInterval(3600) }
+        case .error:
+            store.repoErrors["ziglang/zig"] = "Not found (or no access)"
+            store.ci["0xpolarzero/lookout"]?.state = .failure
+            store.ci["0xpolarzero/lookout"]?.failing = ["test (macos-15)"]
+        case .empty:
+            store.repos = []
+            store.ci = [:]
+            store.items = []
+            store.settings.reviewRequests = false
+        }
+    }
+
+    static let hoverID = "demo-hover"
+    static let selectedID = "demo-selected"
+
+    private static func items(_ now: Date) -> [InboxItem] {
+        var counter = 0
+        func item(_ kind: EventKind, _ repo: String, _ n: Int, _ title: String, _ author: String, _ snippet: String,
+                  _ minutesAgo: Double, _ state: ItemState = .unread, app: Bool = false, path: String? = nil,
+                  id: String? = nil) -> InboxItem {
+            counter += 1
+            let login = author.replacingOccurrences(of: "[bot]", with: "")
+            return InboxItem(id: id ?? "demo-\(counter)", repo: repo, kind: kind, number: n, title: title, snippet: snippet,
+                             author: author, avatar: URL(string: "https://github.com/\(login).png"), authorIsApp: app,
+                             url: URL(string: "https://github.com/\(repo)/issues/\(n)")!,
+                             createdAt: now.addingTimeInterval(-minutesAgo * 60), state: state, path: path)
+        }
+        return [
+            // Needs you
             item(.reviewComment, "ziglang/zig", 21877, "std.Io: add vectored reads to File", "andrewrk",
                  "This should take the buffer by slice instead, otherwise we copy twice on the hot path.", 3,
-                 path: "lib/std/Io/File.zig"),
+                 path: "lib/std/Io/File.zig", id: hoverID),
             item(.prComment, "apple/swift-format", 1042, "Respect trailing comma config in collection literals", "allevato",
                  "Thanks! Could you add a test for the nested array case?", 18),
-            item(.issueOpened, "polarzero/lookout", 12, "Pill overlaps the Dock when it's on the right", "mattt",
-                 "With the Dock pinned right, the pill sits under it. Maybe snap to the visible frame?", 42),
-            item(.reviewRequested, "apple/swift-format", 1051, "Add --lines option to format a range", "ahoppen",
-                 "", 65),
-            item(.issueComment, "polarzero/lookout", 9, "Support GitHub Enterprise", "kyle", "+1, we'd use this at work.", 120, .read),
-            item(.prComment, "polarzero/lookout", 14, "Group notifications by repo", "vercel[bot]",
+            item(.issueOpened, "0xpolarzero/lookout", 12, "Pill overlaps the Dock when it's on the right", "mattt",
+                 "With the Dock pinned right, the pill sits under it. Maybe snap to the visible frame?", 42, id: selectedID),
+            item(.reviewRequested, "apple/swift-format", 1051, "Add --lines option to format a range", "ahoppen", "", 65),
+            item(.prOpened, "0xpolarzero/lookout", 15, "Add GitHub Enterprise host setting", "kylef",
+                 "Adds an API base URL field in Settings and threads it through the client.", 95),
+            item(.issueComment, "0xpolarzero/lookout", 9, "Support GitHub Enterprise", "kyle", "+1, we'd use this at work.", 120, .read),
+            // Bots
+            item(.prComment, "0xpolarzero/lookout", 14, "Group notifications by repo", "vercel[bot]",
                  "Deployment ready. Preview: lookout-git-group.vercel.app", 6, app: true),
+            item(.reviewComment, "apple/swift-format", 1042, "Respect trailing comma config in collection literals",
+                 "coderabbitai[bot]", "Consider extracting this into a helper; the same check appears in three places.", 22,
+                 app: true, path: "Sources/SwiftFormat/Rules/TrailingComma.swift"),
             item(.prComment, "apple/swift-format", 1042, "Respect trailing comma config in collection literals", "codecov[bot]",
-                 "Coverage 87.2% (+0.4%) compared to base.", 25, app: true),
+                 "Coverage 87.2% (+0.4%) compared to base.", 25, .read, app: true),
+            // Done
             item(.reviewComment, "ziglang/zig", 21877, "std.Io: add vectored reads to File", "squeek502",
                  "Nit: this is the same as readv on posix.", 300, .resolved, path: "lib/std/Io/File.zig"),
-            item(.issueComment, "polarzero/lookout", 7, "Crash on wake from sleep", "jessesquires",
+            item(.issueComment, "0xpolarzero/lookout", 7, "Crash on wake from sleep", "jessesquires",
                  "Repro'd on 26.1 as well.", 900, .addressed),
+            item(.reviewRequested, "ziglang/zig", 21840, "Sema: fix comptime int overflow in @shlExact", "mlugg", "", 1500, .addressed),
+            item(.issueOpened, "apple/swift-format", 1038, "Question: config file lookup order?", "someone", "How does it pick between…", 2000, .discarded),
         ]
-        store.me = GHUser(login: "polarzero", avatarUrl: URL(string: "https://github.com/0xpolarzero.png"), type: "User")
-        store.tokenSource = .ghCLI
-        store.lastSync = now.addingTimeInterval(-20)
-        store.rateRemaining = 4812
     }
 }
 
-import AppKit
-import SwiftUI
-
-/// `--demo --snapshot <dir>`: renders the pill and each panel tab to PNGs (no screen recording needed).
+/// `--snapshot <dir>`: renders every screen and pill state to PNGs plus a labelled gallery.png.
 @MainActor
 enum Snapshot {
-    static func run(store: Store, to dir: String) {
-        let ui = UIState()
-        let actions = PillActions(toggle: { _ in }, dragChanged: {}, dragEnded: {})
-        var windows: [(String, NSWindow)] = []
-        func host<V: View>(_ name: String, _ view: V) {
+    private struct Shot { let label: String; let window: NSWindow; let isPill: Bool }
+
+    static func run(to dir: String) {
+        var shots: [Shot] = []
+        func host<V: View>(_ label: String, pill: Bool, _ view: V) {
             let hosting = NSHostingView(rootView: view)
             hosting.frame.size = hosting.fittingSize
             let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-            window.backgroundColor = NSColor(white: 0.22, alpha: 1)
+            window.backgroundColor = .clear
+            window.isOpaque = false
             window.contentView = hosting
             window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
             window.orderFrontRegardless()
-            windows.append((name, window))
+            shots.append(Shot(label: label, window: window, isPill: pill))
         }
-        host("pill", PillView(store: store, ui: ui, actions: actions))
-        for (name, tab, filter) in [("inbox", PanelTab.inbox, InboxFilter.needsYou), ("bots", .inbox, .bots),
-                                    ("done", .inbox, .done), ("repos", .repos, .needsYou), ("settings", .settings, .needsYou)] {
-            let state = UIState()
-            state.tab = tab
-            state.filter = filter
-            host(name, PanelView(store: store, ui: state, close: {}))
+        func store(_ scenario: Demo.Scenario) -> Store {
+            let s = Store()
+            Demo.populate(s, scenario)
+            return s
         }
+        let actions = PillActions(toggle: { _ in }, dragChanged: {}, dragEnded: {})
+        for (label, scenario) in [("Needs you", Demo.Scenario.busy), ("Bots only", .botsOnly), ("All clear", .allClear),
+                                  ("Snoozed", .snoozed), ("Sync error", .error)] {
+            host(label, pill: true, PillView(store: store(scenario), ui: UIState(), actions: actions))
+        }
+        func panel(_ label: String, _ scenario: Demo.Scenario, _ tab: PanelTab, _ filter: InboxFilter = .needsYou) {
+            let ui = UIState()
+            ui.tab = tab
+            ui.filter = filter
+            host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
+                .environment(\.previewHover, Demo.hoverID)
+                .environment(\.previewSelection, Demo.selectedID))
+        }
+        panel("Inbox · hover + keyboard selection", .busy, .inbox)
+        panel("Bots · silent, own tab", .busy, .inbox, .bots)
+        panel("Done · addressed, resolved, discarded", .busy, .inbox, .done)
+        panel("Inbox · all caught up", .allClear, .inbox)
+        panel("Repositories · CI failing + sync error", .error, .repos)
+        panel("Settings · snoozed", .snoozed, .settings)
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            for (name, window) in windows {
-                guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            var images: [(String, NSImage, Bool)] = []
+            for (i, shot) in shots.enumerated() {
+                guard let view = shot.window.contentView,
+                      let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
                 view.cacheDisplay(in: view.bounds, to: rep)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+                let slug = shot.label.lowercased().split(whereSeparator: { !$0.isLetter }).prefix(3).joined(separator: "-")
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: "\(dir)/\(String(format: "%02d", i))-\(slug).png"))
+                let image = NSImage(size: view.bounds.size)
+                image.addRepresentation(rep)
+                images.append((shot.label, image, shot.isPill))
             }
+            writeGallery(images, to: "\(dir)/gallery.png")
             exit(0)
         }
+    }
+
+    private static func writeGallery(_ images: [(String, NSImage, Bool)], to path: String) {
+        let pills = images.filter { $0.2 }
+        let panels = images.filter { !$0.2 }
+        let margin: CGFloat = 40, caption: CGFloat = 30, cols = 3
+        let panelSize = panels.first?.1.size ?? .zero
+        let pillWidth: CGFloat = 150
+        let pillHeight = (pills.map { $0.1.size.height }.max() ?? 0) + caption
+        let width = max(CGFloat(cols) * panelSize.width + margin * 2, CGFloat(pills.count) * pillWidth + margin * 2)
+        let rows = (panels.count + cols - 1) / cols
+        let height = margin * 2 + pillHeight + 20 + CGFloat(rows) * (panelSize.height + caption)
+        let scale: CGFloat = 2
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width * scale), pixelsHigh: Int(height * scale),
+                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.size = NSSize(width: width, height: height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGradient(starting: NSColor(red: 0.20, green: 0.22, blue: 0.28, alpha: 1),
+                   ending: NSColor(red: 0.10, green: 0.10, blue: 0.13, alpha: 1))!
+            .draw(in: NSRect(x: 0, y: 0, width: width, height: height), angle: -90)
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium),
+                                                    .foregroundColor: NSColor(white: 1, alpha: 0.7)]
+        func draw(_ label: String, _ image: NSImage, centerX: CGFloat, top: CGFloat) {
+            let size = image.size
+            (label as NSString).draw(at: NSPoint(x: centerX - (label as NSString).size(withAttributes: attrs).width / 2,
+                                                 y: height - top - 18), withAttributes: attrs)
+            image.draw(in: NSRect(x: centerX - size.width / 2, y: height - top - caption - size.height,
+                                  width: size.width, height: size.height))
+        }
+        let pillsLeft = (width - CGFloat(pills.count) * pillWidth) / 2
+        for (i, p) in pills.enumerated() {
+            draw(p.0, p.1, centerX: pillsLeft + pillWidth * (CGFloat(i) + 0.5), top: margin)
+        }
+        let panelsTop = margin + pillHeight + 20
+        let panelsLeft = (width - CGFloat(cols) * panelSize.width) / 2
+        for (i, p) in panels.enumerated() {
+            draw(p.0, p.1, centerX: panelsLeft + panelSize.width * (CGFloat(i % cols) + 0.5),
+                 top: panelsTop + CGFloat(i / cols) * (panelSize.height + caption))
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 }
 
