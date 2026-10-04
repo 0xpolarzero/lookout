@@ -184,6 +184,8 @@ struct AppSettings: Codable {
     var reviewRequests = true
     var snoozeUntil: Date?
     var didInitialReviewSync = false
+    /// Customized shortcuts by ShortcutAction raw value; missing ones use the defaults.
+    var shortcuts: [String: Shortcut]?
 }
 
 struct PersistedState: Codable {

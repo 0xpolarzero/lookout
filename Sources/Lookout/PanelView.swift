@@ -44,7 +44,7 @@ struct PanelView: View {
             }
             .padding(3)
             .background(Capsule().fill(Color.white.opacity(0.05)))
-            IconButton(symbol: "xmark", help: "Close", detail: "Esc · ⌃⌥L toggles the panel", tint: Theme.tertiary, action: close)
+            IconButton(symbol: "xmark", help: "Close", detail: "Esc · \(store.shortcut(.togglePanel).display) shows or hides the panel", tint: Theme.tertiary, action: close)
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
@@ -78,7 +78,7 @@ struct PanelView: View {
                 }
                 if store.me != nil {
                     IconButton(symbol: "arrow.clockwise", help: "Refresh now",
-                               detail: "Checks every repository, CI and review requests", size: 20) { store.refreshNow() }
+                               detail: "Checks every repository, CI and review requests · \(store.shortcut(.refresh).display)", size: 20) { store.refreshNow() }
                         .disabled(store.isSyncing)
                 }
             }
@@ -118,9 +118,6 @@ struct InboxView: View {
     let store: Store
     @Bindable var ui: UIState
     let close: () -> Void
-    @State private var selection: String?
-    @FocusState private var focused: Bool
-    @Environment(\.previewSelection) private var previewSelection
 
     var body: some View {
         let list = store.list(ui.filter)
@@ -142,48 +139,20 @@ struct InboxView: View {
                     ScrollView {
                         LazyVStack(spacing: 2) {
                             ForEach(list) { item in
-                                ItemRow(item: item, store: store, selected: selection == item.id,
-                                        low: store.isLowPriority(item))
+                                ItemRow(item: item, store: store, selected: ui.selection == item.id,
+                                        low: store.isLowPriority(item)) { ui.selection = item.id }
                                     .id(item.id)
                             }
                         }
                         .padding(8)
                     }
                     .scrollIndicators(.never)
-                                .onChange(of: selection) { _, id in
+                    .onChange(of: ui.selection) { _, id in
                         if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
                     }
                 }
             }
         }
-        .focusable()
-        .focusEffectDisabled()
-        .focused($focused)
-        .onAppear {
-            focused = true
-            if selection == nil { selection = previewSelection }
-        }
-        // The panel is built once and reused, so grab focus again every time it opens.
-        .onChange(of: ui.isOpen) { _, open in if open { focused = true } }
-        .onChange(of: ui.tab) { _, tab in if tab == .inbox { focused = true } }
-        .onKeyPress(.downArrow) { move(1, in: list); return .handled }
-        .onKeyPress(.upArrow) { move(-1, in: list); return .handled }
-        .onKeyPress(.return) {
-            if let item = selected(in: list) { store.open(item) }
-            return .handled
-        }
-        .onKeyPress(.space) {
-            if let item = selected(in: list) { item.state == .unread ? store.markRead(item) : store.markUnread(item) }
-            return .handled
-        }
-        .onKeyPress(.delete) {
-            if let item = selected(in: list) {
-                move(1, in: list)
-                item.state.isOpen ? store.discard(item) : store.restore(item)
-            }
-            return .handled
-        }
-        .onKeyPress(.escape) { close(); return .handled }
     }
 
     private var filterBar: some View {
@@ -192,13 +161,14 @@ struct InboxView: View {
                 Chip(label: filter.label, count: filter == .done ? nil : store.openCount(filter),
                      selected: ui.filter == filter) {
                     ui.filter = filter
-                    selection = nil
                 }
             }
             Spacer()
             if ui.filter != .done {
                 IconButton(symbol: "checkmark.circle", help: "Mark all as read",
-                           detail: "Everything in \(ui.filter.label)") { store.markAllRead(ui.filter) }
+                           detail: "Everything in \(ui.filter.label) · \(store.shortcut(.markAllRead).display)") {
+                    store.markAllRead(ui.filter)
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -220,15 +190,6 @@ struct InboxView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func selected(in list: [InboxItem]) -> InboxItem? {
-        list.first { $0.id == selection }
-    }
-
-    private func move(_ delta: Int, in list: [InboxItem]) {
-        guard !list.isEmpty else { return }
-        let current = list.firstIndex { $0.id == selection } ?? (delta > 0 ? -1 : list.count)
-        selection = list[min(max(current + delta, 0), list.count - 1)].id
-    }
 }
 
 struct ItemRow: View {
@@ -236,6 +197,8 @@ struct ItemRow: View {
     let store: Store
     let selected: Bool
     let low: Bool
+    /// Hovering a row makes it the target of keyboard shortcuts.
+    var onHover: () -> Void = {}
     @State private var isHovering = false
     @Environment(\.previewHover) private var previewHover
     private var hover: Bool { isHovering || previewHover == item.id }
@@ -314,7 +277,10 @@ struct ItemRow: View {
         .opacity(item.state == .unread || hover || selected ? 1 : 0.72)
         .contentShape(Rectangle())
         .onTapGesture { store.open(item) }
-        .onHover { isHovering = $0 }
+        .onHover { inside in
+            isHovering = inside
+            if inside { onHover() }
+        }
         .animation(.easeOut(duration: 0.12), value: hover)
         .contextMenu { menu }
         .zIndex(hover ? 1 : 0)
@@ -324,15 +290,15 @@ struct ItemRow: View {
         HStack(spacing: 2) {
             if item.state.isOpen {
                 if item.state == .unread {
-                    IconButton(symbol: "checkmark", help: "Mark as read", detail: "Space", size: 24) { store.markRead(item) }
+                    IconButton(symbol: "checkmark", help: "Mark as read", detail: store.shortcut(.toggleRead).display, size: 24) { store.markRead(item) }
                 } else {
-                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: "Space", size: 24) { store.markUnread(item) }
+                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: store.shortcut(.toggleRead).display, size: 24) { store.markUnread(item) }
                 }
-                IconButton(symbol: "xmark", help: "Discard", detail: "Moves it to Done · ⌫", size: 24) { store.discard(item) }
+                IconButton(symbol: "xmark", help: "Discard", detail: "Moves it to Done · \(store.shortcut(.discard).display)", size: 24) { store.discard(item) }
             } else {
-                IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", detail: "⌫", size: 24) { store.restore(item) }
+                IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", detail: store.shortcut(.discard).display, size: 24) { store.restore(item) }
             }
-            IconButton(symbol: "arrow.up.right", help: "Open on GitHub", detail: "Marks it read · Return", size: 24) { store.open(item) }
+            IconButton(symbol: "arrow.up.right", help: "Open on GitHub", detail: "Marks it read · \(store.shortcut(.openItem).display)", size: 24) { store.open(item) }
         }
         .padding(2)
         .background(Capsule().fill(Theme.bg))
@@ -382,6 +348,5 @@ struct ItemRow: View {
 // Demo/snapshot only: force a row to look hovered or keyboard-selected.
 extension EnvironmentValues {
     @Entry var previewHover: String? = nil
-    @Entry var previewSelection: String? = nil
     @Entry var previewTip: String? = nil
 }

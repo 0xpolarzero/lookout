@@ -143,6 +143,7 @@ enum Snapshot {
             let ui = UIState(persists: false, edge: .right)
             ui.tab = tab
             ui.filter = filter
+            ui.selection = Demo.hoverID
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
                 .padding(16)
                 .environment(\.previewTip, label.contains("CI tooltip") ? "apple/swift-format|CI"
@@ -150,9 +151,9 @@ enum Snapshot {
                     : label.hasPrefix("Inbox · hover") ? "Discard"
                     : label.hasPrefix("Bots") ? "Mark all as read" : nil)
                 .environment(\.previewHover, Demo.hoverID)
-                .environment(\.previewSelection, Demo.selectedID))
+)
         }
-        panel("Inbox · hover actions + keyboard selection", .busy, .inbox)
+        panel("Inbox · hover actions", .busy, .inbox)
         panel("Bots · silent, own tab", .busy, .inbox, .bots)
         panel("Done · addressed, resolved, discarded", .busy, .inbox, .done)
         panel("Inbox · all caught up", .allClear, .inbox)
@@ -161,6 +162,12 @@ enum Snapshot {
         panel("CI · default branches", .busy, .ci)
         panel("CI · failures", .error, .ci)
         panel("Settings · snoozed", .snoozed, .settings)
+        // Full-height settings, written as a file but kept out of the gallery.
+        host("_settings-full", pill: false, SettingsView(store: store(.busy))
+            .frame(width: UIController.panelContent.width, height: 1100)
+            .background(Theme.bg)
+            .environment(\.colorScheme, .dark)
+            .tipSpace())
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
             var images: [(String, NSImage, Bool)] = []
@@ -175,7 +182,7 @@ enum Snapshot {
                 image.addRepresentation(rep)
                 images.append((shot.label, image, shot.isPill))
             }
-            writeGallery(images, to: "\(dir)/overview.png")
+            writeGallery(images.filter { !$0.0.hasPrefix("_") }, to: "\(dir)/overview.png")
             exit(0)
         }
     }

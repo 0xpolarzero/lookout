@@ -26,6 +26,9 @@ final class Store {
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
     @ObservationIgnored var persists = true
+    /// While a shortcut is being recorded, the panel's key handler stands down.
+    @ObservationIgnored var isRecordingShortcut = false
+    @ObservationIgnored var onGlobalShortcutChange: ((Shortcut) -> Void)?
 
     private static let fileURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -155,6 +158,18 @@ final class Store {
         let ids = Set(list(filter).filter { $0.state == .unread }.map(\.id))
         for i in items.indices where ids.contains(items[i].id) { items[i].state = .read }
         save()
+    }
+
+    func shortcut(_ action: ShortcutAction) -> Shortcut {
+        settings.shortcuts?[action.rawValue] ?? action.defaultShortcut
+    }
+
+    /// `nil` resets to the default.
+    func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) {
+        var all = settings.shortcuts ?? [:]
+        all[action.rawValue] = shortcut == action.defaultShortcut ? nil : shortcut
+        settings.shortcuts = all.isEmpty ? nil : all
+        if action.isGlobal { onGlobalShortcutChange?(self.shortcut(action)) }
     }
 
     func addBot(_ handle: String) {

@@ -52,16 +52,23 @@ final class HotKey {
     private static var handler: (() -> Void)?
     private var ref: EventHotKeyRef?
 
-    init(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
+    init(_ shortcut: Shortcut, handler: @escaping () -> Void) {
         HotKey.handler = handler
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
             HotKey.handler?()
             return noErr
         }, 1, &spec, nil, nil)
+        update(shortcut)
+    }
+
+    func update(_ shortcut: Shortcut) {
+        if let ref { UnregisterEventHotKey(ref) }
+        ref = nil
         let id = EventHotKeyID(signature: OSType(0x4C4B4F54), id: 1)
-        let status = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &ref)
-        if status != noErr { NSLog("Lookout: global shortcut unavailable (\(status))") }
+        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers, id,
+                                         GetApplicationEventTarget(), 0, &ref)
+        if status != noErr { NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))") }
     }
 }
 
@@ -101,10 +108,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.start()
         }
         controller = UIController(store: store)
-        // ⌃⌥Space is macOS's "next input source"; L is matched by key position, so it works in any layout.
-        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(controlKey | optionKey)) { [weak self] in
+        // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source". Matched by key position, so any layout works.
+        hotKey = HotKey(store.shortcut(.togglePanel)) { [weak self] in
             DispatchQueue.main.async { self?.controller.toggle(.inbox) }
         }
+        store.onGlobalShortcutChange = { [weak self] shortcut in self?.hotKey?.update(shortcut) }
         if CommandLine.arguments.contains("--open") {
             controller.toggle(.inbox)
         }

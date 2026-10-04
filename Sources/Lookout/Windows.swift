@@ -7,7 +7,11 @@ import SwiftUI
 final class UIState {
     var isOpen = false
     var tab: PanelTab = .inbox
-    var filter: InboxFilter = .needsYou
+    var filter: InboxFilter = .needsYou {
+        didSet { selection = nil }
+    }
+    /// Inbox row that keyboard shortcuts act on: the hovered row, or the one picked with ↑↓.
+    var selection: String?
     var edge: DockEdge = DockEdge(rawValue: UserDefaults.standard.string(forKey: "pill.edge") ?? "")
         ?? (UserDefaults.standard.bool(forKey: "pill.onLeft") ? .left : .right) {
         didSet { if persists { UserDefaults.standard.set(edge.rawValue, forKey: "pill.edge") } }
@@ -135,6 +139,7 @@ final class UIController {
     /// App that had focus before the panel opened; it gets focus back when the panel closes.
     private var previousApp: NSRunningApplication?
     private var monitor: Any?
+    private var keyMonitor: Any?
 
     init(store: Store) {
         self.store = store
@@ -160,6 +165,10 @@ final class UIController {
 
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in self?.hidePanel() }
+        }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return MainActor.assumeIsolated { self.handleKey(event) }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -236,6 +245,50 @@ final class UIController {
             ? min(max((f.midX - vf.minX) / vf.width, 0.03), 0.97)
             : min(max((f.midY - vf.minY) / vf.height, 0.05), 0.95)
         return (edge, position)
+    }
+
+    // MARK: Keyboard
+
+    /// Panel shortcuts. Returns nil when the key was handled. Typing in a text field is never intercepted.
+    private func handleKey(_ event: NSEvent) -> NSEvent? {
+        guard ui.isOpen, panel.isKeyWindow, !store.isRecordingShortcut else { return event }
+        if event.keyCode == 53, event.modifierFlags.intersection(Shortcut.relevant).isEmpty {
+            hidePanel()
+            return nil
+        }
+        if panel.firstResponder is NSText { return event }
+        let pressed = Shortcut(event)
+        if pressed == store.shortcut(.refresh) {
+            store.refreshNow()
+            return nil
+        }
+        guard ui.tab == .inbox else { return event }
+        let list = store.list(ui.filter)
+        let current = list.first { $0.id == ui.selection }
+        switch event.keyCode {
+        case 125: moveSelection(1, in: list); return nil
+        case 126: moveSelection(-1, in: list); return nil
+        default: break
+        }
+        if pressed == store.shortcut(.markAllRead) {
+            store.markAllRead(ui.filter)
+        } else if let item = current, pressed == store.shortcut(.openItem) {
+            store.open(item)
+        } else if let item = current, pressed == store.shortcut(.toggleRead) {
+            item.state == .unread ? store.markRead(item) : store.markUnread(item)
+        } else if let item = current, pressed == store.shortcut(.discard) {
+            moveSelection(1, in: list)
+            item.state.isOpen ? store.discard(item) : store.restore(item)
+        } else {
+            return event
+        }
+        return nil
+    }
+
+    private func moveSelection(_ delta: Int, in list: [InboxItem]) {
+        guard !list.isEmpty else { return }
+        let index = list.firstIndex { $0.id == ui.selection } ?? (delta > 0 ? -1 : list.count)
+        ui.selection = list[min(max(index + delta, 0), list.count - 1)].id
     }
 
     // MARK: Panel

@@ -13,6 +13,7 @@ struct SettingsView: View {
                 account
                 notifications
                 bots
+                shortcuts
                 general
             }
             .padding(12)
@@ -108,6 +109,24 @@ struct SettingsView: View {
         }
     }
 
+    private var shortcuts: some View {
+        section("Shortcuts") {
+            ForEach(ShortcutAction.allCases) { action in
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(action.title).font(.system(size: 12.5))
+                        if action.isGlobal {
+                            Text("Works from any app").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                        }
+                    }
+                    Spacer()
+                    ShortcutRecorder(action: action, store: store)
+                }
+            }
+            hint("Click a shortcut, then press the new keys (Esc cancels). In the inbox, ↑↓ or hovering picks the row they act on.")
+        }
+    }
+
     private var general: some View {
         section("General") {
             HStack {
@@ -129,16 +148,6 @@ struct SettingsView: View {
                     do { try LaunchAtLogin.set(on); launchError = nil } catch { launchError = error.localizedDescription }
                 }
             if let launchError { Text(launchError).font(.system(size: 11)).foregroundStyle(Theme.red) }
-            HStack {
-                Text("Toggle panel").font(.system(size: 12.5))
-                Spacer()
-                Text("⌃ ⌥ L")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(Theme.secondary)
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.07)))
-            }
             HStack {
                 hint("Drag the pill to any screen edge.")
                 Spacer()

@@ -42,7 +42,7 @@ struct PillView: View {
     private var inboxButton: some View {
         let unread = store.unreadCount(.needsYou)
         let botUnread = store.unreadCount(.bots)
-        return IconButton(symbol: unread > 0 ? "tray.full.fill" : "tray.fill", help: "Inbox (⌃⌥L)", size: 32,
+        return IconButton(symbol: unread > 0 ? "tray.full.fill" : "tray.fill", help: "Inbox (\(store.shortcut(.togglePanel).display))", size: 32,
                           tint: unread > 0 ? Theme.text : Theme.secondary,
                           active: ui.isOpen && ui.tab == .inbox) {
             actions.toggle(.inbox)

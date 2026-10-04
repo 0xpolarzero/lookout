@@ -27,11 +27,11 @@ Requires macOS 14+. Auth comes from `gh auth token` (or a token pasted in Settin
 
 ## Using it
 
-- **Pill**: inbox (amber badge = unread items that need you, grey dot = only bots; a purple moon means snoozed, a red mark means a sync error), and CI counts: how many repos are passing (green), failing (red) and running (amber) on main; hover a row to see which, click to open the CI tab. Settings are in the panel. Drag it from anywhere to any screen edge; on the top or bottom it lays out horizontally. `⌃⌥L` toggles the panel.
+- **Pill**: inbox (amber badge = unread items that need you, grey dot = only bots; a purple moon means snoozed, a red mark means a sync error), and CI counts: how many repos are passing (green), failing (red) and running (amber) on main; hover a row to see which, click to open the CI tab. Settings are in the panel. Drag it from anywhere to any screen edge; on the top or bottom it lays out horizontally. `⌃⌥L` toggles the panel (customizable in Settings → Shortcuts).
 - **Repositories**: add `owner/repo` (suggestions come from repos you own or are involved in) and toggle: issues, issue comments, PRs, PR comments, review comments, CI on the default branch.
 - **Which comments count**: by default only comments that are for you: on issues/PRs you opened, ones that @mention you, or ones posted after you joined the conversation (for review comments: in a review thread you posted in). Turn on **All comments** per repo to get every comment.
 - **CI**: the default branch of every repo with its CI badge on, failing first, with the commit, its title and the failing checks. Click a row to open the commit's checks.
-- **Inbox**: *Needs you* / *Bots* / *Done*. Hover a row to mark it read, discard it, or open it. Keys: ↑↓ to move, Return to open, Space to toggle read, ⌫ to discard or restore, Esc to close.
+- **Inbox**: *Needs you* / *Bots* / *Done*. Hover a row to mark it read, discard it, or open it. Keys act on the hovered row (or pick one with ↑↓): Return opens, Space toggles read, ⌫ discards or restores, ⌥Space marks all read, ⌘R refreshes, Esc closes. All customizable in Settings → Shortcuts.
 - **States**: unread → read (you saw it) → **addressed** (you replied after it, so this happens automatically) → **resolved** (review thread resolved, synced through GraphQL). Discarded items go to Done.
 - **Bots**: GitHub Apps (`…[bot]`) plus any handles you add arrive silently in the Bots tab.
 - **Extras**: review requests from any repo (closed automatically once you review), CI red/green transition notifications, snooze, launch at login.
