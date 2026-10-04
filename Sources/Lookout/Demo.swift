@@ -136,10 +136,11 @@ enum Snapshot {
         let actions = PillActions(toggle: { _ in })
         for (label, scenario) in [("Needs you", Demo.Scenario.busy), ("Bots only", .botsOnly), ("All clear", .allClear),
                                   ("Snoozed", .snoozed), ("Sync error", .error)] {
-            host(label, pill: true, PillView(store: store(scenario), ui: UIState(), actions: actions))
+            host(label, pill: true, PillView(store: store(scenario), ui: UIState(persists: false, edge: .right), actions: actions))
         }
+        host("Docked top / bottom", pill: true, PillView(store: store(.busy), ui: UIState(persists: false, edge: .top), actions: actions))
         func panel(_ label: String, _ scenario: Demo.Scenario, _ tab: PanelTab, _ filter: InboxFilter = .needsYou) {
-            let ui = UIState()
+            let ui = UIState(persists: false, edge: .right)
             ui.tab = tab
             ui.filter = filter
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
@@ -182,9 +183,9 @@ enum Snapshot {
         let panels = images.filter { !$0.2 }
         let margin: CGFloat = 40, caption: CGFloat = 30, cols = 3
         let panelSize = panels.first?.1.size ?? .zero
-        let pillWidth: CGFloat = 150
+        let pillWidths = pills.map { max(150, $0.1.size.width + 40) }
         let pillHeight = (pills.map { $0.1.size.height }.max() ?? 0) + caption
-        let width = max(CGFloat(cols) * panelSize.width + margin * 2, CGFloat(pills.count) * pillWidth + margin * 2)
+        let width = max(CGFloat(cols) * panelSize.width + margin * 2, pillWidths.reduce(0, +) + margin * 2)
         let rows = (panels.count + cols - 1) / cols
         let height = margin * 2 + pillHeight + 20 + CGFloat(rows) * (panelSize.height + caption)
         let scale: CGFloat = 2
@@ -206,9 +207,10 @@ enum Snapshot {
             image.draw(in: NSRect(x: centerX - size.width / 2, y: height - top - caption - size.height,
                                   width: size.width, height: size.height))
         }
-        let pillsLeft = (width - CGFloat(pills.count) * pillWidth) / 2
-        for (i, p) in pills.enumerated() {
-            draw(p.0, p.1, centerX: pillsLeft + pillWidth * (CGFloat(i) + 0.5), top: margin)
+        var x = (width - pillWidths.reduce(0, +)) / 2
+        for (p, w) in zip(pills, pillWidths) {
+            draw(p.0, p.1, centerX: x + w / 2, top: margin)
+            x += w
         }
         let panelsTop = margin + pillHeight + 20
         let panelsLeft = (width - CGFloat(cols) * panelSize.width) / 2

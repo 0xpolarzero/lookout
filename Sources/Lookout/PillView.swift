@@ -8,18 +8,21 @@ struct PillView: View {
     @State private var ripple = false
 
     var body: some View {
-        VStack(spacing: 6) {
+        // Vertical on the left/right edges, horizontal when docked to the top or bottom.
+        let horizontal = ui.edge.isHorizontal
+        let stack = horizontal ? AnyLayout(HStackLayout(spacing: 6)) : AnyLayout(VStackLayout(spacing: 6))
+        stack {
             group {
                 inboxButton
             }
             if !store.ciRepos.isEmpty {
                 group {
-                    VStack(spacing: 6) {
+                    (horizontal ? AnyLayout(HStackLayout(spacing: 4)) : AnyLayout(VStackLayout(spacing: 6))) {
                         ForEach([CIState.success, .failure, .pending], id: \.self) { state in
                             ciCount(state)
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(horizontal ? .horizontal : .vertical, horizontal ? 6 : 8)
                     .contentShape(Rectangle())
                     .onTapGesture { actions.toggle(.ci) }
                 }

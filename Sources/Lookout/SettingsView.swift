@@ -140,7 +140,7 @@ struct SettingsView: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.07)))
             }
             HStack {
-                hint("Drag the pill to move it to either edge.")
+                hint("Drag the pill to any screen edge.")
                 Spacer()
                 Button("Quit Lookout") { NSApp.terminate(nil) }.controlSize(.small)
             }

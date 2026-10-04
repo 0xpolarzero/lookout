@@ -8,13 +8,29 @@ final class UIState {
     var isOpen = false
     var tab: PanelTab = .inbox
     var filter: InboxFilter = .needsYou
-    var onLeft = UserDefaults.standard.bool(forKey: "pill.onLeft") {
-        didSet { UserDefaults.standard.set(onLeft, forKey: "pill.onLeft") }
+    var edge: DockEdge = DockEdge(rawValue: UserDefaults.standard.string(forKey: "pill.edge") ?? "")
+        ?? (UserDefaults.standard.bool(forKey: "pill.onLeft") ? .left : .right) {
+        didSet { if persists { UserDefaults.standard.set(edge.rawValue, forKey: "pill.edge") } }
     }
-    /// Vertical position of the pill as a fraction of the screen height.
-    var pillY: Double = UserDefaults.standard.object(forKey: "pill.y") as? Double ?? 0.5 {
-        didSet { UserDefaults.standard.set(pillY, forKey: "pill.y") }
+    /// Position of the pill along its edge, as a fraction of that edge's length.
+    var position: Double = UserDefaults.standard.object(forKey: "pill.y") as? Double ?? 0.5 {
+        didSet { if persists { UserDefaults.standard.set(position, forKey: "pill.y") } }
     }
+    /// Off for screenshots, so rendering never moves the real pill.
+    @ObservationIgnored var persists = true
+
+    init() {}
+
+    init(persists: Bool, edge: DockEdge) {
+        self.persists = persists
+        self.edge = edge
+    }
+}
+
+enum DockEdge: String {
+    case left, right, top, bottom
+
+    var isHorizontal: Bool { self == .top || self == .bottom }
 }
 
 class FloatingPanel: NSPanel {
@@ -115,6 +131,7 @@ final class UIController {
     private var pillHost: SizingHostingView<PillView>!
     private var screen: NSScreen = NSScreen.main ?? NSScreen.screens[0]
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
+    private var snapping = false
     private var monitor: Any?
 
     init(store: Store) {
@@ -157,13 +174,20 @@ final class UIController {
     private func pillTarget() -> NSRect {
         let size = pillHost.fittingSize
         let vf = screen.visibleFrame
-        let x = ui.onLeft ? vf.minX + 2 : vf.maxX - size.width - 2
-        let y = min(max(vf.minY + vf.height * ui.pillY - size.height / 2, vf.minY), vf.maxY - size.height)
-        return NSRect(x: x, y: y, width: size.width, height: size.height)
+        let inset: CGFloat = 2
+        let alongX = min(max(vf.minX + vf.width * ui.position - size.width / 2, vf.minX), vf.maxX - size.width)
+        let alongY = min(max(vf.minY + vf.height * ui.position - size.height / 2, vf.minY), vf.maxY - size.height)
+        let origin = switch ui.edge {
+        case .left: NSPoint(x: vf.minX + inset, y: alongY)
+        case .right: NSPoint(x: vf.maxX - size.width - inset, y: alongY)
+        case .top: NSPoint(x: alongX, y: vf.maxY - size.height - inset)
+        case .bottom: NSPoint(x: alongX, y: vf.minY + inset)
+        }
+        return NSRect(origin: origin, size: size)
     }
 
     func layoutPill() {
-        guard dragStart == nil else { return }
+        guard dragStart == nil, !snapping else { return }
         pill.setFrame(pillTarget(), display: true)
         if ui.isOpen { positionPanel() }
     }
@@ -181,14 +205,35 @@ final class UIController {
         dragStart = nil
         screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? screen
         let vf = screen.visibleFrame
-        ui.onLeft = pill.frame.midX < vf.midX
-        ui.pillY = min(max((pill.frame.midY - vf.minY) / vf.height, 0.05), 0.95)
-        let target = pillTarget()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.28
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            pill.animator().setFrame(target, display: true)
+        (ui.edge, ui.position) = Self.snap(pill.frame, in: vf)
+        // Let SwiftUI re-lay out the pill (it may have rotated) before measuring the target frame.
+        snapping = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            guard let self else { return }
+            let target = self.pillTarget()
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.28
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.pill.animator().setFrame(target, display: true)
+            }, completionHandler: {
+                Task { @MainActor in
+                    self.snapping = false
+                    self.layoutPill()
+                }
+            })
         }
+    }
+
+    /// Closest screen edge to the dropped pill, and where along that edge it sits (0…1).
+    nonisolated static func snap(_ f: NSRect, in vf: NSRect) -> (DockEdge, Double) {
+        let distances: [(DockEdge, CGFloat)] = [
+            (.left, f.midX - vf.minX), (.right, vf.maxX - f.midX), (.top, vf.maxY - f.midY), (.bottom, f.midY - vf.minY),
+        ]
+        let edge = distances.min { $0.1 < $1.1 }!.0
+        let position = edge.isHorizontal
+            ? min(max((f.midX - vf.minX) / vf.width, 0.03), 0.97)
+            : min(max((f.midY - vf.minY) / vf.height, 0.05), 0.95)
+        return (edge, position)
     }
 
     // MARK: Panel
@@ -208,9 +253,15 @@ final class UIController {
         let size = panel.frame.size
         let pad = Self.panelPadding
         let gap: CGFloat = 4
-        let x = ui.onLeft ? pf.maxX + gap - pad : pf.minX - gap - size.width + pad
-        let y = min(max(pf.midY - size.height / 2, vf.minY - pad), vf.maxY - size.height + pad)
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        let centeredX = min(max(pf.midX - size.width / 2, vf.minX - pad), vf.maxX - size.width + pad)
+        let centeredY = min(max(pf.midY - size.height / 2, vf.minY - pad), vf.maxY - size.height + pad)
+        let origin = switch ui.edge {
+        case .left: NSPoint(x: pf.maxX + gap - pad, y: centeredY)
+        case .right: NSPoint(x: pf.minX - gap - size.width + pad, y: centeredY)
+        case .top: NSPoint(x: centeredX, y: pf.minY - gap - size.height + pad)
+        case .bottom: NSPoint(x: centeredX, y: pf.maxY + gap - pad)
+        }
+        panel.setFrameOrigin(origin)
     }
 
     private func showPanel() {

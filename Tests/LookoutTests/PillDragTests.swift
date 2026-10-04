@@ -34,3 +34,24 @@ import Testing
         #expect(log().isEmpty)
     }
 }
+
+@Suite struct Snapping {
+    private let screen = NSRect(x: 0, y: 0, width: 1512, height: 944)
+    private func pill(_ x: CGFloat, _ y: CGFloat) -> NSRect { NSRect(x: x - 20, y: y - 20, width: 40, height: 40) }
+
+    @Test func snapsToNearestEdge() {
+        #expect(UIController.snap(pill(30, 500), in: screen).0 == .left)
+        #expect(UIController.snap(pill(1490, 500), in: screen).0 == .right)
+        #expect(UIController.snap(pill(700, 920), in: screen).0 == .top)
+        #expect(UIController.snap(pill(700, 25), in: screen).0 == .bottom)
+    }
+
+    @Test func positionFollowsTheEdge() {
+        let (edge, position) = UIController.snap(pill(378, 920), in: screen)
+        #expect(edge == .top)
+        #expect(abs(position - 0.25) < 0.001)
+        let (side, height) = UIController.snap(pill(1490, 472), in: screen)
+        #expect(side == .right)
+        #expect(abs(height - 0.5) < 0.001)
+    }
+}
