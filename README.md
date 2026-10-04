@@ -2,6 +2,15 @@
 
 An always-on GitHub sidekick for macOS: a small pill docked to the edge of the screen, with an inbox for the events you care about.
 
+**What it's for**
+
+- **Your repos:** get notified on everything: new issues, new PRs, every comment.
+- **Repos you contribute to:** only what's meant for you: replies on your issues and PRs, @mentions, answers after you comment, and review comments in your threads.
+- **CI:** see at a glance which repos are green, red or running on main, and get pinged when main breaks.
+- **Review requests:** from any repo, cleared once you've reviewed.
+
+Bots are kept quiet, and items mark themselves *addressed* when you reply and *resolved* when a review thread is resolved.
+
 ![Lookout states](docs/screenshots/gallery.png)
 
 ## Install
