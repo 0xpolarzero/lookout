@@ -50,6 +50,7 @@ enum Demo {
             store.settings.snoozeUntil = Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: now)
                 .map { $0 > now ? $0 : now.addingTimeInterval(3600) }
         case .error:
+            store.rateRemaining = 312
             store.repoErrors["ziglang/zig"] = "Not found (or no access)"
             store.ci["0xpolarzero/lookout"]?.state = .failure
             store.ci["0xpolarzero/lookout"]?.failing = ["test (macos-15)"]

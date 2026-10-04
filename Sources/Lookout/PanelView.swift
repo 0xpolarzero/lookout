@@ -22,6 +22,7 @@ struct PanelView: View {
             footer
         }
         .foregroundStyle(Theme.text)
+        .tipSpace()
         .frame(width: UIController.panelContent.width, height: UIController.panelContent.height)
         .background(Theme.bg)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -72,9 +73,13 @@ struct PanelView: View {
                     }
                 }
                 Spacer()
-                if let rate = store.rateRemaining {
-                    Text("\(rate.formatted()) API calls left")
+                // Only worth showing when the shared GitHub rate limit is running low.
+                if let rate = store.rateRemaining, rate < 500 {
+                    Label("\(rate.formatted()) API calls left this hour", systemImage: "exclamationmark.triangle.fill")
                         .monospacedDigit()
+                        .foregroundStyle(Theme.amber)
+                        .tip("GitHub rate limit low",
+                             "Shared with gh and other tools using your account. Syncing pauses at 0 until the hour resets.")
                 }
             }
             .font(.system(size: 11))
