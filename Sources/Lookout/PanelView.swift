@@ -62,9 +62,6 @@ struct PanelView: View {
                     Text("Connecting to GitHub…")
                 } else {
                     syncStatus(now: context.date)
-                    IconButton(symbol: "arrow.clockwise", help: "Refresh now",
-                               detail: "Checks every repository, CI and review requests", size: 20) { store.refreshNow() }
-                        .disabled(store.isSyncing)
                     if store.isSnoozed, let until = store.settings.snoozeUntil {
                         Text("· Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
                             .foregroundStyle(Theme.purple)
@@ -79,11 +76,16 @@ struct PanelView: View {
                         .tip("GitHub rate limit low",
                              "Shared with gh and other tools using your account. Syncing pauses at 0 until the hour resets.")
                 }
+                if store.me != nil {
+                    IconButton(symbol: "arrow.clockwise", help: "Refresh now",
+                               detail: "Checks every repository, CI and review requests", size: 20) { store.refreshNow() }
+                        .disabled(store.isSyncing)
+                }
             }
             .font(.system(size: 11))
             .foregroundStyle(Theme.tertiary)
             .padding(.leading, 16)
-            .padding(.trailing, 12)
+            .padding(.trailing, 8)
             .frame(height: 30)
         }
     }
