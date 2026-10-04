@@ -143,7 +143,8 @@ enum Snapshot {
             ui.filter = filter
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
                 .padding(16)
-                .environment(\.previewTip, label.contains("CI tooltip") ? "CI" : label.contains("tooltip") ? "Issue comments" : nil)
+                .environment(\.previewTip, label.contains("CI tooltip") ? "apple/swift-format|CI"
+                    : label.contains("tooltip") ? "superradcompany/microsandbox|Issue comments" : nil)
                 .environment(\.previewHover, Demo.hoverID)
                 .environment(\.previewSelection, Demo.selectedID))
         }

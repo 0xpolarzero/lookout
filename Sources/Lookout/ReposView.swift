@@ -117,6 +117,7 @@ struct RepoCard: View {
     let store: Store
     @State private var dropTarget = false
     @State private var hover = false
+    @Environment(\.previewTip) private var previewTip
 
     var body: some View {
         HStack(spacing: 10) {
@@ -154,6 +155,10 @@ struct RepoCard: View {
                 .strokeBorder(dropTarget ? Theme.accent : Theme.stroke, lineWidth: dropTarget ? 1.5 : 1)
         )
         .onHover { hover = $0 }
+        // Screenshots target one badge as "owner/repo|Tooltip title"; only that card shows it.
+        .environment(\.previewTip, previewTip.flatMap { spec in
+            spec.hasPrefix(repo.fullName + "|") ? String(spec.dropFirst(repo.fullName.count + 1)) : nil
+        })
         .draggable(repo.fullName) {
             Text(repo.fullName)
                 .font(.system(size: 12, weight: .semibold))
