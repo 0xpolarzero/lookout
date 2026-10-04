@@ -192,12 +192,15 @@ private struct Tip: ViewModifier {
     let detail: String?
     @State private var shown = false
     @State private var pending: Task<Void, Never>?
-    @State private var bubbleHeight: CGFloat = 0
+    @State private var bubble = CGSize.zero
+    @State private var anchor = CGRect.zero
     @Environment(\.previewTip) private var previewTip
+    @Environment(\.tipBounds) private var bounds
 
     func body(content: Content) -> some View {
         content
             .onAppear { if previewTip == title { shown = true } }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TipSpace.name)) } action: { anchor = $0 }
             .onHover { inside in
                 pending?.cancel()
                 if inside {
@@ -210,17 +213,26 @@ private struct Tip: ViewModifier {
                     shown = false
                 }
             }
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .topLeading) {
                 if shown {
-                    bubble
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bubbleHeight = $0 }
-                        .offset(x: 2, y: -bubbleHeight - 6)
-                        .opacity(bubbleHeight == 0 ? 0 : 1)
+                    bubbleView
+                        .onGeometryChange(for: CGSize.self) { $0.size } action: { bubble = $0 }
+                        .offset(placement)
+                        .opacity(bubble == .zero ? 0 : 1)
                         .allowsHitTesting(false)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
+                        .transition(.opacity)
                 }
             }
             .zIndex(shown ? 10 : 0)
+    }
+
+    /// Centered over the anchor, clamped inside the visible area; flips below when there's no room above.
+    private var placement: CGSize {
+        let margin: CGFloat = 8
+        let x = min(max(anchor.midX - bubble.width / 2, margin), max(margin, bounds.width - margin - bubble.width))
+        let fitsAbove = anchor.minY - bubble.height - 6 >= margin
+        let y = fitsAbove ? -bubble.height - 6 : anchor.height + 6
+        return CGSize(width: x - anchor.minX, height: y)
     }
 
     /// Natural width of the widest line, capped so long details wrap instead of stretching the bubble.
@@ -230,7 +242,7 @@ private struct Tip: ViewModifier {
         return min(ceil(widest) + 2, 210)
     }
 
-    private var bubble: some View {
+    private var bubbleView: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.text)
             if let detail, !detail.isEmpty {
@@ -249,7 +261,29 @@ private struct Tip: ViewModifier {
     }
 }
 
+/// Tooltips position themselves inside the nearest view marked with `.tipSpace()`.
+enum TipSpace {
+    static let name = "tips"
+}
+
+extension EnvironmentValues {
+    @Entry var tipBounds = CGSize(width: 10_000, height: 10_000)
+}
+
+private struct TipSpaceModifier: ViewModifier {
+    @State private var size = CGSize(width: 10_000, height: 10_000)
+
+    func body(content: Content) -> some View {
+        content
+            .coordinateSpace(.named(TipSpace.name))
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            .environment(\.tipBounds, size)
+    }
+}
+
 extension View {
+    func tipSpace() -> some View { modifier(TipSpaceModifier()) }
+
     func tip(_ title: String, _ detail: String? = nil) -> some View {
         modifier(Tip(title: title, detail: detail))
     }

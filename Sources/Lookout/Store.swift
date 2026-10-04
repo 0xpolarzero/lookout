@@ -556,7 +556,9 @@ final class Store {
         let previous = ci[name]?.state
         ci[name] = CIStatus(state: state, branch: branch, sha: commit,
                             url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
-                            failing: failing, checkedAt: Date())
+                            failing: failing, checkedAt: Date(),
+                            title: actions.workflowRuns.first?.displayTitle,
+                            updatedAt: latest.values.compactMap(\.updatedAt).max())
 
         if previous == .success || previous == .pending, state == .failure {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",

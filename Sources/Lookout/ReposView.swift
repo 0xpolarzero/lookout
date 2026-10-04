@@ -31,6 +31,7 @@ struct ReposView: View {
             .padding(12)
         }
         .scrollIndicators(.never)
+        .tipSpace()
         .task { await store.loadSuggestions() }
     }
 
@@ -193,13 +194,7 @@ struct RepoCard: View {
         let on = repo.events.contains(.ciMain)
         let status = store.ci[repo.fullName]
         let state = status?.state ?? .none
-        let stateSymbol = switch state {
-        case .success: "checkmark.seal.fill"
-        case .failure: "xmark.seal.fill"
-        case .pending: "clock.fill"
-        case .none: "seal.fill"
-        }
-        let symbol = on ? stateSymbol : "seal"
+        let symbol = on ? state.symbol : "seal"
         let branch = status?.branch ?? repo.defaultBranch ?? "main"
         var detail = on ? "\(branch) \(state.label)" : "Hidden from the pill · click to show"
         if on, state == .failure, let failing = status?.failing, !failing.isEmpty {

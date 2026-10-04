@@ -136,6 +136,24 @@ enum CIState: String, Codable {
         }
     }
 
+    var symbol: String {
+        switch self {
+        case .success: "checkmark.seal.fill"
+        case .failure: "xmark.seal.fill"
+        case .pending: "clock.fill"
+        case .none: "seal.fill"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .success: "Passing"
+        case .failure: "Failing"
+        case .pending: "Running"
+        case .none: "No checks"
+        }
+    }
+
     var label: String {
         switch self {
         case .success: "passing"
@@ -153,6 +171,9 @@ struct CIStatus: Codable, Hashable {
     var url: URL?
     var failing: [String]
     var checkedAt: Date
+    /// Headline of the latest commit on the branch, and when its runs last changed.
+    var title: String?
+    var updatedAt: Date?
 }
 
 struct AppSettings: Codable {
@@ -185,11 +206,12 @@ enum InboxFilter: String, CaseIterable {
 }
 
 enum PanelTab {
-    case inbox, repos, settings
+    case inbox, ci, repos, settings
 
     var title: String {
         switch self {
         case .inbox: "Inbox"
+        case .ci: "CI"
         case .repos: "Repositories"
         case .settings: "Settings"
         }

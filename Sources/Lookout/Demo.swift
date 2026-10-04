@@ -26,9 +26,14 @@ enum Demo {
             RepoConfig(fullName: "e2b-dev/runtime", events: [.issueComment, .prComment]),
         ]
         store.ci = [
-            "0xpolarzero/lookout": CIStatus(state: .success, branch: "main", failing: [], checkedAt: now),
-            "apple/swift-format": CIStatus(state: .failure, branch: "main", failing: ["Linux / build", "Windows / test"], checkedAt: now),
-            "ziglang/zig": CIStatus(state: .pending, branch: "master", failing: [], checkedAt: now),
+            "0xpolarzero/lookout": CIStatus(state: .success, branch: "main", sha: "6f9e3014c2", failing: [], checkedAt: now,
+                                            title: "Compact, draggable repo cards", updatedAt: now.addingTimeInterval(-1500)),
+            "apple/swift-format": CIStatus(state: .failure, branch: "main", sha: "b41c09e7aa", failing: ["Linux / build", "Windows / test"],
+                                           checkedAt: now, title: "Respect trailing comma config (#1042)", updatedAt: now.addingTimeInterval(-2700)),
+            "ziglang/zig": CIStatus(state: .pending, branch: "master", sha: "0d2e9f1b33", failing: [], checkedAt: now,
+                                    title: "std.Io: add vectored reads to File", updatedAt: now.addingTimeInterval(-240)),
+            "amontlabs/lcu": CIStatus(state: .success, branch: "main", sha: "a93b0c2d11", failing: [], checkedAt: now,
+                                      title: "Release 0.4.2", updatedAt: now.addingTimeInterval(-86400)),
         ]
         store.items = items(now)
 
@@ -48,6 +53,7 @@ enum Demo {
             store.repoErrors["ziglang/zig"] = "Not found (or no access)"
             store.ci["0xpolarzero/lookout"]?.state = .failure
             store.ci["0xpolarzero/lookout"]?.failing = ["test (macos-15)"]
+            store.ci["0xpolarzero/lookout"]?.title = "Drag the pill from anywhere"
         case .empty:
             store.repos = []
             store.ci = [:]
@@ -137,7 +143,7 @@ enum Snapshot {
             ui.filter = filter
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
                 .padding(16)
-                .environment(\.previewTip, label.contains("CI tooltip") ? "CI" : label.contains("tooltip") ? "Comments for you" : nil)
+                .environment(\.previewTip, label.contains("CI tooltip") ? "CI" : label.contains("tooltip") ? "Issue comments" : nil)
                 .environment(\.previewHover, Demo.hoverID)
                 .environment(\.previewSelection, Demo.selectedID))
         }
@@ -147,6 +153,8 @@ enum Snapshot {
         panel("Inbox · all caught up", .allClear, .inbox)
         panel("Repositories · drag to reorder, tooltip on hover", .error, .repos)
         panel("Repositories · CI tooltip", .busy, .repos)
+        panel("CI · default branches", .busy, .ci)
+        panel("CI · failures", .error, .ci)
         panel("Settings · snoozed", .snoozed, .settings)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {

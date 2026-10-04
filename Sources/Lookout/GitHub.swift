@@ -52,6 +52,8 @@ struct GHWorkflowRuns: Decodable {
         let name: String
         let workflowId: Int
         let headSha: String
+        let displayTitle: String?
+        let updatedAt: Date?
         let status: String
         let conclusion: String?
     }

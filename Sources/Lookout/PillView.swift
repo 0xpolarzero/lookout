@@ -21,7 +21,7 @@ struct PillView: View {
                     }
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
-                    .onTapGesture { actions.toggle(.repos) }
+                    .onTapGesture { actions.toggle(.ci) }
                 }
             }
         }

@@ -12,6 +12,7 @@ struct PanelView: View {
             Group {
                 switch ui.tab {
                 case .inbox: InboxView(store: store, ui: ui, close: close)
+                case .ci: CIView(store: store, ui: ui)
                 case .repos: ReposView(store: store)
                 case .settings: SettingsView(store: store)
                 }
@@ -39,6 +40,7 @@ struct PanelView: View {
             Spacer()
             HStack(spacing: 2) {
                 IconButton(symbol: "tray.fill", help: "Inbox", active: ui.tab == .inbox) { ui.tab = .inbox }
+                IconButton(symbol: "checkmark.seal.fill", help: "CI", active: ui.tab == .ci) { ui.tab = .ci }
                 IconButton(symbol: "square.stack.3d.up.fill", help: "Repositories", active: ui.tab == .repos) { ui.tab = .repos }
                 IconButton(symbol: "gearshape.fill", help: "Settings", active: ui.tab == .settings) { ui.tab = .settings }
             }
