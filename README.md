@@ -4,6 +4,12 @@ An always-on GitHub sidekick for macOS: a small pill docked to the edge of the s
 
 ![Lookout states](docs/screenshots/gallery.png)
 
+## Install
+
+Grab the latest zip from [Releases](https://github.com/0xpolarzero/lookout/releases), move **Lookout.app** to `/Applications`, then clear the quarantine once (the app isn't notarized yet):
+
+    xattr -dr com.apple.quarantine /Applications/Lookout.app
+
 ## Build & run
 
     ./scripts/build-app.sh && open build/Lookout.app
@@ -19,6 +25,12 @@ Requires macOS 14+. Auth comes from `gh auth token` (or a token pasted in Settin
 - **States**: unread → read (you saw it) → **addressed** (you replied after it, so this happens automatically) → **resolved** (review thread resolved, synced through GraphQL). Discarded items go to Done.
 - **Bots**: GitHub Apps (`…[bot]`) plus any handles you add arrive silently in the Bots tab.
 - **Extras**: review requests from any repo (closed automatically once you review), CI red/green transition notifications, snooze, launch at login.
+
+## Releasing
+
+Push a version tag; the `Release` workflow tests, builds a universal app and publishes `Lookout-<version>.zip` to GitHub Releases:
+
+    git tag v0.2.0 && git push origin v0.2.0
 
 ## Dev flags
 

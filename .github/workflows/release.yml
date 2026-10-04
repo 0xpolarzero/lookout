@@ -1,0 +1,55 @@
+name: Release
+
+# Push a tag like v0.2.0 to build a universal Lookout.app and publish it as a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.2.0). Created on the current commit if it doesn't exist."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: swift test
+
+      - name: Build universal app
+        run: UNIVERSAL=1 ./scripts/build-app.sh
+
+      - name: Package
+        run: |
+          ditto -c -k --keepParent build/Lookout.app "Lookout-$VERSION.zip"
+          shasum -a 256 "Lookout-$VERSION.zip" | tee "Lookout-$VERSION.zip.sha256"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ### Install
+          1. Download `Lookout-*.zip`, unzip, and move **Lookout.app** to `/Applications`.
+          2. The app is not notarized yet, so clear the download quarantine once:
+             ```
+             xattr -dr com.apple.quarantine /Applications/Lookout.app
+             ```
+          3. Open it. Lookout uses your `gh` login (`gh auth login`), or paste a token in Settings.
+
+          Requires macOS 14 or later. Universal (Apple Silicon + Intel).
+          NOTES
+          gh release create "$TAG" "Lookout-$VERSION.zip" "Lookout-$VERSION.zip.sha256" \
+            --title "Lookout $VERSION" --notes-file notes.md --generate-notes --target "$GITHUB_SHA"
