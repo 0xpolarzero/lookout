@@ -29,8 +29,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         } else {
             content.sound = .default
         }
-        let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        let req = UNNotificationRequest(identifier: id.isEmpty ? UUID().uuidString : id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
+    }
+
+    /// Withdraws banners for items that were read, discarded or filtered out.
+    func remove(_ ids: [String]) {
+        guard available, !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,

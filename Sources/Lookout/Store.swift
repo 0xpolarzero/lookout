@@ -8,7 +8,14 @@ final class Store {
     var repos: [RepoConfig] = []
     var items: [InboxItem] = []
     var ci: [String: CIStatus] = [:]
-    var settings = AppSettings() { didSet { save() } }
+    var settings = AppSettings() {
+        didSet {
+            if oldValue.reviewRequests, !settings.reviewRequests, !loading {
+                removeItems { $0.kind == .reviewRequested }
+            }
+            save()
+        }
+    }
 
     var me: GHUser?
     var tokenSource: TokenSource?
@@ -149,14 +156,31 @@ final class Store {
         if item.state == .unread { markRead(item) }
     }
 
-    func markRead(_ item: InboxItem) { mutate(item.id) { $0.state = .read } }
+    func markRead(_ item: InboxItem) {
+        mutate(item.id) { $0.state = .read }
+        notifier.remove([item.id])
+    }
     func markUnread(_ item: InboxItem) { mutate(item.id) { $0.state = .unread } }
-    func discard(_ item: InboxItem) { mutate(item.id) { $0.state = .discarded } }
+    func discard(_ item: InboxItem) {
+        mutate(item.id) { $0.state = .discarded }
+        notifier.remove([item.id])
+    }
     func restore(_ item: InboxItem) { mutate(item.id) { $0.state = .read } }
 
     func markAllRead(_ filter: InboxFilter) {
         let ids = Set(list(filter).filter { $0.state == .unread }.map(\.id))
         for i in items.indices where ids.contains(items[i].id) { items[i].state = .read }
+        notifier.remove(Array(ids))
+        save()
+    }
+
+    /// Drops items (and their banners) that no longer match what a repo is set to follow.
+    func removeItems(where shouldRemove: (InboxItem) -> Bool) {
+        let gone = items.filter(shouldRemove).map(\.id)
+        guard !gone.isEmpty else { return }
+        let set = Set(gone)
+        items.removeAll { set.contains($0.id) }
+        notifier.remove(gone)
         save()
     }
 
@@ -252,7 +276,12 @@ final class Store {
 
     func toggle(_ kind: EventKind, on repo: RepoConfig) {
         guard let i = repos.firstIndex(where: { $0.id == repo.id }) else { return }
-        if repos[i].events.contains(kind) { repos[i].events.remove(kind) } else { repos[i].events.insert(kind) }
+        if repos[i].events.contains(kind) {
+            repos[i].events.remove(kind)
+            removeItems { $0.repo == repo.fullName && $0.kind == kind }
+        } else {
+            repos[i].events.insert(kind)
+        }
         save()
         if kind == .ciMain && repos[i].events.contains(kind) {
             let name = repo.fullName
@@ -270,6 +299,9 @@ final class Store {
     func toggleAllComments(_ repo: RepoConfig) {
         guard let i = repos.firstIndex(where: { $0.id == repo.id }) else { return }
         repos[i].allComments.toggle()
+        if !repos[i].allComments {
+            removeItems { $0.repo == repo.fullName && $0.forYou == false }
+        }
         save()
     }
 
@@ -397,18 +429,22 @@ final class Store {
         let known = Set(items.map(\.id))
         var added = fresh.filter { !known.contains($0.id) }
         let commentKinds: Set<EventKind> = [.issueComment, .prComment, .reviewComment]
-        let filtering = !repo.allComments
-        let needInfo = Set(added.filter { $0.title == "#\($0.number)" || (filtering && commentKinds.contains($0.kind)) }.map(\.number))
-        let reviewNumbers = Set(added.filter { filtering && $0.kind == .reviewComment }.map(\.number))
+        let needInfo = Set(added.filter { $0.title == "#\($0.number)" || commentKinds.contains($0.kind) }.map(\.number))
+        let reviewNumbers = Set(added.filter { $0.kind == .reviewComment }.map(\.number))
         let info: [Int: ThreadInfo]? = needInfo.isEmpty ? [:]
-            : try? await fetchThreads(name, Array(needInfo), participation: filtering, reviewThreads: reviewNumbers, me: me)
+            : try? await fetchThreads(name, Array(needInfo), participation: true, reviewThreads: reviewNumbers, me: me)
+        // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
+        // Always evaluated (and remembered), so switching All comments off later can prune what isn't for me.
+        // If the lookup failed, keep everything rather than silently dropping something addressed to me.
         for i in added.indices {
             if let title = info?[added[i].number]?.title { added[i].title = title }
+            if let info, commentKinds.contains(added[i].kind) {
+                added[i].forYou = Self.isRelevant(added[i], thread: info[added[i].number],
+                                                  mentioned: mentioned.contains(added[i].id), me: me)
+            }
         }
-        // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
-        // If the lookup failed, keep everything rather than silently dropping something addressed to me.
-        if filtering, let info {
-            added = added.filter { Self.isRelevant($0, thread: info[$0.number], mentioned: mentioned.contains($0.id), me: me) }
+        if !repo.allComments {
+            added = added.filter { $0.forYou != false }
         }
         items.append(contentsOf: added)
 

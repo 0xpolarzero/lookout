@@ -264,6 +264,9 @@ enum Check {
                 print(String(format: "%-15@ %-10@ #%-6d %@ @%@ low=%d  %@", item.kind.rawValue, item.state.rawValue, item.number,
                              shortAgo(item.createdAt), item.author, store.isLowPriority(item) ? 1 : 0, String(item.title.prefix(50))))
             }
+            let comments = store.items.filter { [.issueComment, .prComment, .reviewComment].contains($0.kind) }
+            print("comments forYou:", comments.filter { $0.forYou == true }.count, "notForYou:", comments.filter { $0.forYou == false }.count,
+                  "unknown:", comments.filter { $0.forYou == nil }.count)
             print("items:", store.items.count, "by kind:", Dictionary(grouping: store.items, by: \.kind.rawValue).mapValues(\.count))
             print("ci:", store.ci.mapValues { "\($0.branch) \($0.state.rawValue) failing=\($0.failing)" })
             print("errors:", store.repoErrors, "cursors:", store.repos.first?.cursors ?? [:])

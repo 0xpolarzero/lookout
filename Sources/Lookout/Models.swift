@@ -122,6 +122,8 @@ struct InboxItem: Codable, Identifiable, Hashable {
     /// Review comments: id of the first comment in the thread.
     var threadRoot: Int?
     var path: String?
+    /// Comments: whether the "for you" rule matched (kept even with All comments on, so turning it off can prune).
+    var forYou: Bool?
 }
 
 enum CIState: String, Codable {
