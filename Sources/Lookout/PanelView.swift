@@ -350,4 +350,5 @@ struct ItemRow: View {
 extension EnvironmentValues {
     @Entry var previewHover: String? = nil
     @Entry var previewSelection: String? = nil
+    @Entry var previewTip: String? = nil
 }

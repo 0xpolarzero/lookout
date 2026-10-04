@@ -35,13 +35,23 @@ enum EventKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    var tipDetail: String {
+        switch self {
+        case .issueOpened: "When someone opens an issue"
+        case .prOpened: "When someone opens a pull request"
+        case .ciMain: "Status of the default branch"
+        case .reviewRequested: "When your review is requested"
+        default: "Every comment in this repo"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .issueOpened: "smallcircle.filled.circle"
         case .issueComment: "bubble.left.fill"
         case .prOpened: "arrow.triangle.pull"
-        case .prComment: "bubble.left.fill"
-        case .reviewComment: "text.bubble.fill"
+        case .prComment: "bubble.right.fill"
+        case .reviewComment: "chevron.left.forwardslash.chevron.right"
         case .ciMain: "checkmark.seal.fill"
         case .reviewRequested: "eye.fill"
         }

@@ -183,3 +183,67 @@ struct FlowLayout: Layout {
         return rows
     }
 }
+
+// MARK: - Tooltip
+
+/// A quick, styled tooltip (the system one waits ~1s and looks out of place on the dark panel).
+private struct Tip: ViewModifier {
+    let title: String
+    let detail: String?
+    @State private var shown = false
+    @State private var pending: Task<Void, Never>?
+    @State private var bubbleHeight: CGFloat = 0
+    @Environment(\.previewTip) private var previewTip
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { if previewTip == title { shown = true } }
+            .onHover { inside in
+                pending?.cancel()
+                if inside {
+                    pending = Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.easeOut(duration: 0.12)) { shown = true }
+                    }
+                } else {
+                    shown = false
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if shown {
+                    bubble
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bubbleHeight = $0 }
+                        .offset(x: 2, y: -bubbleHeight - 6)
+                        .opacity(bubbleHeight == 0 ? 0 : 1)
+                        .allowsHitTesting(false)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
+                }
+            }
+            .zIndex(shown ? 10 : 0)
+    }
+
+    private var bubble: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.text)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.secondary)
+                    .frame(maxWidth: 210, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(white: 0.17)))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.1)))
+        .fixedSize()
+    }
+}
+
+extension View {
+    func tip(_ title: String, _ detail: String? = nil) -> some View {
+        modifier(Tip(title: title, detail: detail))
+    }
+}

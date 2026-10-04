@@ -21,6 +21,9 @@ enum Demo {
             RepoConfig(fullName: "0xpolarzero/lookout", allComments: true),
             RepoConfig(fullName: "apple/swift-format"),
             RepoConfig(fullName: "ziglang/zig", events: [.prComment, .reviewComment, .ciMain]),
+            RepoConfig(fullName: "superradcompany/microsandbox", events: [.issueComment, .prComment, .reviewComment]),
+            RepoConfig(fullName: "amontlabs/lcu", allComments: true),
+            RepoConfig(fullName: "e2b-dev/runtime", events: [.issueComment, .prComment]),
         ]
         store.ci = [
             "0xpolarzero/lookout": CIStatus(state: .success, branch: "main", failing: [], checkedAt: now),
@@ -134,6 +137,7 @@ enum Snapshot {
             ui.filter = filter
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
                 .padding(16)
+                .environment(\.previewTip, label.contains("CI tooltip") ? "CI" : label.contains("tooltip") ? "Comments for you" : nil)
                 .environment(\.previewHover, Demo.hoverID)
                 .environment(\.previewSelection, Demo.selectedID))
         }
@@ -141,7 +145,8 @@ enum Snapshot {
         panel("Bots · silent, own tab", .busy, .inbox, .bots)
         panel("Done · addressed, resolved, discarded", .busy, .inbox, .done)
         panel("Inbox · all caught up", .allClear, .inbox)
-        panel("Repositories · CI failing + sync error", .error, .repos)
+        panel("Repositories · drag to reorder, tooltip on hover", .error, .repos)
+        panel("Repositories · CI tooltip", .busy, .repos)
         panel("Settings · snoozed", .snoozed, .settings)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {

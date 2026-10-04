@@ -114,128 +114,147 @@ private struct SuggestionRow: View {
 struct RepoCard: View {
     let repo: RepoConfig
     let store: Store
+    @State private var dropTarget = false
     @State private var hover = false
 
     var body: some View {
-        let status = store.ci[repo.fullName]
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(repo.owner).font(.system(size: 11)).foregroundStyle(Theme.tertiary)
-                    Text(repo.name).font(.system(size: 14, weight: .semibold))
-                }
-                Spacer()
-                if repo.events.contains(.ciMain) {
-                    Button {
-                        if let url = status?.url { NSWorkspace.shared.open(url) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            CIDot(state: status?.state ?? .none, size: 7)
-                            Text("\(status?.branch ?? repo.defaultBranch ?? "main") \(status?.state.label ?? "…")")
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.secondary)
-                        .padding(.horizontal, 8)
-                        .frame(height: 22)
-                        .background(Capsule().fill(Color.white.opacity(0.06)))
-                    }
-                    .buttonStyle(.plain)
-                    .help(status?.failing.isEmpty == false ? "Failing: " + status!.failing.joined(separator: ", ") : "Open latest commit")
-                }
-                Menu {
-                    Button("Open on GitHub") { NSWorkspace.shared.open(repo.url) }
-                    Button("Open Actions") { NSWorkspace.shared.open(repo.url.appendingPathComponent("actions")) }
-                    Divider()
-                    Button("Stop watching", role: .destructive) { store.removeRepo(repo) }
-                } label: {
-                    Image(systemName: "ellipsis").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.secondary)
-                        .frame(width: 24, height: 22)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(repo.owner).font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                Text(repo.name).font(.system(size: 13, weight: .semibold))
             }
-            if let failing = status?.failing, status?.state == .failure, !failing.isEmpty {
-                Text("✕ " + failing.prefix(3).joined(separator: ", "))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.red.opacity(0.9))
-                    .lineLimit(1)
-            }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
-                ForEach(EventKind.repoToggles) { kind in
-                    EventToggle(kind: kind, isOn: repo.events.contains(kind)) { store.toggle(kind, on: repo) }
-                }
-            }
-            allCommentsRow
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .layoutPriority(1)
+            Spacer(minLength: 6)
             if let error = store.repoErrors[repo.fullName] {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+                Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.amber)
+                    .frame(width: 18, height: 24)
+                    .tip("Sync failed", error)
             }
+            HStack(spacing: 3) {
+                ForEach(EventKind.repoToggles.filter { $0 != .ciMain }) { kind in
+                    badge(kind)
+                }
+                Rectangle().fill(Theme.stroke).frame(width: 1, height: 14).padding(.horizontal, 2)
+                allCommentsBadge
+                ciBadge
+            }
+            menu
         }
-        .card()
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(hover ? Theme.hover : Theme.raised))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(dropTarget ? Theme.accent : Theme.stroke, lineWidth: dropTarget ? 1.5 : 1)
+        )
+        .onHover { hover = $0 }
+        .draggable(repo.fullName) {
+            Text(repo.fullName)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(Capsule().fill(Theme.bg))
+                .foregroundStyle(Theme.text)
+        }
+        .dropDestination(for: String.self) { names, _ in
+            guard let name = names.first else { return false }
+            withAnimation(.spring(duration: 0.25)) { store.moveRepo(name, onto: repo.fullName) }
+            return true
+        } isTargeted: { dropTarget = $0 }
     }
-}
 
-extension RepoCard {
-    private var allCommentsRow: some View {
+    // MARK: Badges
+
+    private func badge(_ kind: EventKind) -> some View {
+        let on = repo.events.contains(kind)
+        let filtered = kind != .issueOpened && kind != .prOpened && !repo.allComments
+        let detail = filtered ? "Only on your threads, @mentions and replies to you" : kind.tipDetail
+        return BadgeButton(symbol: kind.symbol, color: kind.color, on: on) { store.toggle(kind, on: repo) }
+            .tip(kind.toggleLabel, detail + (on ? "" : "\nOff · click to turn on"))
+    }
+
+    private var allCommentsBadge: some View {
         let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("All comments").font(.system(size: 12.5, weight: .medium))
-                Text(repo.allComments ? "Every comment in this repo"
-                                      : "Only on your issues & PRs, @mentions, and replies after you")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.tertiary)
-            }
-            Spacer()
-            Toggle("", isOn: Binding(get: { repo.allComments }, set: { _ in store.toggleAllComments(repo) }))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .labelsHidden()
+        return BadgeButton(symbol: "bubble.left.and.bubble.right.fill", color: Theme.accent, on: repo.allComments) {
+            store.toggleAllComments(repo)
         }
-        .padding(.horizontal, 2)
-        .opacity(hasComments ? 1 : 0.4)
+        .opacity(hasComments ? 1 : 0.35)
         .disabled(!hasComments)
+        .tip(repo.allComments ? "All comments" : "Comments for you",
+             repo.allComments ? "Every comment in this repo" : "Click to get every comment, not only the ones for you")
+    }
+
+    private var ciBadge: some View {
+        let on = repo.events.contains(.ciMain)
+        let status = store.ci[repo.fullName]
+        let state = status?.state ?? .none
+        let stateSymbol = switch state {
+        case .success: "checkmark.seal.fill"
+        case .failure: "xmark.seal.fill"
+        case .pending: "clock.fill"
+        case .none: "seal.fill"
+        }
+        let symbol = on ? stateSymbol : "seal"
+        let branch = status?.branch ?? repo.defaultBranch ?? "main"
+        var detail = on ? "\(branch) \(state.label)" : "Hidden from the pill · click to show"
+        if on, state == .failure, let failing = status?.failing, !failing.isEmpty {
+            detail += "\n" + failing.prefix(4).joined(separator: "\n")
+        }
+        return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on) {
+            store.toggle(.ciMain, on: repo)
+        }
+        .tip("CI", detail)
+    }
+
+    private var menu: some View {
+        Menu {
+            Button("Open on GitHub") { NSWorkspace.shared.open(repo.url) }
+            Button("Open Actions") { NSWorkspace.shared.open(repo.url.appendingPathComponent("actions")) }
+            if let url = store.ci[repo.fullName]?.url {
+                Button("Open latest commit checks") { NSWorkspace.shared.open(url) }
+            }
+            Divider()
+            Button("Stop watching", role: .destructive) { store.removeRepo(repo) }
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.tertiary)
+                .frame(width: 20, height: 24)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 }
 
-private struct EventToggle: View {
-    let kind: EventKind
-    let isOn: Bool
+private struct BadgeButton: View {
+    let symbol: String
+    let color: Color
+    let on: Bool
     let action: () -> Void
     @State private var hover = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: kind.symbol)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(isOn ? kind.color : Theme.tertiary)
-                    .frame(width: 14)
-                Text(kind.toggleLabel)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isOn ? Theme.text : Theme.tertiary)
-                Spacer(minLength: 0)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .heavy))
-                    .foregroundStyle(kind.color)
-                    .opacity(isOn ? 1 : 0)
-            }
-            .padding(.horizontal, 9)
-            .frame(height: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isOn ? kind.color.opacity(0.12) : Color.white.opacity(hover ? 0.06 : 0.03))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(isOn ? kind.color.opacity(0.28) : Theme.stroke)
-            )
-            .contentShape(Rectangle())
+            Image(systemName: symbol)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(on ? color : Theme.tertiary.opacity(hover ? 1 : 0.7))
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(on ? color.opacity(hover ? 0.24 : 0.15) : Color.white.opacity(hover ? 0.07 : 0))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(on ? color.opacity(0.25) : Theme.stroke)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: on)
     }
 }

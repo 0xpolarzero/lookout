@@ -245,6 +245,13 @@ final class Store {
         }
     }
 
+    func moveRepo(_ name: String, onto target: String) {
+        guard name != target, let from = repos.firstIndex(where: { $0.fullName == name }),
+              let to = repos.firstIndex(where: { $0.fullName == target }) else { return }
+        repos.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        save()
+    }
+
     func toggleAllComments(_ repo: RepoConfig) {
         guard let i = repos.firstIndex(where: { $0.id == repo.id }) else { return }
         repos[i].allComments.toggle()
