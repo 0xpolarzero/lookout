@@ -11,7 +11,7 @@ An always-on GitHub sidekick for macOS: a small pill docked to the edge of the s
 
 Bots are kept quiet, and items mark themselves *addressed* when you reply and *resolved* when a review thread is resolved.
 
-![Lookout states](docs/screenshots/gallery.png)
+![Lookout states](docs/screenshots/overview.png)
 
 ## Install
 
@@ -45,7 +45,7 @@ Push a version tag; the `Release` workflow tests, builds a universal app and pub
 ## Dev flags
 
     .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty] --open   # mock data, nothing saved
-    .build/debug/Lookout --snapshot docs/screenshots                                 # render every state + gallery.png
+    .build/debug/Lookout --snapshot docs/screenshots                                 # render every state + overview.png
     .build/debug/Lookout --check owner/repo [--days N] [--all]   # headless live sync, prints the inbox
     .build/debug/Lookout --check owner/repo --thread 123         # what Lookout knows about one thread
     swift test

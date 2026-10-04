@@ -171,7 +171,7 @@ enum Snapshot {
                 image.addRepresentation(rep)
                 images.append((shot.label, image, shot.isPill))
             }
-            writeGallery(images, to: "\(dir)/gallery.png")
+            writeGallery(images, to: "\(dir)/overview.png")
             exit(0)
         }
     }
