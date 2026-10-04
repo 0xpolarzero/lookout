@@ -195,65 +195,69 @@ struct FlowLayout: Layout {
 // MARK: - Tooltip
 
 /// A quick, styled tooltip (the system one waits ~1s and looks out of place on the dark panel).
+/// Badges only *request* a tooltip; the nearest `.tipSpace()` draws it in one top layer, so nothing
+/// (headers, neighbouring rows, scroll views) can cover or clip it.
+@Observable
+final class TipCenter {
+    struct Request: Equatable {
+        let id: UUID
+        let title: String
+        let detail: String?
+        var anchor: CGRect
+    }
+
+    var current: Request?
+}
+
 private struct Tip: ViewModifier {
     let title: String
     let detail: String?
-    @State private var shown = false
-    @State private var pending: Task<Void, Never>?
-    @State private var bubble = CGSize.zero
+    @State private var id = UUID()
     @State private var anchor = CGRect.zero
+    @State private var pending: Task<Void, Never>?
+    @Environment(\.tipCenter) private var center
     @Environment(\.previewTip) private var previewTip
-    @Environment(\.tipBounds) private var bounds
 
     func body(content: Content) -> some View {
         content
-            .onAppear { if previewTip == title { shown = true } }
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TipSpace.name)) } action: { anchor = $0 }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TipSpace.name)) } action: { frame in
+                anchor = frame
+                if center?.current?.id == id { center?.current?.anchor = frame }
+            }
+            .onAppear {
+                if previewTip == title {
+                    DispatchQueue.main.async { show() }
+                }
+            }
             .onHover { inside in
                 pending?.cancel()
                 if inside {
                     pending = Task {
                         try? await Task.sleep(for: .milliseconds(300))
                         guard !Task.isCancelled else { return }
-                        withAnimation(.easeOut(duration: 0.12)) { shown = true }
+                        show()
                     }
-                } else {
-                    shown = false
+                } else if center?.current?.id == id {
+                    center?.current = nil
                 }
             }
-            .overlay(alignment: .topLeading) {
-                if shown {
-                    bubbleView
-                        .onGeometryChange(for: CGSize.self) { $0.size } action: { bubble = $0 }
-                        .offset(placement)
-                        .opacity(bubble == .zero ? 0 : 1)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
-                }
-            }
-            .zIndex(shown ? 10 : 0)
+            .onDisappear { if center?.current?.id == id { center?.current = nil } }
     }
 
-    /// Centered over the anchor, clamped inside the visible area; flips below when there's no room above.
-    private var placement: CGSize {
-        let margin: CGFloat = 8
-        let x = min(max(anchor.midX - bubble.width / 2, margin), max(margin, bounds.width - margin - bubble.width))
-        let fitsAbove = anchor.minY - bubble.height - 6 >= margin
-        let y = fitsAbove ? -bubble.height - 6 : anchor.height + 6
-        return CGSize(width: x - anchor.minX, height: y)
+    private func show() {
+        center?.current = TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor)
     }
+}
 
-    /// Natural width of the widest line, capped so long details wrap instead of stretching the bubble.
-    private static func width(of text: String) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 10.5)
-        let widest = text.split(separator: "\n").map { (String($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-        return min(ceil(widest) + 2, 210)
-    }
+private struct TipBubble: View {
+    let request: TipCenter.Request
+    let bounds: CGSize
+    @State private var size = CGSize.zero
 
-    private var bubbleView: some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.text)
-            if let detail, !detail.isEmpty {
+            Text(request.title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.text)
+            if let detail = request.detail, !detail.isEmpty {
                 Text(detail)
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondary)
@@ -265,32 +269,60 @@ private struct Tip: ViewModifier {
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(white: 0.17)))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         .fixedSize()
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        .offset(placement)
+        .opacity(size == .zero ? 0 : 1)
+        .allowsHitTesting(false)
+    }
+
+    /// Centered over the anchor, clamped inside the panel; flips below when there's no room above.
+    private var placement: CGSize {
+        let a = request.anchor
+        let margin: CGFloat = 8
+        let x = min(max(a.midX - size.width / 2, margin), max(margin, bounds.width - margin - size.width))
+        let y = a.minY - size.height - 6 >= margin ? a.minY - size.height - 6 : a.maxY + 6
+        return CGSize(width: x, height: y)
+    }
+
+    /// Natural width of the widest line, capped so long details wrap instead of stretching the bubble.
+    private static func width(of text: String) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 10.5)
+        let widest = text.split(separator: "\n").map { (String($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return min(ceil(widest) + 2, 210)
     }
 }
 
-/// Tooltips position themselves inside the nearest view marked with `.tipSpace()`.
 enum TipSpace {
     static let name = "tips"
 }
 
 extension EnvironmentValues {
     @Entry var systemHelp = false
-    @Entry var tipBounds = CGSize(width: 10_000, height: 10_000)
+    @Entry var tipCenter: TipCenter? = nil
 }
 
 private struct TipSpaceModifier: ViewModifier {
-    @State private var size = CGSize(width: 10_000, height: 10_000)
+    @State private var center = TipCenter()
+    @State private var size = CGSize.zero
 
     func body(content: Content) -> some View {
         content
             .coordinateSpace(.named(TipSpace.name))
+            .environment(\.tipCenter, center)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
-            .environment(\.tipBounds, size)
+            .overlay(alignment: .topLeading) {
+                if let request = center.current {
+                    TipBubble(request: request, bounds: size)
+                        .transition(.opacity.animation(.easeOut(duration: 0.12)))
+                }
+            }
     }
 }
 
 extension View {
+    /// Hosts tooltips for everything inside (use once, at the root of the panel).
     func tipSpace() -> some View { modifier(TipSpaceModifier()) }
 
     func tip(_ title: String, _ detail: String? = nil) -> some View {

@@ -132,7 +132,7 @@ struct SettingsView: View {
             HStack {
                 Text("Toggle panel").font(.system(size: 12.5))
                 Spacer()
-                Text("⌃ ⌥ Space")
+                Text("⌃ ⌥ L")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(Theme.secondary)
                     .padding(.horizontal, 8)

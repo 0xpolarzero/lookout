@@ -147,7 +147,8 @@ enum Snapshot {
                 .padding(16)
                 .environment(\.previewTip, label.contains("CI tooltip") ? "apple/swift-format|CI"
                     : label.contains("tooltip") ? "superradcompany/microsandbox|Issue comments"
-                    : label.hasPrefix("Inbox · hover") ? "Discard" : nil)
+                    : label.hasPrefix("Inbox · hover") ? "Discard"
+                    : label.hasPrefix("Bots") ? "Mark all as read" : nil)
                 .environment(\.previewHover, Demo.hoverID)
                 .environment(\.previewSelection, Demo.selectedID))
         }

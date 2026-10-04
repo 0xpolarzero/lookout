@@ -46,7 +46,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
-// MARK: - Global hotkey (⌃⌥Space)
+// MARK: - Global hotkey (⌃⌥L)
 
 final class HotKey {
     private static var handler: (() -> Void)?
@@ -60,7 +60,8 @@ final class HotKey {
             return noErr
         }, 1, &spec, nil, nil)
         let id = EventHotKeyID(signature: OSType(0x4C4B4F54), id: 1)
-        RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &ref)
+        let status = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &ref)
+        if status != noErr { NSLog("Lookout: global shortcut unavailable (\(status))") }
     }
 }
 
@@ -100,7 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.start()
         }
         controller = UIController(store: store)
-        hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(controlKey | optionKey)) { [weak self] in
+        // ⌃⌥Space is macOS's "next input source"; L is matched by key position, so it works in any layout.
+        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(controlKey | optionKey)) { [weak self] in
             DispatchQueue.main.async { self?.controller.toggle(.inbox) }
         }
         if CommandLine.arguments.contains("--open") {

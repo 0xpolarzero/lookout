@@ -132,6 +132,8 @@ final class UIController {
     private var screen: NSScreen = NSScreen.main ?? NSScreen.screens[0]
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
     private var snapping = false
+    /// App that had focus before the panel opened; it gets focus back when the panel closes.
+    private var previousApp: NSRunningApplication?
     private var monitor: Any?
 
     init(store: Store) {
@@ -267,6 +269,10 @@ final class UIController {
     private func showPanel() {
         positionPanel()
         if !ui.isOpen {
+            // Take keyboard focus so the inbox shortcuts work without clicking into the panel first.
+            let front = NSWorkspace.shared.frontmostApplication
+            if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
+            NSApp.activate(ignoringOtherApps: true)
             panel.alphaValue = 0
             panel.makeKeyAndOrderFront(nil)
             DispatchQueue.main.async { self.panel.invalidateShadow() }
@@ -281,6 +287,11 @@ final class UIController {
     func hidePanel() {
         guard ui.isOpen else { return }
         ui.isOpen = false
+        // Closed from inside (Esc, ✕, shortcut, pill): hand focus back. A click in another app already moved it.
+        if NSApp.isActive, let app = previousApp {
+            app.activate()
+        }
+        previousApp = nil
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.12
             panel.animator().alphaValue = 0

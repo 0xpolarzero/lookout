@@ -44,7 +44,7 @@ struct PanelView: View {
             }
             .padding(3)
             .background(Capsule().fill(Color.white.opacity(0.05)))
-            IconButton(symbol: "xmark", help: "Close", detail: "Esc · ⌃⌥Space toggles the panel", tint: Theme.tertiary, action: close)
+            IconButton(symbol: "xmark", help: "Close", detail: "Esc · ⌃⌥L toggles the panel", tint: Theme.tertiary, action: close)
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
@@ -150,8 +150,7 @@ struct InboxView: View {
                         .padding(8)
                     }
                     .scrollIndicators(.never)
-                    .tipSpace()
-                    .onChange(of: selection) { _, id in
+                                .onChange(of: selection) { _, id in
                         if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
                     }
                 }
@@ -164,6 +163,9 @@ struct InboxView: View {
             focused = true
             if selection == nil { selection = previewSelection }
         }
+        // The panel is built once and reused, so grab focus again every time it opens.
+        .onChange(of: ui.isOpen) { _, open in if open { focused = true } }
+        .onChange(of: ui.tab) { _, tab in if tab == .inbox { focused = true } }
         .onKeyPress(.downArrow) { move(1, in: list); return .handled }
         .onKeyPress(.upArrow) { move(-1, in: list); return .handled }
         .onKeyPress(.return) {

@@ -31,7 +31,6 @@ struct ReposView: View {
             .padding(12)
         }
         .scrollIndicators(.never)
-        .tipSpace()
         .task { await store.loadSuggestions() }
     }
 
