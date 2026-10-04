@@ -223,6 +223,13 @@ private struct Tip: ViewModifier {
             .zIndex(shown ? 10 : 0)
     }
 
+    /// Natural width of the widest line, capped so long details wrap instead of stretching the bubble.
+    private static func width(of text: String) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 10.5)
+        let widest = text.split(separator: "\n").map { (String($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return min(ceil(widest) + 2, 210)
+    }
+
     private var bubble: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.text)
@@ -230,7 +237,7 @@ private struct Tip: ViewModifier {
                 Text(detail)
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.secondary)
-                    .frame(maxWidth: 210, alignment: .leading)
+                    .frame(width: Self.width(of: detail), alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
