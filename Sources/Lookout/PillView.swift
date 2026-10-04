@@ -31,6 +31,7 @@ struct PillView: View {
         .padding(2)
         .fixedSize()
         .environment(\.colorScheme, .dark)
+        .environment(\.systemHelp, true)
         .onChange(of: store.pulse) {
             ripple = false
             withAnimation(.easeOut(duration: 1.1)) { ripple = true }

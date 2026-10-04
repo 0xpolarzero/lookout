@@ -28,14 +28,16 @@ func shortAgo(_ date: Date, now: Date = Date()) -> String {
 struct IconButton: View {
     let symbol: String
     var help: String = ""
+    var detail: String? = nil
     var size: CGFloat = 26
     var tint: Color = Theme.secondary
     var active = false
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.systemHelp) private var systemHelp
 
     var body: some View {
-        Button(action: action) {
+        let button = Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size * 0.46, weight: .semibold))
                 .foregroundStyle(active || hover ? Theme.text : tint)
@@ -45,8 +47,14 @@ struct IconButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help(help)
         .animation(.easeOut(duration: 0.12), value: hover)
+
+        // The pill's window is too small to host our tooltip bubble, so it keeps the system one.
+        if systemHelp || help.isEmpty {
+            button.help(help)
+        } else {
+            button.tip(help, detail)
+        }
     }
 }
 
@@ -267,6 +275,7 @@ enum TipSpace {
 }
 
 extension EnvironmentValues {
+    @Entry var systemHelp = false
     @Entry var tipBounds = CGSize(width: 10_000, height: 10_000)
 }
 

@@ -146,11 +146,12 @@ enum Snapshot {
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
                 .padding(16)
                 .environment(\.previewTip, label.contains("CI tooltip") ? "apple/swift-format|CI"
-                    : label.contains("tooltip") ? "superradcompany/microsandbox|Issue comments" : nil)
+                    : label.contains("tooltip") ? "superradcompany/microsandbox|Issue comments"
+                    : label.hasPrefix("Inbox · hover") ? "Discard" : nil)
                 .environment(\.previewHover, Demo.hoverID)
                 .environment(\.previewSelection, Demo.selectedID))
         }
-        panel("Inbox · hover + keyboard selection", .busy, .inbox)
+        panel("Inbox · hover actions + keyboard selection", .busy, .inbox)
         panel("Bots · silent, own tab", .busy, .inbox, .bots)
         panel("Done · addressed, resolved, discarded", .busy, .inbox, .done)
         panel("Inbox · all caught up", .allClear, .inbox)

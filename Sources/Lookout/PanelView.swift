@@ -35,9 +35,6 @@ struct PanelView: View {
         HStack(spacing: 8) {
             Text(ui.tab.title)
                 .font(.system(size: 15, weight: .semibold))
-            if store.isSyncing {
-                ProgressView().controlSize(.mini).transition(.opacity)
-            }
             Spacer()
             HStack(spacing: 2) {
                 IconButton(symbol: "tray.fill", help: "Inbox", active: ui.tab == .inbox) { ui.tab = .inbox }
@@ -47,15 +44,16 @@ struct PanelView: View {
             }
             .padding(3)
             .background(Capsule().fill(Color.white.opacity(0.05)))
-            IconButton(symbol: "xmark", help: "Close (Esc)", tint: Theme.tertiary, action: close)
+            IconButton(symbol: "xmark", help: "Close", detail: "Esc · ⌃⌥Space toggles the panel", tint: Theme.tertiary, action: close)
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
         .frame(height: 52)
+        .zIndex(1)
     }
 
     private var footer: some View {
-        TimelineView(.periodic(from: .now, by: 15)) { context in
+        TimelineView(.periodic(from: .now, by: 5)) { context in
             HStack(spacing: 6) {
                 if let error = store.authError {
                     Circle().fill(Theme.red).frame(width: 6, height: 6)
@@ -63,10 +61,10 @@ struct PanelView: View {
                 } else if store.me == nil {
                     Text("Connecting to GitHub…")
                 } else {
-                    Circle().fill(store.repoErrors.isEmpty ? Theme.green : Theme.amber).frame(width: 6, height: 6)
-                    if let last = store.lastSync {
-                        Text("Synced \(shortAgo(last, now: context.date) == "now" ? "just now" : shortAgo(last, now: context.date) + " ago")")
-                    }
+                    syncStatus(now: context.date)
+                    IconButton(symbol: "arrow.clockwise", help: "Refresh now",
+                               detail: "Checks every repository, CI and review requests", size: 20) { store.refreshNow() }
+                        .disabled(store.isSyncing)
                     if store.isSnoozed, let until = store.settings.snoozeUntil {
                         Text("· Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
                             .foregroundStyle(Theme.purple)
@@ -84,8 +82,30 @@ struct PanelView: View {
             }
             .font(.system(size: 11))
             .foregroundStyle(Theme.tertiary)
-            .padding(.horizontal, 16)
+            .padding(.leading, 16)
+            .padding(.trailing, 12)
             .frame(height: 30)
+        }
+    }
+
+    /// "Up to date" while polling is healthy; says how stale things are only when that matters.
+    @ViewBuilder private func syncStatus(now: Date) -> some View {
+        if store.isSyncing {
+            ProgressView().controlSize(.mini).scaleEffect(0.7).frame(width: 10, height: 10)
+            Text("Checking GitHub…")
+        } else if let last = store.lastSync {
+            let interval = store.settings.pollInterval
+            let stale = now.timeIntervalSince(last) > interval * 3
+            let failed = store.repoErrors.keys.sorted()
+            let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))
+            HStack(spacing: 6) {
+                Circle().fill(stale || !failed.isEmpty ? Theme.amber : Theme.green).frame(width: 6, height: 6)
+                Text(stale ? "Last synced \(shortAgo(last, now: now)) ago"
+                     : failed.isEmpty ? "Up to date" : "\(failed.count) repo\(failed.count == 1 ? "" : "s") failed to sync")
+            }
+            .tip("Last checked at \(last.formatted(date: .omitted, time: .standard))",
+                 (failed.isEmpty ? "" : failed.joined(separator: "\n") + "\n")
+                     + (stale ? "Not syncing: check your connection or token" : "Next check in about \(next)s"))
         }
     }
 }
@@ -128,6 +148,7 @@ struct InboxView: View {
                         .padding(8)
                     }
                     .scrollIndicators(.never)
+                    .tipSpace()
                     .onChange(of: selection) { _, id in
                         if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
                     }
@@ -171,9 +192,9 @@ struct InboxView: View {
                 }
             }
             Spacer()
-            IconButton(symbol: "arrow.clockwise", help: "Refresh now") { store.refreshNow() }
             if ui.filter != .done {
-                IconButton(symbol: "checkmark.circle", help: "Mark all as read") { store.markAllRead(ui.filter) }
+                IconButton(symbol: "checkmark.circle", help: "Mark all as read",
+                           detail: "Everything in \(ui.filter.label)") { store.markAllRead(ui.filter) }
             }
         }
         .padding(.horizontal, 10)
@@ -292,21 +313,22 @@ struct ItemRow: View {
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
         .contextMenu { menu }
+        .zIndex(hover ? 1 : 0)
     }
 
     private var actions: some View {
         HStack(spacing: 2) {
             if item.state.isOpen {
                 if item.state == .unread {
-                    IconButton(symbol: "checkmark", help: "Mark as read", size: 24) { store.markRead(item) }
+                    IconButton(symbol: "checkmark", help: "Mark as read", detail: "Space", size: 24) { store.markRead(item) }
                 } else {
-                    IconButton(symbol: "circle.fill", help: "Mark as unread", size: 24) { store.markUnread(item) }
+                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: "Space", size: 24) { store.markUnread(item) }
                 }
-                IconButton(symbol: "xmark", help: "Discard", size: 24) { store.discard(item) }
+                IconButton(symbol: "xmark", help: "Discard", detail: "Moves it to Done · ⌫", size: 24) { store.discard(item) }
             } else {
-                IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", size: 24) { store.restore(item) }
+                IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", detail: "⌫", size: 24) { store.restore(item) }
             }
-            IconButton(symbol: "arrow.up.right", help: "Open on GitHub", size: 24) { store.open(item) }
+            IconButton(symbol: "arrow.up.right", help: "Open on GitHub", detail: "Marks it read · Return", size: 24) { store.open(item) }
         }
         .padding(2)
         .background(Capsule().fill(Theme.bg))
