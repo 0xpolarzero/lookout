@@ -9,7 +9,6 @@ struct PillView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            grip
             group {
                 inboxButton
             }
@@ -26,7 +25,7 @@ struct PillView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(2)
         .fixedSize()
         .environment(\.colorScheme, .dark)
         .onChange(of: store.pulse) {
@@ -35,22 +34,6 @@ struct PillView: View {
         }
     }
 
-    private var grip: some View {
-        Capsule()
-            .fill(Color.white.opacity(0.28))
-            .frame(width: 16, height: 4)
-            .frame(width: 40, height: 12)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { _ in actions.dragChanged() }
-                    .onEnded { _ in actions.dragEnded() }
-            )
-            .help("Drag to move · snaps to the nearest edge")
-    }
 
     private var inboxButton: some View {
         let unread = store.unreadCount(.needsYou)
@@ -127,6 +110,5 @@ struct PillView: View {
             .padding(4)
             .background(Capsule(style: .continuous).fill(Theme.bg))
             .overlay(Capsule(style: .continuous).strokeBorder(Theme.stroke))
-            .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
     }
 }

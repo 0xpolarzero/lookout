@@ -25,8 +25,6 @@ struct PanelView: View {
         .background(Theme.bg)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.stroke))
-        .shadow(color: .black.opacity(0.55), radius: 18, y: 8)
-        .padding(UIController.panelPadding)
         .environment(\.colorScheme, .dark)
         .tint(Theme.accent)
     }

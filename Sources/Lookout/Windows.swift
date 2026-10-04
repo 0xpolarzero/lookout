@@ -17,7 +17,7 @@ final class UIState {
     }
 }
 
-final class FloatingPanel: NSPanel {
+class FloatingPanel: NSPanel {
     var allowsKey = false
     var onCancel: (() -> Void)?
 
@@ -60,15 +60,54 @@ final class SizingHostingView<Content: View>: NSHostingView<Content> {
 
 struct PillActions {
     let toggle: (PanelTab) -> Void
-    let dragChanged: () -> Void
-    let dragEnded: () -> Void
+}
+
+/// The whole pill is draggable. A mouse-down is held back until we know whether it's a click (forwarded to
+/// SwiftUI on mouse-up) or a drag (moves the window; SwiftUI never sees it, so no button fires).
+final class PillPanel: FloatingPanel {
+    var onDragChanged: ((NSPoint) -> Void)?
+    var onDragEnded: ((NSPoint) -> Void)?
+    private var pendingDown: NSEvent?
+    private var downAt: NSPoint = .zero
+    private var dragging = false
+
+    override func sendEvent(_ event: NSEvent) {
+        // Screen coordinates from the event itself (stable even though the window moves under the cursor).
+        let p = convertPoint(toScreen: event.locationInWindow)
+        switch event.type {
+        case .leftMouseDown:
+            pendingDown = event
+            downAt = p
+            dragging = false
+        case .leftMouseDragged where pendingDown != nil || dragging:
+            if !dragging, hypot(p.x - downAt.x, p.y - downAt.y) > 3 {
+                dragging = true
+                NSCursor.closedHand.push()
+                onDragChanged?(downAt)
+            }
+            if dragging { onDragChanged?(p) }
+        case .leftMouseUp where dragging:
+            dragging = false
+            pendingDown = nil
+            NSCursor.pop()
+            onDragEnded?(p)
+        case .leftMouseUp:
+            if let down = pendingDown {
+                pendingDown = nil
+                super.sendEvent(down)
+            }
+            super.sendEvent(event)
+        default:
+            super.sendEvent(event)
+        }
+    }
 }
 
 @MainActor
 final class UIController {
     let store: Store
     let ui = UIState()
-    static let panelPadding: CGFloat = 24
+    static let panelPadding: CGFloat = 0
     static let panelContent = NSSize(width: 400, height: 600)
 
     private var pill: FloatingPanel!
@@ -81,11 +120,12 @@ final class UIController {
     init(store: Store) {
         self.store = store
         let actions = PillActions(
-            toggle: { [weak self] tab in self?.toggle(tab) },
-            dragChanged: { [weak self] in self?.dragChanged() },
-            dragEnded: { [weak self] in self?.dragEnded() })
+            toggle: { [weak self] tab in self?.toggle(tab) })
 
-        pill = FloatingPanel(size: NSSize(width: 60, height: 200))
+        let pillPanel = PillPanel(size: NSSize(width: 60, height: 200))
+        pillPanel.onDragChanged = { [weak self] point in self?.dragChanged(to: point) }
+        pillPanel.onDragEnded = { [weak self] point in self?.dragEnded(at: point) }
+        pill = pillPanel
         pillHost = SizingHostingView(rootView: PillView(store: store, ui: ui, actions: actions))
         pillHost.onSizeChange = { [weak self] _ in self?.layoutPill() }
         pill.contentView = pillHost
@@ -95,6 +135,7 @@ final class UIController {
         let pad = Self.panelPadding * 2
         panel = FloatingPanel(size: NSSize(width: Self.panelContent.width + pad, height: Self.panelContent.height + pad))
         panel.allowsKey = true
+        panel.hasShadow = true
         panel.contentView = NSHostingView(rootView: PanelView(store: store, ui: ui, close: { [weak self] in self?.hidePanel() }))
         panel.onCancel = { [weak self] in self?.hidePanel() }
 
@@ -127,8 +168,7 @@ final class UIController {
         if ui.isOpen { positionPanel() }
     }
 
-    private func dragChanged() {
-        let mouse = NSEvent.mouseLocation
+    private func dragChanged(to mouse: NSPoint) {
         if dragStart == nil {
             dragStart = (mouse, pill.frame.origin)
             hidePanel()
@@ -137,9 +177,8 @@ final class UIController {
         pill.setFrameOrigin(NSPoint(x: start.origin.x + mouse.x - start.mouse.x, y: start.origin.y + mouse.y - start.mouse.y))
     }
 
-    private func dragEnded() {
+    private func dragEnded(at mouse: NSPoint) {
         dragStart = nil
-        let mouse = NSEvent.mouseLocation
         screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? screen
         let vf = screen.visibleFrame
         ui.onLeft = pill.frame.midX < vf.midX
@@ -179,6 +218,7 @@ final class UIController {
         if !ui.isOpen {
             panel.alphaValue = 0
             panel.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.async { self.panel.invalidateShadow() }
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.16
                 panel.animator().alphaValue = 1

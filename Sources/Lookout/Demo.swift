@@ -123,7 +123,7 @@ enum Snapshot {
             Demo.populate(s, scenario)
             return s
         }
-        let actions = PillActions(toggle: { _ in }, dragChanged: {}, dragEnded: {})
+        let actions = PillActions(toggle: { _ in })
         for (label, scenario) in [("Needs you", Demo.Scenario.busy), ("Bots only", .botsOnly), ("All clear", .allClear),
                                   ("Snoozed", .snoozed), ("Sync error", .error)] {
             host(label, pill: true, PillView(store: store(scenario), ui: UIState(), actions: actions))
@@ -133,6 +133,7 @@ enum Snapshot {
             ui.tab = tab
             ui.filter = filter
             host(label, pill: false, PanelView(store: store(scenario), ui: ui, close: {})
+                .padding(16)
                 .environment(\.previewHover, Demo.hoverID)
                 .environment(\.previewSelection, Demo.selectedID))
         }
