@@ -27,7 +27,12 @@ struct PillView: View {
                     .onTapGesture { actions.toggle(.ci) }
                 }
             }
+            if store.updater.showsInPill {
+                group { UpdateButton(updater: store.updater, horizontal: horizontal) }
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
+        .animation(.spring(duration: 0.3), value: store.updater.showsInPill)
         .padding(2)
         .fixedSize()
         .environment(\.colorScheme, .dark)
@@ -114,5 +119,93 @@ struct PillView: View {
             .padding(4)
             .background(Capsule(style: .continuous).fill(Theme.bg))
             .overlay(Capsule(style: .continuous).strokeBorder(Theme.stroke))
+    }
+}
+
+/// A new release: click to download it (a ring shows progress), click again to restart into it.
+/// Right-click for the release notes or to skip that version.
+private struct UpdateButton: View {
+    let updater: Updater
+    let horizontal: Bool
+    @State private var hover = false
+
+    var body: some View {
+        let version = updater.release?.version ?? ""
+        Button { updater.advance() } label: {
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle().fill(Color.white.opacity(hover ? 0.08 : 0))
+                    if case .downloading(let fraction) = updater.phase {
+                        Circle().stroke(Color.white.opacity(0.12), lineWidth: 2).padding(3)
+                        Circle().trim(from: 0, to: max(0.03, fraction))
+                            .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .padding(3)
+                            .animation(.linear(duration: 0.2), value: fraction)
+                    }
+                    if updater.phase == .installing {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(tint)
+                    }
+                }
+                .frame(width: 28, height: 28)
+                if horizontal {
+                    Text(label(version))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.text)
+                        .padding(.trailing, 8)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help(version))
+        .contextMenu {
+            if let page = updater.release?.page {
+                Button("What's new in \(version)") { NSWorkspace.shared.open(page) }
+            }
+            Button("Skip \(version)") { updater.skip() }
+        }
+    }
+
+    private var symbol: String {
+        switch updater.phase {
+        case .ready: "arrow.clockwise"
+        case .failed: "exclamationmark"
+        default: "arrow.down"
+        }
+    }
+
+    private var tint: Color {
+        switch updater.phase {
+        case .ready: Theme.green
+        case .failed: Theme.red
+        case .downloading: Theme.secondary
+        default: Theme.accent
+        }
+    }
+
+    private func label(_ version: String) -> String {
+        switch updater.phase {
+        case .downloading(let fraction): "\(Int(fraction * 100))%"
+        case .ready, .installing: "Restart"
+        case .failed: "Retry"
+        default: "Update"
+        }
+    }
+
+    private func help(_ version: String) -> String {
+        switch updater.phase {
+        case .available: "Lookout \(version) is available\nClick to download it · right-click for more"
+        case .downloading(let fraction): "Downloading Lookout \(version)… \(Int(fraction * 100))%"
+        case .ready: "Lookout \(version) is ready\nClick to restart into it"
+        case .installing: "Installing Lookout \(version)…"
+        case .failed(let message): "Update failed: \(message)\nClick to try again"
+        case .idle: ""
+        }
     }
 }

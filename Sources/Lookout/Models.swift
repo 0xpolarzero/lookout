@@ -188,6 +188,10 @@ struct AppSettings: Codable {
     var didInitialReviewSync = false
     /// Customized shortcuts by ShortcutAction raw value; missing ones use the defaults.
     var shortcuts: [String: Shortcut]?
+    /// Look for new releases in the background (default on).
+    var checkUpdates: Bool?
+    /// A release you chose to skip: not offered again by automatic checks.
+    var skippedVersion: String?
 }
 
 struct PersistedState: Codable {

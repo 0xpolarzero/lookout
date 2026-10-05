@@ -15,6 +15,7 @@ struct SettingsView: View {
                 notifications
                 bots
                 shortcuts
+                updates
                 general
             }
             .padding(12)
@@ -129,6 +130,70 @@ struct SettingsView: View {
                 }
             }
             hint("Click a shortcut, then press the new keys (Esc cancels). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
+        }
+    }
+
+    private var updates: some View {
+        let updater = store.updater
+        return section("Updates") {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Lookout \(updater.current)").font(.system(size: 12.5))
+                    Text(updateStatus).font(.system(size: 11)).foregroundStyle(updateStatusColor)
+                }
+                Spacer()
+                if updater.isRelease { updateButton }
+            }
+            if updater.isRelease {
+                toggle("Check for updates automatically", isOn: Binding(
+                    get: { store.settings.checkUpdates ?? true },
+                    set: { store.settings.checkUpdates = $0 }
+                ))
+            }
+        }
+    }
+
+    @ViewBuilder private var updateButton: some View {
+        let updater = store.updater
+        switch updater.phase {
+        case .available, .failed:
+            Button(updater.phase == .available ? "Download & install" : "Try again") { updater.advance() }.controlSize(.small)
+        case .ready:
+            Button("Restart to update") { updater.install() }.controlSize(.small)
+        case .downloading, .installing:
+            EmptyView()
+        case .idle:
+            Button(updater.checking ? "Checking…" : "Check now") {
+                store.settings.skippedVersion = nil
+                Task { await updater.check(manual: true) }
+            }
+            .controlSize(.small)
+            .disabled(updater.checking)
+        }
+    }
+
+    private var updateStatus: String {
+        let updater = store.updater
+        guard updater.isRelease else { return "Development build: updates come from git" }
+        let version = updater.release?.version ?? ""
+        switch updater.phase {
+        case .available: return "Version \(version) is available"
+        case .downloading(let fraction): return "Downloading \(version)… \(Int(fraction * 100))%"
+        case .ready: return "Version \(version) is ready to install"
+        case .installing: return "Installing…"
+        case .failed(let message): return message
+        case .idle:
+            if let error = updater.checkError { return error }
+            guard let last = updater.lastCheck else { return "Not checked yet" }
+            return "Up to date · checked \(last.formatted(.relative(presentation: .named)))"
+        }
+    }
+
+    private var updateStatusColor: Color {
+        switch store.updater.phase {
+        case .failed: Theme.red
+        case .available, .ready: Theme.green
+        default: store.updater.checkError == nil ? Theme.tertiary : Theme.red
         }
     }
 

@@ -30,6 +30,7 @@ final class Store {
 
     @ObservationIgnored let gh = GitHubClient()
     @ObservationIgnored let notifier = Notifier()
+    @ObservationIgnored let updater = Updater()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
     @ObservationIgnored var persists = true
@@ -57,6 +58,10 @@ final class Store {
             }
         }
         notifier.setup()
+        updater.automatic = { [weak self] in self?.settings.checkUpdates ?? true }
+        updater.skipped = { [weak self] in self?.settings.skippedVersion }
+        updater.onSkip = { [weak self] in self?.settings.skippedVersion = $0 }
+        updater.start()
         restartPolling()
     }
 

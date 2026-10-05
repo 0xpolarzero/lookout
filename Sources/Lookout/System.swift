@@ -140,6 +140,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Snapshot.run(to: CommandLine.arguments[i + 1])
             return
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--update"), i + 1 < CommandLine.arguments.count {
+            UpdateCheck.run(as: CommandLine.arguments[i + 1])
+            return
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--check"), i + 1 < CommandLine.arguments.count {
             Check.run(store: store, repo: CommandLine.arguments[i + 1])
             return

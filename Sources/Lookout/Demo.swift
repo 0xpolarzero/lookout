@@ -138,6 +138,15 @@ enum Snapshot {
                                   ("Snoozed", .snoozed), ("Sync error", .error)] {
             host(label, pill: true, PillView(store: store(scenario), ui: UIState(persists: false, edge: .right), actions: actions))
         }
+        for (label, phase) in [("Update · available", Updater.Phase.available), ("Update · downloading", .downloading(0.42)),
+                               ("Update · ready", .ready), ("Update · failed", .failed("The download is corrupted"))] {
+            let s = store(.allClear)
+            s.updater.preview(phase)
+            host(label, pill: true, PillView(store: s, ui: UIState(persists: false, edge: .right), actions: actions))
+            let top = store(.allClear)
+            top.updater.preview(phase)
+            host(label + " · top", pill: true, PillView(store: top, ui: UIState(persists: false, edge: .top), actions: actions))
+        }
         host("Docked top / bottom", pill: true, PillView(store: store(.busy), ui: UIState(persists: false, edge: .top), actions: actions))
         func panel(_ label: String, _ scenario: Demo.Scenario, _ tab: PanelTab, _ filter: InboxFilter = .needsYou) {
             let ui = UIState(persists: false, edge: .right)
@@ -163,8 +172,10 @@ enum Snapshot {
         panel("CI · failures", .error, .ci)
         panel("Settings · snoozed", .snoozed, .settings)
         // Full-height settings, written as a file but kept out of the gallery.
-        host("_settings-full", pill: false, SettingsView(store: store(.busy))
-            .frame(width: UIController.panelContent.width, height: 1100)
+        let updating = store(.busy)
+        updating.updater.preview(.available)
+        host("_settings-full", pill: false, SettingsView(store: updating)
+            .frame(width: UIController.panelContent.width, height: 1400)
             .background(Theme.bg)
             .environment(\.colorScheme, .dark)
             .tipSpace())

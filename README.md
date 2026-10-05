@@ -19,6 +19,8 @@ Grab the latest zip from [Releases](https://github.com/0xpolarzero/lookout/relea
 
     xattr -dr com.apple.quarantine /Applications/Lookout.app
 
+After that Lookout updates itself: when a new release is out, an arrow appears on the pill. Click it to download (a ring shows progress), then click again to restart into the new version. Right-click it for the release notes or to skip that version. Settings → Updates shows your version, checks on demand and turns the background check (every 6 hours) off. An update is only installed if its checksum matches and it's signed by the same certificate as the app you're running.
+
 ## Build & run
 
     ./scripts/build-app.sh && open build/Lookout.app
@@ -42,10 +44,19 @@ Push a version tag; the `Release` workflow tests, builds a universal app and pub
 
     git tag v0.2.0 && git push origin v0.2.0
 
+Releases are signed with one self-signed certificate, so macOS keeps Lookout's Accessibility access across updates and the updater can check a release is ours. Set it up once:
+
+1. In Keychain Access: Certificate Assistant → Create a Certificate, name **Lookout Dev**, identity type *Self-Signed Root*, certificate type *Code Signing*.
+2. Export it with its private key as a `.p12` (with a password), then add two repository secrets: `SIGNING_CERT_P12` (`base64 -i cert.p12 | pbcopy`) and `SIGNING_CERT_PASSWORD`.
+3. Keep the `.p12` safe: a release signed with another certificate isn't installed by existing apps, and everyone has to update by hand once.
+
+`build-app.sh` signs local builds with the same certificate when it's in your keychain (ad hoc otherwise, which macOS treats as a new app on every build).
+
 ## Dev flags
 
     .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty] --open   # mock data, nothing saved
     .build/debug/Lookout --snapshot docs/screenshots                                 # render every state + overview.png
+    build/Lookout.app/Contents/MacOS/Lookout --update 0.1.0   # pretend to be 0.1.0: check, download and verify the latest release
     .build/debug/Lookout --check owner/repo [--days N] [--all]   # headless live sync, prints the inbox
     .build/debug/Lookout --check owner/repo --thread 123         # what Lookout knows about one thread
     swift test

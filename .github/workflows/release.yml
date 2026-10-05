@@ -28,8 +28,37 @@ jobs:
       - name: Test
         run: swift test
 
+      # One certificate for every release: macOS keeps Accessibility access across updates, and the in-app
+      # updater only installs a release signed by the same certificate as the running app.
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          if [ -z "$CERT_P12" ]; then
+            echo "::warning::No SIGNING_CERT_P12 secret: signing ad hoc, so updating loses Accessibility access"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "SIGN_IDENTITY=${{ vars.SIGN_IDENTITY || 'Lookout Dev' }}" >> "$GITHUB_ENV"
+
       - name: Build universal app
-        run: UNIVERSAL=1 ./scripts/build-app.sh
+        run: |
+          UNIVERSAL=1 ./scripts/build-app.sh
+          codesign -dr - build/Lookout.app
+          # With a certificate, the updater pins it: a release that slipped back to ad hoc wouldn't install.
+          if [ -n "${SIGN_IDENTITY:-}" ] && ! codesign -dr - build/Lookout.app 2>&1 | grep -q "certificate leaf"; then
+            echo "::error::Release isn't signed with $SIGN_IDENTITY"
+            exit 1
+          fi
 
       - name: Package
         run: |
@@ -48,6 +77,8 @@ jobs:
              xattr -dr com.apple.quarantine /Applications/Lookout.app
              ```
           3. Open it. Lookout uses your `gh` login (`gh auth login`), or paste a token in Settings.
+
+          Already installed? Lookout offers the update itself: click the arrow on the pill, then restart.
 
           Requires macOS 14 or later. Universal (Apple Silicon + Intel).
           NOTES
