@@ -491,43 +491,55 @@ enum Claude {
     }
 }
 
-/// FSEvents on a few folders (recursive), coalesced; calls back on the main queue.
+/// FSEvents on a few folders (recursive), coalesced. Events arrive on a utility queue, where `relevant` filters
+/// them; only a relevant batch hops to the main queue to call `handler`.
 final class FolderWatcher {
+    /// What the stream's callback holds (retained by the stream itself, so a callback in flight never outlives it).
+    private final class Callbacks {
+        let relevant: (([String]) -> Bool)?
+        let handler: () -> Void
+        init(relevant: (([String]) -> Bool)?, handler: @escaping () -> Void) {
+            self.relevant = relevant
+            self.handler = handler
+        }
+    }
+
+    private static let queue = DispatchQueue(label: "lookout.fsevents", qos: .utility)
     private var stream: FSEventStreamRef?
-    private let handler: () -> Void
-    private let pathHandler: (([String]) -> Void)?
 
     init(_ urls: [URL], latency: TimeInterval = 0.2, handler: @escaping () -> Void) {
-        self.handler = handler
-        pathHandler = nil
-        start(urls, latency: latency, perFile: false)
+        start(urls, latency: latency, Callbacks(relevant: nil, handler: handler))
     }
 
-    /// Per-file events: the handler gets the paths that changed, so it can ignore the ones it doesn't care about.
-    init(_ urls: [URL], latency: TimeInterval = 0.2, paths: @escaping ([String]) -> Void) {
-        handler = {}
-        pathHandler = paths
-        start(urls, latency: latency, perFile: true)
+    /// Per-file events: `relevant` gets the paths that changed (off the main thread), so the handler only runs for
+    /// the ones that matter.
+    init(_ urls: [URL], latency: TimeInterval = 0.2, relevant: @escaping ([String]) -> Bool, handler: @escaping () -> Void) {
+        start(urls, latency: latency, Callbacks(relevant: relevant, handler: handler))
     }
 
-    private func start(_ urls: [URL], latency: TimeInterval, perFile: Bool) {
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
-                                           retain: nil, release: nil, copyDescription: nil)
-        let callback: FSEventStreamCallback = { _, info, count, eventPaths, _, _ in
+    private func start(_ urls: [URL], latency: TimeInterval, _ callbacks: Callbacks) {
+        var context = FSEventStreamContext(version: 0, info: Unmanaged.passRetained(callbacks).toOpaque(),
+                                           retain: nil, release: { info in
+            if let info { Unmanaged<Callbacks>.fromOpaque(info).release() }
+        }, copyDescription: nil)
+        let callback: FSEventStreamCallback = { _, info, _, eventPaths, _, _ in
             guard let info else { return }
-            let watcher = Unmanaged<FolderWatcher>.fromOpaque(info).takeUnretainedValue()
-            if let pathHandler = watcher.pathHandler {
-                pathHandler(unsafeBitCast(eventPaths, to: CFArray.self) as? [String] ?? [])
-            } else {
-                watcher.handler()
-            }
+            let callbacks = Unmanaged<Callbacks>.fromOpaque(info).takeUnretainedValue()
+            if let relevant = callbacks.relevant,
+               !relevant(unsafeBitCast(eventPaths, to: CFArray.self) as? [String] ?? []) { return }
+            DispatchQueue.main.async { callbacks.handler() }
         }
         var flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
-        if perFile { flags |= FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes) }
+        if callbacks.relevant != nil {
+            flags |= FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes)
+        }
         guard let stream = FSEventStreamCreate(nil, callback, &context, urls.map(\.path) as CFArray,
-                                               FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags) else { return }
+                                               FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags) else {
+            Unmanaged.passUnretained(callbacks).release()
+            return
+        }
         self.stream = stream
-        FSEventStreamSetDispatchQueue(stream, .main)
+        FSEventStreamSetDispatchQueue(stream, Self.queue)
         FSEventStreamStart(stream)
     }
 
@@ -570,21 +582,24 @@ final class ClaudeFeed: @unchecked Sendable {
     private var scheduled = false
     private var wantFull = false
     private var wantActivity = false
+    private var wantUnread = false
     private var stamp = ClaudeStamp()
     private var deliver: (@MainActor (ClaudeSnapshot) -> Void)?
     private var relevant = Set<String>()
     // Only touched on `queue`.
     private var live: [ClaudeSession]?
+    private var allSessions: [ClaudeSession]?
     private var openCache: (Date, Set<String>)?
 
     init(activityReader: Claude.ActivityReader) { self.activityReader = activityReader }
 
     /// Reads (everything, or just activity and tasks for the sessions seen last) and calls `apply` on the main thread.
-    func request(full: Bool, stamp: ClaudeStamp, apply: @escaping @MainActor (ClaudeSnapshot) -> Void) {
+    /// `unreadOnly` re-reads just the sidebar dots (the sessions are those of the last read).
+    func request(full: Bool, unreadOnly: Bool = false, stamp: ClaudeStamp, apply: @escaping @MainActor (ClaudeSnapshot) -> Void) {
         lock.lock()
         self.stamp = stamp
         deliver = apply
-        if full { wantFull = true } else { wantActivity = true }
+        if full { wantFull = true } else if unreadOnly { wantUnread = true } else { wantActivity = true }
         let start = !scheduled
         scheduled = true
         lock.unlock()
@@ -592,14 +607,16 @@ final class ClaudeFeed: @unchecked Sendable {
         queue.async { [self] in
             while true {
                 lock.lock()
-                let full = wantFull, any = wantFull || wantActivity
+                let full = wantFull || (wantUnread && wantActivity), any = wantFull || wantActivity || wantUnread
+                let unread = wantUnread && !wantFull && !wantActivity
                 let stamp = stamp, apply = deliver
                 wantFull = false
                 wantActivity = false
+                wantUnread = false
                 if !any { scheduled = false }
                 lock.unlock()
                 guard any else { return }
-                var snapshot = read(full: full)
+                var snapshot = unread ? readUnread() : read(full: full)
                 snapshot.stamp = stamp
                 guard let apply else { continue }
                 DispatchQueue.main.async { MainActor.assumeIsolated { apply(snapshot) } }
@@ -614,14 +631,27 @@ final class ClaudeFeed: @unchecked Sendable {
         return paths.contains { path in relevant.contains { path.contains($0) } }
     }
 
+    /// Only the dots: the sessions are those of the last read, so a full read is needed first.
+    private func readUnread() -> ClaudeSnapshot {
+        guard let sessions = allSessions else { return read(full: true) }
+        var snapshot = ClaudeSnapshot()
+        snapshot.link = .ok
+        snapshot.sessions = sessions
+        snapshot.appUnread = Claude.unreadIDs()
+        snapshot.frontmost = Claude.isFrontmost
+        return snapshot
+    }
+
     private func read(full: Bool) -> ClaudeSnapshot {
         var snapshot = ClaudeSnapshot()
         if full || live == nil {
             switch sessionReader.read() {
             case .failure(.missing):
+                allSessions = nil
                 snapshot.link = .missing
                 return snapshot
             case .failure:
+                allSessions = nil
                 snapshot.link = .unreadable
                 return snapshot
             case .success(let sessions):
@@ -629,6 +659,7 @@ final class ClaudeFeed: @unchecked Sendable {
                 snapshot.sessions = sessions
                 snapshot.appUnread = Claude.unreadIDs()
                 snapshot.frontmost = Claude.isFrontmost
+                allSessions = sessions
                 live = sessions.filter { !$0.isArchived }
             }
         }

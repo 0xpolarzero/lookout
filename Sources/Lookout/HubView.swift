@@ -23,9 +23,19 @@ final class HubState {
     var page: HubPage = .main
     /// "i:<item id>" or "a:<session id>": the row the keys act on.
     var selection: String?
+    /// The last row the keyboard (or a click on the inbox) picked: the lists scroll to it. Never set by hovering, so
+    /// the pointer moving over a row doesn't move the list.
+    var keyboardSelection: ScrollRequest?
     var filter: InboxFilter = .needsYou {
-        didSet { selection = nil }
+        didSet { selection = nil; keyboardSelection = nil }
     }
+    /// Asks the lists to scroll to a row, even one asked for before (a new request every time).
+    func requestScroll(_ id: String) {
+        keyboardSelection = ScrollRequest(id: id, seq: (keyboardSelection?.seq ?? 0) + 1)
+    }
+    @ObservationIgnored var sessionMemo = SessionSearchMemo()
+    /// The last search's results (see `Store.hubItems`).
+    @ObservationIgnored var searchMemo = SearchMemo()
     var toast: String?
     /// Typed while the hub has the keyboard: narrows the inbox and finds sessions, kept or not.
     var query = ""
@@ -133,6 +143,7 @@ final class HubKeys {
         // Closing leaves any page: the hub opens on the main view next time.
         hub.go(.main)
         hub.query = ""
+        hub.keyboardSelection = nil
         hub.pinned = false
         hub.hovering = false
         onClose()
@@ -216,11 +227,13 @@ final class HubKeys {
             // Searching looks everywhere, and what you type shows in the inbox's header: nothing stays shrunk.
             if !query.isEmpty { hub.focus = nil }
         }
-        if let first = targets().first { select(first) } else { hub.selection = nil; ui.drawerSelection = nil }
+        if let first = targets().first { select(first) } else { hub.selection = nil; hub.keyboardSelection = nil; ui.drawerSelection = nil }
     }
 
+    /// Picks a row from the keyboard: the lists follow it.
     func select(_ target: String) {
         hub.selection = target
+        hub.requestScroll(target)
         ui.drawerSelection = target.hasPrefix("a:") ? String(target.dropFirst(2)) : nil
     }
 }
@@ -242,6 +255,9 @@ struct LookoutHub: View {
     /// The bar's size and the open panel's natural size, to place the panel against the bar's ends.
     @State var barSize: CGSize = .zero
     @State var peekSizes: [HubSection: CGSize] = [:]
+    /// The strip's trailing group (controls, update button) as laid out, for the sessions' segment to leave room
+    /// for; a first guess until it's measured.
+    @State var stripTrailingWidth: CGFloat = 140
 
 
     /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
@@ -306,15 +322,16 @@ struct LookoutHub: View {
             Button("Quit Lookout") { NSApp.terminate(nil) }
         }
         .environment(\.colorScheme, .dark)
-        .onChange(of: ui.drawerSelection) { _, id in
-            if let id, hub.selection != "a:" + id { hub.selection = "a:" + id }
-        }
+        .background(SelectionSync(ui: ui, hub: hub))
     }
 
     // MARK: Data
 
     var items: [InboxItem] { store.hubItems(hub) }
     var searching: Bool { !hub.query.isEmpty }
+    /// What the inbox list animates on: its items changing, or the filter or search swapping them.
+    struct ListKey: Equatable { let revision: Int; let filter: InboxFilter; let query: String }
+    var listKey: ListKey { ListKey(revision: store.itemsRevision, filter: hub.filter, query: hub.query) }
     var agentRows: (kept: [AgentRow], pending: [AgentRow]) {
         if searching { return (store.hubSessions(hub), []) }
         let rows = store.agentRows
@@ -354,7 +371,7 @@ struct LookoutHub: View {
             // footer once open. In the full view, dragging the line above them sizes the sessions' list.
             sectionDivider
             VStack(alignment: side, spacing: 0) {
-                row(cell: { (expanded ? AnyView(settingsButton) : AnyView(controlsCell)).padding(.vertical, 9) },
+                row(cell: { Group { if expanded { settingsCell } else { controlsCell } }.padding(.vertical, 9) },
                     detail: { footerDetail })
             }
             .modifier(probe(.controls))
@@ -413,8 +430,8 @@ struct LookoutHub: View {
                 if items.isEmpty {
                     row(cell: { EmptyView() }, detail: { emptyInbox })
                 }
-                CappedScroll(cap: caps.inbox, selection: hub.selection) {
-                    VStack(alignment: side, spacing: 1) {
+                CappedScroll(cap: caps.inbox, hub: hub) {
+                    LazyVStack(alignment: side, spacing: 1) {
                         ForEach(items) { item in
                             row(cell: { EmptyView() }, detail: { itemRow(item) }).id("i:" + item.id)
                         }
@@ -422,7 +439,7 @@ struct LookoutHub: View {
                     .padding(.bottom, 4)
                     .id(searching ? "search" : hub.filter.rawValue)
                     .transition(.opacity)
-                    .animation(.easeOut(duration: 0.22), value: items.map(\.id))
+                    .animation(.easeOut(duration: 0.22), value: listKey)
                 }
                 // Its own width, so a scroller can't widen it and push its rows off the bar's column.
                 .frame(width: Self.cell + Self.detail)
@@ -460,13 +477,13 @@ struct LookoutHub: View {
     }
 
     @ViewBuilder var agentRowsView: some View {
-        row(cell: { agentsCell }, detail: { agentsHeader })
+        row(cell: { claudeMark }, detail: { agentsHeader })
         if showsDetail && shrunk(.agents) {
             EmptyView()
         } else if showsDetail {
             Group {
                 // The sessions scroll with their tiles, so each stays beside its row.
-                CappedScroll(cap: caps.agents, selection: hub.selection) { sessionRows }
+                CappedScroll(cap: caps.agents, hub: hub) { sessionRows }
                     .frame(width: Self.cell + Self.detail)
                 row(cell: { newSessionCell }, detail: { newSessionDetail })
             }
@@ -479,14 +496,18 @@ struct LookoutHub: View {
     @ViewBuilder var sessionRows: some View {
         let rows = agentRows
         VStack(alignment: side, spacing: 0) {
+            // By project, a line between projects, and draggable onto one another, as along the top and bottom.
+            let starts = projectStarts(rows.kept)
             ForEach(rows.kept) { r in
                 // Its first line level with the tile; what it did, or what it left running, under it.
                 row(alignment: .top, cell: { tile(r, size: 26) }, detail: { sessionBlock(r, twoLines: false) })
+                    .modifier(ReorderIf(enabled: showsDetail, row: r, store: store))
+                    .modifier(GroupRule(on: showsDetail && starts.contains(r.id)))
                     .id("a:" + r.id)
             }
             if !rows.pending.isEmpty {
                 row(cell: { Capsule().fill(Color.white.opacity(0.12)).frame(width: 14, height: 1.5).frame(height: 14) },
-                    detail: { pendingLabel.padding(.horizontal, 8) })
+                    detail: { pendingLabel(twoLines: false) })
                 ForEach(rows.pending) { r in
                     row(alignment: .top, cell: { tile(r, size: 22) }, detail: { sessionBlock(r, twoLines: false) })
                         .id("a:" + r.id)
@@ -495,8 +516,21 @@ struct LookoutHub: View {
         }
     }
 
-    var pendingLabel: some View {
+    /// The kept sessions that begin a project's run after the first (none when searching): a line goes above each.
+    /// Rows stay keyed by their own session, so reordering never rebuilds them.
+    func projectStarts(_ kept: [AgentRow]) -> Set<String> {
+        guard !searching else { return [] }
+        var starts: Set<String> = []
+        for (prev, next) in zip(kept, kept.dropFirst()) where prev.session.folderKey != next.session.folderKey {
+            starts.insert(next.id)
+        }
+        return starts
+    }
+
+    /// "PENDING", aligned with the text of the rows under it (two-line rows pad 10, one-line 8).
+    func pendingLabel(twoLines: Bool) -> some View {
         Text("PENDING").font(.system(size: 9.5, weight: .bold)).foregroundStyle(Theme.tertiary)
+            .padding(.leading, twoLines ? 10 : 8)
     }
 
     /// Heights the two lists may scroll within: what's left once the fixed parts are laid out, inbox first.
@@ -575,7 +609,7 @@ struct LookoutHub: View {
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {
-                    agentsCell
+                    claudeMark
                     if wide && shrunk(.agents) {
                         // Shrunk: just its counts, like CI's.
                         let counts = store.agentCounts
@@ -611,20 +645,25 @@ struct LookoutHub: View {
                 .frame(maxHeight: .infinity)
                 .modifier(probe(.controls))
         }
-        if expanded {
-            Spacer(minLength: 0)
-            stripDivider
-            HStack(spacing: 2) {
-                pinButton
-                reposButton
-                settingsButton
+        if expanded { Spacer(minLength: 0) }
+        HStack(spacing: 0) {
+            if expanded {
+                stripDivider
+                HStack(spacing: 2) {
+                    pinButton
+                    reposButton
+                    settingsCell
+                }
+                .padding(.horizontal, Self.inset + 2)
+                .transition(.hubReveal)
             }
-            .padding(.horizontal, Self.inset + 2)
-            .transition(.hubReveal)
+            if store.updater.showsInPill {
+                stripDivider
+                UpdateButton(updater: store.updater, horizontal: true).padding(.horizontal, 6)
+            }
         }
-        if store.updater.showsInPill {
-            stripDivider
-            UpdateButton(updater: store.updater, horizontal: true).padding(.horizontal, 6)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            if expanded, stripTrailingWidth != width { stripTrailingWidth = width }
         }
     }
 
@@ -652,7 +691,7 @@ struct LookoutHub: View {
                     VStack(spacing: 0) {
                         if let focus = hub.focus {
                             // The strip's width, never its text's.
-                            focusedBody(focus).frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .topLeading)
+                            focusedBody(focus).frame(minWidth: Self.ciWidth, idealWidth: Self.ciWidth, maxWidth: .infinity, alignment: .topLeading)
                         } else {
                             HStack(alignment: .top, spacing: 0) {
                                 // CI at the bottom (level with the new session row): the room between is the inbox's.
@@ -697,8 +736,8 @@ struct LookoutHub: View {
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
-        CappedScroll(cap: max(160, min(maxLength - Self.cell - 150, Self.listCap)), selection: hub.selection) {
-            VStack(spacing: 1) {
+        CappedScroll(cap: max(160, min(maxLength - Self.cell - 150, Self.listCap)), hub: hub) {
+            LazyVStack(spacing: 1) {
                 if items.isEmpty { emptyInbox }
                 ForEach(items) { itemRow($0).id("i:" + $0.id) }
             }
@@ -706,7 +745,7 @@ struct LookoutHub: View {
             .padding(.vertical, 8)
             .id(searching ? "search" : hub.filter.rawValue)
             .transition(.opacity)
-            .animation(.easeOut(duration: 0.22), value: items.map(\.id))
+            .animation(.easeOut(duration: 0.22), value: listKey)
         }
     }
 
@@ -726,29 +765,20 @@ struct LookoutHub: View {
 
     /// The sessions along the top and bottom: one per line, read top to bottom like the inbox beside them.
     var agentsColumn: some View {
-        agentsGrid(columns: 1)
-    }
-
-    func agentsGrid(columns: Int) -> some View {
         let rows = agentRows
-        let grid = Array(repeating: GridItem(.flexible(minimum: 260), spacing: 4, alignment: .top), count: columns)
         return VStack(alignment: .leading, spacing: 0) {
-            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), selection: hub.selection) {
-                // Your sessions by project, a line between projects; then the pending ones, labelled and dimmed.
-                VStack(alignment: .leading, spacing: 0) {
-                    let groups = searching ? [rows.kept] : store.groups(rows.kept)
-                    ForEach(Array(groups.enumerated()), id: \.offset) { i, group in
-                        if i > 0 { groupDivider }
-                        LazyVGrid(columns: grid, alignment: .leading, spacing: 0) {
-                            ForEach(group) { twoLineRow($0).modifier(AgentReorder(row: $0, store: store)) }
-                        }
+            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub) {
+                // Your sessions by project, a line between projects; then the pending ones, labelled.
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    let starts = projectStarts(rows.kept)
+                    ForEach(rows.kept) { r in
+                        if starts.contains(r.id) { groupDivider }
+                        twoLineRow(r).modifier(AgentReorder(row: r, store: store))
                     }
                     if !rows.pending.isEmpty {
                         if !rows.kept.isEmpty { groupDivider }
-                        pendingLabel.padding(.leading, 10).padding(.bottom, 4)
-                        LazyVGrid(columns: grid, alignment: .leading, spacing: 0) {
-                            ForEach(rows.pending) { twoLineRow($0).opacity(0.62) }
-                        }
+                        pendingLabel(twoLines: true).padding(.bottom, 4)
+                        ForEach(rows.pending) { twoLineRow($0) }
                     }
                 }
                 .padding(.horizontal, Self.inset)
@@ -767,6 +797,7 @@ struct LookoutHub: View {
         sessionBlock(r, twoLines: true).id("a:" + r.id)
     }
 
+    /// A line between one project's sessions and the next's.
     var groupDivider: some View {
         Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 10).padding(.vertical, 4)
     }
@@ -784,25 +815,27 @@ struct LookoutHub: View {
     /// them; the sessions' (with the controls after it) spans theirs.
     func columnWidth(_ section: HubSection) -> CGFloat {
         switch section {
-        case .inbox: return 370
-        case .ci: return Self.githubWidth - 370 - 1
+        case .inbox: return Self.inboxSegment
+        case .ci: return Self.githubWidth - Self.inboxSegment - 1
         default:
-            // As much as the screen has left after the controls, the update button and the margins.
-            let wanted: CGFloat = 400
-            let room = maxWidth - Self.githubWidth - 1 - 140 - (store.updater.showsInPill ? 50 : 0) - 2 * Self.inset
-            return max(260, min(wanted, room))
+            // As much as the screen has left after the measured controls and update button, and the margins.
+            let room = maxWidth - Self.githubWidth - 1 - stripTrailingWidth - 2 * Self.inset
+            return max(Self.agentsMin, min(Self.detail, room))
         }
     }
 
     static let githubWidth: CGFloat = 570
+    /// The inbox's segment of that column (CI's takes the rest), and the narrowest the sessions' column gets.
+    static let inboxSegment: CGFloat = 370
+    static let agentsMin: CGFloat = 260
     /// Along the top and bottom, the lists scroll past this, so the view stays compact.
     static let listCap: CGFloat = 300
 
-    /// Along the top and bottom, a focused section across the whole width, in as many columns as fit.
+    /// Along the top and bottom, a focused section across the whole width: the inbox in two columns.
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            CappedScroll(cap: maxLength - Self.cell - 16, selection: hub.selection) {
+            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub) {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 6, alignment: .top), GridItem(.flexible(), spacing: 6, alignment: .top)],
                           alignment: .leading, spacing: 1) {
                     ForEach(items) { itemRow($0).id("i:" + $0.id) }
@@ -814,7 +847,7 @@ struct LookoutHub: View {
         case .ci:
             ciColumn
         default:
-            agentsGrid(columns: 1)
+            agentsColumn
         }
     }
 
@@ -839,81 +872,46 @@ struct LookoutHub: View {
         }
     }
 
-    /// A session in the full view: its line, then (short) what it did and what it left running. One block: it
-    /// highlights, opens and shows its actions as a whole, wherever the pointer is on it.
+    /// A session in the full view (see `SessionBlock`).
     func sessionBlock(_ r: AgentRow, twoLines: Bool) -> some View {
-        let selected = ui.drawerSelection == r.id
-        return VStack(alignment: .leading, spacing: 0) {
-            DrawerRow(row: r, store: store, ui: ui, number: 0, twoLines: twoLines, highlight: hub.query,
-                      showsKept: searching, inHub: !twoLines, plain: true)
-            // Under the title: past the tile on two-line rows (10 + 24 + 9), else at the title's 8.
-            Group { if twoLines { cardDetail(r) } else { sessionDetails(r) } }
-                .padding(.leading, twoLines ? 43 : 8)
-                .padding(.trailing, 8)
-                .padding(.top, twoLines ? -8 : -3)
-                .padding(.bottom, twoLines ? 4 : 7)
-        }
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(selected ? 0.06 : 0)))
-        // The same actions as an inbox item's, over the title line's right end, centred on it.
-        .overlay(alignment: .topTrailing) {
-            if selected {
-                AgentActions(row: r, store: store, size: IconButton.Size.row)
-                    .padding(.top, twoLines ? 9 : 0)
-                    .padding(.trailing, 4)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.15), value: selected)
-        .contentShape(Rectangle())
-        .onTapGesture { store.openAgent(r.id) }
-        .onHover { if $0 { ui.drawerSelection = r.id } }
-    }
-
-    /// A grid card's one line under its title, always there so every card is the same height: the turn's summary,
-    /// else what's still running (the count is in the status above either way).
-    @ViewBuilder func cardDetail(_ r: AgentRow) -> some View {
-        let summary = r.session.running ? nil : r.session.summary?.detail
-        if let summary, !summary.isEmpty {
-            Text((try? AttributedString(markdown: summary, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                 ?? AttributedString(summary))
-                .font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
-        } else if !r.tasks.isEmpty {
-            RunningLine(tasks: r.tasks)
-        } else {
-            Text(" ").font(.system(size: 11))
-        }
-    }
-
-    /// At most two short lines: the turn's summary, and what's still running after it.
-    @ViewBuilder func sessionDetails(_ r: AgentRow) -> some View {
-        let summary = r.session.running ? nil : r.session.summary?.detail
-        if summary?.isEmpty == false || !r.tasks.isEmpty {
-            VStack(alignment: .leading, spacing: 1) {
-                if let summary, !summary.isEmpty {
-                    // The summary is Markdown (**bold**, `code`): shown as such, on one line.
-                    Text((try? AttributedString(markdown: summary, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                         ?? AttributedString(summary))
-                        .font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
-                }
-                if !r.tasks.isEmpty { RunningLine(tasks: r.tasks) }
-            }
-        }
+        SessionBlock(row: r, twoLines: twoLines, store: store, ui: ui, hub: hub)
     }
 }
 
 /// Stacks its views top to bottom, all as wide as the widest: along the top and bottom, the strip spans whatever
 /// is under it (columns or a page) and the columns span the strip.
 struct SharedWidthStack: Layout {
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let height = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }.reduce(0, +)
-        return CGSize(width: width, height: height)
+    /// What's been measured this pass: the widest's width, and every subview's height at one width.
+    struct Cache {
+        var width: CGFloat?
+        var heightsAt: CGFloat?
+        var heights: [CGFloat] = []
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    private func width(_ subviews: Subviews, _ cache: inout Cache) -> CGFloat {
+        if let width = cache.width { return width }
+        let width = subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        cache.width = width
+        return width
+    }
+
+    private func heights(_ subviews: Subviews, at width: CGFloat, _ cache: inout Cache) -> [CGFloat] {
+        if cache.heightsAt == width { return cache.heights }
+        cache.heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
+        cache.heightsAt = width
+        return cache.heights
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let width = width(subviews, &cache)
+        return CGSize(width: width, height: heights(subviews, at: width, &cache).reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         var y = bounds.minY
-        for sub in subviews {
-            let height = sub.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
+        for (sub, height) in zip(subviews, heights(subviews, at: bounds.width, &cache)) {
             sub.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: height))
             y += height
         }
@@ -954,6 +952,17 @@ struct AgentReorder: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(Reorderable(row: row, store: store, dropTarget: $target))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.accent.opacity(target ? 0.6 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
+    }
+}
+
+/// A line along a row's top edge, taking no room of its own: between projects, the rows stay level with the bar's tiles.
+struct GroupRule: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            if on { Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 8) }
+        }
     }
 }

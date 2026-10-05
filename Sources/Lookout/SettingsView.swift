@@ -64,11 +64,11 @@ struct SettingsView: View {
                 Text("Snooze").font(.system(size: 12.5))
                 Spacer()
                 if store.isSnoozed, let until = store.settings.snoozeUntil {
-                    Text("until \(until.formatted(date: .omitted, time: .shortened))")
+                    Text("Until \(until.formatted(date: .omitted, time: .shortened))")
                         .font(.system(size: 12)).foregroundStyle(Theme.purple)
                     Button("Resume") { store.snooze(for: nil) }.controlSize(.small)
                 } else {
-                    Menu("Pause…") {
+                    Menu("Off") {
                         Button("30 minutes") { store.snooze(for: 1800) }
                         Button("1 hour") { store.snooze(for: 3600) }
                         Button("3 hours") { store.snooze(for: 3 * 3600) }
@@ -76,6 +76,8 @@ struct SettingsView: View {
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .accessibilityLabel("Snooze")
+                    .accessibilityValue("Off")
                 }
             }
             hint("Snoozing silences banners; the inbox keeps filling up.")
@@ -94,18 +96,7 @@ struct SettingsView: View {
             if !store.settings.botHandles.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(store.settings.botHandles, id: \.self) { handle in
-                        HStack(spacing: 4) {
-                            Text("@\(handle)")
-                            Button { store.removeBot(handle) } label: {
-                                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Theme.tertiary)
-                        }
-                        .font(.system(size: 12))
-                        .padding(.horizontal, 9)
-                        .frame(height: 24)
-                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                        RemovableTag(text: "@\(handle)", removeLabel: "Remove @\(handle)") { store.removeBot(handle) }
                     }
                 }
             }
@@ -149,7 +140,7 @@ struct SettingsView: View {
                         .foregroundStyle(Theme.tertiary)
                 }
                 Spacer()
-                Toggle("", isOn: Binding(get: { store.agents.enabled }, set: { store.setAgentsEnabled($0) }))
+                Toggle("Claude sessions", isOn: Binding(get: { store.agents.enabled }, set: { store.setAgentsEnabled($0) }))
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
@@ -209,31 +200,24 @@ struct SettingsView: View {
         HStack {
             Text("Muted folders").font(.system(size: 12.5))
             Spacer()
-            Menu("Mute…") {
+            Menu(muted.isEmpty ? "None" : "\(muted.count) folder\(muted.count == 1 ? "" : "s")") {
                 ForEach(unmuted, id: \.self) { folder in
                     Button(folderName(folder)) { store.setFolderMuted(folder, true) }
                 }
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .accessibilityLabel("Muted folders")
+            .accessibilityValue(muted.isEmpty ? "None" : "\(muted.count) folder\(muted.count == 1 ? "" : "s")")
             .disabled(unmuted.isEmpty)
         }
         if !muted.isEmpty {
             FlowLayout(spacing: 6) {
                 ForEach(muted, id: \.self) { folder in
-                    HStack(spacing: 4) {
-                        Text(folderName(folder))
-                        Button { store.setFolderMuted(folder, false) } label: {
-                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Theme.tertiary)
+                    RemovableTag(text: folderName(folder), removeLabel: "Unmute \(folderName(folder))",
+                                 tip: folder.isEmpty ? "Chats not tied to a folder" : folder) {
+                        store.setFolderMuted(folder, false)
                     }
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 9)
-                    .frame(height: 24)
-                    .background(Capsule().fill(Color.white.opacity(0.07)))
-                    .help(folder.isEmpty ? "Chats not tied to a folder" : folder)
                 }
             }
         }
@@ -249,7 +233,9 @@ struct SettingsView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Lookout \(updater.current)").font(.system(size: 12.5))
-                    Text(updateStatus).font(.system(size: 11)).foregroundStyle(updateStatusColor)
+                    Ticking(coarse: true) { now in
+                        Text(updateStatus(now)).font(.system(size: 11)).foregroundStyle(updateStatusColor)
+                    }
                 }
                 Spacer()
                 if updater.isRelease { updateButton }
@@ -282,7 +268,7 @@ struct SettingsView: View {
         }
     }
 
-    private var updateStatus: String {
+    private func updateStatus(_ now: Date) -> String {
         let updater = store.updater
         guard updater.isRelease else { return "Development build: updates come from git" }
         let version = updater.release?.version ?? ""
@@ -295,8 +281,14 @@ struct SettingsView: View {
         case .idle:
             if let error = updater.checkError { return error }
             guard let last = updater.lastCheck else { return "Not checked yet" }
-            return "Up to date · checked \(last.formatted(.relative(presentation: .named)))"
+            return "Up to date · checked \(checkedPhrase(last, now: now))"
         }
+    }
+
+    private func checkedPhrase(_ date: Date, now: Date) -> String {
+        let ago = shortAgo(date, now: now)
+        if ago == "now" { return "just now" }
+        return now.timeIntervalSince(date) < 7 * 86400 ? "\(ago) ago" : "on \(ago)"
     }
 
     private var updateStatusColor: Color {
@@ -312,7 +304,7 @@ struct SettingsView: View {
             HStack {
                 Text("Check every").font(.system(size: 12.5))
                 Spacer()
-                Picker("", selection: $store.settings.pollInterval) {
+                Picker("Check every", selection: $store.settings.pollInterval) {
                     Text("30s").tag(30.0)
                     Text("1m").tag(60.0)
                     Text("2m").tag(120.0)
@@ -369,7 +361,7 @@ struct SettingsView: View {
                 if let detail { Text(detail).font(.system(size: 10.5)).foregroundStyle(Theme.tertiary) }
             }
             Spacer(minLength: 8)
-            Toggle("", isOn: isOn)
+            Toggle(label, isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
@@ -381,5 +373,38 @@ struct SettingsView: View {
             .font(.system(size: 11))
             .foregroundStyle(Theme.tertiary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A capsule with a label and a small remove button.
+private struct RemovableTag: View {
+    let text: String
+    let removeLabel: String
+    var tip: String? = nil
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(text)
+            Button(action: remove) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.tertiary)
+            .accessibilityLabel(removeLabel)
+            .tip(removeLabel)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 9)
+        .frame(height: 24)
+        .background(Capsule().fill(Color.white.opacity(0.07)))
+        .modifier(OptionalTip(title: tip))
+    }
+}
+
+private struct OptionalTip: ViewModifier {
+    let title: String?
+    func body(content: Content) -> some View {
+        if let title { content.tip(title) } else { content }
     }
 }

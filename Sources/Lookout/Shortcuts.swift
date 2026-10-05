@@ -128,15 +128,15 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .togglePanel: "Show / hide panel"
+        case .togglePanel: "Keep open"
         case .openItem: "Open on GitHub"
         case .toggleRead: "Mark read / unread"
-        case .discard: "Discard / back to inbox"
+        case .discard: "Done / back to inbox"
         case .markAllRead: "Mark all as read"
         case .refresh: "Refresh now"
         case .sessionSwitcher: "Switch Claude session"
         case .keepSession: "Keep a pending session"
-        case .removeSession: "Remove / dismiss a session"
+        case .removeSession: "Remove a session"
         }
     }
 

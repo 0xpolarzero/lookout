@@ -14,7 +14,42 @@ final class HubLayout {
     /// The bar's size at rest, to carry exactly that when it's dragged.
     @ObservationIgnored var restSize: CGSize = .zero
     /// The hub's frame in the window (top-left origin).
-    @ObservationIgnored var frame: CGRect = .zero
+    @ObservationIgnored var frame: CGRect = .zero {
+        didSet { if frame != oldValue { onFrame?() } }
+    }
+    @ObservationIgnored var onFrame: (() -> Void)?
+}
+
+/// A transparent window over the bar at rest. The real window lets the mouse through everywhere until the pointer
+/// is on the hub; this one's tracking area is how that's noticed without a system-wide mouse monitor.
+private final class HoverTrigger: FloatingPanel {
+    private final class TriggerView: NSView {
+        var onHover: (() -> Void)?
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
+                                           owner: self))
+        }
+        override func mouseEntered(with event: NSEvent) { onHover?() }
+        override func mouseMoved(with event: NSEvent) { onHover?() }
+    }
+
+    private let trigger = TriggerView()
+    var onHover: (() -> Void)? {
+        get { trigger.onHover }
+        set { trigger.onHover = newValue }
+    }
+
+    override init(size: NSSize) {
+        super.init(size: size)
+        contentView = trigger
+        // It takes the mouse (a window that ignores it gets no tracking events); it only covers the hub's own frame,
+        // and goes away the moment the pointer is on it.
+        acceptsMouseMovedEvents = true
+    }
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 /// Places the hub against its edge: flush with the screen, at its position along the edge, and kept on screen
@@ -73,7 +108,7 @@ struct HubRoot: View {
     @ViewBuilder private func content(in size: CGSize) -> some View {
         let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), maxWidth: size.width)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hub-root")) } action: { frame in
-                if ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil { NSLog("Lookout hub frame \(frame)") }
+                if HubController.debug { NSLog("Lookout hub frame \(frame)") }
                 layout.frame = frame
                 if !hub.expanded, hub.page == .main {
                     layout.restLength = ui.edge.isHorizontal ? frame.width : frame.height
@@ -116,6 +151,9 @@ final class HubController {
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
 
     private static let barDepth: CGFloat = 46
+    fileprivate static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
+    private let trigger = HoverTrigger(size: NSSize(width: 10, height: 10))
+    private var globalMouse: Any?
 
     /// `demo`: on the right edge and nothing saved, so trying it never moves your real bar.
     init(store: Store, demo: Bool = false) {
@@ -139,12 +177,15 @@ final class HubController {
             else { return }
             _ = self.keys.key(esc)
         }
+        trigger.onHover = { [weak self] in self?.mouseMoved() }
+        layout.onFrame = { [weak self] in self?.syncTrigger() }
         window.canDrag = { [weak self] p in self?.isOnBar(p) ?? false }
         window.onDragChanged = { [weak self] in self?.dragChanged(to: $0) }
         window.onDragEnded = { [weak self] in self?.dragEnded(at: $0) }
         dock()
         window.orderFrontRegardless()
         watchMouse()
+        syncTrigger()
         watchKeys()
         observe()
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -179,6 +220,7 @@ final class HubController {
         layout.floating = false
         host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout, maxLength: maxLength)
         window.setFrame(frame, display: true)
+        syncTrigger()
     }
 
     /// The hub's frame on screen (AppKit coordinates).
@@ -210,15 +252,44 @@ final class HubController {
     // MARK: Mouse
 
     /// The window only takes the mouse over the hub; hovering it opens it after a beat, leaving closes it.
+    /// At rest nothing watches the mouse system-wide: a tracking area over the bar (`HoverTrigger`) notices the
+    /// pointer arriving. The global monitor, to notice it leaving, runs only while the window takes the mouse.
     private func watchMouse() {
         let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseUp]
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.mouseMoved() }
-        }) { monitors.append(global) }
         if let local = NSEvent.addLocalMonitorForEvents(matching: events, handler: { [weak self] event in
             MainActor.assumeIsolated { self?.mouseMoved() }
             return event
         }) { monitors.append(local) }
+    }
+
+    /// Whether the window takes the mouse (the pointer is on the hub). A window-server call, so only on change.
+    private func setAcceptsMouse(_ accepts: Bool) {
+        if window.ignoresMouseEvents == accepts { window.ignoresMouseEvents = !accepts }
+        syncTrigger()
+    }
+
+    /// While the window takes the mouse: the global monitor runs (to notice the pointer leaving) and the arming
+    /// window is away. Otherwise the arming window sits over the hub and nothing else watches.
+    private func syncTrigger() {
+        if !window.ignoresMouseEvents {
+            if globalMouse == nil {
+                globalMouse = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseUp]) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.mouseMoved() }
+                }
+            }
+            if trigger.isVisible { trigger.orderOut(nil) }
+            return
+        }
+        if let global = globalMouse {
+            NSEvent.removeMonitor(global)
+            globalMouse = nil
+        }
+        guard layout.frame != .zero, dragStart == nil else { return }
+        let frame = hubScreenFrame.insetBy(dx: -1, dy: -1)
+        if trigger.frame != frame { trigger.setFrame(frame, display: false) }
+        if !trigger.isVisible { trigger.orderFrontRegardless() }
+        // The hub may have grown or moved under a still pointer.
+        if frame.contains(NSEvent.mouseLocation) { mouseMoved() }
     }
 
     private func mouseMoved() {
@@ -226,8 +297,8 @@ final class HubController {
         let mouse = NSEvent.mouseLocation
         let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(mouse)
             || (hub.panelFrame != .zero && screenFrame(hub.panelFrame).insetBy(dx: -2, dy: -2).contains(mouse))
-        // A window-server call, so only when it changes (this runs for every mouse event on the system).
-        if window.ignoresMouseEvents == inside { window.ignoresMouseEvents = !inside }
+        // A window-server call, so only when it changes.
+        setAcceptsMouse(inside)
         if inside == hub.hovering {
             // Closed from the keyboard with the pointer outside: the next entry may show a panel again.
             if !inside, hub.quiet { hub.quiet = false }
@@ -295,7 +366,7 @@ final class HubController {
     private func takeFocus() {
         let front = NSWorkspace.shared.frontmostApplication
         if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
-        window.ignoresMouseEvents = false
+        setAcceptsMouse(true)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKey()
     }
@@ -342,7 +413,13 @@ final class HubController {
         guard open != reportedOpen else { return }
         reportedOpen = open
         store.setHubOpen(open)
-        if open { ImageCache.shared.prefetch(store.items.prefix(30).compactMap { Avatar.sizedURL($0.avatar, size: 22) }) }
+        if open {
+            // Every author in the inbox (not just the newest items: the view may list another filter or a search),
+            // and the account's own picture in Settings.
+            var urls = Array(Set(store.items.compactMap(\.avatar))).prefix(60).compactMap { Avatar.sizedURL($0, size: 22) }
+            if let me = Avatar.sizedURL(store.me?.avatarUrl, size: 30) { urls.append(me) }
+            ImageCache.shared.prefetch(urls)
+        }
     }
 
     func agentsChanged() {}

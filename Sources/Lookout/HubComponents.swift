@@ -4,10 +4,11 @@ import SwiftUI
 // Building blocks of the hub.
 
 /// Scrolls only once its content is taller than `cap`; otherwise exactly as tall as the content. Follows the
-/// keyboard selection.
+/// keyboard selection (never the pointer's: hovering a row mustn't move the list under it).
 struct CappedScroll<Content: View>: View {
     let cap: CGFloat
-    var selection: String?
+    /// Read here, in this view's own body, so the parent doesn't depend on it.
+    var hub: HubState?
     @ViewBuilder let content: () -> Content
     @State private var height: CGFloat = 0
 
@@ -33,8 +34,8 @@ struct CappedScroll<Content: View>: View {
                         .frame(height: 14)
                 }
             }
-            .onChange(of: selection) { _, id in
-                if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
+            .onChange(of: hub?.keyboardSelection) { _, request in
+                if let id = request?.id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
             }
         }
     }
@@ -44,11 +45,13 @@ struct CappedScroll<Content: View>: View {
 struct CompactItemRow: View {
     let item: InboxItem
     let store: Store
-    let selected: Bool
-    let low: Bool
-    var onHover: () -> Void = {}
+    let ui: UIState
+    let hub: HubState
     @State private var hover = false
 
+    /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
+    private var selected: Bool { hub.selection == "i:" + item.id }
+    private var low: Bool { hub.filter == .bots }
     private var open: Bool { hover || selected }
     private var unread: Bool { item.state == .unread }
 
@@ -99,7 +102,13 @@ struct CompactItemRow: View {
             // Centred on the title line (6pt row padding + half its 15pt line = 13.5; the capsule is 26 tall).
             if open { actions.padding(.top, 1).padding(.trailing, 4).transition(.opacity) }
         }
-        .onHover { hover = $0; if $0 { onHover() } }
+        .onHover {
+            hover = $0
+            if $0 {
+                hub.selection = "i:" + item.id
+                ui.drawerSelection = nil
+            }
+        }
         .animation(.easeOut(duration: 0.15), value: open)
     }
 
@@ -156,16 +165,49 @@ struct Caret: View {
     }
 }
 
+/// A request to scroll the lists to a row; `seq` makes asking for the same row again a new request.
+struct ScrollRequest: Equatable {
+    let id: String
+    let seq: Int
+}
+
+/// The last session search's result, valid for one query and one state of the agents.
+struct SessionSearchMemo {
+    var query = ""
+    var revision = -1
+    var result: [AgentRow] = []
+}
+
+/// The last search's lowercase keys and result, so the many reads of one render cost one search.
+struct SearchMemo {
+    var revision = -1
+    /// One lowercase line per item, in `store.items` order.
+    var keys: [String] = []
+    var query = ""
+    var queryRevision = -1
+    var result: [InboxItem] = []
+}
+
 extension Store {
-    /// The inbox as the hub shows it: the picked filter, or every item matching the search.
+    /// The inbox as the hub shows it: the picked filter, or every item matching the search (memoized on the query and
+    /// the items' revision).
     func hubItems(_ hub: HubState) -> [InboxItem] {
         let words = hub.query.lowercased().split(separator: " ")
         guard !words.isEmpty else { return list(hub.filter) }
-        return items.filter { item in
-            let text = "\(item.title) \(item.repo) #\(item.number) @\(item.author) \(item.snippet)".lowercased()
-            return words.allSatisfy { text.contains($0) }
+        var memo = hub.searchMemo
+        if memo.queryRevision == itemsRevision, memo.query == hub.query { return memo.result }
+        if memo.revision != itemsRevision {
+            memo.keys = items.map { "\($0.title) \($0.repo) #\($0.number) @\($0.author) \($0.snippet)".lowercased() }
+            memo.revision = itemsRevision
         }
-        .sorted { ($0.state.isOpen ? 0 : 1, $1.createdAt) < ($1.state.isOpen ? 0 : 1, $0.createdAt) }
+        memo.result = zip(items, memo.keys)
+            .filter { _, key in words.allSatisfy { key.contains($0) } }
+            .map(\.0)
+            .sorted { ($0.state.isOpen ? 0 : 1, $1.createdAt) < ($1.state.isOpen ? 0 : 1, $0.createdAt) }
+        memo.query = hub.query
+        memo.queryRevision = itemsRevision
+        hub.searchMemo = memo
+        return memo.result
     }
 
     /// A repo's latest CI run on GitHub (its Actions page until a run is known); the playground reports it instead.
@@ -183,7 +225,13 @@ extension Store {
     /// Sessions as the hub lists them: yours and the pending ones, or any session matching the search.
     func hubSessions(_ hub: HubState) -> [AgentRow] {
         guard agents.enabled else { return [] }
-        if !hub.query.trimmingCharacters(in: .whitespaces).isEmpty { return searchSessions(hub.query) }
+        if !hub.query.trimmingCharacters(in: .whitespaces).isEmpty {
+            let memo = hub.sessionMemo
+            if memo.revision == agentsRevision, memo.query == hub.query { return memo.result }
+            let result = searchSessions(hub.query)
+            hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
+            return result
+        }
         let rows = agentRows
         return rows.kept + rows.pending.prefix(PillView.pendingTiles)
     }
@@ -339,5 +387,130 @@ struct RunningLine: View {
         .font(.system(size: 11))
         .lineLimit(1)
         .truncationMode(.tail)
+    }
+}
+
+/// A session's turn summary on one line: Markdown (**bold**, `code`) shown as such.
+struct SummaryText: View {
+    let row: AgentRow
+
+    var body: some View {
+        Text(row.summaryText).font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
+    }
+}
+
+/// A session's tile in the bar; opens it in Claude. Its highlight is compared here, in its own body, so hovering a
+/// tile doesn't rebuild the whole hub. No tooltip: hovering opens the sessions' panel, a row beside each tile.
+struct BarTile: View {
+    let row: AgentRow
+    let size: CGFloat
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+
+    var body: some View {
+        Button { store.openAgent(row.id) } label: {
+            AgentTile(row: row, size: size, selected: hub.selection == "a:" + row.id)
+        }
+        .buttonStyle(.plain)
+        .frame(height: 36)
+        .onHover {
+            if $0 {
+                hub.selection = "a:" + row.id
+                ui.drawerSelection = row.id
+            }
+        }
+    }
+}
+
+/// A session in the full view: its line, then (short) what it did and what it left running. One block: it
+/// highlights, opens and shows its actions as a whole, wherever the pointer is on it. Whether it's the picked one
+/// is compared here, in its own body.
+struct SessionBlock: View {
+    let row: AgentRow
+    let twoLines: Bool
+    let store: Store
+    @Bindable var ui: UIState
+    let hub: HubState
+
+    var body: some View {
+        let selected = ui.drawerSelection == row.id
+        VStack(alignment: .leading, spacing: 0) {
+            DrawerRow(row: row, store: store, ui: ui, number: 0, twoLines: twoLines, highlight: hub.query,
+                      showsKept: !hub.query.isEmpty, inHub: !twoLines, plain: true)
+            // Under the title: past the tile on two-line rows (10 + 24 + 9), else at the title's 8.
+            Group { if twoLines { cardDetail } else { details } }
+                .padding(.leading, twoLines ? 43 : 8)
+                .padding(.trailing, 8)
+                .padding(.top, twoLines ? -8 : -3)
+                .padding(.bottom, twoLines ? 4 : 7)
+        }
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(selected ? 0.06 : 0)))
+        // The same actions as an inbox item's, over the title line's right end, centred on it.
+        .overlay(alignment: .topTrailing) {
+            if selected {
+                AgentActions(row: row, store: store, size: IconButton.Size.row)
+                    .padding(.top, twoLines ? 9 : 0)
+                    .padding(.trailing, 4)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: selected)
+        .contentShape(Rectangle())
+        .onTapGesture { store.openAgent(row.id) }
+        .onHover { if $0 { ui.drawerSelection = row.id } }
+    }
+
+    private var summary: String? {
+        guard !row.session.running, let detail = row.session.summary?.detail, !detail.isEmpty else { return nil }
+        return detail
+    }
+
+    /// A grid card's one line under its title, always there so every card is the same height: the turn's summary,
+    /// else what's still running (the count is in the status above either way).
+    @ViewBuilder private var cardDetail: some View {
+        if summary != nil {
+            SummaryText(row: row)
+        } else if !row.tasks.isEmpty {
+            RunningLine(tasks: row.tasks)
+        } else {
+            Text(" ").font(.system(size: 11))
+        }
+    }
+
+    /// At most two short lines: the turn's summary, and what's still running after it.
+    @ViewBuilder private var details: some View {
+        if summary != nil || !row.tasks.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                if summary != nil { SummaryText(row: row) }
+                if !row.tasks.isEmpty { RunningLine(tasks: row.tasks) }
+            }
+        }
+    }
+}
+
+/// Keeps `ui.drawerSelection` (a session row hovered anywhere) and the hub's selection (what the keys act on) the
+/// same, from a view of its own: only this body reads the drawer's selection, not the hub's.
+struct SelectionSync: View {
+    let ui: UIState
+    let hub: HubState
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .onChange(of: ui.drawerSelection) { _, id in
+                if let id, hub.selection != "a:" + id { hub.selection = "a:" + id }
+            }
+    }
+}
+
+/// Your sessions in the hub can be dragged onto one another to reorder them, when `enabled` (the bar's tiles at
+/// rest are plain buttons).
+struct ReorderIf: ViewModifier {
+    let enabled: Bool
+    let row: AgentRow
+    let store: Store
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if enabled { content.modifier(AgentReorder(row: row, store: store)) } else { content }
     }
 }

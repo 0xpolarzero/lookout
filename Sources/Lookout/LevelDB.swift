@@ -12,9 +12,15 @@ enum LevelDB {
         var value: [UInt8]?
     }
 
-    /// Matches per file, keyed by path, size and modification date. Tables never change once written, so in
-    /// practice only the log is parsed again.
-    private static var cache: [String: (stamp: String, entries: [Entry])] = [:]
+    /// Newest match per file, keyed by path and key. Tables never change once written, so they're parsed once; the
+    /// log only grows, so only what was appended is parsed (`offset` is where the next unparsed record starts).
+    private struct FileState {
+        var stamp: String
+        var best: Entry?
+        var inode: UInt64 = 0
+        var offset = 0
+    }
+    private static var cache: [String: FileState] = [:]
     /// Guards `cache`: reads come from the refresh queue, and the debug check runs on the main thread.
     private static let lock = NSLock()
 
@@ -22,28 +28,43 @@ enum LevelDB {
     static func latest(in dir: URL, keySuffix: [UInt8]) -> [UInt8]? {
         lock.lock()
         defer { lock.unlock() }
-        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         var best: Entry?
         var live = Set<String>()
         for file in files where ["log", "ldb", "sst"].contains(file.pathExtension) {
-            let values = try? file.resourceValues(forKeys: Set(keys))
-            let stamp = "\(values?.fileSize ?? -1)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+            var info = stat()
+            guard stat(file.path, &info) == 0 else { continue }
+            let stamp = "\(info.st_size)|\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)"
             let path = file.path + "|" + String(decoding: keySuffix, as: UTF8.self)
             live.insert(path)
-            var found: [Entry]
-            if let cached = cache[path], cached.stamp == stamp {
-                found = cached.entries
-            } else {
-                guard let data = try? Data(contentsOf: file) else { continue }
-                let bytes = [UInt8](data)
-                found = file.pathExtension == "log" ? logEntries(bytes) : (try? tableEntries(bytes)) ?? []
-                found = found.filter { $0.key.ends(with: keySuffix) }
-                cache[path] = (stamp, found)
+            var state = cache[path] ?? FileState(stamp: "")
+            if state.stamp != stamp {
+                if file.pathExtension == "log" {
+                    // A replaced or shortened log is parsed from the start.
+                    if state.inode != UInt64(info.st_ino) || Int(info.st_size) < state.offset { state = FileState(stamp: "") }
+                    state.inode = UInt64(info.st_ino)
+                    guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+                    defer { try? handle.close() }
+                    // A failed seek or read leaves the cached state alone, so the next call tries again.
+                    guard (try? handle.seek(toOffset: UInt64(state.offset))) != nil,
+                          let data = try? handle.readToEnd() else { continue }
+                    let bytes = [UInt8](data)
+                    let (records, resume) = logRecords(bytes, base: state.offset)
+                    for record in records {
+                        for entry in (try? batchEntries(record)) ?? [] where entry.key.ends(with: keySuffix) {
+                            if state.best == nil || entry.sequence > state.best!.sequence { state.best = entry }
+                        }
+                    }
+                    state.offset = resume
+                } else {
+                    guard let data = try? Data(contentsOf: file) else { continue }
+                    let found = ((try? tableEntries([UInt8](data))) ?? []).filter { $0.key.ends(with: keySuffix) }
+                    state.best = found.max { $0.sequence < $1.sequence }
+                }
+                state.stamp = stamp
+                cache[path] = state
             }
-            for entry in found where best == nil || entry.sequence > best!.sequence {
-                best = entry
-            }
+            if let entry = state.best, best == nil || entry.sequence > best!.sequence { best = entry }
         }
         cache = cache.filter { live.contains($0.key) || !$0.key.hasPrefix(dir.path) }
         return best?.value
@@ -59,16 +80,23 @@ enum LevelDB {
         return entries
     }
 
+    static func logRecords(_ bytes: [UInt8]) -> [[UInt8]] { logRecords(bytes, base: 0).records }
+
     /// Reassembles records from 32 KiB blocks (FULL, or FIRST/MIDDLE…/LAST fragments). Stops at a torn tail.
-    static func logRecords(_ bytes: [UInt8]) -> [[UInt8]] {
+    /// `bytes` is the file from `base` on (a record boundary); `resume` is the file offset after the last complete
+    /// record, i.e. where to start next time.
+    static func logRecords(_ bytes: [UInt8], base: Int) -> (records: [[UInt8]], resume: Int) {
         let blockSize = 32768
         var records: [[UInt8]] = []
         var pending: [UInt8]?
+        var pendingStart = 0
+        var resume = base
         var p = 0
         while p + 7 <= bytes.count {
-            let leftInBlock = blockSize - p % blockSize
+            let leftInBlock = blockSize - (base + p) % blockSize
             if leftInBlock < 7 {
                 p += leftInBlock
+                if pending == nil { resume = base + min(p, bytes.count) }
                 continue
             }
             let length = Int(bytes[p + 4]) | Int(bytes[p + 5]) << 8
@@ -76,18 +104,20 @@ enum LevelDB {
             let start = p + 7
             guard type != 0, start + length <= bytes.count else { break }
             let payload = Array(bytes[start..<start + length])
+            let header = p
             p = start + length
             switch type {
             case 1: records.append(payload); pending = nil
-            case 2: pending = payload
+            case 2: pending = payload; pendingStart = header
             case 3: pending? += payload
             case 4:
                 if let first = pending { records.append(first + payload) }
                 pending = nil
             default: pending = nil
             }
+            if pending == nil { resume = base + p } else { resume = base + pendingStart }
         }
-        return records
+        return (records, resume)
     }
 
     /// WriteBatch: sequence (8, LE), count (4), then Put(1)/Delete(0) records. Each record takes the next sequence.

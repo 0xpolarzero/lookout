@@ -24,6 +24,7 @@ extension LookoutHub {
             }
             if let first = store.list(.needsYou).first {
                 hub.selection = "i:" + first.id
+                hub.requestScroll("i:" + first.id)
                 ui.drawerSelection = nil
             }
         }
@@ -111,20 +112,7 @@ extension LookoutHub {
     }
 
     func itemRow(_ item: InboxItem) -> some View {
-        CompactItemRow(item: item, store: store, selected: hub.selection == "i:" + item.id, low: hub.filter == .bots) {
-            hub.selection = "i:" + item.id
-            ui.drawerSelection = nil
-        }
-    }
-
-    func moreButton(_ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.secondary)
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        CompactItemRow(item: item, store: store, ui: ui, hub: hub)
     }
 
     /// A line of text with a link after it, padded like a row ("No CI shown  Choose repositories").
@@ -246,8 +234,6 @@ extension LookoutHub {
             .contentShape(Rectangle())
     }
 
-    var agentsCell: some View { claudeMark }
-
     /// "Agents", then what's waiting for you (amber) and what's done and unread (blue).
     var agentsHeader: some View {
         let counts = store.agentCounts
@@ -257,16 +243,9 @@ extension LookoutHub {
         return sectionHeader("Agents", status: status) { if showsDetail { focusButton(.agents) } }
     }
 
-    /// A session's tile in the bar; opens it in Claude. Collapsed, it says which session it is.
-    @ViewBuilder func tile(_ r: AgentRow, size: CGFloat) -> some View {
-        let button = Button { store.openAgent(r.id) } label: {
-            AgentTile(row: r, size: size, selected: hub.selection == "a:" + r.id)
-        }
-        .buttonStyle(.plain)
-        .frame(height: 36)
-        .onHover { if $0 { hub.selection = "a:" + r.id; ui.drawerSelection = r.id } }
-        // No tooltip: hovering opens the sessions' panel, a row beside each tile.
-        button
+    /// A session's tile in the bar; opens it in Claude.
+    func tile(_ r: AgentRow, size: CGFloat) -> some View {
+        BarTile(row: r, size: size, store: store, ui: ui, hub: hub)
     }
 
     /// The "+" in the bar, a tile like the sessions' above it: a scratch session.
@@ -298,8 +277,6 @@ extension LookoutHub {
         IconButton(symbol: "gearshape.fill", help: "Settings", detail: "⌘,", size: IconButton.Size.bar,
                    active: hub.page == .settings || (hub.page == .repos && !edge.isHorizontal)) { hub.go(.settings) }
     }
-
-    var settingsButton: some View { settingsCell }
 
     // MARK: Footer
 

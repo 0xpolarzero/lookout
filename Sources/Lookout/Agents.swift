@@ -99,6 +99,8 @@ struct AgentRow: Identifiable, Hashable {
     var activity: ClaudeActivity?
     /// Turn over, but subagents or commands it started are still running.
     var tasks: [ClaudeTask] = []
+    /// The turn's summary as Markdown (**bold**, `code`), parsed once when the row is built; empty when there is none.
+    var summaryText = AttributedString()
 
     /// The picked icon, unless you chose letters or an emoji yourself.
     var icon: String? { entry.label == nil ? entry.icon : nil }
@@ -271,6 +273,11 @@ extension Store {
         }
         let keptRows = rows(kept), pendingRows = rows(pending)
         let allRows = keptRows + pendingRows
+        // Summaries of sessions that are gone (or have a newer one) needn't stay parsed.
+        if summaryTexts.count > allRows.count + 32 {
+            let current = Set(allRows.compactMap { $0.session.summary?.detail })
+            summaryTexts = summaryTexts.filter { current.contains($0.key) }
+        }
         let unread = allRows.filter { $0.unread && !$0.session.running }
         let blocked = unread.filter { $0.session.summary?.blocked == true }.count
         var folders: [String] = []
@@ -296,7 +303,18 @@ extension Store {
                  label: label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
                  color: projectColor(session.folderKey),
                  activity: session.running ? claudeActivity[session.id] : nil,
-                 tasks: session.running ? [] : claudeTasks[session.id] ?? [])
+                 tasks: session.running ? [] : claudeTasks[session.id] ?? [],
+                 summaryText: summaryText(session.summary?.detail))
+    }
+
+    /// Parsed once per distinct summary (the rows are rebuilt on every change, the summaries rarely change).
+    private func summaryText(_ detail: String?) -> AttributedString {
+        guard let detail, !detail.isEmpty else { return AttributedString() }
+        if let hit = summaryTexts[detail] { return hit }
+        let text = (try? AttributedString(markdown: detail, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(detail)
+        summaryTexts[detail] = text
+        return text
     }
 
     func projectColor(_ folder: String) -> Color? {
@@ -373,6 +391,12 @@ extension Store {
         claudeFeed.request(full: true, stamp: claudeStamp) { [weak self] in self?.applyClaude($0) }
     }
 
+    /// Re-reads only the sidebar dots (the app writes them lazily): the sessions are those of the last read.
+    func refreshUnread() {
+        guard agents.enabled else { return }
+        claudeFeed.request(full: false, unreadOnly: true, stamp: claudeStamp) { [weak self] in self?.applyClaude($0) }
+    }
+
     /// What each working session is doing, from the tail of its transcript (only files that changed are read), and
     /// the background work left running by sessions whose turn is over.
     func refreshActivity() {
@@ -397,6 +421,7 @@ extension Store {
         if let next = snapshot.activity, next != claudeActivity { claudeActivity = next }
         if let next = snapshot.tasks, next != claudeTasks { claudeTasks = next }
         if snapshot.sessions != nil { pickIcons() }
+        scheduleClaudeTick()
     }
 
     /// Folds a fresh read of the app into what Lookout remembers. Pure apart from `now`, so tests drive it directly.
@@ -552,16 +577,29 @@ extension Store {
         let rows = allAgentRows
         guard let next = rows.first(where: { $0.entry.icon == nil && $0.entry.label == nil }) else { return }
         let session = next.session
-        let first = session.cliID.flatMap { activityReader.transcript($0) }.flatMap { Claude.firstMessage(head: Claude.head(of: $0)) }
-        // Nothing to go on yet (a brand-new session the app hasn't named): wait for the next read.
-        guard first != nil || session.title != "Untitled session" else { return }
-        let used = Set(rows.compactMap(\.entry.icon)).union(next.entry.rejectedIcons ?? [])
-        let open = SessionIcons.open(excluding: used)
-        guard !open.isEmpty else { return }
-        var state = ["session title": session.title, "project": session.folderName]
-        if let first { state["first message"] = first }
-        let client = JevClient(key: key)
+        let cliID = session.cliID
+        let reader = activityReader
         iconTask = Task { [weak self] in
+            // The transcript's head (256 KB, parsed) is read off the main thread, which may also be waiting on the
+            // activity reader's lock.
+            let first = await Task.detached(priority: .utility) {
+                cliID.flatMap { reader.transcript($0) }.flatMap { Claude.firstMessage(head: Claude.head(of: $0)) }
+            }.value
+            guard let self else { return }
+            // Nothing to go on yet (a brand-new session the app hasn't named): wait for the next read.
+            let rows = self.allAgentRows
+            guard first != nil || session.title != "Untitled session",
+                  let current = rows.first(where: { $0.id == session.id }), current.entry.icon == nil, current.entry.label == nil else {
+                self.iconTask = nil
+                if first != nil || session.title != "Untitled session" { self.pickIcons() }
+                return
+            }
+            let used = Set(rows.compactMap(\.entry.icon)).union(current.entry.rejectedIcons ?? [])
+            let open = SessionIcons.open(excluding: used)
+            guard !open.isEmpty else { self.iconTask = nil; return }
+            var state = ["session title": session.title, "project": session.folderName]
+            if let first { state["first message"] = first }
+            let client = JevClient(key: key)
             do {
                 // Two questions (Jev takes at most 255 options): what kind of icon, then which one.
                 let kinds = try await client.choose(open.map(\.category.key),
@@ -570,18 +608,17 @@ extension Store {
                 let options = SessionIcons.shortlist(open, probabilities: kinds.probabilities)
                 let pick = try await client.choose(options, hints: SessionIcons.hints, for: state, instructions:
                     "Pick the icon that best shows what this coding session is about, so its owner can tell it apart from their other sessions at a glance.")
-                guard let self else { return }
                 self.mutateAgent(session.id) { $0.icon = pick.choice }
                 self.iconError = nil
                 self.iconTask = nil
                 self.pickIcons()
             } catch {
-                guard let self else { return }
                 self.iconError = error.localizedDescription
                 self.iconTask = nil
                 // A rejected key waits for a new one; anything else retries in a while.
                 self.iconsPausedUntil = (error as? JevClient.Failure)?.message.contains("API key") == true
                     ? .distantFuture : Date().addingTimeInterval(600)
+                self.scheduleClaudeTick()
             }
         }
     }
@@ -596,8 +633,8 @@ extension Store {
     }
 
     var typesafeKey: String? {
-        if typesafeKeyCache == nil { typesafeKeyCache = Keychain.read(Keychain.typesafe) ?? "" }
-        return typesafeKeyCache
+        // Filled in by the read at launch (see `Store.start`), never from the main thread.
+        typesafeKeyCache
     }
 
     func setTypesafeKey(_ key: String?) {

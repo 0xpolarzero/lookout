@@ -19,6 +19,7 @@ struct ReposView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 addField
+                if !store.repos.isEmpty { legend }
                 ForEach(store.repos) { repo in
                     RepoCard(repo: repo, store: store)
                 }
@@ -34,6 +35,20 @@ struct ReposView: View {
         }
         .scrollIndicators(.never)
         .task { await store.loadSuggestions() }
+    }
+
+    /// Column header over the toggles of every card, in the same order and spacing as the badges.
+    private var legend: some View {
+        HStack(spacing: 10) {
+            Text("WATCHING").font(.system(size: 9.5, weight: .semibold)).tracking(0.6)
+            Spacer(minLength: 6)
+            RepoToggleColumns.legend
+            Color.clear.frame(width: 20, height: 1)
+        }
+        .foregroundStyle(Theme.tertiary)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.top, 2)
     }
 
     private var addField: some View {
@@ -118,6 +133,33 @@ private struct SuggestionRow: View {
     }
 }
 
+/// Shared geometry so the legend lines up with the badges.
+private enum RepoToggleColumns {
+    static let spacing: CGFloat = 3
+    static var kinds: [EventKind] { EventKind.repoToggles.filter { $0 != .ciMain } }
+
+    /// Group captions with a bracket underneath, spanning the badge columns they describe:
+    /// issues (opened, comments), pull requests (opened, comments, review comments), all-comments ("All") and CI.
+    static var legend: some View {
+        HStack(spacing: 3) {
+            group("Issues", columns: 2)
+            group("Pull requests", columns: 3)
+            Color.clear.frame(width: 5, height: 1)
+            group("All", columns: 1)
+            group("CI", columns: 1)
+        }
+    }
+
+    private static func group(_ text: String, columns: Int) -> some View {
+        let width = CGFloat(columns) * 24 + CGFloat(columns - 1) * spacing
+        return VStack(spacing: 2) {
+            Text(text).font(.system(size: 9, weight: .medium)).lineLimit(1).fixedSize()
+            RoundedRectangle(cornerRadius: 0.5).fill(Theme.stroke).frame(height: 1)
+        }
+        .frame(width: width)
+    }
+}
+
 struct RepoCard: View {
     let repo: RepoConfig
     let store: Store
@@ -142,8 +184,8 @@ struct RepoCard: View {
                     .frame(width: 18, height: 24)
                     .tip("Sync failed", error)
             }
-            HStack(spacing: 3) {
-                ForEach(EventKind.repoToggles.filter { $0 != .ciMain }) { kind in
+            HStack(spacing: RepoToggleColumns.spacing) {
+                ForEach(RepoToggleColumns.kinds) { kind in
                     badge(kind)
                 }
                 Rectangle().fill(Theme.stroke).frame(width: 1, height: 14).padding(.horizontal, 2)
@@ -186,13 +228,13 @@ struct RepoCard: View {
         let on = repo.events.contains(kind)
         let filtered = kind != .issueOpened && kind != .prOpened && !repo.allComments
         let detail = filtered ? "Only on your threads, @mentions and replies to you" : kind.tipDetail
-        return BadgeButton(symbol: kind.symbol, color: kind.color, on: on) { store.toggle(kind, on: repo) }
+        return BadgeButton(symbol: kind.symbol, color: kind.color, on: on, label: kind.toggleLabel) { store.toggle(kind, on: repo) }
             .tip(kind.toggleLabel, detail + (on ? "" : "\nOff · click to turn on"))
     }
 
     private var allCommentsBadge: some View {
         let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
-        return BadgeButton(symbol: "bubble.left.and.bubble.right.fill", color: Theme.accent, on: repo.allComments) {
+        return BadgeButton(symbol: "bubble.left.and.bubble.right.fill", color: Theme.accent, on: repo.allComments, label: "All comments") {
             store.toggleAllComments(repo)
         }
         .opacity(hasComments ? 1 : 0.35)
@@ -207,11 +249,11 @@ struct RepoCard: View {
         let state = status?.state ?? .none
         let symbol = on ? state.symbol : "seal"
         let branch = status?.branch ?? repo.defaultBranch ?? "main"
-        var detail = on ? "\(branch) \(state.label)" : "Hidden from the pill · click to show"
+        var detail = on ? "\(branch) \(state.label)" : "Hidden from the bar · click to show"
         if on, state == .failure, let failing = status?.failing, !failing.isEmpty {
             detail += "\n" + failing.prefix(4).joined(separator: "\n")
         }
-        return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on) {
+        return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on, label: "CI") {
             store.toggle(.ciMain, on: repo)
         }
         .tip("CI", detail)
@@ -240,6 +282,7 @@ private struct BadgeButton: View {
     let symbol: String
     let color: Color
     let on: Bool
+    var label = ""
     let action: () -> Void
     @State private var hover = false
 
@@ -260,6 +303,8 @@ private struct BadgeButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(on ? "On" : "Off")
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: on)
     }

@@ -69,6 +69,8 @@ final class HotKeys {
     private var swallowedUps: Set<Int> = []
     private var tap = ModifierTap()
     private var monitors: [Any] = []
+    /// When the held modifier went down (event timestamps, i.e. system uptime), to ask whether anything else happened since.
+    private var heldSince: TimeInterval?
     /// Taps are ignored while this is true (e.g. while a shortcut is being recorded).
     var paused: () -> Bool = { false }
 
@@ -115,19 +117,29 @@ final class HotKeys {
         if taps.isEmpty {
             monitors.forEach(NSEvent.removeMonitor)
             monitors = []
+            heldSince = nil
             return
         }
         guard monitors.isEmpty else { return }
         if !AXIsProcessTrusted() {
             AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
         }
-        let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        // Only modifier changes are watched; whether anything else happened during a tap is asked on release.
+        let events: NSEvent.EventTypeMask = [.flagsChanged]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: { [weak self] in self?.handle($0) }) {
             monitors.append(global)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: events, handler: { [weak self] in self?.handle($0); return $0 }) {
             monitors.append(local)
         }
+    }
+
+    /// Whether a key, click or scroll happened since the modifier went down: the window server remembers, so
+    /// nothing has to watch those events (and wake the app) while typing or scrolling.
+    private func interrupted(since start: TimeInterval) -> Bool {
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        let types: [CGEventType] = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        return types.contains { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) < elapsed }
     }
 
     /// A session event tap for the mouse buttons in use: it sees them in every app and can keep a shortcut's click
@@ -175,13 +187,16 @@ final class HotKeys {
     }
 
     private func handle(_ event: NSEvent) {
-        if Self.debug, event.type == .flagsChanged {
+        if Self.debug {
             NSLog("Lookout keys: flagsChanged %d flags %lx trusted %d", event.keyCode, event.modifierFlags.rawValue, AXIsProcessTrusted() ? 1 : 0)
         }
-        guard event.type == .flagsChanged else { return tap.interrupt() }
+        let held = UInt(event.modifierFlags.rawValue) & Shortcut.sideBits != 0
+        let since = heldSince
+        if held { if heldSince == nil { heldSince = event.timestamp } } else { heldSince = nil }
         // Without Accessibility the keys typed elsewhere are invisible, so right ⌘ + C would look like a tap.
         guard let key = tap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue),
               !paused(), AXIsProcessTrusted() else { return }
+        if let since, interrupted(since: since) { return }
         for entry in taps.values where entry.key == key { entry.handler() }
     }
 }

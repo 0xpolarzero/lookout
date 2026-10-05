@@ -99,7 +99,10 @@ final class GitHubClient: @unchecked Sendable {
     var graphqlRemaining: Int? { lock.withLock { gqlRemaining } }
     private var coreRemaining: Int?
     private var gqlRemaining: Int?
-    private var etags: [String: (etag: String, data: Data)] = [:]
+    private var etags: [String: (etag: String, data: Data, used: Int)] = [:]
+    private var etagClock = 0
+    /// Most responses remembered; the least recently used go first.
+    private static let etagLimit = 200
     private let lock = NSLock()
 
     private let decoder: JSONDecoder = {
@@ -125,8 +128,18 @@ final class GitHubClient: @unchecked Sendable {
         }
         let url = comps.url!
         var req = request(url)
-        let key = url.absoluteString
-        let cached = lock.withLock { etags[key] }
+        // Without the moving `since` cursor: each poll replaces the entry instead of adding one (a changed query
+        // that returns the same body still gets its 304).
+        var keyed = comps
+        keyed.queryItems = comps.queryItems?.filter { $0.name != "since" }
+        let key = keyed.url!.absoluteString
+        let cached = lock.withLock { () -> (etag: String, data: Data, used: Int)? in
+            guard var hit = etags[key] else { return nil }
+            etagClock += 1
+            hit.used = etagClock
+            etags[key] = hit
+            return hit
+        }
         if let cached { req.setValue(cached.etag, forHTTPHeaderField: "If-None-Match") }
 
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -135,7 +148,13 @@ final class GitHubClient: @unchecked Sendable {
         if http.statusCode == 304, let cached { return cached.data }
         try check(http, data)
         if let etag = http.value(forHTTPHeaderField: "ETag") {
-            lock.withLock { etags[key] = (etag, data) }
+            lock.withLock {
+                etagClock += 1
+                etags[key] = (etag, data, etagClock)
+                if etags.count > Self.etagLimit, let oldest = etags.min(by: { $0.value.used < $1.value.used })?.key {
+                    etags[oldest] = nil
+                }
+            }
         }
         return data
     }

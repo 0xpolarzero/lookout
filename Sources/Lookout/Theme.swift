@@ -102,6 +102,8 @@ struct KeyCap: View {
 struct Avatar: View {
     let url: URL?
     var size: CGFloat = 26
+    /// Shown as initials until (or unless) the picture is there.
+    var name: String?
 
     @State private var loaded: (url: URL, image: NSImage)?
 
@@ -111,6 +113,7 @@ struct Avatar: View {
         let image = loaded.flatMap { $0.url == sized ? $0.image : nil } ?? ImageCache.shared.cached(sized)
         ZStack {
             Circle().fill(Color.white.opacity(0.1))
+            if image == nil { placeholder }
             if let image {
                 Image(nsImage: image).resizable().interpolation(.high).transition(.opacity)
             }
@@ -124,6 +127,16 @@ struct Avatar: View {
             let img = await ImageCache.shared.load(sized)
             guard !Task.isCancelled, let img else { return }
             withAnimation(.easeOut(duration: 0.15)) { loaded = (sized, img) }
+        }
+    }
+
+    /// Initials of the name, or a person glyph without one.
+    @ViewBuilder private var placeholder: some View {
+        let initials = name.map { $0.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).prefix(2).compactMap(\.first).map(String.init).joined().uppercased() } ?? ""
+        if initials.isEmpty {
+            Image(systemName: "person.fill").font(.system(size: size * 0.5)).foregroundStyle(Color.white.opacity(0.35))
+        } else {
+            Text(initials).font(.system(size: size * 0.4, weight: .semibold, design: .rounded)).foregroundStyle(Color.white.opacity(0.55))
         }
     }
 

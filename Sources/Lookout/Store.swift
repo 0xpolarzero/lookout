@@ -9,17 +9,30 @@ final class Store {
     nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots"].contains($0) }
 
     var repos: [RepoConfig] = [] {
-        didSet { memo = Memo() }
+        didSet {
+            memo = Memo()
+            persistedRevision &+= 1
+        }
     }
     var items: [InboxItem] = [] {
-        didSet { memo = Memo() }
+        didSet {
+            memo = Memo()
+            itemsRevision &+= 1
+            persistedRevision &+= 1
+        }
     }
+    /// Bumped on every assignment to `items`, and those only happen on real changes: a cheap animation/memo key for views.
+    private(set) var itemsRevision = 0
     var ci: [String: CIStatus] = [:] {
-        didSet { memo = Memo() }
+        didSet {
+            memo = Memo()
+            persistedRevision &+= 1
+        }
     }
     var settings = AppSettings() {
         didSet {
             memo = Memo()
+            persistedRevision &+= 1
             if oldValue.reviewRequests, !settings.reviewRequests, !loading {
                 removeItems { $0.kind == .reviewRequested }
             }
@@ -31,21 +44,35 @@ final class Store {
     var agents = AgentsState() {
         didSet {
             agentCache = nil
+            agentsRevision &+= 1
+            persistedRevision &+= 1
             if !ingesting { claudeStamp.revision += 1 }
             save()
         }
     }
+    /// Bumped whenever the rows the hub shows can change (agents, sessions, activity, tasks): a cheap memo/animation key.
+    private(set) var agentsRevision = 0
     var claudeSessions: [String: ClaudeSession] = [:] {
-        didSet { agentCache = nil }
+        didSet {
+            agentCache = nil
+            agentsRevision &+= 1
+        }
     }
     var claudeActivity: [String: ClaudeActivity] = [:] {
-        didSet { agentCache = nil }
+        didSet {
+            agentCache = nil
+            agentsRevision &+= 1
+        }
     }
     /// Subagents and commands still running in sessions whose turn is over.
     var claudeTasks: [String: [ClaudeTask]] = [:] {
-        didSet { agentCache = nil }
+        didSet {
+            agentCache = nil
+            agentsRevision &+= 1
+        }
     }
-    var hasTypesafeKey = Keychain.read(Keychain.typesafe)?.isEmpty == false
+    /// Filled in right after launch (see `start`): the Keychain read stays off the main thread.
+    var hasTypesafeKey = false
     var iconError: String?
     var claudeLink: ClaudeLink = .off
 
@@ -73,6 +100,14 @@ final class Store {
     @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var saveDirty = false
+    /// Bumped by every persisted property's didSet: a poll saves only if this moved.
+    @ObservationIgnored private var persistedRevision = 0
+    /// `persistedRevision` as of the last `save()`: a poll saves whatever changed since, whoever changed it.
+    @ObservationIgnored private var savedRevision = 0
+    /// When the one-shot Claude timer fires (it only ever moves earlier until it does).
+    @ObservationIgnored private var claudeDeadline: Date?
+    /// When each repo's CI was last checked, live (the persisted `checkedAt` only changes with the status).
+    @ObservationIgnored private var ciCheckedAt: [String: Date] = [:]
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
@@ -88,9 +123,18 @@ final class Store {
     @ObservationIgnored var iconTask: Task<Void, Never>?
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     @ObservationIgnored var typesafeKeyCache: String?
-    @ObservationIgnored private var claudeWatcher: FolderWatcher?
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
-    @ObservationIgnored private var claudeTimer: Timer?
+    @ObservationIgnored private var sessionsWatcher: FolderWatcher?
+    @ObservationIgnored private var dotsWatcher: FolderWatcher?
+    @ObservationIgnored var claudeTimer: Timer?
+    @ObservationIgnored private var claudeObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var screensAsleep = false
+    /// Parsed Markdown of session summaries (see `AgentRow.summaryText`).
+    @ObservationIgnored var summaryTexts: [String: AttributedString] = [:]
+
+    private nonisolated static func isClaude(_ note: Notification) -> Bool {
+        (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier == Claude.bundleID
+    }
 
     private static let isoFormatter = ISO8601DateFormatter()
 
@@ -121,30 +165,114 @@ final class Store {
         observeSleep()
         restartPolling()
         watchClaude()
+        Task.detached(priority: .utility) {
+            let key = Keychain.read(Keychain.typesafe) ?? ""
+            await MainActor.run { [weak self] in
+                // A key saved meanwhile (Settings) is newer than this read.
+                guard let self, self.typesafeKeyCache == nil else { return }
+                self.typesafeKeyCache = key
+                self.hasTypesafeKey = !key.isEmpty
+                self.pickIcons()
+            }
+        }
     }
 
-    /// File events give near-instant updates; the timer catches what they can't (the clock, the app quitting).
+    /// File events give near-instant updates: the sessions folder triggers a read of the sessions, the app's local
+    /// storage (where it lazily writes the sidebar dots) only a re-read of the dots. What events can't tell is covered
+    /// by the app launching, quitting or coming to the front, and by a one-shot timer (see `scheduleClaudeTick`).
     func watchClaude() {
-        claudeWatcher = nil
+        sessionsWatcher = nil
+        dotsWatcher = nil
         transcriptWatcher = nil
         claudeTimer?.invalidate()
         claudeTimer = nil
+        claudeDeadline = nil
+        let center = NSWorkspace.shared.notificationCenter
+        claudeObservers.forEach { center.removeObserver($0) }
+        claudeObservers = []
         guard agents.enabled else { return }
-        claudeWatcher = FolderWatcher([Claude.sessionsDir, Claude.localStorageDir]) { [weak self] in
+        sessionsWatcher = FolderWatcher([Claude.sessionsDir]) { [weak self] in
             MainActor.assumeIsolated { self?.refreshClaude() }
         }
-        // Transcripts change with every step an agent takes: only the working sessions' tails are read.
-        // Only the transcripts of working sessions (and those with background tasks) are worth waking up for.
-        transcriptWatcher = FolderWatcher([Claude.transcriptsDir], latency: 0.5, paths: { [weak self] paths in
+        // The app writes to its leveldb in bursts: one read of the dots per couple of seconds is plenty.
+        dotsWatcher = FolderWatcher([Claude.localStorageDir], latency: 2) { [weak self] in
+            MainActor.assumeIsolated { self?.refreshUnread() }
+        }
+        // Transcripts change with every step an agent takes: only the working sessions' tails are read, and only the
+        // transcripts of working sessions (and those with background tasks) are worth waking up for. The filter runs
+        // on the watcher's queue; `isRelevant` takes its own lock.
+        let feed = claudeFeed
+        transcriptWatcher = FolderWatcher([Claude.transcriptsDir], latency: 0.5, relevant: { feed.isRelevant($0) }) { [weak self] in
+            MainActor.assumeIsolated { self?.refreshActivity() }
+        }
+        func watch(_ name: Notification.Name, _ then: @escaping @MainActor (Store) -> Void) {
+            claudeObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard Self.isClaude(note) else { return }
+                MainActor.assumeIsolated { if let self { then(self) } }
+            })
+        }
+        // Whether the app is open decides if a session still "runs"; being in front, which one you're looking at.
+        watch(NSWorkspace.didLaunchApplicationNotification) { $0.refreshClaude() }
+        watch(NSWorkspace.didTerminateApplicationNotification) { $0.refreshClaude() }
+        watch(NSWorkspace.didActivateApplicationNotification) { $0.refreshClaude() }
+        claudeObservers.append(center.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.claudeFeed.isRelevant(paths) else { return }
-                self.refreshActivity()
+                self?.screensAsleep = true
+                self?.claudeTimer?.invalidate()
+                self?.claudeTimer = nil
+                self?.claudeDeadline = nil
             }
         })
-        claudeTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshClaude() }
-        }
+        claudeObservers.append(center.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.screensAsleep = false
+                self.refreshClaude()
+            }
+        })
+        screensAsleep = false
         refreshClaude()
+    }
+
+    /// What nothing announces is the clock: a turn with no summary stops counting as running two hours after its last
+    /// message, and a background subagent that stopped writing is given up on. One timer, set after each read for the
+    /// first moment something can expire (and none while the screens are asleep or nothing is running).
+    func lastCICheck(_ name: String) -> Date? { ciCheckedAt[name] ?? ci[name]?.checkedAt }
+
+    func scheduleClaudeTick() {
+        guard agents.enabled, persists, !screensAsleep else {
+            claudeTimer?.invalidate()
+            claudeTimer = nil
+            claudeDeadline = nil
+            return
+        }
+        var next: TimeInterval?
+        let now = Date()
+        for session in claudeSessions.values where session.running {
+            let left = (session.lastUserMessage ?? .distantPast).addingTimeInterval(Claude.runningTimeout).timeIntervalSince(now)
+            next = min(next ?? left, left)
+        }
+        // Sessions with background work: its end isn't always an event (a command's process just exits).
+        if !claudeTasks.isEmpty { next = min(next ?? 60, 60) }
+        // Icon picking waits out a failure (a rejected key waits for a new one instead).
+        if agents.iconsEnabled, iconsPausedUntil > now, iconsPausedUntil < .distantFuture {
+            next = min(next ?? .infinity, iconsPausedUntil.timeIntervalSince(now))
+        }
+        guard let next else { return }
+        let deadline = now.addingTimeInterval(max(next, 1) + 1)
+        // Frequent reads must not keep pushing it back: it only moves earlier.
+        if claudeTimer?.isValid == true, let current = claudeDeadline, current <= deadline { return }
+        claudeTimer?.invalidate()
+        claudeDeadline = deadline
+        let timer = Timer(fire: deadline, interval: 0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.claudeDeadline = nil
+                self?.refreshClaude()
+            }
+        }
+        timer.tolerance = max(next, 1) * 0.1 + 2
+        RunLoop.main.add(timer, forMode: .common)
+        claudeTimer = timer
     }
 
     func restartPolling() {
@@ -229,6 +357,7 @@ final class Store {
         ci = state.ci
         settings = state.settings
         agents = state.agents ?? AgentsState()
+        savedRevision = persistedRevision
     }
 
     private static let writer = DispatchQueue(label: "lookout.save")
@@ -236,6 +365,7 @@ final class Store {
     /// Coalesced: the write happens shortly after the last call, off the main thread.
     func save() {
         guard persists, !loading else { return }
+        savedRevision = persistedRevision
         saveDirty = true
         saveTask?.cancel()
         saveTask = Task { [weak self] in
@@ -546,9 +676,9 @@ final class Store {
         defer {
             isSyncing = false
             lastSync = Date()
-            rateRemaining = gh.rateRemaining
+            if rateRemaining != gh.rateRemaining { rateRemaining = gh.rateRemaining }
             prune()
-            save()
+            if persistedRevision != savedRevision { save() }
         }
         if me == nil { await authenticate() }
         guard me != nil else { return }
@@ -572,15 +702,18 @@ final class Store {
             try await syncConversations(name)
             try await syncThreads(name)
             try await syncCI(name)
-            repoErrors[name] = nil
+            if repoErrors[name] != nil { repoErrors[name] = nil }
         } catch {
-            repoErrors[name] = error.localizedDescription
+            let message = error.localizedDescription
+            if repoErrors[name] != message { repoErrors[name] = message }
         }
     }
 
     private func updateRepo(_ name: String, _ f: (inout RepoConfig) -> Void) {
         guard let i = repos.firstIndex(where: { $0.fullName == name }) else { return }
-        f(&repos[i])
+        var repo = repos[i]
+        f(&repo)
+        if repo != repos[i] { repos[i] = repo }
     }
 
     private func syncConversations(_ name: String) async throws {
@@ -674,19 +807,25 @@ final class Store {
         if !repo.allComments {
             added = added.filter { $0.forYou != false }
         }
-        items.append(contentsOf: added)
-        updateRepo(name) { $0.cursors.merge(newCursors) { _, new in new } }
+        if !added.isEmpty { items.append(contentsOf: added) }
+        if !newCursors.isEmpty { updateRepo(name) { $0.cursors.merge(newCursors) { _, new in new } } }
 
         // Anything I replied to after it was posted is addressed.
-        for reply in myReplies {
-            for i in items.indices where items[i].repo == name && items[i].number == reply.number
-                && items[i].state.isOpen && items[i].createdAt < reply.at {
-                if let root = reply.root {
-                    if items[i].threadRoot == root { items[i].state = .addressed }
-                } else if EventKind.conversationKinds.contains(items[i].kind) {
-                    items[i].state = .addressed
+        if !myReplies.isEmpty {
+            var all = items
+            var changed = false
+            for reply in myReplies {
+                for i in all.indices where all[i].repo == name && all[i].number == reply.number
+                    && all[i].state.isOpen && all[i].createdAt < reply.at {
+                    if let root = reply.root {
+                        if all[i].threadRoot == root { all[i].state = .addressed; changed = true }
+                    } else if EventKind.conversationKinds.contains(all[i].kind) {
+                        all[i].state = .addressed
+                        changed = true
+                    }
                 }
             }
+            if changed { items = all }
         }
 
         announce(added.filter { $0.state == .unread && $0.createdAt > repo.addedAt })
@@ -790,11 +929,14 @@ final class Store {
                 }
             }
         }
-        for i in items.indices where items[i].repo == name && items[i].kind == .reviewComment {
-            guard let root = items[i].threadRoot, let r = resolved[root] else { continue }
-            if r, items[i].state != .discarded { items[i].state = .resolved }
-            if !r, items[i].state == .resolved { items[i].state = .read }
+        var all = items
+        var changed = false
+        for i in all.indices where all[i].repo == name && all[i].kind == .reviewComment {
+            guard let root = all[i].threadRoot, let r = resolved[root] else { continue }
+            if r, all[i].state != .discarded, all[i].state != .resolved { all[i].state = .resolved; changed = true }
+            if !r, all[i].state == .resolved { all[i].state = .read; changed = true }
         }
+        if changed { items = all }
     }
 
     private func syncCI(_ name: String) async throws {
@@ -820,26 +962,35 @@ final class Store {
         let target = sha ?? ref
         async let checksReq: GHCheckRuns = gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
         async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
-        let (checks, status) = try await (checksReq, statusReq)
+        let (checks, combined) = try await (checksReq, statusReq)
         let external = checks.checkRuns.filter { $0.app?.slug != "github-actions" }
 
         let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
         var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()
         failing += external.filter { bad.contains($0.conclusion ?? "") }.map(\.name)
-        failing += status.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
+        failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
         let pending = latest.values.contains { $0.status != "completed" }
             || external.contains { $0.status != "completed" }
-            || status.statuses.contains { $0.state == "pending" }
-        let any = !latest.isEmpty || !external.isEmpty || status.totalCount > 0
+            || combined.statuses.contains { $0.state == "pending" }
+        let any = !latest.isEmpty || !external.isEmpty || combined.totalCount > 0
         let state: CIState = !failing.isEmpty ? .failure : pending ? .pending : any ? .success : .none
-        let commit = sha ?? status.sha
+        let commit = sha ?? combined.sha
 
         let previous = ci[name]?.state
-        ci[name] = CIStatus(state: state, branch: branch, sha: commit,
-                            url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
-                            failing: failing, checkedAt: Date(),
-                            title: actions.workflowRuns.first?.displayTitle,
-                            updatedAt: latest.values.compactMap(\.updatedAt).max())
+        let status = CIStatus(state: state, branch: branch, sha: commit,
+                              url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
+                              failing: failing, checkedAt: Date(),
+                              title: actions.workflowRuns.first?.displayTitle,
+                              updatedAt: latest.values.compactMap(\.updatedAt).max())
+        // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
+        ciCheckedAt[name] = status.checkedAt
+        if var old = ci[name] {
+            old.checkedAt = status.checkedAt
+            if old != status { ci[name] = status; save() }
+        } else {
+            ci[name] = status
+            save()
+        }
 
         if previous == .success || previous == .pending, state == .failure {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",
@@ -881,10 +1032,11 @@ final class Store {
 
     private func prune() {
         let now = Date()
-        items.removeAll { item in
+        func expired(_ item: InboxItem) -> Bool {
             let age = now.timeIntervalSince(item.createdAt)
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
+        if items.contains(where: expired) { items.removeAll(where: expired) }
         if items.count > 1500 {
             items = Array(items.sorted { $0.createdAt > $1.createdAt }.prefix(1500))
         }

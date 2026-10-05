@@ -202,11 +202,6 @@ extension LookoutHub {
     /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
     static let peekLine: CGFloat = 30
 
-    /// The height of a section's first cell in the bar: the inbox's (icon and count), or a 30pt one.
-    func firstCell(_ section: HubSection, _ frame: CGRect) -> CGFloat {
-        section == .inbox || section == .controls ? frame.height : Self.peekLine
-    }
-
     /// A panel's width: the controls' is a small menu; along the top and bottom, CI's is its column's.
     func panelWidth(_ section: HubSection) -> CGFloat {
         switch section {
@@ -235,17 +230,24 @@ extension LookoutHub {
                 peekInbox.padding(.top, 4)
             case .ci:
                 peekCI
-            case .controls:
-                EmptyView()
             case .agents:
                 let rows = agentRows
                 agentsHeader.frame(height: Self.peekLine)
-                ForEach(rows.kept) { r in DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: 36) }
+                // By project and draggable, like the full view's.
+                let starts = projectStarts(rows.kept)
+                ForEach(rows.kept) { r in
+                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: 36)
+                        .modifier(GroupRule(on: starts.contains(r.id)))
+                        .modifier(AgentReorder(row: r, store: store))
+                }
                 if !rows.pending.isEmpty {
-                    pendingLabel.padding(.horizontal, 8).frame(height: 14)
+                    pendingLabel(twoLines: false).frame(height: 14)
                     ForEach(rows.pending) { r in DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: 36) }
                 }
                 NewSessionRow(store: store, style: .detail).frame(height: 36)
+            default:
+                // (The controls have their own panel.)
+                EmptyView()
             }
         }
         .frame(width: Self.detail - 2 * Self.peekPad, alignment: .leading)
@@ -263,17 +265,21 @@ extension LookoutHub {
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 let rows = agentRows
-                CappedScroll(cap: maxLength - Self.cell - 120, selection: hub.selection) {
+                CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(rows.kept) { twoLineRow($0) }
+                        let starts = projectStarts(rows.kept)
+                        ForEach(rows.kept) { r in
+                            if starts.contains(r.id) { groupDivider }
+                            twoLineRow(r).modifier(AgentReorder(row: r, store: store))
+                        }
                         if !rows.pending.isEmpty {
-                            pendingLabel.padding(.leading, 10).padding(.top, 6).padding(.bottom, 2)
+                            pendingLabel(twoLines: true).padding(.top, 6).padding(.bottom, 2)
                             ForEach(rows.pending) { twoLineRow($0) }
                         }
                     }
                 }
                 NewSessionRow(store: store, style: .twoLines)
-            case .controls:
+            default:
                 EmptyView()
             }
         }
@@ -300,9 +306,9 @@ extension LookoutHub {
         if items.isEmpty {
             emptyInbox
         } else {
-            CappedScroll(cap: 330, selection: hub.selection) {
-                VStack(spacing: 1) { ForEach(items) { itemRow($0).id("i:" + $0.id) } }
-                    .animation(.easeOut(duration: 0.22), value: items.map(\.id))
+            CappedScroll(cap: 330, hub: hub) {
+                LazyVStack(spacing: 1) { ForEach(items) { itemRow($0).id("i:" + $0.id) } }
+                    .animation(.easeOut(duration: 0.22), value: listKey)
             }
         }
     }
