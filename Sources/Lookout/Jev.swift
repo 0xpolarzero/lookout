@@ -12,8 +12,15 @@ struct JevClient {
         var errorDescription: String? { message }
     }
 
-    /// The best of `options` (option names, no descriptions) for `state`, and how sure Jev is.
-    func choose(_ options: [String], for state: [String: String], instructions: String) async throws -> (choice: String, confidence: Double) {
+    struct Choice {
+        let choice: String
+        let confidence: Double
+        /// Every option's probability (they sum to 1).
+        let probabilities: [String: Double]
+    }
+
+    /// The best of `options` for `state`, and how sure Jev is. `hints` describes options whose name isn't enough.
+    func choose(_ options: [String], hints: [String: String] = [:], for state: [String: String], instructions: String) async throws -> Choice {
         // Option keys: SF Symbol names use dots; keep keys plain and map back.
         let keys = Dictionary(uniqueKeysWithValues: options.map { (Self.key(for: $0), $0) })
         let body: [String: Any] = [
@@ -23,7 +30,7 @@ struct JevClient {
                 "pick": [
                     "type": "choice",
                     "instructions": instructions,
-                    "criteria": Dictionary(uniqueKeysWithValues: keys.keys.map { ($0, NSNull()) }),
+                    "criteria": keys.mapValues { option -> Any in hints[option] ?? NSNull() },
                 ],
             ],
         ]
@@ -49,13 +56,18 @@ struct JevClient {
         option.replacingOccurrences(of: ".", with: "_")
     }
 
-    static func parse(_ data: Data, keys: [String: String]) throws -> (choice: String, confidence: Double) {
+    static func parse(_ data: Data, keys: [String: String]) throws -> Choice {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let pick = (json["answers"] as? [String: Any])?["pick"] as? [String: Any],
               let key = pick["choice"] as? String, let option = keys[key] else {
             throw Failure(message: "Unexpected answer from TypeSafe")
         }
-        return (option, (pick["confidence"] as? Double) ?? 0)
+        var probabilities: [String: Double] = [:]
+        for (key, p) in pick["probabilities"] as? [String: Double] ?? [:] {
+            if let option = keys[key] { probabilities[option] = p }
+        }
+        if probabilities.isEmpty { probabilities[option] = 1 }
+        return Choice(choice: option, confidence: (pick["confidence"] as? Double) ?? 0, probabilities: probabilities)
     }
 }
 

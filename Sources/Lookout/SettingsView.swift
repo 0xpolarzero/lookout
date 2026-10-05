@@ -206,8 +206,9 @@ struct SettingsView: View {
                 Text(error).font(.system(size: 11)).foregroundStyle(Theme.amber)
             }
             hint("Each session in your list gets an icon instead of letters. Its title, project name and first message go to "
-                 + "TypeSafe (api.typesafe.ai), whose Jev model picks one of \(SessionIcons.available.count) icons not already on screen, "
-                 + "for about $0.0001 a session. Keys come from console.typesafe.ai.")
+                 + "TypeSafe (api.typesafe.ai), whose Jev model picks what kind of icon fits (code, debugging, data, people…), "
+                 + "then one of that kind not already on screen, from \(SessionIcons.drawable.count) in all. Two small requests, "
+                 + "about $0.0002 a session. Keys come from console.typesafe.ai.")
         }
     }
 

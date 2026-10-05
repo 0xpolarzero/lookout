@@ -45,6 +45,9 @@ struct AgentsState: Codable {
     /// Bumped when the palette changes, so colours picked from an older one are picked again.
     var paletteVersion = AgentsState.palette
     static let palette = 2
+    /// Bumped when the icon list changes, so icons picked from an older one are picked again.
+    var iconsVersion = AgentsState.icons
+    static let icons = 2
 
     init() {}
 
@@ -67,6 +70,12 @@ struct AgentsState: Codable {
         iconsEnabled = try c.decodeIfPresent(Bool.self, forKey: .iconsEnabled) ?? false
         let version = try c.decodeIfPresent(Int.self, forKey: .paletteVersion) ?? 1
         folderColors = version == Self.palette ? try c.decodeIfPresent([String: Int].self, forKey: .folderColors) ?? [:] : [:]
+        if try c.decodeIfPresent(Int.self, forKey: .iconsVersion) ?? 1 != Self.icons {
+            for i in entries.indices {
+                entries[i].icon = nil
+                entries[i].rejectedIcons = nil
+            }
+        }
     }
 }
 
@@ -510,14 +519,19 @@ extension Store {
         // Nothing to go on yet (a brand-new session the app hasn't named): wait for the next read.
         guard first != nil || session.title != "Untitled session" else { return }
         let used = Set(rows.compactMap(\.entry.icon)).union(next.entry.rejectedIcons ?? [])
-        let options = SessionIcons.available.filter { !used.contains($0) }
-        guard !options.isEmpty else { return }
+        let open = SessionIcons.open(excluding: used)
+        guard !open.isEmpty else { return }
         var state = ["session title": session.title, "project": session.folderName]
         if let first { state["first message"] = first }
         let client = JevClient(key: key)
         iconTask = Task { [weak self] in
             do {
-                let pick = try await client.choose(options, for: state, instructions:
+                // Two questions (Jev takes at most 255 options): what kind of icon, then which one.
+                let kinds = try await client.choose(open.map(\.category.key),
+                    hints: Dictionary(uniqueKeysWithValues: open.map { ($0.category.key, $0.category.about) }),
+                    for: state, instructions: "Which kind of icon would best show what this coding session is about?")
+                let options = SessionIcons.shortlist(open, probabilities: kinds.probabilities)
+                let pick = try await client.choose(options, hints: SessionIcons.hints, for: state, instructions:
                     "Pick the icon that best shows what this coding session is about, so its owner can tell it apart from their other sessions at a glance.")
                 guard let self else { return }
                 self.mutateAgent(session.id) { $0.icon = pick.choice }
