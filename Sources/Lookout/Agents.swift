@@ -310,6 +310,15 @@ extension Store {
         return (blocked + rows.filter(\.waitsForYou).count, unread.count - blocked)
     }
 
+    /// Projects with a session in your list or pending, in the order they're listed: where a new session can start.
+    var agentFolders: [String] {
+        var out: [String] = []
+        for row in allAgentRows where !row.session.folderKey.isEmpty && !out.contains(row.session.folderKey) {
+            out.append(row.session.folderKey)
+        }
+        return out
+    }
+
     var knownFolders: [String] {
         Array(Set(claudeSessions.values.map(\.folderKey))).sorted { a, b in
             if a.isEmpty != b.isEmpty { return !a.isEmpty }
@@ -430,6 +439,10 @@ extension Store {
     func openAgent(_ id: String) {
         Claude.open(id)
         mutateAgent(id) { $0.unread = false }
+    }
+
+    func startAgent(in folder: String) {
+        Claude.newSession(in: folder)
     }
 
     func toggleAgentRead(_ id: String) {

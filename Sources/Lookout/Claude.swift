@@ -68,6 +68,14 @@ enum Claude {
         NSWorkspace.shared.open(url)
     }
 
+    /// Starts a new Code session in a folder (the app's own link, the one its dock menu uses for recent folders).
+    static func newSession(in folder: String) {
+        var components = URLComponents(string: "claude://code/new")
+        components?.queryItems = [URLQueryItem(name: "folder", value: folder)]
+        guard let url = components?.url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: Sessions
 
     private struct Raw: Decodable {
