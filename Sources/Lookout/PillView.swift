@@ -40,6 +40,16 @@ struct PillView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: store.updater.showsInPill)
+        // No menu bar icon, so the pill carries the app menu (its update button keeps its own).
+        .contextMenu {
+            Button("Open Inbox") { actions.toggle(.inbox) }
+            Button("Settings…") { actions.toggle(.settings) }
+            if store.updater.isRelease {
+                Button("Check for Updates") { Task { await store.updater.check(manual: true) } }
+            }
+            Divider()
+            Button("Quit Lookout") { NSApp.terminate(nil) }
+        }
         .padding(2)
         .fixedSize()
         // Tile positions in window coordinates: the drawer (its own window, beside the pill) lines its rows up with them.
@@ -321,6 +331,7 @@ struct AgentDrawer: View {
     let showAgents: () -> Void
     var onHover: (Bool) -> Void = { _ in }
     @State private var bubbleHeight: CGFloat = 0
+    @State private var barHeight: CGFloat = 0
 
     static let moreID = "more"
     static let width: CGFloat = 300
@@ -374,17 +385,39 @@ struct AgentDrawer: View {
                 .onHover(perform: onHover)
                 .offset(y: top)
             }
+            // New sessions in the listed projects, right under the rows.
+            if showsBar(placed.isEmpty) {
+                newSessionBar
+                    .padding(6)
+                    .frame(width: Self.width)
+                    .background(panelShape)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { barHeight = $0 }
+                    .onHover(perform: onHover)
+                    .offset(y: bottom + 6)
+            }
             // The selected session's summary goes in a card under the drawer, never over other rows.
             if let row = selected?.row, let detail = detail(row) {
                 bubble(row, detail)
                     .frame(width: Self.width)
                     .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bubbleHeight = $0 }
-                    .offset(y: bottom + 6)
+                    .offset(y: bottom + barSpace + 6)
                     .allowsHitTesting(false)
             }
         }
-        .frame(width: Self.width, height: max(height, hasCard(selected?.row) ? bottom + 6 + bubbleHeight : 0), alignment: .topLeading)
+        .frame(width: Self.width, height: max(height, alignedBottom(bottom, empty: placed.isEmpty, card: hasCard(selected?.row))),
+               alignment: .topLeading)
+    }
+
+    private func showsBar(_ empty: Bool) -> Bool { !empty && !store.agentFolders.isEmpty }
+
+    /// Room the new-session bar takes under the rows (with its gap).
+    private var barSpace: CGFloat { store.agentFolders.isEmpty ? 0 : barHeight + 6 }
+
+    private func alignedBottom(_ bottom: CGFloat, empty: Bool, card: Bool) -> CGFloat {
+        let below = (showsBar(empty) ? barSpace : 0) + (card ? 6 + bubbleHeight : 0)
+        return below > 0 ? bottom + below : 0
     }
 
     private func hasCard(_ row: AgentRow?) -> Bool {
@@ -439,6 +472,10 @@ struct AgentDrawer: View {
                 DrawerRow(row: row, store: store, ui: ui, number: index, twoLines: true)
             }
             if morePending > 0 { moreRow.frame(height: rowHeight) }
+            if !store.agentFolders.isEmpty {
+                Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 4).padding(.vertical, 4)
+                newSessionBar
+            }
         }
         .padding(6)
         .frame(width: Self.width + 20)
@@ -473,6 +510,21 @@ struct AgentDrawer: View {
         RoundedRectangle(cornerRadius: 14, style: .continuous)
             .fill(Theme.bg)
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.stroke))
+    }
+
+    /// "New session" in each project of the listed sessions, one click away.
+    private var newSessionBar: some View {
+        FlowLayout(spacing: 5) {
+            Text("New session in")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Theme.tertiary)
+                .frame(height: 22)
+                .padding(.leading, 4)
+                .padding(.trailing, 1)
+            ForEach(store.agentFolders, id: \.self) { folder in
+                NewSessionChip(folder: folder, color: store.projectColor(folder)) { store.startAgent(in: folder) }
+            }
+        }
     }
 
     private var moreRow: some View {
@@ -598,5 +650,34 @@ private struct DrawerRow: View {
             Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "pending") : row.statusText)
                 .foregroundStyle(row.statusColor)
         }
+    }
+}
+
+/// One project in the drawer's new-session bar.
+private struct NewSessionChip: View {
+    let folder: String
+    let color: Color?
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus").font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(hover ? Theme.text : Theme.tertiary)
+                if let color { Circle().fill(color).frame(width: 6, height: 6) }
+                Text(URL(fileURLWithPath: folder).lastPathComponent)
+                    .font(.system(size: 11))
+                    .foregroundStyle(hover ? Theme.text : Theme.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(Capsule().fill(Color.white.opacity(hover ? 0.12 : 0.05)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help("New Claude session in \((folder as NSString).abbreviatingWithTildeInPath)")
     }
 }
