@@ -6,7 +6,7 @@ import SwiftUI
 
 // MARK: - Playground window
 
-/// A fake desktop: the bar on the edge you pick, an app behind it to try click-through, and the keys wired up.
+/// A fake desktop: the bar on the edge you pick, an app behind it, and the keys wired up.
 struct PlaygroundView: View {
     let store: Store
     @Bindable var ui: UIState
@@ -86,7 +86,7 @@ struct PlaygroundView: View {
         .background(Color.black.opacity(0.22))
     }
 
-    /// Something to click through to while Lookout is see-through.
+    /// Something under the open view.
     private var behindApp: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
@@ -95,7 +95,7 @@ struct PlaygroundView: View {
                 Text("Some app behind").font(.system(size: 12, weight: .semibold)).foregroundStyle(.black.opacity(0.6))
                 Spacer()
             }
-            Text("Make Lookout see-through (double-tap right ⌘), then click this button through it.")
+            Text("An app under Lookout: clicks around the bar reach it.")
                 .font(.system(size: 12.5)).foregroundStyle(.black.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
             Button("Clicked \(behindClicks) times") { behindClicks += 1 }
@@ -120,13 +120,12 @@ struct PlaygroundView: View {
             .pickerStyle(.segmented)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Hover the bar to expand it · right ⌘ keeps it open").foregroundStyle(.secondary)
-                Text("Double-tap right ⌘: see-through, click-through · Esc: back / close").foregroundStyle(.secondary)
+                Text("Esc: back / close").foregroundStyle(.secondary)
                 Text("↑ ↓ ↩ Space ⌫ ⌘K ⌘⌫ ⌥Space ⌘, as in the app").foregroundStyle(.secondary)
             }
             .font(.system(size: 11.5))
             HStack(spacing: 10) {
                 Label(hub.pinned ? "Pinned" : "Not pinned", systemImage: hub.pinned ? "pin.fill" : "pin")
-                Label(hub.transparent ? "See-through" : "Opaque", systemImage: hub.transparent ? "eye.slash" : "eye")
             }
             .font(.system(size: 11.5, weight: .medium))
         }

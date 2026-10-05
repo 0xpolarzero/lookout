@@ -58,9 +58,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 /// Key combinations go through Carbon hot keys; lone modifier taps (e.g. right ⌘) through event monitors,
 /// which need Accessibility access to see the keys typed in other apps.
 final class HotKeys {
+    static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
     private static var handlers: [UInt32: () -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
     private var taps: [UInt32: (key: UInt16, handler: () -> Void)] = [:]
+    /// Mouse button shortcuts, caught (and kept from the app under the pointer) by an event tap.
+    private var buttons: [UInt32: (button: Int, flags: NSEvent.ModifierFlags, handler: () -> Void)] = [:]
+    private var buttonTap: CFMachPort?
+    /// Buttons whose press was a shortcut: their release is kept from the app under the pointer too.
+    private var swallowedUps: Set<Int> = []
     private var tap = ModifierTap()
     private var monitors: [Any] = []
     /// Taps are ignored while this is true (e.g. while a shortcut is being recorded).
@@ -82,8 +88,13 @@ final class HotKeys {
         if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
         HotKeys.handlers[id] = nil
         taps[id] = nil
-        defer { updateMonitors() }
+        buttons[id] = nil
+        defer { updateMonitors(); updateButtonTap() }
         guard let shortcut else { return }
+        if let button = shortcut.mouseButton {
+            buttons[id] = (button, shortcut.flags, handler)
+            return
+        }
         if shortcut.isModifierTap {
             taps[id] = (shortcut.keyCode, handler)
             return
@@ -119,7 +130,54 @@ final class HotKeys {
         }
     }
 
+    /// A session event tap for the mouse buttons in use: it sees them in every app and can keep a shortcut's click
+    /// from also going back in a browser. It needs Accessibility access, like modifier taps.
+    private func updateButtonTap() {
+        if buttons.isEmpty {
+            if let tap = buttonTap { CGEvent.tapEnable(tap: tap, enable: false) }
+            buttonTap = nil
+            return
+        }
+        guard buttonTap == nil else { return }
+        if !AXIsProcessTrusted() {
+            AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+        }
+        let mask = CGEventMask(1 << CGEventType.otherMouseDown.rawValue | 1 << CGEventType.otherMouseUp.rawValue)
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+                                          eventsOfInterest: mask, callback: { _, type, event, info in
+            guard let info else { return Unmanaged.passUnretained(event) }
+            return Unmanaged<HotKeys>.fromOpaque(info).takeUnretainedValue().button(type, event)
+        }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
+            NSLog("Lookout: can't watch mouse buttons (Accessibility access?)")
+            return
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        buttonTap = tap
+    }
+
+    /// Runs on the main run loop. Returns nil to keep the click from the app under the pointer.
+    private func button(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = buttonTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        }
+        let number = Int(event.getIntegerValueField(.mouseEventButtonNumber))
+        if type == .otherMouseUp { return swallowedUps.remove(number) == nil ? Unmanaged.passUnretained(event) : nil }
+        guard !paused() else { return Unmanaged.passUnretained(event) }
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue)).intersection(Shortcut.relevant)
+        guard let match = buttons.values.first(where: { $0.button == number && $0.flags == flags }) else {
+            return Unmanaged.passUnretained(event)
+        }
+        swallowedUps.insert(number)
+        DispatchQueue.main.async { match.handler() }
+        return nil
+    }
+
     private func handle(_ event: NSEvent) {
+        if Self.debug, event.type == .flagsChanged {
+            NSLog("Lookout keys: flagsChanged %d flags %lx trusted %d", event.keyCode, event.modifierFlags.rawValue, AXIsProcessTrusted() ? 1 : 0)
+        }
         guard event.type == .flagsChanged else { return tap.interrupt() }
         // Without Accessibility the keys typed elsewhere are invisible, so right ⌘ + C would look like a tap.
         guard let key = tap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue),

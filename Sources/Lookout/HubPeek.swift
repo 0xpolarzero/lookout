@@ -33,7 +33,7 @@ extension LookoutHub {
     }
 
     /// The hovered section, when the whole view isn't open.
-    var peeking: HubSection? { expanded ? nil : hub.section }
+    var peeking: HubSection? { expanded || hub.quiet ? nil : hub.section }
 
     /// Where a panel sits along the bar: from `start`, `length` long (both along the bar's edge), and which of the
     /// bar's ends it reaches.
@@ -284,15 +284,18 @@ extension LookoutHub {
         }
     }
 
-    /// The pointer left the bar and its panel: close the panel a beat later (crossing the gap between them
-    /// doesn't count).
+    /// The pointer left the bar and its panel: close the panel (a moment later, so going from one to the other,
+    /// side by side, doesn't count).
     func hoverChanged() {
         peekLeave?.cancel()
         guard !overBar, !overPanel else { return }
         let hub = hub
         peekLeave = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            if !Task.isCancelled { hub.section = nil }
+            try? await Task.sleep(for: .milliseconds(40))
+            if !Task.isCancelled {
+                hub.section = nil
+                hub.quiet = false
+            }
         }
     }
 }

@@ -281,7 +281,7 @@ extension LookoutHub {
 
     var pinButton: some View {
         IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Unpin" : "Keep open",
-                   detail: "\(store.shortcut(.togglePanel).display) · twice for see-through",
+                   detail: store.shortcut(.togglePanel).display,
                    size: IconButton.Size.bar, tint: hub.pinned ? Theme.amber : Theme.secondary, active: hub.pinned) {
             hub.pinned.toggle()
         }

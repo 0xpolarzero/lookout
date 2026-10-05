@@ -11,11 +11,15 @@ enum HubPage { case main, settings, repos }
 final class HubState {
     var hovering = false
     var pinned = false {
-        // Pinned or unpinned by hand on a page: that's what you want once back, not what it was before.
-        didSet { if !navigating, page != .main { pinnedBeforePage = nil } }
+        didSet {
+            // Pinned or unpinned by hand on a page: that's what you want once back, not what it was before.
+            if !navigating, page != .main { pinnedBeforePage = nil }
+            // Just closed with the pointer still over the bar: no panel pops back open under it.
+            if oldValue && !pinned { quiet = true }
+        }
     }
-    /// Dimmed and click-through: what's behind stays usable without closing Lookout.
-    var transparent = false
+    /// No hover panels until the pointer has left the bar (set when the full view closes).
+    var quiet = false
     var page: HubPage = .main
     /// "i:<item id>" or "a:<session id>": the row the keys act on.
     var selection: String?
@@ -87,8 +91,6 @@ final class HubKeys {
     let hub: HubState
     /// Unpinned and closed from the keyboard (Esc): the app hands focus back.
     var onClose: () -> Void = {}
-    private var lastTap: Date = .distantPast
-    private var pinnedBeforeTap = false
 
     init(store: Store, ui: UIState, hub: HubState) {
         self.store = store
@@ -96,24 +98,10 @@ final class HubKeys {
         self.hub = hub
     }
 
-    /// The keep-open key: one tap pins or unpins at once; a second one right after undoes that and toggles
-    /// see-through instead.
+    /// The keep-open key: opens (and keeps open), or closes.
     func toggleTap() {
-        let now = Date()
-        if now.timeIntervalSince(lastTap) < 0.3 {
-            hub.pinned = pinnedBeforeTap
-            hub.transparent.toggle()
-            lastTap = .distantPast
-        } else {
-            pinnedBeforeTap = hub.pinned
-            if hub.transparent {
-                hub.transparent = false
-            } else {
-                hub.pinned.toggle()
-                if !hub.pinned { close() }
-            }
-            lastTap = now
-        }
+        if HotKeys.debug { NSLog("Lookout keys: tap, pinned %d", hub.pinned ? 1 : 0) }
+        if hub.pinned { close() } else { hub.pinned = true }
     }
 
     func close() {
@@ -136,7 +124,6 @@ final class HubKeys {
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
             else if hub.focus != nil { withAnimation(LookoutHub.refocus) { hub.focus = nil } }
-            else if hub.transparent { hub.transparent = false }
             else { close() }
             return true
         }
@@ -145,7 +132,7 @@ final class HubKeys {
             return true
         }
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
-        guard hub.expanded, hub.page == .main, !hub.transparent else { return false }
+        guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
             setQuery(String(hub.query.dropLast()))
@@ -199,7 +186,11 @@ final class HubKeys {
 
     /// A new search picks its first result, so ↩ opens it straight away.
     private func setQuery(_ query: String) {
-        withAnimation(.easeOut(duration: 0.15)) { hub.query = query }
+        withAnimation(.easeOut(duration: 0.15)) {
+            hub.query = query
+            // Searching looks everywhere, and what you type shows in the inbox's header: nothing stays shrunk.
+            if !query.isEmpty { hub.focus = nil }
+        }
         if let first = targets().first { select(first) } else { hub.selection = nil; ui.drawerSelection = nil }
     }
 
@@ -267,13 +258,10 @@ struct LookoutHub: View {
                 y: peeking != nil ? 7 : 2)
         .animation(.easeOut(duration: 0.16), value: peeking)
         .fixedSize()
-        .opacity(hub.transparent ? 0.28 : 1)
-        .allowsHitTesting(!hub.transparent)
         // Opening has a touch of bounce; closing doesn't, so it never overshoots back past the bar.
         .animation(expanded ? Self.opening : Self.closing, value: expanded)
         .animation(.spring(duration: 0.36, bounce: 0.06), value: hub.page)
         .animation(Self.refocus, value: hub.focus)
-        .animation(.easeOut(duration: 0.18), value: hub.transparent)
         .contextMenu {
             Button("Keep Open") { hub.pinned = true }
             Button("Settings…") { hub.go(.settings) }
@@ -538,9 +526,12 @@ struct LookoutHub: View {
             HStack(spacing: 2) {
                 ciCell
                 // 6 more than the 2 between the counts: the title as far from its icon as the agents'.
-                if wide && !shrunk(.ci) { ciHeader.padding(.leading, 6).transition(.hubReveal) }
+                if wide {
+                    Text("CI").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.secondary)
+                        .padding(.leading, 6).padding(.trailing, 2).transition(.hubReveal)
+                }
                 ForEach(Self.ciOrder, id: \.self) { ciCount($0) }
-                if wide && shrunk(.ci) { Spacer(minLength: 0); focusButton(.ci) }
+                if wide { Spacer(minLength: 0); focusButton(.ci) }
             }
             .padding(.leading, Self.inset + 1)
             .padding(.trailing, Self.inset)
@@ -623,17 +614,30 @@ struct LookoutHub: View {
         if expanded {
             Group {
                 if hub.page == .main {
-                    // A focused column widens; the others shrink to what their segment in the strip shows. The last
-                    // takes what's left under the strip's trailing group.
-                    HStack(alignment: .top, spacing: 0) {
-                        column(.inbox) { inboxColumn }
-                        columnDivider
-                        if store.agents.enabled {
-                            column(.ci) { ciColumn }
-                            columnDivider
-                            column(.agents, last: true) { agentsColumn }
+                    // GitHub on the left (the inbox, CI under it), the sessions on the right; a focused section has
+                    // the whole width to itself. The strip above keeps its segments whatever's focused.
+                    VStack(spacing: 0) {
+                        if let focus = hub.focus {
+                            // The strip's width, never its text's.
+                            focusedBody(focus).frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .topLeading)
                         } else {
-                            column(.ci, last: true) { ciColumn }
+                            HStack(alignment: .top, spacing: 0) {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    inboxColumn
+                                    Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 12)
+                                    ciColumn
+                                }
+                                .frame(width: Self.githubWidth, alignment: .topLeading)
+                                if store.agents.enabled {
+                                    columnDivider
+                                    // As wide as its segment (with the controls after it), whatever its text would like.
+                                    agentsColumn.frame(minWidth: columnWidth(.agents), idealWidth: columnWidth(.agents),
+                                                       maxWidth: .infinity, alignment: .topLeading)
+                                }
+                            }
+                            // As tall as the taller side, so the sessions' column reaches the bottom (its new
+                            // session row with it).
+                            .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.1)),
@@ -655,8 +659,9 @@ struct LookoutHub: View {
         Rectangle().fill(Theme.stroke).frame(width: 1).padding(.vertical, 12)
     }
 
+    /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
-        CappedScroll(cap: maxLength - Self.cell, selection: hub.selection) {
+        CappedScroll(cap: max(160, maxLength - Self.cell - 150), selection: hub.selection) {
             VStack(spacing: 1) {
                 if items.isEmpty { emptyInbox }
                 ForEach(items) { itemRow($0).id("i:" + $0.id) }
@@ -683,25 +688,31 @@ struct LookoutHub: View {
         .opacity(searching ? 0.4 : 1)
     }
 
+    /// The sessions along the top and bottom: one column, or two once there are enough to make the view tall (so
+    /// it doesn't stretch past what the inbox needs).
     var agentsColumn: some View {
+        agentsGrid(columns: agentRows.kept.count + agentRows.pending.count > 5 ? 2 : 1)
+    }
+
+    func agentsGrid(columns: Int) -> some View {
         let rows = agentRows
+        let grid = Array(repeating: GridItem(.flexible(minimum: 260), spacing: 4, alignment: .top), count: columns)
         return VStack(alignment: .leading, spacing: 0) {
             CappedScroll(cap: maxLength - Self.cell - 60, selection: hub.selection) {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(rows.kept) { twoLineRow($0) }
-                    if !rows.pending.isEmpty {
-                        // Lined up with the tiles, as beside the bar on the sides.
-                        pendingLabel.padding(.leading, 10).padding(.top, 6).padding(.bottom, 2)
-                        ForEach(rows.pending) { twoLineRow($0) }
-                    }
+                // One grid, so no hole is left before the pending ones (their smaller, dimmer tiles say what they are).
+                LazyVGrid(columns: grid, alignment: .leading, spacing: 2) {
+                    ForEach(rows.kept + rows.pending) { twoLineRow($0) }
                 }
                 .padding(.horizontal, Self.inset)
                 .padding(.top, 8)
             }
+            // At the bottom, whatever height the column gets.
+            Spacer(minLength: 0)
             NewSessionRow(store: store, style: .twoLines)
                 .padding(.horizontal, Self.inset)
                 .padding(.bottom, 8)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     func twoLineRow(_ r: AgentRow) -> some View {
@@ -717,24 +728,38 @@ struct LookoutHub: View {
         showsDetail && hub.focus != nil && hub.focus != section
     }
 
-    /// Along the top and bottom: a column's width, wider focused, narrow shrunk.
+    /// Along the top and bottom, the strip's segments: the inbox's and CI's together span the GitHub column under
+    /// them; the sessions' (with the controls after it) spans theirs, wider when they come in two columns.
     func columnWidth(_ section: HubSection) -> CGFloat {
-        let focused = hub.focus == section
-        return switch section {
-        case .inbox: focused ? 640 : shrunk(.inbox) ? 116 : Self.detail
-        case .ci: focused ? 480 : shrunk(.ci) ? 196 : Self.ciWidth
-        default: focused ? 640 : shrunk(.agents) ? 210 : Self.detail
+        switch section {
+        case .inbox: 380
+        case .ci: Self.githubWidth - 380 - 1
+        default: agentRows.kept.count + agentRows.pending.count > 5 ? 430 : 260
         }
     }
 
-    /// A column under its segment: its content, or nothing while shrunk.
-    @ViewBuilder func column<Content: View>(_ section: HubSection, last: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
-        let width = columnWidth(section)
-        Group {
-            if shrunk(section) { Color.clear.frame(height: 1) } else { content() }
+    static let githubWidth: CGFloat = 580
+
+    /// Along the top and bottom, a focused section across the whole width, in as many columns as fit.
+    @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
+        switch section {
+        case .inbox:
+            CappedScroll(cap: maxLength - Self.cell - 16, selection: hub.selection) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 6, alignment: .top), GridItem(.flexible(), spacing: 6, alignment: .top)],
+                          alignment: .leading, spacing: 1) {
+                    ForEach(items) { itemRow($0).id("i:" + $0.id) }
+                }
+                .padding(.horizontal, Self.inset)
+                .padding(.vertical, 8)
+            }
+            .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
+        case .ci:
+            ciColumn
+        default:
+            agentsGrid(columns: 3)
         }
-        .frame(minWidth: width, idealWidth: width, maxWidth: last ? .infinity : width, alignment: .topLeading)
     }
+
 
     /// A count with its colour's dot, as CI's in the bar.
     func dotCount(_ n: Int, _ color: Color) -> some View {
@@ -792,7 +817,10 @@ struct LookoutHub: View {
         if summary?.isEmpty == false || !r.tasks.isEmpty {
             VStack(alignment: .leading, spacing: 1) {
                 if let summary, !summary.isEmpty {
-                    Text(summary).font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
+                    // The summary is Markdown (**bold**, `code`): shown as such, on one line.
+                    Text((try? AttributedString(markdown: summary, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                         ?? AttributedString(summary))
+                        .font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
                 }
                 if !r.tasks.isEmpty { RunningLine(tasks: r.tasks) }
             }

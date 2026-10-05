@@ -221,13 +221,11 @@ final class HubController {
         let mouse = NSEvent.mouseLocation
         let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(mouse)
             || (hub.panelFrame != .zero && screenFrame(hub.panelFrame).insetBy(dx: -2, dy: -2).contains(mouse))
-        window.ignoresMouseEvents = hub.transparent || !inside
-        // See-through keeps everything as it is: you're working with what's behind.
-        guard !hub.transparent else { return }
+        window.ignoresMouseEvents = !inside
         if inside == hub.hovering { hoverTask?.cancel(); return }
         hoverTask?.cancel()
         // Passing over the bar on the way somewhere else shouldn't open it; nor should a drag from elsewhere.
-        let delay: Duration = inside ? .zero : .milliseconds(120)
+        let delay: Duration = inside ? .zero : .milliseconds(40)
         guard !inside || NSEvent.pressedMouseButtons == 0 else { return }
         hoverTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
@@ -235,6 +233,7 @@ final class HubController {
             self.hub.hovering = inside
             if !inside {
                 self.hub.section = nil
+                self.hub.quiet = false
                 self.closedByLeaving()
             }
         }
@@ -262,7 +261,7 @@ final class HubController {
         }) { monitors.append(local) }
     }
 
-    /// The keep-open shortcut (right ⌘, say): tap to pin or unpin, tap twice for see-through.
+    /// The keep-open shortcut (right ⌘, say): opens and keeps it open, or closes it.
     func toggleShortcut() {
         keys.toggleTap()
     }
@@ -295,19 +294,15 @@ final class HubController {
         mouseMoved()
     }
 
-    /// Pinning takes the keyboard; see-through gives it back and lets every click through.
+    /// Pinning takes the keyboard; unpinning gives it back.
     private func observe() {
         withObservationTracking {
             _ = hub.pinned
-            _ = hub.transparent
             _ = ui.edge
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
-                if self.hub.transparent {
-                    self.window.ignoresMouseEvents = true
-                    if self.window.isKeyWindow { self.giveFocusBack() }
-                } else if self.hub.pinned, !self.window.isKeyWindow {
+                if self.hub.pinned, !self.window.isKeyWindow {
                     self.takeFocus()
                 } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
                     self.giveFocusBack()

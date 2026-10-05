@@ -31,8 +31,30 @@ struct Shortcut: Codable, Hashable {
         return UInt32(m)
     }
 
+    /// Mouse buttons past the left and right ones (a mouse's side buttons), stored as key codes from here on, so
+    /// a shortcut is a key, a modifier tap or a button, held with modifiers or not.
+    static let mouseBase: UInt16 = 0x1000
+
+    static func mouse(_ button: Int, modifiers: NSEvent.ModifierFlags = []) -> Shortcut {
+        Shortcut(keyCode: mouseBase + UInt16(button), modifiers: modifiers)
+    }
+
+    /// NSEvent's button number: 2 is the middle button, 3 and 4 the side ones (back, forward).
+    var mouseButton: Int? { keyCode >= Self.mouseBase ? Int(keyCode - Self.mouseBase) : nil }
+
     var display: String {
         if let tap = Self.tapKeys[keyCode] { return tap.name }
+        if let button = mouseButton {
+            let mods = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
+                + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
+            let name = switch button {
+            case 2: "Middle click"
+            case 3: "Mouse back"
+            case 4: "Mouse forward"
+            default: "Mouse button \(button + 1)"
+            }
+            return mods + name
+        }
         var s = ""
         if flags.contains(.control) { s += "⌃" }
         if flags.contains(.option) { s += "⌥" }
@@ -188,7 +210,16 @@ struct ShortcutRecorder: View {
         recording = true
         store.isRecordingShortcut = true
         tap = ModifierTap()
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .otherMouseDown]) { event in
+            if event.type == .otherMouseDown {
+                // A mouse's side (or middle) button, for the shortcuts that work everywhere.
+                if action.isGlobal {
+                    accept(Shortcut.mouse(event.buttonNumber, modifiers: event.modifierFlags))
+                } else {
+                    error = "Mouse buttons work for the shortcuts that work from any app"
+                }
+                return nil
+            }
             if event.type == .flagsChanged {
                 // A lone modifier tap needs the system-wide detector, so only global shortcuts accept it.
                 if action.isGlobal, let key = tap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {

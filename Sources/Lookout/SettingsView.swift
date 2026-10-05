@@ -121,7 +121,7 @@ struct SettingsView: View {
                         Text(action.title).font(.system(size: 12.5))
                         if action.isGlobal {
                             Text("Works from any app").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
-                            if store.shortcut(action).isModifierTap && !AXIsProcessTrusted() {
+                            if (store.shortcut(action).isModifierTap || store.shortcut(action).mouseButton != nil) && !AXIsProcessTrusted() {
                                 Text("Needs Accessibility access (System Settings › Privacy & Security)")
                                     .font(.system(size: 10.5)).foregroundStyle(Theme.amber)
                             }
