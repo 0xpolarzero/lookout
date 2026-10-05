@@ -28,7 +28,7 @@ final class Updater {
     }
 
     static let repo = "0xpolarzero/lookout"
-    static let interval: TimeInterval = 6 * 3600
+    static let interval: TimeInterval = 3600
 
     private(set) var phase: Phase = .idle
     private(set) var release: Release?
@@ -46,6 +46,9 @@ final class Updater {
     @ObservationIgnored private var staged: URL?
     var stagedPath: String? { staged?.path }
     @ObservationIgnored private var progress: NSKeyValueObservation?
+    @ObservationIgnored private var wake: NSObjectProtocol?
+    /// Downloads started by a check rather than a click fail quietly and are tried again at the next check.
+    @ObservationIgnored private var quiet = false
 
     let current: String
     private var forceRelease: Bool
@@ -61,18 +64,42 @@ final class Updater {
         forceRelease || (Bundle.main.bundleIdentifier != nil && Version(current) != nil && !current.contains("dev"))
     }
 
-    /// The pill shows a button from the moment a release is found until it's installed or skipped.
-    var showsInPill: Bool { release != nil && phase != .idle }
+    /// Releases download in the background: the pill shows a button once one is ready to restart into, or when
+    /// it's left to you (found by a check that doesn't download, or a background download that failed).
+    var showsInPill: Bool {
+        guard release != nil else { return false }
+        switch phase {
+        case .available, .ready, .installing, .failed: return true
+        case .downloading: return !quiet
+        case .idle: return false
+        }
+    }
 
+    /// Checks shortly after launch, every hour and on wake from sleep.
     func start() {
         guard isRelease, loop == nil else { return }
         loop = Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))
             while !Task.isCancelled {
-                if let self, self.automatic() { await self.check(manual: false) }
+                if let self, self.automatic() { await self.update(manual: false) }
                 try? await Task.sleep(for: .seconds(Self.interval))
             }
         }
+        wake = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
+                                                                 queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(10))
+                if let self, self.automatic() { await self.update(manual: false) }
+            }
+        }
+    }
+
+    /// Checks, then fetches and verifies anything new in the background.
+    func update(manual: Bool) async {
+        await check(manual: manual)
+        guard phase == .available else { return }
+        quiet = true
+        download()
     }
 
     // MARK: Check
@@ -145,8 +172,9 @@ final class Updater {
             } catch is CancellationError {
                 phase = .available
             } catch {
-                phase = .failed(error.localizedDescription)
+                phase = quiet ? .available : .failed(error.localizedDescription)
             }
+            quiet = false
         }
     }
 
@@ -268,8 +296,8 @@ final class Updater {
     /// The one thing to do next: download, retry, or restart.
     func advance() {
         switch phase {
-        case .available: download()
-        case .failed: staged == nil ? download() : install()
+        case .available: quiet = false; download()
+        case .failed: quiet = false; staged == nil ? download() : install()
         case .ready: install()
         case .idle, .downloading, .installing: break
         }

@@ -19,7 +19,7 @@ Grab the latest zip from [Releases](https://github.com/0xpolarzero/lookout/relea
 
     xattr -dr com.apple.quarantine /Applications/Lookout.app
 
-After that Lookout updates itself: when a new release is out, an arrow appears on the pill. Click it to download (a ring shows progress), then click again to restart into the new version. Right-click it for the release notes or to skip that version. Settings → Updates shows your version, checks on demand and turns the background check (every 6 hours) off. An update is only installed if its checksum matches and it's signed by the same certificate as the app you're running.
+After that Lookout updates itself: it checks in the background (shortly after launch, every hour and on wake), downloads and verifies a new release, then shows a small restart icon on the pill; hover it for what it is, click to restart into the new version. Right-click it for the release notes or to skip that version. Settings → Updates shows your version, checks on demand and turns the background check off. An update is only installed if its checksum matches and it's signed by the same certificate as the app you're running.
 
 ## Build & run
 

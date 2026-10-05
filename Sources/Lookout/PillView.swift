@@ -45,7 +45,7 @@ struct PillView: View {
             Button("Open Inbox") { actions.toggle(.inbox) }
             Button("Settings…") { actions.toggle(.settings) }
             if store.updater.isRelease {
-                Button("Check for Updates") { Task { await store.updater.check(manual: true) } }
+                Button("Check for Updates") { Task { await store.updater.update(manual: true) } }
             }
             Divider()
             Button("Quit Lookout") { NSApp.terminate(nil) }
@@ -230,8 +230,9 @@ struct PillView: View {
     }
 }
 
-/// A new release: click to download it (a ring shows progress), click again to restart into it.
-/// Right-click for the release notes or to skip that version.
+/// A new release, fetched in the background: an icon that says what it is on hover; click to restart into it
+/// (or to download it, with a ring for progress, if that didn't happen on its own). Right-click for the release
+/// notes or to skip that version.
 private struct UpdateButton: View {
     let updater: Updater
     let horizontal: Bool
@@ -260,7 +261,7 @@ private struct UpdateButton: View {
                     }
                 }
                 .frame(width: 28, height: 28)
-                if horizontal {
+                if horizontal && hover {
                     Text(label(version))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.text)
@@ -271,6 +272,7 @@ private struct UpdateButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .animation(.spring(duration: 0.25), value: hover)
         .help(help(version))
         .contextMenu {
             if let page = updater.release?.page {
@@ -300,9 +302,9 @@ private struct UpdateButton: View {
     private func label(_ version: String) -> String {
         switch updater.phase {
         case .downloading(let fraction): "\(Int(fraction * 100))%"
-        case .ready, .installing: "Restart"
-        case .failed: "Retry"
-        default: "Update"
+        case .ready, .installing: "Restart to update"
+        case .failed: "Retry update"
+        default: "Update to \(version)"
         }
     }
 
