@@ -232,6 +232,8 @@ struct LookoutHub: View {
     @Bindable var hub: HubState
     /// Room the expanded view may take along its edge.
     var maxLength: CGFloat = 700
+    /// The window's width: along the top and bottom, the sessions' column takes what the screen has left.
+    var maxWidth: CGFloat = .infinity
     /// Where each section's cells are in the bar, and whether the pointer is on the bar or a section's panel.
     @State var sectionFrames: [HubSection: CGRect] = [:]
     @State var overBar = false
@@ -653,12 +655,15 @@ struct LookoutHub: View {
                             focusedBody(focus).frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .topLeading)
                         } else {
                             HStack(alignment: .top, spacing: 0) {
+                                // CI at the bottom (level with the new session row): the room between is the inbox's.
                                 VStack(alignment: .leading, spacing: 0) {
                                     inboxColumn
+                                    Spacer(minLength: 0)
                                     Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 12)
                                     ciColumn
                                 }
                                 .frame(width: Self.githubWidth, alignment: .topLeading)
+                                .frame(maxHeight: .infinity, alignment: .top)
                                 if store.agents.enabled {
                                     columnDivider
                                     // As wide as its segment (with the controls after it), whatever its text would like.
@@ -692,7 +697,7 @@ struct LookoutHub: View {
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
-        CappedScroll(cap: max(160, maxLength - Self.cell - 150), selection: hub.selection) {
+        CappedScroll(cap: max(160, min(maxLength - Self.cell - 150, Self.listCap)), selection: hub.selection) {
             VStack(spacing: 1) {
                 if items.isEmpty { emptyInbox }
                 ForEach(items) { itemRow($0).id("i:" + $0.id) }
@@ -706,33 +711,45 @@ struct LookoutHub: View {
     }
 
     var ciColumn: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
             if store.ciRepos.isEmpty {
                 linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) }
             } else {
                 // The state's name starts each line, coloured; its count is in the strip above.
-                ForEach(Self.ciOrder, id: \.self) { ciLine($0) }
+                ForEach(Self.ciOrder, id: \.self) { ciLine($0, compact: true) }
             }
         }
         .padding(.horizontal, Self.inset)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .opacity(searching ? 0.4 : 1)
     }
 
-    /// The sessions along the top and bottom: one column, or two once there are enough to make the view tall (so
-    /// it doesn't stretch past what the inbox needs).
+    /// The sessions along the top and bottom: one per line, read top to bottom like the inbox beside them.
     var agentsColumn: some View {
-        agentsGrid(columns: agentRows.kept.count + agentRows.pending.count > 5 ? 2 : 1)
+        agentsGrid(columns: 1)
     }
 
     func agentsGrid(columns: Int) -> some View {
         let rows = agentRows
         let grid = Array(repeating: GridItem(.flexible(minimum: 260), spacing: 4, alignment: .top), count: columns)
         return VStack(alignment: .leading, spacing: 0) {
-            CappedScroll(cap: maxLength - Self.cell - 60, selection: hub.selection) {
-                // One grid, so no hole is left before the pending ones (their smaller, dimmer tiles say what they are).
-                LazyVGrid(columns: grid, alignment: .leading, spacing: 2) {
-                    ForEach(rows.kept + rows.pending) { twoLineRow($0) }
+            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), selection: hub.selection) {
+                // Your sessions by project, a line between projects; then the pending ones, labelled and dimmed.
+                VStack(alignment: .leading, spacing: 0) {
+                    let groups = searching ? [rows.kept] : store.groups(rows.kept)
+                    ForEach(Array(groups.enumerated()), id: \.offset) { i, group in
+                        if i > 0 { groupDivider }
+                        LazyVGrid(columns: grid, alignment: .leading, spacing: 0) {
+                            ForEach(group) { twoLineRow($0).modifier(AgentReorder(row: $0, store: store)) }
+                        }
+                    }
+                    if !rows.pending.isEmpty {
+                        if !rows.kept.isEmpty { groupDivider }
+                        pendingLabel.padding(.leading, 10).padding(.bottom, 4)
+                        LazyVGrid(columns: grid, alignment: .leading, spacing: 0) {
+                            ForEach(rows.pending) { twoLineRow($0).opacity(0.62) }
+                        }
+                    }
                 }
                 .padding(.horizontal, Self.inset)
                 .padding(.top, 8)
@@ -750,6 +767,10 @@ struct LookoutHub: View {
         sessionBlock(r, twoLines: true).id("a:" + r.id)
     }
 
+    var groupDivider: some View {
+        Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 10).padding(.vertical, 4)
+    }
+
     // MARK: Focus
 
     static var refocus: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.34, bounce: 0.06) }
@@ -760,16 +781,22 @@ struct LookoutHub: View {
     }
 
     /// Along the top and bottom, the strip's segments: the inbox's and CI's together span the GitHub column under
-    /// them; the sessions' (with the controls after it) spans theirs, wider when they come in two columns.
+    /// them; the sessions' (with the controls after it) spans theirs.
     func columnWidth(_ section: HubSection) -> CGFloat {
         switch section {
-        case .inbox: 380
-        case .ci: Self.githubWidth - 380 - 1
-        default: agentRows.kept.count + agentRows.pending.count > 5 ? 430 : 260
+        case .inbox: return 370
+        case .ci: return Self.githubWidth - 370 - 1
+        default:
+            // As much as the screen has left after the controls, the update button and the margins.
+            let wanted: CGFloat = 400
+            let room = maxWidth - Self.githubWidth - 1 - 140 - (store.updater.showsInPill ? 50 : 0) - 2 * Self.inset
+            return max(260, min(wanted, room))
         }
     }
 
-    static let githubWidth: CGFloat = 580
+    static let githubWidth: CGFloat = 570
+    /// Along the top and bottom, the lists scroll past this, so the view stays compact.
+    static let listCap: CGFloat = 300
 
     /// Along the top and bottom, a focused section across the whole width, in as many columns as fit.
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
@@ -787,7 +814,7 @@ struct LookoutHub: View {
         case .ci:
             ciColumn
         default:
-            agentsGrid(columns: 3)
+            agentsGrid(columns: 1)
         }
     }
 
@@ -820,11 +847,11 @@ struct LookoutHub: View {
             DrawerRow(row: r, store: store, ui: ui, number: 0, twoLines: twoLines, highlight: hub.query,
                       showsKept: searching, inHub: !twoLines, plain: true)
             // Under the title: past the tile on two-line rows (10 + 24 + 9), else at the title's 8.
-            sessionDetails(r)
+            Group { if twoLines { cardDetail(r) } else { sessionDetails(r) } }
                 .padding(.leading, twoLines ? 43 : 8)
                 .padding(.trailing, 8)
-                .padding(.top, twoLines ? -4 : -3)
-                .padding(.bottom, 7)
+                .padding(.top, twoLines ? -8 : -3)
+                .padding(.bottom, twoLines ? 4 : 7)
         }
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(selected ? 0.06 : 0)))
         // The same actions as an inbox item's, over the title line's right end, centred on it.
@@ -840,6 +867,21 @@ struct LookoutHub: View {
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(r.id) }
         .onHover { if $0 { ui.drawerSelection = r.id } }
+    }
+
+    /// A grid card's one line under its title, always there so every card is the same height: the turn's summary,
+    /// else what's still running (the count is in the status above either way).
+    @ViewBuilder func cardDetail(_ r: AgentRow) -> some View {
+        let summary = r.session.running ? nil : r.session.summary?.detail
+        if let summary, !summary.isEmpty {
+            Text((try? AttributedString(markdown: summary, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                 ?? AttributedString(summary))
+                .font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
+        } else if !r.tasks.isEmpty {
+            RunningLine(tasks: r.tasks)
+        } else {
+            Text(" ").font(.system(size: 11))
+        }
     }
 
     /// At most two short lines: the turn's summary, and what's still running after it.
@@ -899,5 +941,19 @@ private struct CapHeightLayout: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+}
+
+
+/// Your sessions in the hub can be dragged onto one another to reorder them (pending ones can't).
+struct AgentReorder: ViewModifier {
+    let row: AgentRow
+    let store: Store
+    @State private var target = false
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(Reorderable(row: row, store: store, dropTarget: $target))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.accent.opacity(target ? 0.6 : 0)))
     }
 }

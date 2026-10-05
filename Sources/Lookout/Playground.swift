@@ -47,7 +47,8 @@ struct PlaygroundView: View {
 
     @ViewBuilder private func docked(_ size: CGSize) -> some View {
         let hubView = LookoutHub(store: store, ui: ui, hub: hub,
-                                 maxLength: ui.edge.isHorizontal ? size.height - menuBar - 80 : size.height - menuBar - 60)
+                                 maxLength: ui.edge.isHorizontal ? size.height - menuBar - 80 : size.height - menuBar - 60,
+                                 maxWidth: size.width)
             .onHover(perform: hover)
         switch ui.edge {
         case .right: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.top, menuBar + 40)

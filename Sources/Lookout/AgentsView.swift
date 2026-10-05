@@ -425,7 +425,7 @@ struct AgentListRow: View {
 }
 
 /// Only kept sessions can be dragged; dropping on another kept one moves it there.
-private struct Reorderable: ViewModifier {
+struct Reorderable: ViewModifier {
     let row: AgentRow
     let store: Store
     @Binding var dropTarget: Bool

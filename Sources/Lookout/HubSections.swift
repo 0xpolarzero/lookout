@@ -213,7 +213,8 @@ extension LookoutHub {
     }
 
     /// The repos in a CI state, as chips that open their checks.
-    func ciLine(_ state: CIState) -> some View {
+    /// `compact`: along the top and bottom, where lines don't have to match the bar's cells.
+    func ciLine(_ state: CIState, compact: Bool = false) -> some View {
         let repos = store.ciRepos(in: state)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(state.title)
@@ -231,8 +232,8 @@ extension LookoutHub {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+        .padding(.vertical, compact ? 1 : 4)
+        .frame(maxWidth: .infinity, minHeight: compact ? 24 : 30, alignment: .leading)
     }
 
     // MARK: Agents
