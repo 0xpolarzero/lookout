@@ -610,11 +610,10 @@ private struct DrawerRow: View {
             if selected {
                 AgentActions(row: row, store: store, size: 22)
             } else if !twoLines {
-                // What a working agent is doing matters more than the end of its title.
                 status.font(.system(size: 10.5).monospacedDigit()).lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: row.session.running ? 170 : 110, alignment: .trailing)
-                    .fixedSize(horizontal: row.session.running, vertical: false)
-                    .layoutPriority(row.session.running ? 2 : 0)
+                    .frame(maxWidth: busy ? 170 : 110, alignment: .trailing)
+                    .fixedSize(horizontal: busy, vertical: false)
+                    .layoutPriority(busy ? 2 : 0)
             }
         }
         .padding(.leading, 10)
@@ -626,6 +625,9 @@ private struct DrawerRow: View {
         .onTapGesture { store.openAgent(row.id) }
         .onHover { if $0 { ui.drawerSelection = row.id } }
     }
+
+    /// Working, or done with something still running: the status says more than the end of the title.
+    private var busy: Bool { row.session.running || !row.tasks.isEmpty }
 
     /// The title, with what you typed picked out.
     private var title: AttributedString {
@@ -645,8 +647,14 @@ private struct DrawerRow: View {
         if row.session.running {
             WorkingText(row: row)
         } else {
-            Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "pending") : row.statusText)
-                .foregroundStyle(row.statusColor)
+            HStack(spacing: 4) {
+                Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "pending") : row.statusText)
+                    .foregroundStyle(row.statusColor)
+                if let tasks = row.tasksText {
+                    Text("·").foregroundStyle(Theme.tertiary)
+                    Text(tasks).foregroundStyle(Theme.claude)
+                }
+            }
         }
     }
 }

@@ -98,6 +98,13 @@ enum Demo {
         store.claudeSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         store.claudeLink = .ok
         store.claudeActivity = ["local_demo-lookout": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-20))]
+        store.claudeTasks = ["local_demo-ci": [
+            ClaudeTask(id: "a1", kind: .agent, title: "Review the sandbox changes", since: now.addingTimeInterval(-190),
+                       activity: ClaudeActivity(text: "Reading sandbox.rs", since: now.addingTimeInterval(-5))),
+            ClaudeTask(id: "a2", kind: .agent, title: "Check the other CI jobs", since: now.addingTimeInterval(-70),
+                       activity: ClaudeActivity(text: "Thinking", since: now.addingTimeInterval(-2))),
+            ClaudeTask(id: "b1", kind: .command, title: "Run the full test suite", since: now.addingTimeInterval(-370)),
+        ]]
         var state = AgentsState()
         state.folderColors = ["/Users/me/code/lcu": 0, "/Users/me/code/microsandbox": 1, "/Users/me/code/lookout": 2,
                               "/Users/me/code/lcu-research": 3]
@@ -402,6 +409,16 @@ enum ClaudeCheck {
             let reader = Claude.ActivityReader()
             for s in sessions where s.running {
                 print("  working:", s.title, "→", s.cliID.flatMap { reader.activity(for: $0) }.map { "\($0.text) (since \(shortAgo($0.since)))" } ?? "no transcript")
+            }
+            let folders = Claude.taskFolders()
+            let open = Claude.openTaskOutputs()
+            let tasks = Claude.TaskReader()
+            for s in sessions where !s.running && !s.isArchived {
+                guard let cli = s.cliID, let folder = folders[cli] else { continue }
+                for t in tasks.tasks(in: folder, transcript: reader.transcript(cli), openOutputs: open) {
+                    print("  background:", s.title, "→", t.kind == .agent ? "agent" : "command", t.title,
+                          t.activity.map { "(\($0.text))" } ?? "", "since \(shortAgo(t.since))")
+                }
             }
         }
         if CommandLine.arguments.contains("--watch") { watch(); return }

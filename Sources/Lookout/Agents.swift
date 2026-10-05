@@ -97,6 +97,8 @@ struct AgentRow: Identifiable, Hashable {
     var color: Color?
     /// What it's doing, while it works.
     var activity: ClaudeActivity?
+    /// Turn over, but subagents or commands it started are still running.
+    var tasks: [ClaudeTask] = []
 
     /// The picked icon, unless you chose letters or an emoji yourself.
     var icon: String? { entry.label == nil ? entry.icon : nil }
@@ -124,11 +126,11 @@ struct AgentRow: Identifiable, Hashable {
 
     /// "Running swift test · 3m" while working: the current step, and how long the turn has run.
     func workingText(now: Date = Date()) -> String {
-        let elapsed = duration(now.timeIntervalSince(session.lastUserMessage ?? activity?.since ?? now))
+        let elapsed = Self.duration(now.timeIntervalSince(session.lastUserMessage ?? activity?.since ?? now))
         return "\(activity?.text ?? "Working") · \(elapsed)"
     }
 
-    private func duration(_ t: TimeInterval) -> String {
+    static func duration(_ t: TimeInterval) -> String {
         let s = max(0, Int(t))
         if s < 60 { return "\(s)s" }
         if s < 3600 { return "\(s / 60)m" }
@@ -143,6 +145,9 @@ struct AgentRow: Identifiable, Hashable {
         case .idle: shortAgo(session.lastActivity)
         }
     }
+
+    /// "3 running": what's left in the background, after the status.
+    var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
 
     var statusColor: Color {
         switch status {
@@ -253,7 +258,8 @@ extension Store {
         AgentRow(session: session, entry: entry ?? agents.entries.first { $0.id == session.id } ?? AgentEntry(id: session.id),
                  label: label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
                  color: projectColor(session.folderKey),
-                 activity: session.running ? claudeActivity[session.id] : nil)
+                 activity: session.running ? claudeActivity[session.id] : nil,
+                 tasks: session.running ? [] : claudeTasks[session.id] ?? [])
     }
 
     func projectColor(_ folder: String) -> Color? {
@@ -361,6 +367,24 @@ extension Store {
             if let cli = session.cliID, let activity = activityReader.activity(for: cli) { next[session.id] = activity }
         }
         if next != claudeActivity { claudeActivity = next }
+        refreshTasks()
+    }
+
+    /// Background work left running by sessions whose turn is over. Cheap enough for every transcript change: a couple
+    /// of folder listings and one pass over your processes, and only when some session has tasks listed at all.
+    func refreshTasks() {
+        var next: [String: [ClaudeTask]] = [:]
+        let folders = Claude.isRunning ? Claude.taskFolders() : [:]
+        let idle = claudeSessions.values.filter { !$0.running && !$0.isArchived && $0.cliID.map { folders[$0] != nil } == true }
+        if !idle.isEmpty {
+            let open = Claude.openTaskOutputs()
+            for session in idle {
+                guard let cli = session.cliID, let folder = folders[cli] else { continue }
+                let tasks = taskReader.tasks(in: folder, transcript: activityReader.transcript(cli), openOutputs: open)
+                if !tasks.isEmpty { next[session.id] = tasks }
+            }
+        }
+        if next != claudeTasks { claudeTasks = next }
     }
 
     /// Folds a fresh read of the app into what Lookout remembers. Pure apart from `now`, so tests drive it directly.

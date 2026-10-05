@@ -23,6 +23,8 @@ final class Store {
     }
     var claudeSessions: [String: ClaudeSession] = [:]
     var claudeActivity: [String: ClaudeActivity] = [:]
+    /// Subagents and commands still running in sessions whose turn is over.
+    var claudeTasks: [String: [ClaudeTask]] = [:]
     var hasTypesafeKey = Keychain.read(Keychain.typesafe)?.isEmpty == false
     var iconError: String?
     var claudeLink: ClaudeLink = .off
@@ -50,6 +52,7 @@ final class Store {
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
     @ObservationIgnored let claudeReader = Claude.SessionReader()
     @ObservationIgnored let activityReader = Claude.ActivityReader()
+    @ObservationIgnored let taskReader = Claude.TaskReader()
     @ObservationIgnored var iconTask: Task<Void, Never>?
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     @ObservationIgnored var typesafeKeyCache: String?

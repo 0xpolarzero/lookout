@@ -40,6 +40,17 @@ struct ClaudeActivity: Hashable {
     var waitsForYou = false
 }
 
+/// A subagent or shell command a session started in the background, still running.
+struct ClaudeTask: Hashable, Identifiable {
+    enum Kind: Hashable { case agent, command }
+    var id: String
+    var kind: Kind
+    var title: String
+    var since: Date
+    /// What a subagent is on (from its own transcript); commands don't say.
+    var activity: ClaudeActivity? = nil
+}
+
 enum Claude {
     static let bundleID = "com.anthropic.claudefordesktop"
     static let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -261,6 +272,137 @@ enum Claude {
             }
             return name.isEmpty ? "Working" : "Using " + name
         }
+    }
+
+    // MARK: Background (subagents and shell commands still running after a turn)
+
+    /// Claude Code lists each session's background tasks in `<root>/<project>/<cliID>/tasks/<id>.output`: a symlink to
+    /// the transcript for a subagent, a file the command writes to for a shell command.
+    static let tasksRoot = URL(fileURLWithPath: "/private/tmp/claude-\(getuid())", isDirectory: true)
+    /// A subagent whose transcript hasn't moved in this long died with its session (or the app).
+    static let agentTimeout: TimeInterval = 30 * 60
+
+    /// Every task folder, by the session it belongs to.
+    static func taskFolders() -> [String: URL] {
+        let fm = FileManager.default
+        var folders: [String: URL] = [:]
+        for project in (try? fm.contentsOfDirectory(at: tasksRoot, includingPropertiesForKeys: nil)) ?? [] {
+            for session in (try? fm.contentsOfDirectory(at: project, includingPropertiesForKeys: nil)) ?? [] {
+                let tasks = session.appendingPathComponent("tasks", isDirectory: true)
+                if fm.fileExists(atPath: tasks.path) { folders[session.lastPathComponent] = tasks }
+            }
+        }
+        return folders
+    }
+
+    /// Files under `tasksRoot` that a process of yours has as its output: the shell commands still running. A command's
+    /// output stays open exactly as long as it runs, so this is the system's answer, with no timeout to guess.
+    static func openTaskOutputs() -> Set<String> {
+        let prefix = tasksRoot.path + "/"
+        let uid = getuid()
+        var pids = [pid_t](repeating: 0, count: Int(proc_listallpids(nil, 0)) + 64)
+        let count = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))
+        var open = Set<String>()
+        for pid in pids.prefix(max(0, count)) where pid > 0 {
+            var bsd = proc_bsdshortinfo()
+            let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsd, bsdSize) == bsdSize, bsd.pbsi_uid == uid else { continue }
+            var info = vnode_fdinfowithpath()
+            let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
+            guard proc_pidfdinfo(pid, 1, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { continue }
+            let path = withUnsafeBytes(of: info.pvip.vip_path) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
+            if path.hasPrefix(prefix) { open.insert(path) }
+        }
+        return open
+    }
+
+    /// The tasks a session still has running. Finished ones are remembered, so a session's list is only read again when
+    /// its folder or transcript changes.
+    final class TaskReader {
+        private var finished = Set<String>()
+        private var titles: [String: String] = [:]
+        /// The session transcript (by date) last searched for each agent's end.
+        private var checked: [String: Date?] = [:]
+        private var agentActivity: [URL: (Date, ClaudeActivity?)] = [:]
+
+        func tasks(in folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> [ClaudeTask] {
+            let fm = FileManager.default
+            let keys: [URLResourceKey] = [.isSymbolicLinkKey, .creationDateKey]
+            let entries = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
+            var tasks: [ClaudeTask] = []
+            for entry in entries where entry.pathExtension == "output" {
+                let id = entry.deletingPathExtension().lastPathComponent
+                guard !finished.contains(id) else { continue }
+                let values = try? entry.resourceValues(forKeys: Set(keys))
+                let since = values?.creationDate ?? now
+                if values?.isSymbolicLink == true {
+                    guard let target = try? fm.destinationOfSymbolicLink(atPath: entry.path) else { continue }
+                    let agent = URL(fileURLWithPath: target)
+                    let modified = (try? agent.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                    // Its end is announced to the session that started it (looked for again only when that changes).
+                    let parentModified = transcript.flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]) }?.contentModificationDate
+                    if now.timeIntervalSince(modified) > Claude.agentTimeout
+                        || parentModified != checked[id] && transcript.flatMap(data).map({ Claude.announcesEnd(of: id, in: $0) }) == true {
+                        finished.insert(id)
+                        continue
+                    }
+                    checked[id] = parentModified
+                    let title = titles[id] ?? Claude.agentTitle(meta: agent.deletingPathExtension().appendingPathExtension("meta.json"))
+                    titles[id] = title
+                    tasks.append(ClaudeTask(id: id, kind: .agent, title: title, since: since, activity: activity(agent, modified)))
+                } else {
+                    guard openOutputs.contains(entry.path) else {
+                        // (A file only just listed may not be open yet.)
+                        if now.timeIntervalSince(since) > 5 { finished.insert(id) }
+                        continue
+                    }
+                    let title = titles[id] ?? transcript.flatMap(data).flatMap { Claude.commandTitle(id, in: $0) } ?? "Background command"
+                    titles[id] = title
+                    tasks.append(ClaudeTask(id: id, kind: .command, title: title, since: since))
+                }
+            }
+            return tasks.sorted { $0.since < $1.since }
+        }
+
+        private func data(_ url: URL) -> Data? { try? Data(contentsOf: url) }
+
+        private func activity(_ url: URL, _ modified: Date) -> ClaudeActivity? {
+            if let cached = agentActivity[url], cached.0 == modified { return cached.1 }
+            let activity = Claude.activity(tail: Claude.tail(of: url))
+            agentActivity[url] = (modified, activity)
+            return activity
+        }
+    }
+
+    /// The session's transcript has the notice Claude Code sends when a task ends.
+    static func announcesEnd(of id: String, in transcript: Data) -> Bool {
+        transcript.range(of: Data("<task-id>\(id)</task-id>".utf8)) != nil
+    }
+
+    static func agentTitle(meta: URL) -> String {
+        struct Meta: Decodable { var description: String? }
+        let description = (try? Data(contentsOf: meta)).flatMap { try? JSONDecoder().decode(Meta.self, from: $0) }?.description
+        return description?.isEmpty == false ? description! : "Subagent"
+    }
+
+    /// What the session called the command: the description (or command) of the call that answered "…with ID: <id>".
+    static func commandTitle(_ id: String, in transcript: Data) -> String? {
+        func line(around range: Range<Data.Index>) -> [String: Any]? {
+            let newline = UInt8(ascii: "\n")
+            let start = transcript[..<range.lowerBound].lastIndex(of: newline).map { $0 + 1 } ?? transcript.startIndex
+            let end = transcript[range.upperBound...].firstIndex(of: newline) ?? transcript.endIndex
+            return try? JSONSerialization.jsonObject(with: transcript[start..<end]) as? [String: Any]
+        }
+        func content(_ obj: [String: Any]?) -> [[String: Any]] {
+            (obj?["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+        }
+        guard let launched = transcript.range(of: Data("with ID: \(id).".utf8)),
+              let callID = content(line(around: launched)).lazy.compactMap({ $0["tool_use_id"] as? String }).first,
+              let called = transcript.range(of: Data("\"id\":\"\(callID)\"".utf8)),
+              let call = content(line(around: called)).first(where: { $0["id"] as? String == callID }),
+              let input = call["input"] as? [String: Any] else { return nil }
+        let text = (input["description"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? input["command"] as? String
+        return text.map { $0.split(separator: "\n").first.map(String.init) ?? $0 }
     }
 
     // MARK: Unread (the sidebar's blue dots)

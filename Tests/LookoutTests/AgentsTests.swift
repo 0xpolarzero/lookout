@@ -270,6 +270,75 @@ import Testing
         #expect(Claude.describe(tool: "Bash", input: ["command": "git status --short"]) == "Running git status --short")
     }
 
+    @Test func backgroundTasks() throws {
+        // Like Claude Code writes them: slashes as they are.
+        func line(_ obj: [String: Any]) -> String {
+            String(data: try! JSONSerialization.data(withJSONObject: obj, options: .withoutEscapingSlashes), encoding: .utf8)!
+        }
+        let fm = FileManager.default
+        // Resolved, as the system reports open files (/var is a link to /private/var).
+        let temp = URL(fileURLWithPath: realpath(fm.temporaryDirectory.path, nil).map { String(cString: $0) } ?? NSTemporaryDirectory())
+        let root = temp.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fm.removeItem(at: root) }
+        let tasks = root.appendingPathComponent("tasks", isDirectory: true)
+        let subagents = root.appendingPathComponent("subagents", isDirectory: true)
+        try fm.createDirectory(at: tasks, withIntermediateDirectories: true)
+        try fm.createDirectory(at: subagents, withIntermediateDirectories: true)
+
+        // Two subagents (one announced as finished) and two commands (one still has its output open).
+        for id in ["a1", "a2"] {
+            let transcript = subagents.appendingPathComponent("agent-\(id).jsonl")
+            try Data((line(["type": "assistant", "timestamp": "2026-10-05T08:33:04.292Z", "message": ["content": [
+                ["type": "tool_use", "name": "Read", "input": ["file_path": "/x/Agents.swift"]]]]]) + "\n").utf8).write(to: transcript)
+            try Data(#"{"description":"Review \#(id)","requestShape":"background"}"#.utf8)
+                .write(to: subagents.appendingPathComponent("agent-\(id).meta.json"))
+            try fm.createSymbolicLink(at: tasks.appendingPathComponent("\(id).output"), withDestinationURL: transcript)
+        }
+        for id in ["b1", "b2"] { try Data().write(to: tasks.appendingPathComponent("\(id).output")) }
+        let parent = root.appendingPathComponent("session.jsonl")
+        try Data([
+            line(["type": "assistant", "message": ["content": [["type": "tool_use", "id": "toolu_1", "name": "Bash",
+                                                                 "input": ["command": "swift build", "description": "Build the app"]]]]]),
+            line(["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": "toolu_1",
+                                                            "content": "Command running in background with ID: b1. Output is being written to: …"]]]]),
+            line(["type": "queue-operation", "content": "<task-notification>\n<task-id>a2</task-id>\n<status>completed</status>"]),
+        ].joined(separator: "\n").utf8).write(to: parent)
+
+        let reader = Claude.TaskReader()
+        let open: Set<String> = [tasks.appendingPathComponent("b1.output").path]
+        let later = Date().addingTimeInterval(60)
+        let found = reader.tasks(in: tasks, transcript: parent, openOutputs: open, now: later)
+        #expect(found.map(\.id).sorted() == ["a1", "b1"])
+        #expect(found.first { $0.id == "a1" }?.kind == .agent)
+        #expect(found.first { $0.id == "a1" }?.title == "Review a1")
+        #expect(found.first { $0.id == "a1" }?.activity?.text == "Reading Agents.swift")
+        #expect(found.first { $0.id == "b1" }?.kind == .command)
+        #expect(found.first { $0.id == "b1" }?.title == "Build the app")
+        // The command ends: its output is closed, and it stays finished.
+        #expect(reader.tasks(in: tasks, transcript: parent, openOutputs: [], now: later).map(\.id) == ["a1"])
+        #expect(reader.tasks(in: tasks, transcript: parent, openOutputs: open, now: later).map(\.id) == ["a1"])
+        // A subagent whose transcript went quiet long ago died with its session.
+        #expect(reader.tasks(in: tasks, transcript: parent, openOutputs: [], now: later.addingTimeInterval(Claude.agentTimeout)).isEmpty)
+    }
+
+    @Test func runningCommandsHoldTheirOutputOpen() throws {
+        let fm = FileManager.default
+        let folder = Claude.tasksRoot.appendingPathComponent("lookout-tests-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: folder) }
+        let output = folder.appendingPathComponent("b1.output")
+        fm.createFile(atPath: output.path, contents: nil)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["10"]
+        process.standardOutput = try FileHandle(forWritingTo: output)
+        try process.run()
+        #expect(Claude.openTaskOutputs().contains(output.path))
+        process.terminate()
+        process.waitUntilExit()
+        #expect(!Claude.openTaskOutputs().contains(output.path))
+    }
+
     @Test func rejectsOtherFiles() {
         #expect(Claude.decodeSession(json(["scheduledTasks": []])) == nil)
         #expect(Claude.decodeSession(Data("not json".utf8)) == nil)

@@ -30,7 +30,11 @@ struct AgentTile: View {
                 if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
             }
             .overlay(alignment: .topTrailing) {
-                if row.session.running && !row.waitsForYou { WorkingDot().offset(x: 3, y: -3) }
+                if row.session.running && !row.waitsForYou {
+                    WorkingDot().offset(x: 3, y: -3)
+                } else if !row.tasks.isEmpty {
+                    BackgroundRing().offset(x: 3, y: -3)
+                }
             }
             // The project's colour, as an underline.
             .overlay(alignment: .bottom) {
@@ -86,6 +90,59 @@ struct WorkingDot: View {
             .onAppear {
                 withAnimation(.easeInOut(duration: 1.1).repeatForever()) { breathe = true }
             }
+    }
+}
+
+/// "Done, but still running something": the working dot's colour, as a turning ring.
+struct BackgroundRing: View {
+    var size: CGFloat = 9
+    @State private var turn = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.72)
+            .stroke(Theme.claude, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+            .frame(width: size - 1.8, height: size - 1.8)
+            .rotationEffect(.degrees(turn ? 360 : 0))
+            .background(Circle().fill(Theme.bg).padding(-1.5))
+            .frame(width: size, height: size)
+            .onAppear {
+                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { turn = true }
+            }
+    }
+}
+
+/// One line per subagent or command still running, with what a subagent is on and how long it's been going.
+struct TaskLines: View {
+    let tasks: [ClaudeTask]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(tasks) { task in
+                    HStack(spacing: 6) {
+                        Image(systemName: task.kind == .agent ? "asterisk" : "terminal")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.claude)
+                            .frame(width: 12)
+                        Text(task.title).foregroundStyle(Theme.secondary).lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text(status(task, now: context.date))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(Theme.claude)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
+                }
+            }
+        }
+        .font(.system(size: 11))
+    }
+
+    private func status(_ task: ClaudeTask, now: Date) -> String {
+        let elapsed = AgentRow.duration(now.timeIntervalSince(task.since))
+        guard let activity = task.activity?.text else { return elapsed }
+        return "\(activity) · \(elapsed)"
     }
 }
 
@@ -320,6 +377,9 @@ struct AgentListRow: View {
                         .foregroundStyle(Theme.secondary)
                         .lineLimit(2)
                         .padding(.top, 1)
+                }
+                if !row.tasks.isEmpty {
+                    TaskLines(tasks: row.tasks).padding(.top, 3)
                 }
                 // Always there (hiding it on hover would shift the row under the pointer).
                 if row.pending {
