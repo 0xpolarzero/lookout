@@ -410,10 +410,10 @@ struct AgentDrawer: View {
                alignment: .topLeading)
     }
 
-    private func showsBar(_ empty: Bool) -> Bool { !empty && !store.agentFolders.isEmpty }
+    private func showsBar(_ empty: Bool) -> Bool { !empty }
 
     /// Room the new-session bar takes under the rows (with its gap).
-    private var barSpace: CGFloat { store.agentFolders.isEmpty ? 0 : barHeight + 6 }
+    private var barSpace: CGFloat { barHeight + 6 }
 
     private func alignedBottom(_ bottom: CGFloat, empty: Bool, card: Bool) -> CGFloat {
         let below = (showsBar(empty) ? barSpace : 0) + (card ? 6 + bubbleHeight : 0)
@@ -472,10 +472,8 @@ struct AgentDrawer: View {
                 DrawerRow(row: row, store: store, ui: ui, number: index, twoLines: true)
             }
             if morePending > 0 { moreRow.frame(height: rowHeight) }
-            if !store.agentFolders.isEmpty {
-                Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 4).padding(.vertical, 4)
-                newSessionBar
-            }
+            Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 4).padding(.vertical, 4)
+            newSessionBar
         }
         .padding(6)
         .frame(width: Self.width + 20)
@@ -512,19 +510,9 @@ struct AgentDrawer: View {
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.stroke))
     }
 
-    /// "New session" in each project of the listed sessions, one click away.
+    /// "New session": a scratch one (no folder) on the row, or one in a listed project from its tile.
     private var newSessionBar: some View {
-        FlowLayout(spacing: 5) {
-            Text("New session in")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Theme.tertiary)
-                .frame(height: 22)
-                .padding(.leading, 4)
-                .padding(.trailing, 1)
-            ForEach(store.agentFolders, id: \.self) { folder in
-                NewSessionChip(folder: folder, color: store.projectColor(folder)) { store.startAgent(in: folder) }
-            }
-        }
+        NewSessionRow(store: store).frame(height: rowHeight)
     }
 
     private var moreRow: some View {
@@ -653,31 +641,110 @@ private struct DrawerRow: View {
     }
 }
 
-/// One project in the drawer's new-session bar.
-private struct NewSessionChip: View {
+/// The drawer's last row: a new scratch session on the row itself, one in a listed project from its tile, and
+/// every option by name in the menu when there are more projects than tiles.
+private struct NewSessionRow: View {
+    let store: Store
+    @State private var hover = false
+
+    static let maxTiles = 4
+
+    var body: some View {
+        let folders = store.agentFolders
+        HStack(spacing: 5) {
+            Button(action: Self.startScratch) {
+                HStack(spacing: 9) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(hover ? Theme.text : Theme.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.white.opacity(hover ? 0.14 : 0.08)))
+                    Text("New session").font(.system(size: 12.5)).foregroundStyle(hover ? Theme.text : Theme.secondary)
+                    Spacer(minLength: 4)
+                }
+                .padding(.leading, 6)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hover = $0 }
+            .help("New Claude session in scratch (no folder)")
+
+            let shown = Array(folders.prefix(Self.maxTiles))
+            let initials = Self.initials(shown.map { URL(fileURLWithPath: $0).lastPathComponent })
+            ForEach(Array(shown.enumerated()), id: \.element) { i, folder in
+                ProjectTile(folder: folder, initials: initials[i], color: store.projectColor(folder)) { store.startAgent(in: folder) }
+            }
+            if folders.count > Self.maxTiles { menu(folders) }
+        }
+        .padding(.trailing, 4)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hover ? Color.white.opacity(0.08) : .clear))
+    }
+
+    private func menu(_ folders: [String]) -> some View {
+        Menu {
+            Button("Scratch (no folder)", action: Self.startScratch)
+            Divider()
+            ForEach(folders, id: \.self) { folder in
+                Button(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
+            }
+        } label: {
+            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(Theme.tertiary)
+        .frame(width: 20, height: 22)
+        .help("New session in…")
+    }
+
+    /// Two letters per project, told apart from the others shown: the first letters of its first two words
+    /// ("lcu-research" → LR), else its first two; on a clash, its first and last.
+    static func initials(_ names: [String]) -> [String] {
+        func first(_ name: String) -> String {
+            let words = name.split { !$0.isLetter && !$0.isNumber }
+            if words.count >= 2 { return String([words[0].first!, words[1].first!]) }
+            return String(name.filter { $0.isLetter || $0.isNumber }.prefix(2))
+        }
+        var out = names.map { first($0).uppercased() }
+        for i in out.indices where out.firstIndex(of: out[i]) != i {
+            let letters = names[i].filter { $0.isLetter || $0.isNumber }
+            if let a = letters.first, let b = letters.last { out[i] = String([a, b]).uppercased() }
+        }
+        return out.map { $0.isEmpty ? "?" : $0 }
+    }
+
+    /// The app's new-session link with no folder opens its composer with none picked: a scratch session.
+    static func startScratch() {
+        guard let url = URL(string: "claude://code/new") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+/// A listed project in the new-session row: its colour, its initials, its name on hover.
+private struct ProjectTile: View {
     let folder: String
+    let initials: String
     let color: Color?
     let action: () -> Void
     @State private var hover = false
 
     var body: some View {
+        let name = URL(fileURLWithPath: folder).lastPathComponent
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "plus").font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(hover ? Theme.text : Theme.tertiary)
-                if let color { Circle().fill(color).frame(width: 6, height: 6) }
-                Text(URL(fileURLWithPath: folder).lastPathComponent)
-                    .font(.system(size: 11))
-                    .foregroundStyle(hover ? Theme.text : Theme.secondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 22)
-            .background(Capsule().fill(Color.white.opacity(hover ? 0.12 : 0.05)))
-            .contentShape(Capsule())
+            Text(initials)
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(color == nil ? Theme.text.opacity(0.88) : Color.black.opacity(0.78))
+                .frame(width: 22, height: 22)
+                .background(shape.fill(color ?? Color.white.opacity(0.1)))
+                .opacity(hover ? 1 : 0.8)
+                .overlay { if hover { shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5).padding(-2.5) } }
+                .contentShape(shape)
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help("New Claude session in \((folder as NSString).abbreviatingWithTildeInPath)")
+        .help("New Claude session in \(name) (\((folder as NSString).abbreviatingWithTildeInPath))")
     }
 }
