@@ -32,6 +32,7 @@ struct Shortcut: Codable, Hashable {
     }
 
     var display: String {
+        if let tap = Self.tapKeys[keyCode] { return tap.name }
         var s = ""
         if flags.contains(.control) { s += "⌃" }
         if flags.contains(.option) { s += "⌥" }
@@ -39,6 +40,18 @@ struct Shortcut: Codable, Hashable {
         if flags.contains(.command) { s += "⌘" }
         return s + Self.keyName(keyCode)
     }
+
+    /// Modifier keys that work as a shortcut tapped on their own, by side: key code → device-dependent flag bit.
+    static let tapKeys: [UInt16: (bit: UInt, name: String)] = [
+        59: (0x01, "Left ⌃"), 62: (0x2000, "Right ⌃"),
+        58: (0x20, "Left ⌥"), 61: (0x40, "Right ⌥"),
+        55: (0x08, "Left ⌘"), 54: (0x10, "Right ⌘"),
+    ]
+    /// Device-dependent bits of every sided ⌃⌥⇧⌘ key.
+    static let sideBits: UInt = 0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x2000
+
+    /// A lone modifier tap (e.g. right ⌘) rather than a key combination.
+    var isModifierTap: Bool { Self.tapKeys[keyCode] != nil }
 
     private static let named: [UInt16: String] = [
         36: "Return", 76: "Enter", 48: "Tab", 49: "Space", 51: "⌫", 117: "⌦", 53: "Esc",
@@ -64,6 +77,26 @@ struct Shortcut: Codable, Hashable {
         guard status == noErr, length > 0 else { return "#\(code)" }
         return String(utf16CodeUnits: chars, count: length).uppercased()
     }
+}
+
+/// Recognizes a single modifier key pressed and released on its own: no other modifier held and no key,
+/// click or scroll in between (so right ⌘ + C never counts as a right ⌘ tap).
+struct ModifierTap {
+    private var candidate: UInt16?
+
+    /// Feed a flagsChanged event; returns the key code of a completed tap.
+    mutating func flagsChanged(keyCode: UInt16, flags: UInt) -> UInt16? {
+        let held = flags & Shortcut.sideBits
+        if held == 0 {
+            defer { candidate = nil }
+            return candidate == keyCode ? candidate : nil
+        }
+        candidate = Shortcut.tapKeys[keyCode]?.bit == held ? keyCode : nil
+        return nil
+    }
+
+    /// Anything else happened while the modifier was down.
+    mutating func interrupt() { candidate = nil }
 }
 
 enum ShortcutAction: String, CaseIterable, Identifiable {
@@ -105,6 +138,7 @@ struct ShortcutRecorder: View {
     @State private var monitor: Any?
     @State private var error: String?
     @State private var hover = false
+    @State private var tap = ModifierTap()
 
     var body: some View {
         let current = store.shortcut(action)
@@ -143,19 +177,34 @@ struct ShortcutRecorder: View {
         error = nil
         recording = true
         store.isRecordingShortcut = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        tap = ModifierTap()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            if event.type == .flagsChanged {
+                // A lone modifier tap needs the system-wide detector, so only global shortcuts accept it.
+                if action.isGlobal, let key = tap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) {
+                    accept(Shortcut(keyCode: key))
+                }
+                return event
+            }
+            tap.interrupt()
             let shortcut = Shortcut(event)
             if event.keyCode == UInt16(kVK_Escape) && shortcut.flags.isEmpty {
                 stop()
             } else if action.isGlobal && !shortcut.hasCommandLikeModifier {
-                error = "Use ⌃, ⌥ or ⌘ for a shortcut that works everywhere"
-            } else if let other = ShortcutAction.allCases.first(where: { $0 != action && store.shortcut($0) == shortcut }) {
-                error = "Already used for \(other.title)"
+                error = "Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere"
             } else {
-                store.setShortcut(shortcut, for: action)
-                stop()
+                accept(shortcut)
             }
             return nil
+        }
+    }
+
+    private func accept(_ shortcut: Shortcut) {
+        if let other = ShortcutAction.allCases.first(where: { $0 != action && store.shortcut($0) == shortcut }) {
+            error = "Already used for \(other.title)"
+        } else {
+            store.setShortcut(shortcut, for: action)
+            stop()
         }
     }
 

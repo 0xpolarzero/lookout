@@ -26,6 +26,36 @@ import Testing
         #expect(ShortcutAction.markAllRead.defaultShortcut.display == "⌥Space")
     }
 
+    @Test func modifierTapRecognizesALoneSidedKey() {
+        let rightCmd: UInt = 0x10 | NSEvent.ModifierFlags.command.rawValue
+        let leftCmd: UInt = 0x08 | NSEvent.ModifierFlags.command.rawValue
+        var tap = ModifierTap()
+        #expect(tap.flagsChanged(keyCode: 54, flags: rightCmd) == nil)
+        #expect(tap.flagsChanged(keyCode: 54, flags: 0) == 54)
+        // Left ⌘ is a different key.
+        #expect(tap.flagsChanged(keyCode: 55, flags: leftCmd) == nil)
+        #expect(tap.flagsChanged(keyCode: 55, flags: 0) == 55)
+        // Right ⌘ + C is a combination, not a tap.
+        _ = tap.flagsChanged(keyCode: 54, flags: rightCmd)
+        tap.interrupt()
+        #expect(tap.flagsChanged(keyCode: 54, flags: 0) == nil)
+        // Both ⌘ keys held together is not a tap either.
+        _ = tap.flagsChanged(keyCode: 54, flags: rightCmd)
+        _ = tap.flagsChanged(keyCode: 55, flags: rightCmd | leftCmd)
+        _ = tap.flagsChanged(keyCode: 55, flags: rightCmd)
+        #expect(tap.flagsChanged(keyCode: 54, flags: 0) == nil)
+        // Shift doesn't tap.
+        _ = tap.flagsChanged(keyCode: 60, flags: 0x04 | NSEvent.ModifierFlags.shift.rawValue)
+        #expect(tap.flagsChanged(keyCode: 60, flags: 0) == nil)
+    }
+
+    @Test func modifierTapShortcut() {
+        let rightCmd = Shortcut(keyCode: 54)
+        #expect(rightCmd.isModifierTap)
+        #expect(rightCmd.display == "Right ⌘")
+        #expect(!ShortcutAction.togglePanel.defaultShortcut.isModifierTap)
+    }
+
     @Test func customizeAndReset() {
         let store = Store()
         store.persists = false

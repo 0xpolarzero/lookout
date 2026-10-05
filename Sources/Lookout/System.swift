@@ -54,9 +54,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
 // MARK: - Global hotkey (⌃⌥L)
 
+/// Key combinations go through a Carbon hot key; a lone modifier tap (e.g. right ⌘) through event monitors,
+/// which need Accessibility access to see the keys typed in other apps.
 final class HotKey {
     private static var handler: (() -> Void)?
     private var ref: EventHotKeyRef?
+    private var tapKey: UInt16?
+    private var tap = ModifierTap()
+    private var monitors: [Any] = []
+    /// Taps are ignored while this is true (e.g. while a shortcut is being recorded).
+    var paused: () -> Bool = { false }
 
     init(_ shortcut: Shortcut, handler: @escaping () -> Void) {
         HotKey.handler = handler
@@ -71,10 +78,40 @@ final class HotKey {
     func update(_ shortcut: Shortcut) {
         if let ref { UnregisterEventHotKey(ref) }
         ref = nil
+        tapKey = shortcut.isModifierTap ? shortcut.keyCode : nil
+        updateMonitors()
+        guard tapKey == nil else { return }
         let id = EventHotKeyID(signature: OSType(0x4C4B4F54), id: 1)
         let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers, id,
                                          GetApplicationEventTarget(), 0, &ref)
         if status != noErr { NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))") }
+    }
+
+    private func updateMonitors() {
+        if tapKey == nil {
+            monitors.forEach(NSEvent.removeMonitor)
+            monitors = []
+            return
+        }
+        guard monitors.isEmpty else { return }
+        if !AXIsProcessTrusted() {
+            AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+        }
+        let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: { [weak self] in self?.handle($0) }) {
+            monitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: events, handler: { [weak self] in self?.handle($0); return $0 }) {
+            monitors.append(local)
+        }
+    }
+
+    private func handle(_ event: NSEvent) {
+        guard event.type == .flagsChanged else { return tap.interrupt() }
+        // Without Accessibility the keys typed elsewhere are invisible, so right ⌘ + C would look like a tap.
+        guard let key = tap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue),
+              key == tapKey, !paused(), AXIsProcessTrusted() else { return }
+        HotKey.handler?()
     }
 }
 
@@ -118,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey = HotKey(store.shortcut(.togglePanel)) { [weak self] in
             DispatchQueue.main.async { self?.controller.toggle(.inbox) }
         }
+        hotKey?.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
         store.onGlobalShortcutChange = { [weak self] shortcut in self?.hotKey?.update(shortcut) }
         if CommandLine.arguments.contains("--open") {
             controller.toggle(.inbox)

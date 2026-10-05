@@ -1,4 +1,5 @@
 import SwiftUI
+import ApplicationServices
 
 struct SettingsView: View {
     @Bindable var store: Store
@@ -117,13 +118,17 @@ struct SettingsView: View {
                         Text(action.title).font(.system(size: 12.5))
                         if action.isGlobal {
                             Text("Works from any app").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                            if store.shortcut(action).isModifierTap && !AXIsProcessTrusted() {
+                                Text("Needs Accessibility access (System Settings › Privacy & Security)")
+                                    .font(.system(size: 10.5)).foregroundStyle(Theme.amber)
+                            }
                         }
                     }
                     Spacer()
                     ShortcutRecorder(action: action, store: store)
                 }
             }
-            hint("Click a shortcut, then press the new keys (Esc cancels). In the inbox, ↑↓ or hovering picks the row they act on.")
+            hint("Click a shortcut, then press the new keys (Esc cancels). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
         }
     }
 
