@@ -66,6 +66,8 @@ class FloatingPanel: NSPanel {
         hidesOnDeactivate = false
         isMovable = false
         isReleasedWhenClosed = false
+        // Lookout is an accessory app, inactive most of the time: without this, `.help` tooltips never show.
+        allowsToolTipsWhenApplicationIsInactive = true
     }
 
     override var canBecomeKey: Bool { allowsKey }

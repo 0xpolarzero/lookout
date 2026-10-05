@@ -763,6 +763,6 @@ private struct ProjectTile: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help("New Claude session in \(name) (\((folder as NSString).abbreviatingWithTildeInPath))")
+        .help(name)
     }
 }
