@@ -106,6 +106,11 @@ final class HubController {
     private var screen: NSScreen
     private var monitors: [Any] = []
     private var hoverTask: Task<Void, Never>?
+    /// The hover state a scheduled task is about to apply, so repeated events don't reschedule it.
+    private var pendingHover: Bool?
+    /// Whether the hub was last reported to the store as visible beyond the bare bar.
+    private var reportedOpen = false
+    private var lastPinned = false
     /// The app that had focus before the hub took it, to hand it back.
     private var previousApp: NSRunningApplication?
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
@@ -221,17 +226,27 @@ final class HubController {
         let mouse = NSEvent.mouseLocation
         let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(mouse)
             || (hub.panelFrame != .zero && screenFrame(hub.panelFrame).insetBy(dx: -2, dy: -2).contains(mouse))
-        window.ignoresMouseEvents = !inside
-        if inside == hub.hovering { hoverTask?.cancel(); return }
+        // A window-server call, so only when it changes (this runs for every mouse event on the system).
+        if window.ignoresMouseEvents == inside { window.ignoresMouseEvents = !inside }
+        if inside == hub.hovering {
+            // Closed from the keyboard with the pointer outside: the next entry may show a panel again.
+            if !inside, hub.quiet { hub.quiet = false }
+            if pendingHover != nil { hoverTask?.cancel(); pendingHover = nil }
+            return
+        }
+        if pendingHover == inside { return }
         hoverTask?.cancel()
         // Passing over the bar on the way somewhere else shouldn't open it; nor should a drag from elsewhere.
-        let delay: Duration = inside ? .zero : .milliseconds(40)
-        guard !inside || NSEvent.pressedMouseButtons == 0 else { return }
+        guard !inside || NSEvent.pressedMouseButtons == 0 else { pendingHover = nil; return }
+        pendingHover = inside
+        let delay: Duration = inside ? .zero : .milliseconds(120)
         hoverTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
+            self.pendingHover = nil
             self.hub.hovering = inside
             if !inside {
+                self.hub.cancelDwell()
                 self.hub.section = nil
                 self.hub.quiet = false
                 self.closedByLeaving()
@@ -299,18 +314,35 @@ final class HubController {
         withObservationTracking {
             _ = hub.pinned
             _ = ui.edge
+            _ = hub.section
+            _ = hub.quiet
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
-                if self.hub.pinned, !self.window.isKeyWindow {
+                // Keyboard focus moves only when pinning changes: a panel closing under a pinned hub must not steal it back.
+                let pinnedChanged = self.hub.pinned != self.lastPinned
+                self.lastPinned = self.hub.pinned
+                if !pinnedChanged {
+                } else if self.hub.pinned, !self.window.isKeyWindow {
                     self.takeFocus()
                 } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
                     self.giveFocusBack()
                 }
                 self.mouseMoved()
+                self.reportOpen()
                 self.observe()
             }
         }
+    }
+
+    /// Tells the store when the hub is more than the bare bar (a panel or the full view), so it refreshes stale
+    /// data and polls faster meanwhile; warms the avatars the inbox is about to show.
+    private func reportOpen() {
+        let open = hub.pinned || (hub.section != nil && !hub.quiet)
+        guard open != reportedOpen else { return }
+        reportedOpen = open
+        store.setHubOpen(open)
+        if open { ImageCache.shared.prefetch(store.items.prefix(30).compactMap { Avatar.sizedURL($0.avatar, size: 22) }) }
     }
 
     func agentsChanged() {}
@@ -320,6 +352,9 @@ final class HubController {
     private func dragChanged(to mouse: NSPoint) {
         if dragStart == nil {
             hoverTask?.cancel()
+            pendingHover = nil
+            hub.cancelDwell()
+            hub.section = nil
             // Back to the bar at once (no closing animation), and carry just the bar, under the cursor where you
             // grabbed it.
             var instant = Transaction(animation: nil)
@@ -337,6 +372,7 @@ final class HubController {
             let bar = NSRect(origin: NSPoint(x: mouse.x - grip.x, y: mouse.y - grip.y), size: rest)
             window.setFrame(bar, display: true)
             dragStart = (mouse, bar.origin)
+            hub.dragging = true
         }
         guard let start = dragStart else { return }
         window.setFrameOrigin(NSPoint(x: start.origin.x + mouse.x - start.mouse.x, y: start.origin.y + mouse.y - start.mouse.y))
@@ -358,6 +394,7 @@ final class HubController {
             }, completionHandler: {
                 MainActor.assumeIsolated {
                     self.dragStart = nil
+                    self.hub.dragging = false
                     self.dock()
                     self.mouseMoved()
                 }

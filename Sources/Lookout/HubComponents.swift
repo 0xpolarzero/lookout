@@ -148,12 +148,11 @@ extension AnyTransition {
 
 /// A blinking text cursor for the typed search.
 struct Caret: View {
-    @State private var on = true
-
     var body: some View {
-        RoundedRectangle(cornerRadius: 1).fill(Theme.accent).frame(width: 1.5, height: 14)
-            .opacity(on ? 1 : 0)
-            .onAppear { withAnimation(.easeInOut(duration: 0.55).repeatForever()) { on = false } }
+        Pulse(from: 1, to: 0, duration: 0.55) {
+            RoundedRectangle(cornerRadius: 1).fill(Theme.accent).frame(width: 1.5, height: 14)
+        }
+        .frame(width: 1.5, height: 14)
     }
 }
 

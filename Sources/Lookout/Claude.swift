@@ -189,9 +189,13 @@ enum Claude {
     final class ActivityReader {
         private var paths: [String: URL] = [:]
         private var cache: [URL: (Date, ClaudeActivity?)] = [:]
+        /// Read from the refresh queue and (for icons) from the main thread.
+        private let lock = NSLock()
 
         func activity(for cliID: String) -> ClaudeActivity? {
             guard let url = transcript(cliID) else { return nil }
+            lock.lock()
+            defer { lock.unlock() }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
             if let cached = cache[url], cached.0 == modified { return cached.1 }
             let activity = Claude.activity(tail: Claude.tail(of: url))
@@ -200,6 +204,8 @@ enum Claude {
         }
 
         func transcript(_ cliID: String) -> URL? {
+            lock.lock()
+            defer { lock.unlock() }
             if let known = paths[cliID], FileManager.default.fileExists(atPath: known.path) { return known }
             let dirs = (try? FileManager.default.contentsOfDirectory(at: Claude.transcriptsDir, includingPropertiesForKeys: nil)) ?? []
             let found = dirs.lazy.map { $0.appendingPathComponent("\(cliID).jsonl") }.first { FileManager.default.fileExists(atPath: $0.path) }
@@ -216,15 +222,15 @@ enum Claude {
         return (try? handle.readToEnd()) ?? Data()
     }
 
+    private static let iso = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+
     /// The last step in a transcript: the tool being run, or thinking between steps.
     static func activity(tail: Data) -> ClaudeActivity? {
         let lines = tail.split(separator: UInt8(ascii: "\n")).reversed()
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         for line in lines {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   let type = obj["type"] as? String, type == "assistant" || type == "user" else { continue }
-            let since = (obj["timestamp"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+            let since = (obj["timestamp"] as? String).flatMap { try? Date($0, strategy: Self.iso) } ?? Date()
             let content = (obj["message"] as? [String: Any])?["content"]
             let parts = content as? [[String: Any]] ?? []
             if type == "assistant" {
@@ -321,15 +327,55 @@ enum Claude {
     final class TaskReader {
         private var finished = Set<String>()
         private var titles: [String: String] = [:]
-        /// The session transcript (by date) last searched for each agent's end.
-        private var checked: [String: Date?] = [:]
         private var agentActivity: [URL: (Date, ClaudeActivity?)] = [:]
+        /// Task ids announced as ended in each session transcript. Transcripts only grow, so only new bytes are searched.
+        private var scans: [URL: (offset: Int, ended: Set<String>, inode: UInt64)] = [:]
+
+        /// Reads only what was appended since the last scan; a replaced or shortened file is scanned from the start.
+        private func scanTranscript(_ url: URL) {
+            var info = stat()
+            guard stat(url.path, &info) == 0 else { return }
+            let inode = UInt64(info.st_ino), size = Int(info.st_size)
+            var scan = scans[url] ?? (0, [], inode)
+            if scan.inode != inode || size < scan.offset { scan = (0, [], inode) }
+            guard size > scan.offset, let handle = try? FileHandle(forReadingFrom: url) else { scans[url] = scan; return }
+            defer { try? handle.close() }
+            try? handle.seek(toOffset: UInt64(scan.offset))
+            if let chunk = try? handle.readToEnd() {
+                scan.offset = Claude.scanEnds(chunk, base: scan.offset, into: &scan.ended)
+            }
+            scans[url] = scan
+        }
+
+        /// Whether some command in the folder is still unaccounted for, i.e. whether the process list is worth reading.
+        func needsOpenOutputs(in folder: URL) -> Bool {
+            let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? []
+            return entries.contains { entry in
+                entry.pathExtension == "output" && !finished.contains(entry.deletingPathExtension().lastPathComponent)
+                    && (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink != true
+            }
+        }
 
         func tasks(in folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> [ClaudeTask] {
             let fm = FileManager.default
             let keys: [URLResourceKey] = [.isSymbolicLinkKey, .creationDateKey]
             let entries = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
             var tasks: [ClaudeTask] = []
+            // The transcript is read in full at most once per call, and only for a command's title.
+            var whole: Data??
+            func transcriptData() -> Data? {
+                if whole == nil { whole = .some(transcript.flatMap { try? Data(contentsOf: $0) }) }
+                return whole!
+            }
+            var scanned = false
+            func ended(_ id: String) -> Bool {
+                guard let transcript else { return false }
+                if !scanned {
+                    scanned = true
+                    scanTranscript(transcript)
+                }
+                return scans[transcript]?.ended.contains(id) == true
+            }
             for entry in entries where entry.pathExtension == "output" {
                 let id = entry.deletingPathExtension().lastPathComponent
                 guard !finished.contains(id) else { continue }
@@ -339,14 +385,11 @@ enum Claude {
                     guard let target = try? fm.destinationOfSymbolicLink(atPath: entry.path) else { continue }
                     let agent = URL(fileURLWithPath: target)
                     let modified = (try? agent.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                    // Its end is announced to the session that started it (looked for again only when that changes).
-                    let parentModified = transcript.flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]) }?.contentModificationDate
-                    if now.timeIntervalSince(modified) > Claude.agentTimeout
-                        || parentModified != checked[id] && transcript.flatMap(data).map({ Claude.announcesEnd(of: id, in: $0) }) == true {
+                    // Its end is announced to the session that started it.
+                    if now.timeIntervalSince(modified) > Claude.agentTimeout || ended(id) {
                         finished.insert(id)
                         continue
                     }
-                    checked[id] = parentModified
                     let title = titles[id] ?? Claude.agentTitle(meta: agent.deletingPathExtension().appendingPathExtension("meta.json"))
                     titles[id] = title
                     tasks.append(ClaudeTask(id: id, kind: .agent, title: title, since: since, activity: activity(agent, modified)))
@@ -356,7 +399,7 @@ enum Claude {
                         if now.timeIntervalSince(since) > 5 { finished.insert(id) }
                         continue
                     }
-                    let title = titles[id] ?? transcript.flatMap(data).flatMap { Claude.commandTitle(id, in: $0) } ?? "Background command"
+                    let title = titles[id] ?? transcriptData().flatMap { Claude.commandTitle(id, in: $0) } ?? "Background command"
                     titles[id] = title
                     tasks.append(ClaudeTask(id: id, kind: .command, title: title, since: since))
                 }
@@ -364,14 +407,32 @@ enum Claude {
             return tasks.sorted { $0.since < $1.since }
         }
 
-        private func data(_ url: URL) -> Data? { try? Data(contentsOf: url) }
-
         private func activity(_ url: URL, _ modified: Date) -> ClaudeActivity? {
             if let cached = agentActivity[url], cached.0 == modified { return cached.1 }
             let activity = Claude.activity(tail: Claude.tail(of: url))
             agentActivity[url] = (modified, activity)
             return activity
         }
+    }
+
+    /// Collects the ids of every `<task-id>…</task-id>` notice from `base` on, where `chunk` is the file's bytes from
+    /// there. Returns where to resume: just short of the end (a tag may be cut), or at an unfinished notice.
+    @discardableResult
+    static func scanEnds(_ chunk: Data, base: Int, into ended: inout Set<String>) -> Int {
+        let open = Data("<task-id>".utf8), close = Data("</task-id>".utf8)
+        var resume = max(0, chunk.count - open.count + 1)
+        var cursor = chunk.startIndex
+        while let found = chunk.range(of: open, in: cursor..<chunk.endIndex) {
+            let from = found.upperBound
+            guard let end = chunk.range(of: close, in: from..<min(chunk.endIndex, from + 200)) else {
+                if chunk.endIndex - found.lowerBound < 300 { resume = min(resume, found.lowerBound - chunk.startIndex) }
+                cursor = from
+                continue
+            }
+            ended.insert(String(decoding: chunk[from..<end.lowerBound], as: UTF8.self))
+            cursor = end.upperBound
+        }
+        return base + resume
     }
 
     /// The session's transcript has the notice Claude Code sends when a task ends.
@@ -434,18 +495,37 @@ enum Claude {
 final class FolderWatcher {
     private var stream: FSEventStreamRef?
     private let handler: () -> Void
+    private let pathHandler: (([String]) -> Void)?
 
     init(_ urls: [URL], latency: TimeInterval = 0.2, handler: @escaping () -> Void) {
         self.handler = handler
+        pathHandler = nil
+        start(urls, latency: latency, perFile: false)
+    }
+
+    /// Per-file events: the handler gets the paths that changed, so it can ignore the ones it doesn't care about.
+    init(_ urls: [URL], latency: TimeInterval = 0.2, paths: @escaping ([String]) -> Void) {
+        handler = {}
+        pathHandler = paths
+        start(urls, latency: latency, perFile: true)
+    }
+
+    private func start(_ urls: [URL], latency: TimeInterval, perFile: Bool) {
         var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
                                            retain: nil, release: nil, copyDescription: nil)
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, eventPaths, _, _ in
             guard let info else { return }
-            Unmanaged<FolderWatcher>.fromOpaque(info).takeUnretainedValue().handler()
+            let watcher = Unmanaged<FolderWatcher>.fromOpaque(info).takeUnretainedValue()
+            if let pathHandler = watcher.pathHandler {
+                pathHandler(unsafeBitCast(eventPaths, to: CFArray.self) as? [String] ?? [])
+            } else {
+                watcher.handler()
+            }
         }
+        var flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
+        if perFile { flags |= FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes) }
         guard let stream = FSEventStreamCreate(nil, callback, &context, urls.map(\.path) as CFArray,
-                                               FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency,
-                                               FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)) else { return }
+                                               FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags) else { return }
         self.stream = stream
         FSEventStreamSetDispatchQueue(stream, .main)
         FSEventStreamStart(stream)
@@ -456,5 +536,136 @@ final class FolderWatcher {
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)
         FSEventStreamRelease(stream)
+    }
+}
+
+// MARK: - Background reading
+
+/// Everything one read of the app produced. `sessions` is nil for an activity-only refresh.
+struct ClaudeSnapshot {
+    var link: ClaudeLink?
+    var sessions: [ClaudeSession]?
+    var appUnread: Set<String>?
+    var frontmost = false
+    var activity: [String: ClaudeActivity]?
+    var tasks: [String: [ClaudeTask]]?
+    /// What the store looked like when the read was asked for (see `Store.applyClaude`).
+    var stamp = ClaudeStamp()
+}
+
+/// `generation` changes when the extension is switched; `revision` when you change something about an agent.
+struct ClaudeStamp: Equatable {
+    var generation = 0
+    var revision = 0
+}
+
+/// Reads the app's files on its own serial queue (the readers keep caches and aren't thread-safe), so none of it
+/// touches the main thread. Requests made while a read is running are folded into one more read afterwards.
+final class ClaudeFeed: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "lookout.claude", qos: .utility)
+    private let sessionReader = Claude.SessionReader()
+    private let taskReader = Claude.TaskReader()
+    let activityReader: Claude.ActivityReader
+    private let lock = NSLock()
+    private var scheduled = false
+    private var wantFull = false
+    private var wantActivity = false
+    private var stamp = ClaudeStamp()
+    private var deliver: (@MainActor (ClaudeSnapshot) -> Void)?
+    private var relevant = Set<String>()
+    // Only touched on `queue`.
+    private var live: [ClaudeSession]?
+    private var openCache: (Date, Set<String>)?
+
+    init(activityReader: Claude.ActivityReader) { self.activityReader = activityReader }
+
+    /// Reads (everything, or just activity and tasks for the sessions seen last) and calls `apply` on the main thread.
+    func request(full: Bool, stamp: ClaudeStamp, apply: @escaping @MainActor (ClaudeSnapshot) -> Void) {
+        lock.lock()
+        self.stamp = stamp
+        deliver = apply
+        if full { wantFull = true } else { wantActivity = true }
+        let start = !scheduled
+        scheduled = true
+        lock.unlock()
+        guard start else { return }
+        queue.async { [self] in
+            while true {
+                lock.lock()
+                let full = wantFull, any = wantFull || wantActivity
+                let stamp = stamp, apply = deliver
+                wantFull = false
+                wantActivity = false
+                if !any { scheduled = false }
+                lock.unlock()
+                guard any else { return }
+                var snapshot = read(full: full)
+                snapshot.stamp = stamp
+                guard let apply else { continue }
+                DispatchQueue.main.async { MainActor.assumeIsolated { apply(snapshot) } }
+            }
+        }
+    }
+
+    /// Whether a changed transcript path belongs to a session that is working or has background tasks.
+    func isRelevant(_ paths: [String]) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths.contains { path in relevant.contains { path.contains($0) } }
+    }
+
+    private func read(full: Bool) -> ClaudeSnapshot {
+        var snapshot = ClaudeSnapshot()
+        if full || live == nil {
+            switch sessionReader.read() {
+            case .failure(.missing):
+                snapshot.link = .missing
+                return snapshot
+            case .failure:
+                snapshot.link = .unreadable
+                return snapshot
+            case .success(let sessions):
+                snapshot.link = .ok
+                snapshot.sessions = sessions
+                snapshot.appUnread = Claude.unreadIDs()
+                snapshot.frontmost = Claude.isFrontmost
+                live = sessions.filter { !$0.isArchived }
+            }
+        }
+        let sessions = live ?? []
+        var activity: [String: ClaudeActivity] = [:]
+        var watched = Set<String>()
+        for session in sessions where session.running {
+            guard let cli = session.cliID else { continue }
+            watched.insert(cli)
+            if let found = activityReader.activity(for: cli) { activity[session.id] = found }
+        }
+        var tasks: [String: [ClaudeTask]] = [:]
+        let folders = Claude.isRunning ? Claude.taskFolders() : [:]
+        let idle = sessions.filter { !$0.running && $0.cliID.map { folders[$0] != nil } == true }
+        if !idle.isEmpty {
+            // The process list is only worth walking while some command's fate is still unknown.
+            let open = idle.contains { $0.cliID.flatMap { folders[$0] }.map(taskReader.needsOpenOutputs) == true }
+                ? openOutputs() : []
+            for session in idle {
+                guard let cli = session.cliID, let folder = folders[cli] else { continue }
+                watched.insert(cli)
+                let found = taskReader.tasks(in: folder, transcript: activityReader.transcript(cli), openOutputs: open)
+                if !found.isEmpty { tasks[session.id] = found }
+            }
+        }
+        lock.lock()
+        relevant = watched
+        lock.unlock()
+        snapshot.activity = activity
+        snapshot.tasks = tasks
+        return snapshot
+    }
+
+    private func openOutputs() -> Set<String> {
+        if let (at, set) = openCache, Date().timeIntervalSince(at) < 2 { return set }
+        let set = Claude.openTaskOutputs()
+        openCache = (Date(), set)
+        return set
     }
 }

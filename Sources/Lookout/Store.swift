@@ -8,11 +8,18 @@ final class Store {
     /// Demo and snapshot runs: never touch the Keychain (a new build would stop on an access prompt).
     nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots"].contains($0) }
 
-    var repos: [RepoConfig] = []
-    var items: [InboxItem] = []
-    var ci: [String: CIStatus] = [:]
+    var repos: [RepoConfig] = [] {
+        didSet { memo = Memo() }
+    }
+    var items: [InboxItem] = [] {
+        didSet { memo = Memo() }
+    }
+    var ci: [String: CIStatus] = [:] {
+        didSet { memo = Memo() }
+    }
     var settings = AppSettings() {
         didSet {
+            memo = Memo()
             if oldValue.reviewRequests, !settings.reviewRequests, !loading {
                 removeItems { $0.kind == .reviewRequested }
             }
@@ -22,12 +29,22 @@ final class Store {
 
     /// Claude sessions extension (see Agents.swift).
     var agents = AgentsState() {
-        didSet { save() }
+        didSet {
+            agentCache = nil
+            if !ingesting { claudeStamp.revision += 1 }
+            save()
+        }
     }
-    var claudeSessions: [String: ClaudeSession] = [:]
-    var claudeActivity: [String: ClaudeActivity] = [:]
+    var claudeSessions: [String: ClaudeSession] = [:] {
+        didSet { agentCache = nil }
+    }
+    var claudeActivity: [String: ClaudeActivity] = [:] {
+        didSet { agentCache = nil }
+    }
     /// Subagents and commands still running in sessions whose turn is over.
-    var claudeTasks: [String: [ClaudeTask]] = [:]
+    var claudeTasks: [String: [ClaudeTask]] = [:] {
+        didSet { agentCache = nil }
+    }
     var hasTypesafeKey = Keychain.read(Keychain.typesafe)?.isEmpty == false
     var iconError: String?
     var claudeLink: ClaudeLink = .off
@@ -48,20 +65,34 @@ final class Store {
     @ObservationIgnored let updater = Updater()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
+    @ObservationIgnored private var memo = Memo()
+    @ObservationIgnored private var hubOpen = false
+    @ObservationIgnored private var systemAsleep = false
+    @ObservationIgnored private var pollNow = false
+    @ObservationIgnored private var sleeper: Task<Void, Never>?
+    @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var saveDirty = false
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Void)?
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
-    @ObservationIgnored let claudeReader = Claude.SessionReader()
     @ObservationIgnored let activityReader = Claude.ActivityReader()
-    @ObservationIgnored let taskReader = Claude.TaskReader()
+    @ObservationIgnored lazy var claudeFeed = ClaudeFeed(activityReader: activityReader)
+    /// Derived rows, rebuilt after any change to the agents or what was read (see Agents.swift).
+    @ObservationIgnored var agentCache: AgentCache?
+    /// Tells a read of the app that was asked for before you changed something from one asked for after.
+    @ObservationIgnored var claudeStamp = ClaudeStamp()
+    @ObservationIgnored var ingesting = false
     @ObservationIgnored var iconTask: Task<Void, Never>?
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     @ObservationIgnored var typesafeKeyCache: String?
     @ObservationIgnored private var claudeWatcher: FolderWatcher?
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var claudeTimer: Timer?
+
+    private static let isoFormatter = ISO8601DateFormatter()
 
     private static let fileURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -87,6 +118,7 @@ final class Store {
         updater.skipped = { [weak self] in self?.settings.skippedVersion }
         updater.onSkip = { [weak self] in self?.settings.skippedVersion = $0 }
         updater.start()
+        observeSleep()
         restartPolling()
         watchClaude()
     }
@@ -102,9 +134,13 @@ final class Store {
             MainActor.assumeIsolated { self?.refreshClaude() }
         }
         // Transcripts change with every step an agent takes: only the working sessions' tails are read.
-        transcriptWatcher = FolderWatcher([Claude.transcriptsDir], latency: 0.5) { [weak self] in
-            MainActor.assumeIsolated { self?.refreshActivity() }
-        }
+        // Only the transcripts of working sessions (and those with background tasks) are worth waking up for.
+        transcriptWatcher = FolderWatcher([Claude.transcriptsDir], latency: 0.5, paths: { [weak self] paths in
+            MainActor.assumeIsolated {
+                guard let self, self.claudeFeed.isRelevant(paths) else { return }
+                self.refreshActivity()
+            }
+        })
         claudeTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshClaude() }
         }
@@ -113,17 +149,70 @@ final class Store {
 
     func restartPolling() {
         pollTask?.cancel()
+        sleeper?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.pollAll()
-                let interval = self?.settings.pollInterval ?? 60
-                try? await Task.sleep(for: .seconds(interval))
+                guard let self else { return }
+                if !self.systemAsleep { await self.pollAll() }
+                await self.sleepUntilNextPoll()
             }
         }
     }
 
     func refreshNow() {
         Task { await pollAll() }
+    }
+
+    /// The hub being open means someone is looking: sync now if stale, and poll faster meanwhile.
+    func setHubOpen(_ open: Bool) {
+        guard open != hubOpen else { return }
+        hubOpen = open
+        sleeper?.cancel()
+        if open, !isSyncing, Date().timeIntervalSince(lastSync ?? .distantPast) > 60 { refreshNow() }
+    }
+
+    private var effectivePollInterval: TimeInterval {
+        let base = settings.pollInterval
+        if hubOpen { return min(base, 30) }
+        return ProcessInfo.processInfo.isLowPowerModeEnabled ? base * 2 : base
+    }
+
+    /// Sleeps in slices so a change (hub opening, wake, new interval) can cut it short.
+    private func sleepUntilNextPoll() async {
+        while !Task.isCancelled {
+            if pollNow, !systemAsleep {
+                pollNow = false
+                return
+            }
+            var wait = 3600.0
+            if !systemAsleep {
+                wait = effectivePollInterval - Date().timeIntervalSince(lastSync ?? .distantPast)
+                if wait <= 0 {
+                    if !isSyncing { return }
+                    wait = 1
+                }
+            }
+            let task = Task<Void, Never> { try? await Task.sleep(for: .seconds(wait)) }
+            sleeper = task
+            await task.value
+        }
+    }
+
+    private func observeSleep() {
+        let center = NSWorkspace.shared.notificationCenter
+        sleepObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.systemAsleep = true }
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.systemAsleep = false
+                    self.pollNow = true
+                    self.sleeper?.cancel()
+                }
+            },
+        ]
     }
 
     // MARK: Persistence
@@ -142,34 +231,97 @@ final class Store {
         agents = state.agents ?? AgentsState()
     }
 
+    private static let writer = DispatchQueue(label: "lookout.save")
+
+    /// Coalesced: the write happens shortly after the last call, off the main thread.
     func save() {
         guard persists, !loading else { return }
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        let state = PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents)
-        if let data = try? enc.encode(state) {
-            try? data.write(to: Self.fileURL, options: .atomic)
+        saveDirty = true
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.writeSnapshot(wait: false)
         }
     }
+
+    /// Writes any pending change now (quitting).
+    func flushSave() {
+        saveTask?.cancel()
+        writeSnapshot(wait: true)
+    }
+
+    private func writeSnapshot(wait: Bool) {
+        guard saveDirty, persists, !loading else {
+            if wait { Self.writer.sync {} }
+            return
+        }
+        saveDirty = false
+        let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents))
+        let write = {
+            let enc = JSONEncoder()
+            enc.dateEncodingStrategy = .iso8601
+            if let data = try? enc.encode(box.state) {
+                try? data.write(to: Self.fileURL, options: .atomic)
+            }
+        }
+        if wait { Self.writer.sync(execute: write) } else { Self.writer.async(execute: write) }
+    }
+
+    private struct SnapshotBox: @unchecked Sendable { let state: PersistedState }
 
     // MARK: Derived
 
     var isSnoozed: Bool { (settings.snoozeUntil ?? .distantPast) > Date() }
-    var ciRepos: [RepoConfig] { repos.filter { $0.events.contains(.ciMain) } }
+
+    /// Derived inbox data, rebuilt lazily after `items`, `settings`, `repos` or `ci` change.
+    private struct Memo {
+        var lists: [InboxFilter: [InboxItem]] = [:]
+        var unread: [InboxFilter: Int] = [:]
+        var bots: Set<String>?
+        var ciRepos: [RepoConfig]?
+        var byState: [CIState: [RepoConfig]] = [:]
+        var worst: CIState?
+    }
+
+    // The getters touch the observed properties so SwiftUI tracks them, even on a memo hit.
+    var ciRepos: [RepoConfig] {
+        let repos = self.repos
+        if let hit = memo.ciRepos { return hit }
+        let result = repos.filter { $0.events.contains(.ciMain) }
+        memo.ciRepos = result
+        return result
+    }
 
     func ciRepos(in state: CIState) -> [RepoConfig] {
-        ciRepos.filter { ci[$0.fullName]?.state == state }
+        let ci = self.ci
+        let all = ciRepos
+        if let hit = memo.byState[state] { return hit }
+        let result = all.filter { ci[$0.fullName]?.state == state }
+        memo.byState[state] = result
+        return result
+    }
+
+    private var botSet: Set<String> {
+        let handles = settings.botHandles
+        if let hit = memo.bots { return hit }
+        let result = Set(handles.map { $0.lowercased() })
+        memo.bots = result
+        return result
     }
 
     func isLowPriority(_ item: InboxItem) -> Bool {
         let author = item.author.lowercased()
         if settings.treatAppsAsBots && item.authorIsApp { return true }
-        let handles = Set(settings.botHandles.map { $0.lowercased() })
+        let handles = botSet
         return handles.contains(author) || handles.contains(author.replacingOccurrences(of: "[bot]", with: ""))
     }
 
     func list(_ filter: InboxFilter) -> [InboxItem] {
-        items.filter { item in
+        let items = self.items
+        _ = settings
+        if let hit = memo.lists[filter] { return hit }
+        let result = items.filter { item in
             switch filter {
             case .needsYou: item.state.isOpen && !isLowPriority(item)
             case .bots: item.state.isOpen && isLowPriority(item)
@@ -177,10 +329,16 @@ final class Store {
             }
         }
         .sorted { $0.createdAt > $1.createdAt }
+        memo.lists[filter] = result
+        return result
     }
 
     func unreadCount(_ filter: InboxFilter) -> Int {
-        list(filter).filter { $0.state == .unread }.count
+        let all = list(filter)
+        if let hit = memo.unread[filter] { return hit }
+        let n = all.reduce(0) { $0 + ($1.state == .unread ? 1 : 0) }
+        memo.unread[filter] = n
+        return n
     }
 
     func openCount(_ filter: InboxFilter) -> Int {
@@ -188,11 +346,17 @@ final class Store {
     }
 
     var worstCI: CIState {
-        let states = ciRepos.compactMap { ci[$0.fullName]?.state }
-        if states.contains(.failure) { return .failure }
-        if states.contains(.pending) { return .pending }
-        if states.contains(.success) { return .success }
-        return .none
+        let all = ciRepos
+        let ci = self.ci
+        if let hit = memo.worst { return hit }
+        let states = all.compactMap { ci[$0.fullName]?.state }
+        let result: CIState
+        if states.contains(.failure) { result = .failure }
+        else if states.contains(.pending) { result = .pending }
+        else if states.contains(.success) { result = .success }
+        else { result = .none }
+        memo.worst = result
+        return result
     }
 
     // MARK: Item actions
@@ -388,8 +552,15 @@ final class Store {
         }
         if me == nil { await authenticate() }
         guard me != nil else { return }
-        for repo in repos {
-            await sync(repo.fullName)
+        await withTaskGroup(of: Void.self) { group in
+            var names = repos.map(\.fullName).makeIterator()
+            for _ in 0..<4 {
+                guard let name = names.next() else { break }
+                group.addTask { @MainActor in await self.sync(name) }
+            }
+            while await group.next() != nil {
+                if let name = names.next() { group.addTask { @MainActor in await self.sync(name) } }
+            }
         }
         if settings.reviewRequests {
             await syncReviewRequests()
@@ -418,10 +589,12 @@ final class Store {
         let baseline = repo.addedAt.addingTimeInterval(-24 * 3600)
         func cursor(_ key: String) -> Date { repo.cursors[key] ?? baseline }
         func query(_ key: String) -> [String: String] {
-            ["sort": "updated", "direction": "asc", "per_page": "100", "since": ISO8601DateFormatter().string(from: cursor(key))]
+            ["sort": "updated", "direction": "asc", "per_page": "100", "since": Self.isoFormatter.string(from: cursor(key))]
         }
 
         var fresh: [InboxItem] = []
+        // Committed with the merged items, so a saved state never has a cursor past items it lacks.
+        var newCursors: [String: Date] = [:]
         var mentioned = Set<String>()
         var titles: [Int: String] = [:]
         // (number, my comment date, thread root) — applied after new items merge.
@@ -439,7 +612,7 @@ final class Store {
                     title: issue.title, snippet: snippet(issue.body), author: user.login, avatar: user.avatarUrl,
                     authorIsApp: user.isApp, url: issue.htmlUrl, createdAt: issue.createdAt, state: .unread))
             }
-            if let last = issues.map(\.updatedAt).max() { updateRepo(name) { $0.cursors["issues"] = last } }
+            if let last = issues.map(\.updatedAt).max() { newCursors["issues"] = last }
         }
 
         if !ev.isDisjoint(with: [.issueOpened, .prOpened, .issueComment, .prComment]) {
@@ -458,7 +631,7 @@ final class Store {
                     title: title(for: number, in: name, titles), snippet: snippet(c.body), author: user.login,
                     avatar: user.avatarUrl, authorIsApp: user.isApp, url: c.htmlUrl, createdAt: c.createdAt, state: .unread))
             }
-            if let last = comments.map(\.updatedAt).max() { updateRepo(name) { $0.cursors["comments"] = last } }
+            if let last = comments.map(\.updatedAt).max() { newCursors["comments"] = last }
         }
 
         if ev.contains(.reviewComment) {
@@ -478,7 +651,7 @@ final class Store {
                     avatar: user.avatarUrl, authorIsApp: user.isApp, url: c.htmlUrl, createdAt: c.createdAt,
                     state: .unread, threadRoot: root, path: c.path))
             }
-            if let last = comments.map(\.updatedAt).max() { updateRepo(name) { $0.cursors["review"] = last } }
+            if let last = comments.map(\.updatedAt).max() { newCursors["review"] = last }
         }
 
         let known = Set(items.map(\.id))
@@ -502,6 +675,7 @@ final class Store {
             added = added.filter { $0.forYou != false }
         }
         items.append(contentsOf: added)
+        updateRepo(name) { $0.cursors.merge(newCursors) { _, new in new } }
 
         // Anything I replied to after it was posted is addressed.
         for reply in myReplies {
@@ -551,7 +725,7 @@ final class Store {
             ((obj as? [String: Any])?[key] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
         }
         func login(_ node: [String: Any]) -> String? { ((node["author"] as? [String: Any])?["login"] as? String)?.lowercased() }
-        func date(_ node: [String: Any], _ key: String) -> Date? { (node[key] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } }
+        func date(_ node: [String: Any], _ key: String) -> Date? { (node[key] as? String).flatMap { Self.isoFormatter.date(from: $0) } }
 
         var result: [Int: ThreadInfo] = [:]
         for (key, value) in repoObj {
@@ -644,9 +818,10 @@ final class Store {
             latest[run.workflowId] = run
         }
         let target = sha ?? ref
-        let checks: GHCheckRuns = try await gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
+        async let checksReq: GHCheckRuns = gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
+        async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
+        let (checks, status) = try await (checksReq, statusReq)
         let external = checks.checkRuns.filter { $0.app?.slug != "github-actions" }
-        let status: GHCombinedStatus = try await gh.get("/repos/\(name)/commits/\(target)/status")
 
         let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
         var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()

@@ -316,8 +316,8 @@ extension LookoutHub {
 
     /// Sync state, as a dot and a few words: problems first, then checking, snoozed, and up to date.
     var syncStatus: some View {
-        TimelineView(.periodic(from: .now, by: 10)) { context in
-            syncLabel(now: context.date)
+        Ticking(coarse: true) { now in
+            syncLabel(now: now)
         }
     }
 

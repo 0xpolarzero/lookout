@@ -226,19 +226,38 @@ enum AgentLabel {
 
 // MARK: - Store
 
+/// What the views derive from the agents and the read sessions, computed once per change.
+struct AgentCache {
+    var rows: (kept: [AgentRow], pending: [AgentRow])
+    var all: [AgentRow]
+    var counts: (blocked: Int, done: Int)
+    var folders: [String]
+    var entries: [String: AgentEntry]
+    var labels: [String: String]
+}
+
 extension Store {
     var agentsEnabled: Bool { agents.enabled }
 
-    /// Kept sessions in your order, grouped by project (projects in the order their first session appears), then
-    /// pending ones, most recent first. Labels are unique across both.
-    var agentRows: (kept: [AgentRow], pending: [AgentRow]) {
-        let byID = Dictionary(uniqueKeysWithValues: agents.entries.map { ($0.id, $0) })
-        let muted = Set(agents.mutedFolders)
-        let ordered = agents.entries.filter(\.kept).compactMap { e in claudeSessions[e.id].map { ($0, e) } }
+    /// Derived rows, memoized: views read these dozens of times per render. The getters still read the observed
+    /// properties, so SwiftUI keeps tracking them; `agentCache` is dropped whenever one of them changes.
+    private var cache: AgentCache {
+        let state = agents, sessions = claudeSessions, activity = claudeActivity, tasks = claudeTasks
+        if let agentCache { return agentCache }
+        let built = buildAgentCache(state, sessions, activity, tasks)
+        agentCache = built
+        return built
+    }
+
+    private func buildAgentCache(_ state: AgentsState, _ sessions: [String: ClaudeSession],
+                                 _ activity: [String: ClaudeActivity], _ tasks: [String: [ClaudeTask]]) -> AgentCache {
+        let byID = Dictionary(state.entries.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let muted = Set(state.mutedFolders)
+        let ordered = state.entries.filter(\.kept).compactMap { e in sessions[e.id].map { ($0, e) } }
         var folderOrder: [String] = []
         for (s, _) in ordered where !folderOrder.contains(s.folderKey) { folderOrder.append(s.folderKey) }
         let kept = folderOrder.flatMap { folder in ordered.filter { $0.0.folderKey == folder } }
-        let pending = claudeSessions.values
+        let pending = sessions.values
             .compactMap { s -> (ClaudeSession, AgentEntry)? in
                 guard let e = byID[s.id], !e.kept, e.hiddenAt == nil, !muted.contains(s.folderKey) else { return nil }
                 return (s, e)
@@ -248,14 +267,32 @@ extension Store {
         let labels = AgentLabel.assign(all.map { (id: $0.0.id, title: $0.0.title, custom: $0.1.label) },
                                        folders: Dictionary(all.map { ($0.0.id, $0.0.folderName) }, uniquingKeysWith: { a, _ in a }))
         func rows(_ list: [(ClaudeSession, AgentEntry)]) -> [AgentRow] {
-            list.map { row($0.0, $0.1, label: labels[$0.0.id]) }
+            list.map { makeRow($0.0, $0.1, label: labels[$0.0.id]) }
         }
-        return (rows(kept), rows(pending))
+        let keptRows = rows(kept), pendingRows = rows(pending)
+        let allRows = keptRows + pendingRows
+        let unread = allRows.filter { $0.unread && !$0.session.running }
+        let blocked = unread.filter { $0.session.summary?.blocked == true }.count
+        var folders: [String] = []
+        for row in allRows where !row.session.folderKey.isEmpty && !folders.contains(row.session.folderKey) {
+            folders.append(row.session.folderKey)
+        }
+        return AgentCache(rows: (keptRows, pendingRows), all: allRows,
+                          counts: (blocked + allRows.filter(\.waitsForYou).count, unread.count - blocked),
+                          folders: folders, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
+
+    /// Kept sessions in your order, grouped by project (projects in the order their first session appears), then
+    /// pending ones, most recent first. Labels are unique across both.
+    var agentRows: (kept: [AgentRow], pending: [AgentRow]) { cache.rows }
 
     /// A row for any session, kept or not (search results show sessions Lookout hasn't listed).
     func row(_ session: ClaudeSession, _ entry: AgentEntry? = nil, label: String? = nil) -> AgentRow {
-        AgentRow(session: session, entry: entry ?? agents.entries.first { $0.id == session.id } ?? AgentEntry(id: session.id),
+        makeRow(session, entry ?? cache.entries[session.id], label: label)
+    }
+
+    private func makeRow(_ session: ClaudeSession, _ entry: AgentEntry?, label: String?) -> AgentRow {
+        AgentRow(session: session, entry: entry ?? AgentEntry(id: session.id),
                  label: label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
                  color: projectColor(session.folderKey),
                  activity: session.running ? claudeActivity[session.id] : nil,
@@ -289,7 +326,7 @@ extension Store {
     func searchSessions(_ query: String, limit: Int = 8) -> [AgentRow] {
         let words = query.lowercased().split(separator: " ").map(String.init)
         guard !words.isEmpty else { return [] }
-        let labels = Dictionary(allAgentRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a })
+        let labels = cache.labels
         let kept = Set(agents.entries.filter(\.kept).map(\.id))
         // 3: title starts with it, 2: the title has every word, 1: only with the folder's name.
         func score(_ s: ClaudeSession) -> Int {
@@ -312,27 +349,13 @@ extension Store {
             .map { row($0, label: labels[$0.id]) }
     }
 
-    var allAgentRows: [AgentRow] {
-        let rows = agentRows
-        return rows.kept + rows.pending
-    }
+    var allAgentRows: [AgentRow] { cache.all }
 
     /// Unread sessions waiting on you (amber) and the other unread finished ones (blue).
-    var agentCounts: (blocked: Int, done: Int) {
-        let rows = allAgentRows
-        let unread = rows.filter { $0.unread && !$0.session.running }
-        let blocked = unread.filter { $0.session.summary?.blocked == true }.count
-        return (blocked + rows.filter(\.waitsForYou).count, unread.count - blocked)
-    }
+    var agentCounts: (blocked: Int, done: Int) { cache.counts }
 
     /// Projects with a session in your list or pending, in the order they're listed: where a new session can start.
-    var agentFolders: [String] {
-        var out: [String] = []
-        for row in allAgentRows where !row.session.folderKey.isEmpty && !out.contains(row.session.folderKey) {
-            out.append(row.session.folderKey)
-        }
-        return out
-    }
+    var agentFolders: [String] { cache.folders }
 
     var knownFolders: [String] {
         Array(Set(claudeSessions.values.map(\.folderKey))).sorted { a, b in
@@ -343,48 +366,37 @@ extension Store {
 
     // MARK: Reading the app
 
-    /// Re-reads the app's session files and sidebar dots. Called on file changes (and a slow timer as backup).
+    /// Re-reads the app's session files and sidebar dots, off the main thread. Called on file changes (and a slow
+    /// timer as backup); calls made while a read is running fold into one more read.
     func refreshClaude() {
         guard agents.enabled else { return }
-        switch claudeReader.read() {
-        case .failure(.missing):
-            if claudeLink != .missing { claudeLink = .missing }
-        case .failure:
-            if claudeLink != .unreadable { claudeLink = .unreadable }
-        case .success(let sessions):
-            if claudeLink != .ok { claudeLink = .ok }
-            ingest(sessions, appUnread: Claude.unreadIDs(), claudeFrontmost: Claude.isFrontmost)
-            refreshActivity()
-            pickIcons()
-        }
+        claudeFeed.request(full: true, stamp: claudeStamp) { [weak self] in self?.applyClaude($0) }
     }
 
-    /// What each working session is doing, from the tail of its transcript (only files that changed are read).
+    /// What each working session is doing, from the tail of its transcript (only files that changed are read), and
+    /// the background work left running by sessions whose turn is over.
     func refreshActivity() {
         guard agents.enabled else { return }
-        var next: [String: ClaudeActivity] = [:]
-        for session in claudeSessions.values where session.running {
-            if let cli = session.cliID, let activity = activityReader.activity(for: cli) { next[session.id] = activity }
-        }
-        if next != claudeActivity { claudeActivity = next }
-        refreshTasks()
+        claudeFeed.request(full: false, stamp: claudeStamp) { [weak self] in self?.applyClaude($0) }
     }
 
-    /// Background work left running by sessions whose turn is over. Cheap enough for every transcript change: a couple
-    /// of folder listings and one pass over your processes, and only when some session has tasks listed at all.
-    func refreshTasks() {
-        var next: [String: [ClaudeTask]] = [:]
-        let folders = Claude.isRunning ? Claude.taskFolders() : [:]
-        let idle = claudeSessions.values.filter { !$0.running && !$0.isArchived && $0.cliID.map { folders[$0] != nil } == true }
-        if !idle.isEmpty {
-            let open = Claude.openTaskOutputs()
-            for session in idle {
-                guard let cli = session.cliID, let folder = folders[cli] else { continue }
-                let tasks = taskReader.tasks(in: folder, transcript: activityReader.transcript(cli), openOutputs: open)
-                if !tasks.isEmpty { next[session.id] = tasks }
-            }
+    /// Takes a read of the app back onto the main thread; properties are only set when they changed.
+    private func applyClaude(_ snapshot: ClaudeSnapshot) {
+        guard agents.enabled, snapshot.stamp.generation == claudeStamp.generation else { return }
+        // You changed something since this read was asked for: it could undo that, so read again instead.
+        if snapshot.sessions != nil, snapshot.stamp.revision != claudeStamp.revision {
+            refreshClaude()
+            return
         }
-        if next != claudeTasks { claudeTasks = next }
+        if let link = snapshot.link, claudeLink != link { claudeLink = link }
+        if let sessions = snapshot.sessions {
+            ingesting = true
+            ingest(sessions, appUnread: snapshot.appUnread, claudeFrontmost: snapshot.frontmost)
+            ingesting = false
+        }
+        if let next = snapshot.activity, next != claudeActivity { claudeActivity = next }
+        if let next = snapshot.tasks, next != claudeTasks { claudeTasks = next }
+        if snapshot.sessions != nil { pickIcons() }
     }
 
     /// Folds a fresh read of the app into what Lookout remembers. Pure apart from `now`, so tests drive it directly.
@@ -615,6 +627,7 @@ extension Store {
 
     func setAgentsEnabled(_ on: Bool) {
         guard on != agents.enabled else { return }
+        claudeStamp.generation += 1
         agents.enabled = on
         if on {
             agents.enabledAt = agents.enabledAt ?? Date()

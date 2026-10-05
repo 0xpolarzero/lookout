@@ -57,7 +57,7 @@ struct PanelView: View {
     }
 
     private var footer: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { context in
+        Ticking(coarse: true) { now in
             HStack(spacing: 6) {
                 if ui.tab == .agents {
                     claudeStatus
@@ -67,7 +67,7 @@ struct PanelView: View {
                 } else if store.me == nil {
                     Text("Connecting to GitHub…")
                 } else {
-                    syncStatus(now: context.date)
+                    syncStatus(now: now)
                     if store.isSnoozed, let until = store.settings.snoozeUntil {
                         Text("· Snoozed until \(until.formatted(date: .omitted, time: .shortened))")
                             .foregroundStyle(Theme.purple)

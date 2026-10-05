@@ -15,9 +15,13 @@ enum LevelDB {
     /// Matches per file, keyed by path, size and modification date. Tables never change once written, so in
     /// practice only the log is parsed again.
     private static var cache: [String: (stamp: String, entries: [Entry])] = [:]
+    /// Guards `cache`: reads come from the refresh queue, and the debug check runs on the main thread.
+    private static let lock = NSLock()
 
     /// Newest value of the first key ending with `suffix`, or nil if absent (or deleted).
     static func latest(in dir: URL, keySuffix: [UInt8]) -> [UInt8]? {
+        lock.lock()
+        defer { lock.unlock() }
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys)) ?? []
         var best: Entry?

@@ -94,7 +94,11 @@ struct GitHubError: LocalizedError {
 /// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
 final class GitHubClient: @unchecked Sendable {
     var token: String?
-    private(set) var rateRemaining: Int?
+    /// Remaining calls in the core (REST) and GraphQL buckets.
+    var rateRemaining: Int? { lock.withLock { coreRemaining } }
+    var graphqlRemaining: Int? { lock.withLock { gqlRemaining } }
+    private var coreRemaining: Int?
+    private var gqlRemaining: Int?
     private var etags: [String: (etag: String, data: Data)] = [:]
     private let lock = NSLock()
 
@@ -141,7 +145,9 @@ final class GitHubClient: @unchecked Sendable {
         req.httpMethod = "POST"
         req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
         let (data, resp) = try await URLSession.shared.data(for: req)
-        try check(resp as! HTTPURLResponse, data)
+        let http = resp as! HTTPURLResponse
+        trackRate(http)
+        try check(http, data)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw GitHubError(message: "Bad GraphQL response")
         }
@@ -158,9 +164,11 @@ final class GitHubClient: @unchecked Sendable {
     }
 
     private func trackRate(_ http: HTTPURLResponse) {
-        guard http.value(forHTTPHeaderField: "x-ratelimit-resource") == "core" else { return }
-        if let r = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) {
-            rateRemaining = r
+        guard let r = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) else { return }
+        switch http.value(forHTTPHeaderField: "x-ratelimit-resource") {
+        case "core": lock.withLock { coreRemaining = r }
+        case "graphql": lock.withLock { gqlRemaining = r }
+        default: break
         }
     }
 

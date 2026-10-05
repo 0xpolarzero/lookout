@@ -48,8 +48,8 @@ struct WorkingText: View {
     let row: AgentRow
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            Text(row.workingText(now: context.date)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.claude)
+        Ticking { now in
+            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.claude)
         }
     }
 }
@@ -74,20 +74,16 @@ struct ProjectLabel: View {
 /// A busy session's tile: see-through, slowly pulsing.
 private struct BusyPulse: ViewModifier {
     let on: Bool
-    @State private var dim = false
 
     func body(content: Content) -> some View {
-        content
-            .opacity(on ? (dim ? 0.28 : 0.6) : 1)
-            .onAppear { if on { start() } }
-            .onChange(of: on) { _, busy in
-                if busy { start() } else { withAnimation(.easeOut(duration: 0.25)) { dim = false } }
-            }
-    }
-
-    private func start() {
-        dim = false
-        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { dim = true }
+        if on {
+            // A render-server opacity loop; clicks fall through to the tile's own gestures.
+            Pulse(from: 0.6, to: 0.28, duration: 1.1) { content }
+                .allowsHitTesting(false)
+                .overlay { Color.clear.contentShape(Rectangle()) }
+        } else {
+            content
+        }
     }
 }
 
@@ -96,7 +92,7 @@ struct TaskLines: View {
     let tasks: [ClaudeTask]
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        Ticking { now in
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(tasks) { task in
                     HStack(spacing: 6) {
@@ -106,7 +102,7 @@ struct TaskLines: View {
                             .frame(width: 12)
                         Text(task.title).foregroundStyle(Theme.secondary).lineLimit(1)
                         Spacer(minLength: 6)
-                        Text(status(task, now: context.date))
+                        Text(status(task, now: now))
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(Theme.claude)
                             .lineLimit(1)

@@ -103,20 +103,32 @@ struct Avatar: View {
     let url: URL?
     var size: CGFloat = 26
 
+    @State private var loaded: (url: URL, image: NSImage)?
+
     var body: some View {
-        AsyncImage(url: sized) { phase in
-            if let image = phase.image {
-                image.resizable().interpolation(.high)
-            } else {
-                Circle().fill(Color.white.opacity(0.1))
+        let sized = Self.sizedURL(url, size: size)
+        // A cached image is there on the first frame; otherwise a placeholder, then a quick fade-in.
+        let image = loaded.flatMap { $0.url == sized ? $0.image : nil } ?? ImageCache.shared.cached(sized)
+        ZStack {
+            Circle().fill(Color.white.opacity(0.1))
+            if let image {
+                Image(nsImage: image).resizable().interpolation(.high).transition(.opacity)
             }
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Color.white.opacity(0.08)))
+        .task(id: sized) {
+            guard let sized, ImageCache.shared.cached(sized) == nil else { loaded = nil; return }
+            loaded = nil
+            let img = await ImageCache.shared.load(sized)
+            guard !Task.isCancelled, let img else { return }
+            withAnimation(.easeOut(duration: 0.15)) { loaded = (sized, img) }
+        }
     }
 
-    private var sized: URL? {
+    /// The avatar URL asking GitHub for twice the point size, in pixels.
+    static func sizedURL(_ url: URL?, size: CGFloat) -> URL? {
         guard let url, var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
         comps.queryItems = (comps.queryItems ?? []).filter { $0.name != "s" } + [URLQueryItem(name: "s", value: "\(Int(size * 2))")]
         return comps.url
@@ -126,16 +138,20 @@ struct Avatar: View {
 struct CIDot: View {
     let state: CIState
     var size: CGFloat = 8
-    @State private var breathe = false
 
     var body: some View {
-        Circle()
-            .fill(state.color)
+        if state == .pending {
+            // Breathing: a render-server animation, with no glow (a shadow can't animate cheaply).
+            Pulse(from: 1, to: 0.35, duration: 0.9) {
+                Circle().fill(state.color).frame(width: size, height: size)
+            }
             .frame(width: size, height: size)
-            .shadow(color: state == .none ? .clear : state.color.opacity(0.6), radius: 3)
-            .opacity(state == .pending && breathe ? 0.35 : 1)
-            .onAppear { breathe = true }
-            .animation(state == .pending ? .easeInOut(duration: 0.9).repeatForever() : .default, value: breathe)
+        } else {
+            Circle()
+                .fill(state.color)
+                .frame(width: size, height: size)
+                .shadow(color: state == .none ? .clear : state.color.opacity(0.6), radius: 3)
+        }
     }
 }
 

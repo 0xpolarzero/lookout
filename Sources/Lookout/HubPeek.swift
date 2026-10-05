@@ -6,6 +6,11 @@ import SwiftUI
 
 enum HubSection: Hashable { case inbox, ci, agents, controls }
 
+struct PeekMeasure: Equatable {
+    let section: HubSection
+    let size: CGSize
+}
+
 /// Reports a section's place in the bar and makes it the one shown when the pointer enters it.
 struct SectionProbe: ViewModifier {
     let section: HubSection
@@ -19,7 +24,7 @@ struct SectionProbe: ViewModifier {
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.barSpace)) } action: { frame in
                 if !hub.expanded, frames[section] != frame { frames[section] = frame }
             }
-            .onHover { if $0 { hub.section = section } }
+            .onHover { if $0 { hub.enter(section) } else { hub.cancelDwell() } }
     }
 }
 
@@ -56,8 +61,9 @@ extension LookoutHub {
     /// for the controls). Then it's kept within the bar, and snapped flush with an end it comes close to.
     func placement(_ section: HubSection, _ frame: CGRect) -> Placement? {
         let bar = edge.isHorizontal ? barSize.width : barSize.height
-        let natural = edge.isHorizontal ? panelWidth(section) : peekSize.height
-        guard bar > 0, natural > 0 else { return nil }
+        // This section's own measured size: until it's known (or while another's is all there is), nothing to place.
+        let natural = edge.isHorizontal ? panelWidth(section) : peekSizes[section]?.height ?? 0
+        guard bar > 0, natural > 0, peekSizes[section] != nil else { return nil }
         var start: CGFloat
         var length = natural
         if edge.isHorizontal {
@@ -82,7 +88,10 @@ extension LookoutHub {
             let place = placement(section, frame)
             let shape = panelShape(place)
             let panel = peekContent(section)
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { peekSize = $0 }
+                // The section is part of what's observed: an equal size on switching must still fill that section's entry.
+                .onGeometryChange(for: PeekMeasure.self) { PeekMeasure(section: section, size: $0.size) } action: {
+                    if peekSizes[$0.section] != $0.size { peekSizes[$0.section] = $0.size }
+                }
                 .frame(height: edge.isHorizontal ? nil : place?.length, alignment: .top)
                 .background(shape.fill(Theme.bg))
                 .overlay(shape.strokeBorder(Theme.stroke))
@@ -96,16 +105,40 @@ extension LookoutHub {
                 .onDisappear { hub.panelFrame = .zero }
                 // Hidden until it's been measured and placed, so it never shows up in the wrong spot first.
                 .opacity(place == nil ? 0 : 1)
-                .transition(.opacity.combined(with: .offset(x: edge == .right ? 6 : edge == .left ? -6 : 0,
-                                                            y: edge == .top ? -6 : edge == .bottom ? 6 : 0)))
-            // Laid over the bar from its top-left (bottom-left on the bottom edge), then moved out beside it.
-            let along = place?.start ?? 0
-            switch edge {
-            case .right: panel.offset(x: -(panelWidth(section) + Self.peekGap), y: along)
-            case .left: panel.offset(x: Self.cell + Self.peekGap, y: along)
-            case .top: panel.offset(x: along, y: Self.cell + Self.peekGap)
-            case .bottom: panel.offset(x: along, y: -(Self.cell + Self.peekGap))
-            }
+                .transition(peekTransition)
+            let o = peekOffset(section, place)
+            panel.offset(x: o.width, y: o.height)
+        }
+    }
+
+    /// Only the first open and the last close fade and slide; switching sections is instant (no Reduce Motion: no slide).
+    var peekTransition: AnyTransition {
+        let d: CGFloat = Self.reduceMotion ? 0 : 6
+        return .opacity.combined(with: .offset(x: edge == .right ? d : edge == .left ? -d : 0,
+                                               y: edge == .top ? -d : edge == .bottom ? d : 0))
+    }
+
+    /// Laid over the bar from its top-left (bottom-left on the bottom edge), then moved out beside it.
+    func peekOffset(_ section: HubSection, _ place: Placement?) -> CGSize {
+        let along = place?.start ?? 0
+        return switch edge {
+        case .right: CGSize(width: -(panelWidth(section) + Self.peekGap), height: along)
+        case .left: CGSize(width: Self.cell + Self.peekGap, height: along)
+        case .top: CGSize(width: along, height: Self.cell + Self.peekGap)
+        case .bottom: CGSize(width: along, height: -(Self.cell + Self.peekGap))
+        }
+    }
+
+    /// The open panel's outline with its shadow, in the layer behind the bar and panel.
+    @ViewBuilder var peekShadow: some View {
+        if let section = peeking, let frame = sectionFrames[section], let place = placement(section, frame),
+           let size = peekSizes[section] {
+            let o = peekOffset(section, place)
+            Color.clear
+                .frame(width: panelWidth(section), height: edge.isHorizontal ? size.height : place.length)
+                .background { panelShape(place).fill(Theme.bg).shadow(color: .black.opacity(0.42), radius: 20, y: 7) }
+                .offset(x: o.width, y: o.height)
+                .transition(peekTransition)
         }
     }
 
@@ -290,8 +323,9 @@ extension LookoutHub {
         peekLeave?.cancel()
         guard !overBar, !overPanel else { return }
         let hub = hub
+        hub.cancelDwell()
         peekLeave = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(40))
+            try? await Task.sleep(for: .milliseconds(120))
             if !Task.isCancelled {
                 hub.section = nil
                 hub.quiet = false

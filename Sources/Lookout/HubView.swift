@@ -40,6 +40,31 @@ final class HubState {
 
     /// The section the pointer is on: just that one opens beside the bar.
     var section: HubSection?
+    /// The bar is being carried to another edge: no panels meanwhile.
+    @ObservationIgnored var dragging = false
+    @ObservationIgnored private var dwell: Task<Void, Never>?
+
+    /// The pointer entered a section. The first panel waits for the pointer to settle (so sweeping along the edge
+    /// opens nothing); once one is open, moving to another section switches at once, with no transition.
+    func enter(_ next: HubSection) {
+        dwell?.cancel()
+        guard !dragging else { return }
+        if section != nil {
+            guard section != next else { return }
+            var instant = Transaction(animation: nil)
+            instant.disablesAnimations = true
+            withTransaction(instant) { section = next }
+            return
+        }
+        dwell = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            if !Task.isCancelled, self?.dragging == false { self?.section = next }
+        }
+    }
+
+    /// The pointer left a section before it settled: nothing opens.
+    func cancelDwell() { dwell?.cancel() }
+
     /// Where that section's panel is (in the hub's window), so the window takes the mouse there too.
     @ObservationIgnored var panelFrame: CGRect = .zero
 
@@ -214,7 +239,7 @@ struct LookoutHub: View {
     @State var peekLeave: Task<Void, Never>?
     /// The bar's size and the open panel's natural size, to place the panel against the bar's ends.
     @State var barSize: CGSize = .zero
-    @State var peekSize: CGSize = .zero
+    @State var peekSizes: [HubSection: CGSize] = [:]
 
 
     /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
@@ -226,8 +251,11 @@ struct LookoutHub: View {
     /// Along the top and bottom: the CI column, and the narrowest a page gets under the strip.
     static let ciWidth: CGFloat = 300
     static let pageWidth: CGFloat = 480
-    static let opening = Animation.spring(duration: 0.38, bounce: 0.14)
-    static let closing = Animation.spring(duration: 0.2, bounce: 0)
+    /// With Reduce Motion on, springs and slides become short fades.
+    static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    static var opening: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.28, bounce: 0.08) }
+    static var closing: Animation { reduceMotion ? .easeOut(duration: 0.12) : .spring(duration: 0.2, bounce: 0) }
+    static var pageSpring: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.28, bounce: 0.06) }
 
     var edge: DockEdge { ui.edge }
     var expanded: Bool { hub.expanded }
@@ -250,17 +278,20 @@ struct LookoutHub: View {
         .clipShape(shape)
         // The hovered section's panel, outside the bar's clip; the bar's own size doesn't change.
         .overlay(alignment: peekAlignment) { peekPanel }
-        // The full view's shadow comes from its outline alone (cheap to redraw as it changes); at rest, one for the
-        // bar and its panel together, so the panel's doesn't fall across the bar.
-        .background { shape.fill(Theme.bg).shadow(color: .black.opacity(expanded ? 0.42 : 0), radius: 20, y: 7) }
-        .compositingGroup()
-        .shadow(color: .black.opacity(expanded ? 0 : peeking != nil ? 0.42 : 0.22), radius: peeking != nil ? 20 : 6,
-                y: peeking != nil ? 7 : 2)
-        .animation(.easeOut(duration: 0.16), value: peeking)
+        // Shadows come from shapes alone, in a layer under the bar and its panel (never a blurred composite of their
+        // content, which would be redone on every frame of anything animating inside): the panel's can't fall
+        // across the bar, which is opaque above it.
+        .background(alignment: peekAlignment) { peekShadow }
+        .background {
+            shape.fill(Theme.bg)
+                .shadow(color: .black.opacity(expanded ? 0.42 : peeking != nil ? 0.42 : 0.22),
+                        radius: expanded || peeking != nil ? 20 : 6, y: expanded || peeking != nil ? 7 : 2)
+        }
+        .animation(.easeOut(duration: 0.16), value: peeking != nil)
         .fixedSize()
         // Opening has a touch of bounce; closing doesn't, so it never overshoots back past the bar.
         .animation(expanded ? Self.opening : Self.closing, value: expanded)
-        .animation(.spring(duration: 0.36, bounce: 0.06), value: hub.page)
+        .animation(Self.pageSpring, value: hub.page)
         .animation(Self.refocus, value: hub.focus)
         .contextMenu {
             Button("Keep Open") { hub.pinned = true }
@@ -308,7 +339,7 @@ struct LookoutHub: View {
         page
             .frame(width: Self.detail)
             .modifier(FitHeight(cap: maxLength))
-            .transition(.move(edge: edge == .right ? .trailing : .leading))
+            .transition(Self.reduceMotion ? .opacity : .move(edge: edge == .right ? .trailing : .leading))
     }
 
     /// The rows: the bar's cells on the screen side, their content beside them. With a page open, the same cells
@@ -647,7 +678,7 @@ struct LookoutHub: View {
                         .modifier(FitHeight(cap: maxLength - Self.cell))
                         .frame(idealWidth: Self.pageWidth, maxWidth: .infinity)
                         // Settles toward the strip as it fades in.
-                        .transition(.opacity.combined(with: .offset(y: edge == .top ? -8 : 8)))
+                        .transition(.opacity.combined(with: .offset(y: Self.reduceMotion ? 0 : edge == .top ? -8 : 8)))
                 }
             }
             .overlay(alignment: edge == .top ? .top : .bottom) { Rectangle().fill(Theme.stroke).frame(height: 1) }
@@ -721,7 +752,7 @@ struct LookoutHub: View {
 
     // MARK: Focus
 
-    static let refocus = Animation.spring(duration: 0.34, bounce: 0.06)
+    static var refocus: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.34, bounce: 0.06) }
 
     /// Shrunk to its header because another section is focused (in the full view only).
     func shrunk(_ section: HubSection) -> Bool {

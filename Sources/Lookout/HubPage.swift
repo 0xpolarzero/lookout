@@ -13,7 +13,7 @@ extension LookoutHub {
                 if hub.page == .repos { ReposView(store: store) } else { SettingsView(store: store) }
             }
             .id(hub.page)
-            .transition(.push(from: hub.forward ? .trailing : .leading))
+            .transition(Self.reduceMotion ? .opacity : .push(from: hub.forward ? .trailing : .leading))
             .frame(maxHeight: .infinity, alignment: .top)
             // Cut short by the hub's height: the last line fades into the bottom padding instead of hitting the edge.
             .mask {

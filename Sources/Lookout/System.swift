@@ -205,9 +205,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hub: HubController?
     private lazy var hotKeys = HotKeys()
     private var playground: Playground?
+    private var sigtermSource: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
+        handleSigterm()
         store = Store()
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
             Snapshot.run(to: CommandLine.arguments[i + 1])
@@ -262,6 +264,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.toggle(.inbox)
             hub?.toggleShortcut()
         }
+    }
+
+    /// SIGTERM would skip `applicationWillTerminate` and lose a pending save.
+    private func handleSigterm() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        sigtermSource = source
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store?.flushSave()
     }
 
     /// The session switcher only grabs its keys while the Claude extension is on.

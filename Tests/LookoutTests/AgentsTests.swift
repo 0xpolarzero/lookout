@@ -270,6 +270,18 @@ import Testing
         #expect(Claude.describe(tool: "Bash", input: ["command": "git status --short"]) == "Running git status --short")
     }
 
+    @Test func endNoticesCutAtAScanBoundaryAreStillFound() {
+        let full = Data("xx<task-id>a2</task-id>yy".utf8)
+        var ended = Set<String>()
+        for cut in 1..<full.count {
+            ended = []
+            let first = full.prefix(cut)
+            let next = Claude.scanEnds(Data(first), base: 0, into: &ended)
+            Claude.scanEnds(Data(full[next...]), base: next, into: &ended)
+            #expect(ended == ["a2"], "cut at \(cut)")
+        }
+    }
+
     @Test func backgroundTasks() throws {
         // Like Claude Code writes them: slashes as they are.
         func line(_ obj: [String: Any]) -> String {
