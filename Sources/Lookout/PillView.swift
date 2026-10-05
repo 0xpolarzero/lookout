@@ -169,24 +169,32 @@ struct PillView: View {
         )
         .overlay(alignment: .topTrailing) {
             if unread > 0 {
-                Text(unread > 99 ? "99+" : "\(unread)")
-                    .font(.system(size: 10, weight: .bold).monospacedDigit())
-                    .foregroundStyle(Color.black.opacity(0.85))
-                    .padding(.horizontal, 4)
-                    .frame(minWidth: 16, minHeight: 16)
-                    .background(Capsule().fill(Theme.amber))
+                countBadge(unread, fill: Theme.amber, text: Color.black.opacity(0.85))
                     .offset(x: 5, y: -5)
                     .transition(.scale.combined(with: .opacity))
-            } else if botUnread > 0 {
-                Circle()
-                    .fill(Theme.secondary)
-                    .frame(width: 7, height: 7)
-                    .offset(x: 1, y: -1)
+            }
+        }
+        // Bots get the same count, muted, on the other corner so it still shows beside the amber one.
+        .overlay(alignment: unread > 0 ? .topLeading : .topTrailing) {
+            if botUnread > 0 {
+                countBadge(botUnread, fill: Color.white.opacity(0.28), text: Theme.text)
+                    .offset(x: unread > 0 ? -1 : 5, y: -5)
                     .help("\(botUnread) from bots")
+                    .transition(.scale.combined(with: .opacity))
             }
         }
         .overlay(alignment: .bottomTrailing) { statusBadge.offset(x: 4, y: 4) }
         .animation(.spring(duration: 0.3), value: unread)
+        .animation(.spring(duration: 0.3), value: botUnread)
+    }
+
+    private func countBadge(_ count: Int, fill: Color, text: Color) -> some View {
+        Text(count > 99 ? "99+" : "\(count)")
+            .font(.system(size: 10, weight: .bold).monospacedDigit())
+            .foregroundStyle(text)
+            .padding(.horizontal, 4)
+            .frame(minWidth: 16, minHeight: 16)
+            .background(Capsule().fill(fill))
     }
 
     /// One row per CI state with the number of repos in it; hover lists them.
