@@ -7,8 +7,10 @@ enum Theme {
     static let hover = Color.white.opacity(0.07)
     static let stroke = Color.white.opacity(0.085)
     static let text = Color.white.opacity(0.93)
-    static let secondary = Color.white.opacity(0.56)
-    static let tertiary = Color.white.opacity(0.34)
+    /// ~7.97:1 on `bg`.
+    static let secondary = Color.white.opacity(0.64)
+    /// ~4.67:1 on `bg` (was .34, 3.1:1). Still clearly below `secondary`.
+    static let tertiary = Color.white.opacity(0.46)
     static let accent = Color(red: 0.40, green: 0.58, blue: 1.0)
     static let amber = Color(red: 0.99, green: 0.74, blue: 0.27)
     static let green = Color(red: 0.32, green: 0.82, blue: 0.50)
@@ -41,25 +43,19 @@ func shortAgo(_ date: Date, now: Date = Date()) -> String {
 struct IconButton: View {
     let symbol: String
     var help: String = ""
+    /// What VoiceOver says; defaults to `help`. Give one when `help` is empty: icon-only buttons need a label.
+    var label: String? = nil
     var detail: String? = nil
     var size: CGFloat = 26
     var tint: Color = Theme.secondary
     var active = false
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
-        let button = Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.46, weight: .semibold))
-                .foregroundStyle(active || hover ? Theme.text : tint)
-                .frame(width: size, height: size)
-                .background(Circle().fill(Color.white.opacity(active ? 0.13 : hover ? 0.08 : 0)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
+        let button = Button(action: action) { IconButtonLabel(symbol: symbol, size: size, tint: tint, active: active) }
+            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Color.white.opacity(0.08), isActive: active))
+            .accessibilityLabel(label ?? help)
+            .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
         // The pill's window is too small to host our tooltip bubble: `.tip` falls back to the system one there.
         if help.isEmpty {
@@ -67,6 +63,21 @@ struct IconButton: View {
         } else {
             button.tip(help, detail)
         }
+    }
+}
+
+private struct IconButtonLabel: View {
+    let symbol: String
+    let size: CGFloat
+    let tint: Color
+    let active: Bool
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.46, weight: .semibold))
+            .foregroundStyle(active || hover ? Theme.text : tint)
+            .frame(width: size, height: size)
     }
 }
 
@@ -94,8 +105,8 @@ struct KeyCap: View {
             .foregroundStyle(Theme.secondary)
             .padding(.horizontal, 5)
             .frame(minWidth: 18, minHeight: 16)
-            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white.opacity(0.08)))
-            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Color.white.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).fill(Color.white.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).strokeBorder(Color.white.opacity(0.06)))
     }
 }
 
@@ -173,30 +184,19 @@ struct Chip: View {
     var count: Int? = nil
     var selected = false
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Text(label)
-                if let count, count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 10, weight: .bold).monospacedDigit())
-                        .foregroundStyle(selected ? Color.black.opacity(0.8) : Theme.secondary)
-                        .padding(.horizontal, 5)
-                        .frame(height: 15)
-                        .background(Capsule().fill(selected ? Theme.amber : Color.white.opacity(0.1)))
-                }
+                if let count, count > 0 { CountBadge(count, tint: selected ? Theme.amber : nil) }
             }
-            .font(.system(size: 12, weight: .medium))
+            .font(Theme.Typography.control)
             .foregroundStyle(selected ? Theme.text : Theme.secondary)
             .padding(.horizontal, 10)
-            .frame(height: 26)
-            .background(Capsule().fill(Color.white.opacity(selected ? 0.11 : hover ? 0.06 : 0)))
-            .contentShape(Capsule())
+            .frame(height: Theme.Metrics.chip)
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
+        .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.field, active: Theme.Fill.selected, isActive: selected))
     }
 }
 
@@ -206,9 +206,9 @@ struct FieldStyle: ViewModifier {
             .textFieldStyle(.plain)
             .font(.system(size: 13))
             .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.stroke))
+            .frame(height: Theme.Metrics.field)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous).fill(Theme.Fill.field))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous).strokeBorder(Theme.stroke))
     }
 }
 
@@ -218,8 +218,8 @@ extension View {
     func card() -> some View {
         self
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.raised))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.stroke))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.lg + 2, style: .continuous).fill(Theme.raised))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.lg + 2, style: .continuous).strokeBorder(Theme.stroke))
     }
 }
 

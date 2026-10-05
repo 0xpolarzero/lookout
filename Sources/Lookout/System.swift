@@ -216,7 +216,6 @@ enum LaunchAtLogin {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store!
-    private var controller: UIController?
     private var hub: HubController?
     private lazy var hotKeys = HotKeys()
     private var playground: Playground?
@@ -226,10 +225,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installMainMenu()
         handleSigterm()
         store = Store()
-        if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
-            Snapshot.run(to: CommandLine.arguments[i + 1])
-            return
-        }
         if let i = CommandLine.arguments.firstIndex(of: "--playground-shots"), i + 1 < CommandLine.arguments.count {
             PlaygroundShots.run(to: CommandLine.arguments[i + 1])
             return
@@ -257,11 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             store.start()
         }
-        if CommandLine.arguments.contains("--classic") {
-            controller = UIController(store: store)
-        } else {
-            hub = HubController(store: store, demo: CommandLine.arguments.contains("--demo"))
-        }
+        hub = HubController(store: store, demo: CommandLine.arguments.contains("--demo"))
         // Demo: the keep-open key on right ⌘ (not saved), to try tap and double-tap.
         if CommandLine.arguments.contains("--demo"), hub != nil {
             store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
@@ -273,10 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onGlobalShortcutChange = { [weak self] action, _ in self?.registerHotKey(action) }
         store.onAgentsEnabledChange = { [weak self] _ in
             self?.registerHotKey(.sessionSwitcher)
-            self?.controller?.agentsChanged()
         }
         if CommandLine.arguments.contains("--open") {
-            controller?.toggle(.inbox)
             hub?.toggleShortcut()
         }
     }
@@ -300,14 +289,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .togglePanel:
             hotKeys.set(1, store.shortcut(action)) { [weak self] in
                 DispatchQueue.main.async {
-                    self?.controller?.toggle(.inbox)
                     self?.hub?.toggleShortcut()
                 }
             }
         case .sessionSwitcher:
             hotKeys.set(2, store.agents.enabled ? store.shortcut(action) : nil) { [weak self] in
                 DispatchQueue.main.async {
-                    self?.controller?.showSwitcher()
                     self?.hub?.showSessions()
                 }
             }
