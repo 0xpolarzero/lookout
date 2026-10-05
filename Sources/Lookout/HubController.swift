@@ -18,7 +18,7 @@ final class HubLayout {
 }
 
 /// Places the hub against its edge: flush with the screen, at its position along the edge, and kept on screen
-/// as it grows (from the bar's top on the sides, around its middle along the top and bottom).
+/// as it grows (from the bar's top on the sides, from its left end along the top and bottom).
 private struct EdgeLayout: Layout {
     let edge: DockEdge
     let position: Double
@@ -33,7 +33,8 @@ private struct EdgeLayout: Layout {
         guard let hub = subviews.first else { return }
         let size = hub.sizeThatFits(.unspecified)
         func along(_ length: CGFloat, _ own: CGFloat) -> CGFloat {
-            let start = edge.isHorizontal ? length * position - own / 2 : length * position - restLength / 2
+            // From where the bar starts at rest, so the bar never moves as the view opens or a divider is dragged.
+            let start = length * position - restLength / 2
             return min(max(start, inset), length - own - inset)
         }
         let origin = switch edge {
@@ -176,8 +177,10 @@ final class HubController {
     }
 
     /// The hub's frame on screen (AppKit coordinates).
-    private var hubScreenFrame: NSRect {
-        let f = layout.frame
+    private var hubScreenFrame: NSRect { screenFrame(layout.frame) }
+
+    /// A frame in the window (top-left origin) on screen.
+    private func screenFrame(_ f: CGRect) -> NSRect {
         let w = window.frame
         return NSRect(x: w.minX + f.minX, y: w.maxY - f.maxY, width: f.width, height: f.height)
     }
@@ -215,20 +218,25 @@ final class HubController {
 
     private func mouseMoved() {
         guard dragStart == nil else { return }
-        let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(NSEvent.mouseLocation)
+        let mouse = NSEvent.mouseLocation
+        let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(mouse)
+            || (hub.panelFrame != .zero && screenFrame(hub.panelFrame).insetBy(dx: -2, dy: -2).contains(mouse))
         window.ignoresMouseEvents = hub.transparent || !inside
         // See-through keeps everything as it is: you're working with what's behind.
         guard !hub.transparent else { return }
         if inside == hub.hovering { hoverTask?.cancel(); return }
         hoverTask?.cancel()
         // Passing over the bar on the way somewhere else shouldn't open it; nor should a drag from elsewhere.
-        let delay: Duration = inside ? .milliseconds(110) : .milliseconds(90)
+        let delay: Duration = inside ? .zero : .milliseconds(120)
         guard !inside || NSEvent.pressedMouseButtons == 0 else { return }
         hoverTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
             self.hub.hovering = inside
-            if !inside { self.closedByLeaving() }
+            if !inside {
+                self.hub.section = nil
+                self.closedByLeaving()
+            }
         }
     }
 

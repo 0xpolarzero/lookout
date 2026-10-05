@@ -5,10 +5,6 @@ struct PillView: View {
     let store: Store
     let ui: UIState
     let actions: PillActions
-    /// Prototype: one bar instead of an island per group, flush against the screen on the left and right edges.
-    var merged = false
-    /// Off when the bar is drawn inside a larger shape (the expanded bar).
-    var chrome = true
     @State private var ripple = false
 
     /// How many pending tiles fit before a "+N" tile takes over.
@@ -17,10 +13,9 @@ struct PillView: View {
     var body: some View {
         // Vertical on the left/right edges, horizontal when docked to the top or bottom.
         let horizontal = ui.edge.isHorizontal
-        let spacing: CGFloat = merged ? 0 : 6
-        let stack = horizontal ? AnyLayout(HStackLayout(spacing: spacing)) : AnyLayout(VStackLayout(spacing: spacing))
+        let stack = horizontal ? AnyLayout(HStackLayout(spacing: 6)) : AnyLayout(VStackLayout(spacing: 6))
         stack {
-            group(first: true) {
+            group {
                 inboxButton
             }
             if !store.ciRepos.isEmpty {
@@ -44,10 +39,6 @@ struct PillView: View {
                     .transition(.scale.combined(with: .opacity))
             }
         }
-        // The inbox badges sit over the button's corner: room for them inside the bar.
-        .padding(merged ? 7 : 0)
-        .background { if merged && chrome { Self.barShape(ui.edge).fill(Theme.bg) } }
-        .overlay { if merged && chrome { Self.barShape(ui.edge).strokeBorder(Theme.stroke) } }
         .animation(.spring(duration: 0.3), value: store.updater.showsInPill)
         // No menu bar icon, so the pill carries the app menu (its update button keeps its own).
         .contextMenu {
@@ -59,7 +50,7 @@ struct PillView: View {
             Divider()
             Button("Quit Lookout") { NSApp.terminate(nil) }
         }
-        .padding(merged ? 0 : 2)
+        .padding(2)
         .fixedSize()
         // Tile positions in window coordinates: the drawer (its own window, beside the pill) lines its rows up with them.
         .coordinateSpace(.named(PillSpace.name))
@@ -239,32 +230,11 @@ struct PillView: View {
             .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
     }
 
-    @ViewBuilder private func group<Content: View>(first: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
-        if merged {
-            let horizontal = ui.edge.isHorizontal
-            (horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))) {
-                if !first {
-                    Capsule().fill(Color.white.opacity(0.1))
-                        .frame(width: horizontal ? 1 : 20, height: horizontal ? 20 : 1)
-                }
-                content().padding(4)
-            }
-        } else {
-            content()
-                .padding(4)
-                .background(Capsule(style: .continuous).fill(Theme.bg))
-                .overlay(Capsule(style: .continuous).strokeBorder(Theme.stroke))
-        }
-    }
-
-    /// Square on the side that touches the screen, rounded on the others.
-    static func barShape(_ edge: DockEdge, radius r: CGFloat = 20) -> UnevenRoundedRectangle {
-        switch edge {
-        case .right: UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, style: .continuous)
-        case .left: UnevenRoundedRectangle(bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
-        case .top: UnevenRoundedRectangle(bottomLeadingRadius: r, bottomTrailingRadius: r, style: .continuous)
-        case .bottom: UnevenRoundedRectangle(topLeadingRadius: r, topTrailingRadius: r, style: .continuous)
-        }
+    private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .padding(4)
+            .background(Capsule(style: .continuous).fill(Theme.bg))
+            .overlay(Capsule(style: .continuous).strokeBorder(Theme.stroke))
     }
 }
 
@@ -606,6 +576,8 @@ struct DrawerRow: View {
     var showsKept = false
     /// In the hub, beside its bar tile: padded and highlighted like the inbox's rows (8 × 6, white 0.06).
     var inHub = false
+    /// Inside a larger block that draws the highlight itself (title and details hover as one).
+    var plain = false
 
     var body: some View {
         let selected = ui.drawerSelection == row.id
@@ -639,13 +611,16 @@ struct DrawerRow: View {
             .layoutPriority(1)
             Spacer(minLength: 6)
 
-            if selected {
+            if selected && !plain {
                 AgentActions(row: row, store: store, size: 22)
             } else if !twoLines {
+                // In a hub block the actions are laid over this spot instead: the status steps aside without the
+                // row changing size.
                 status.font(.system(size: 10.5).monospacedDigit()).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: busy ? 170 : 110, alignment: .trailing)
                     .fixedSize(horizontal: busy, vertical: false)
                     .layoutPriority(busy ? 2 : 0)
+                    .opacity(selected && plain ? 0 : 1)
             }
         }
         .padding(.leading, inHub && !twoLines ? 8 : 10)
@@ -655,7 +630,7 @@ struct DrawerRow: View {
         .frame(height: twoLines ? 44 : nil)
         .frame(maxHeight: twoLines ? 44 : .infinity)
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .fill(selected ? Color.white.opacity(inHub ? 0.06 : 0.08) : .clear))
+            .fill(selected && !plain ? Color.white.opacity(inHub ? 0.06 : 0.08) : .clear))
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(row.id) }
         .onHover { if $0 { ui.drawerSelection = row.id } }

@@ -192,7 +192,11 @@ enum PlaygroundShots {
         var windows: [(String, NSWindow)] = []
         for edge in [DockEdge.right, .top, .left, .bottom] {
             for (state, pinned, page) in [("rest", false, HubPage.main), ("open", true, .main), ("settings", true, .settings),
-                                          ("repos", true, .repos), ("search", true, .main), ("tip", true, .main)] {
+                                          ("repos", true, .repos), ("search", true, .main), ("tip", true, .main),
+                                          ("peek-inbox", false, .main), ("peek-ci", false, .main), ("peek-agents", false, .main),
+                                          ("peek-controls", false, .main), ("picked", true, .main),
+                                          ("focus-inbox", true, .main), ("focus-agents", true, .main)] {
+                if (state == "picked" || state.hasPrefix("focus")) && edge != .right && edge != .top { continue }
                 if (state == "repos" || state == "tip") && edge != .right && edge != .top { continue }
                 let store = Store()
                 Demo.populate(store, .agents)
@@ -202,6 +206,14 @@ enum PlaygroundShots {
                 hub.pinned = pinned
                 hub.page = page
                 if state == "search" { hub.query = "sand" }
+                // "peek-…": just that section open beside the bar, as when it's hovered.
+                hub.focus = ["focus-inbox": HubSection.inbox, "focus-agents": .agents][state]
+                // "picked": an inbox item and a session picked, their actions showing, to compare them.
+                if state == "picked" {
+                    hub.selection = store.list(.needsYou).first.map { "i:" + $0.id }
+                    ui.drawerSelection = "local_demo-ci"
+                }
+                hub.section = ["peek-inbox": HubSection.inbox, "peek-ci": .ci, "peek-agents": .agents, "peek-controls": .controls][state]
                 // "tip": the settings button's tooltip, shown at once, to check it isn't clipped against the edge.
                 let hosting = NSHostingView(rootView: PlaygroundView(store: store, ui: ui, hub: hub)
                     .environment(\.previewTip, state == "tip" ? "Settings" : nil)

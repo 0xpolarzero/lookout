@@ -162,10 +162,10 @@ struct SettingsView: View {
                 Divider().opacity(0.4)
                 sessionIcons
                 Divider().opacity(0.4)
-                hint("Your Claude Code sessions on the pill and in an Agents tab: what's working, done or waiting for you. "
+                hint("Your Claude Code sessions on the bar: what's working, done or waiting for you. "
                      + "Sessions with new activity arrive as pending; keep the ones you use. Read-only: Lookout never writes to the app.")
             } else {
-                hint("Your Claude Code sessions on the pill and in an Agents tab, to see which agents are done or waiting and jump between them.")
+                hint("Your Claude Code sessions on the bar, to see which agents are done or waiting and jump between them.")
             }
         }
     }
@@ -328,14 +328,14 @@ struct SettingsView: View {
                     do { try LaunchAtLogin.set(on); launchError = nil } catch { launchError = error.localizedDescription }
                 }
             if let launchError { Text(launchError).font(.system(size: 11)).foregroundStyle(Theme.red) }
-            toggle("Keep the pill centered on its edge", isOn: Binding(
+            toggle("Keep the bar centered on its edge", isOn: Binding(
                 get: { store.settings.centerPill ?? false },
                 set: { store.settings.centerPill = $0 }
             ))
             HStack {
                 hint(store.settings.centerPill == true
-                     ? "Drag the pill to any screen edge; it stays at the middle."
-                     : "Drag the pill to any screen edge.")
+                     ? "Drag the bar to any screen edge; it stays at the middle."
+                     : "Drag the bar to any screen edge.")
                 Spacer()
                 Button("Quit Lookout") { NSApp.terminate(nil) }.controlSize(.small)
             }

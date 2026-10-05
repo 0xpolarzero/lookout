@@ -15,7 +15,7 @@ extension LookoutHub {
 
     var inboxIcon: some View {
         InboxCell(needsYou: store.unreadCount(.needsYou), bots: store.unreadCount(.bots), vertical: !edge.isHorizontal,
-                  showsCount: !(expanded && hub.page == .main)) {
+                  showsCount: !(showsDetail && !shrunk(.inbox))) {
             // Straight to what needs you, its newest item picked so the keys act on it at once.
             withAnimation(.easeOut(duration: 0.18)) {
                 hub.go(.main)
@@ -73,10 +73,11 @@ extension LookoutHub {
                            size: IconButton.Size.header) {
                     withAnimation(.easeOut(duration: 0.2)) { store.markAllRead(hub.filter) }
                 }
-                .padding(.trailing, 3)
                 .transition(.opacity)
             }
+            if showsDetail { focusButton(.inbox) }
         }
+        .padding(.trailing, 3)
         .animation(.easeOut(duration: 0.15), value: store.unreadCount(hub.filter) > 0)
     }
 
@@ -172,12 +173,18 @@ extension LookoutHub {
             .contentTransition(.symbolEffect(.replace))
             .frame(width: 30, height: 30)
             .contentShape(Rectangle())
-            .tip("CI on main", store.ciSummary)
     }
 
     /// CI's section header: "CI" and how it's going, worst first.
     var ciHeader: some View {
-        sectionHeader("CI", status: ciStatus.map { [$0] } ?? [])
+        // Shrunk (another section focused), its lines are gone: every state's count, in its colour.
+        let status: [(String, Color)] = shrunk(.ci)
+            ? Self.ciOrder.compactMap { state in
+                let n = store.ciRepos(in: state).count
+                return n == 0 ? nil : ("\(n) \(state.label)", state.color)
+            }
+            : ciStatus.map { [$0] } ?? []
+        return sectionHeader("CI", status: status) { if showsDetail { focusButton(.ci) } }
     }
 
     /// "2 failing" in red; "1 running" while nothing fails but something runs; "all passing" once everything has.
@@ -203,7 +210,6 @@ extension LookoutHub {
         }
         .frame(width: 32, height: 30)
         .contentShape(Rectangle())
-        .tip(n == 0 ? "Nothing \(state.label)" : "\(n) \(state.label) on main", n == 0 ? nil : store.ciList(state))
     }
 
     /// The repos in a CI state, as chips that open their checks.
@@ -232,15 +238,11 @@ extension LookoutHub {
     // MARK: Agents
 
     var claudeMark: some View {
-        let counts = store.agentCounts
-        let parts = [counts.blocked > 0 ? "\(counts.blocked) waiting for you" : nil, counts.done > 0 ? "\(counts.done) done" : nil]
-            .compactMap { $0 }
-        return Image(systemName: "asterisk")
+        Image(systemName: "asterisk")
             .font(.system(size: 14, weight: .bold))
             .foregroundStyle(Theme.claude)
             .frame(width: 30, height: 30)
             .contentShape(Rectangle())
-            .tip("Claude sessions", parts.isEmpty ? "Your list and the ones with new activity" : parts.joined(separator: " · "))
     }
 
     var agentsCell: some View { claudeMark }
@@ -251,7 +253,7 @@ extension LookoutHub {
         var status: [(String, Color)] = []
         if counts.blocked > 0 { status.append(("\(counts.blocked) waiting", Theme.amber)) }
         if counts.done > 0 { status.append(("\(counts.done) done", Theme.accent)) }
-        return sectionHeader("Agents", status: status)
+        return sectionHeader("Agents", status: status) { if showsDetail { focusButton(.agents) } }
     }
 
     /// A session's tile in the bar; opens it in Claude. Collapsed, it says which session it is.
@@ -262,11 +264,8 @@ extension LookoutHub {
         .buttonStyle(.plain)
         .frame(height: 36)
         .onHover { if $0 { hub.selection = "a:" + r.id; ui.drawerSelection = r.id } }
-        if expanded {
-            button
-        } else {
-            button.tip(r.session.title, "\(r.statusText) · open in Claude · \(store.shortcut(.openItem).display)")
-        }
+        // No tooltip: hovering opens the sessions' panel, a row beside each tile.
+        button
     }
 
     /// The "+" in the bar, a tile like the sessions' above it: a scratch session.

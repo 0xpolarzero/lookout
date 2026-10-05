@@ -6,7 +6,7 @@ import Observation
 @MainActor
 final class Store {
     /// Demo and snapshot runs: never touch the Keychain (a new build would stop on an access prompt).
-    nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots", "--bar"].contains($0) }
+    nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots"].contains($0) }
 
     var repos: [RepoConfig] = []
     var items: [InboxItem] = []

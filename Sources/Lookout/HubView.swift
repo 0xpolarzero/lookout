@@ -34,7 +34,15 @@ final class HubState {
     @ObservationIgnored private var pinnedBeforePage: Bool?
     @ObservationIgnored private var navigating = false
 
-    var expanded: Bool { hovering || pinned }
+    /// The section the pointer is on: just that one opens beside the bar.
+    var section: HubSection?
+    /// Where that section's panel is (in the hub's window), so the window takes the mouse there too.
+    @ObservationIgnored var panelFrame: CGRect = .zero
+
+    /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
+    var expanded: Bool { pinned }
+    /// In the full view, the section given all the room it needs; the others shrink to their header (and counts).
+    var focus: HubSection?
 
     /// Settings and Repositories pin the view, so it stays put while you type or drag; back on the main view,
     /// the pin is what it was before.
@@ -127,6 +135,7 @@ final class HubKeys {
             if editing { event.window?.makeFirstResponder(nil) }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
+            else if hub.focus != nil { withAnimation(LookoutHub.refocus) { hub.focus = nil } }
             else if hub.transparent { hub.transparent = false }
             else { close() }
             return true
@@ -207,6 +216,15 @@ struct LookoutHub: View {
     @Bindable var hub: HubState
     /// Room the expanded view may take along its edge.
     var maxLength: CGFloat = 700
+    /// Where each section's cells are in the bar, and whether the pointer is on the bar or a section's panel.
+    @State var sectionFrames: [HubSection: CGRect] = [:]
+    @State var overBar = false
+    @State var overPanel = false
+    @State var peekLeave: Task<Void, Never>?
+    /// The bar's size and the open panel's natural size, to place the panel against the bar's ends.
+    @State var barSize: CGSize = .zero
+    @State var peekSize: CGSize = .zero
+
 
     /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
     static let cell: CGFloat = 46
@@ -228,21 +246,33 @@ struct LookoutHub: View {
     var showsDetail: Bool { expanded && hub.page == .main }
 
     var body: some View {
-        let shape = PillView.barShape(edge, radius: expanded ? 22 : 20)
+        let shape = barOutline
         Group {
             if edge.isHorizontal { horizontal } else { vertical }
         }
+        .coordinateSpace(.named(Self.barSpace))
+        // Only the bar at rest is measured (for the hover panels): nothing to redo while the full view changes.
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in if !hub.expanded, barSize != size { barSize = size } }
+        .onHover { overBar = $0; hoverChanged() }
         .background(shape.fill(Theme.bg))
         .overlay(shape.strokeBorder(Theme.stroke))
         .clipShape(shape)
+        // The hovered section's panel, outside the bar's clip; the bar's own size doesn't change.
+        .overlay(alignment: peekAlignment) { peekPanel }
+        // The full view's shadow comes from its outline alone (cheap to redraw as it changes); at rest, one for the
+        // bar and its panel together, so the panel's doesn't fall across the bar.
+        .background { shape.fill(Theme.bg).shadow(color: .black.opacity(expanded ? 0.42 : 0), radius: 20, y: 7) }
         .compositingGroup()
-        .shadow(color: .black.opacity(expanded ? 0.42 : 0.22), radius: expanded ? 22 : 6, y: expanded ? 8 : 2)
+        .shadow(color: .black.opacity(expanded ? 0 : peeking != nil ? 0.42 : 0.22), radius: peeking != nil ? 20 : 6,
+                y: peeking != nil ? 7 : 2)
+        .animation(.easeOut(duration: 0.16), value: peeking)
         .fixedSize()
         .opacity(hub.transparent ? 0.28 : 1)
         .allowsHitTesting(!hub.transparent)
         // Opening has a touch of bounce; closing doesn't, so it never overshoots back past the bar.
         .animation(expanded ? Self.opening : Self.closing, value: expanded)
         .animation(.spring(duration: 0.36, bounce: 0.06), value: hub.page)
+        .animation(Self.refocus, value: hub.focus)
         .animation(.easeOut(duration: 0.18), value: hub.transparent)
         .contextMenu {
             Button("Keep Open") { hub.pinned = true }
@@ -299,13 +329,14 @@ struct LookoutHub: View {
         VStack(alignment: side, spacing: 0) {
             VStack(alignment: side, spacing: 0) { mainRows }
                 .opacity(pageOpen ? 0.5 : 1)
-            if expanded {
-                Group {
-                    sectionDivider
-                    row(cell: { settingsButton }, detail: { footerDetail })
-                }
-                .transition(.hubReveal)
+            // Last, the controls: a gear at rest (hover for pin, repositories, settings), settings and the
+            // footer once open. In the full view, dragging the line above them sizes the sessions' list.
+            sectionDivider
+            VStack(alignment: side, spacing: 0) {
+                row(cell: { (expanded ? AnyView(settingsButton) : AnyView(controlsCell)).padding(.vertical, 9) },
+                    detail: { footerDetail })
             }
+            .modifier(probe(.controls))
         }
         // Opaque, so the page sliding out from under it doesn't show through.
         .background(Theme.bg)
@@ -330,13 +361,14 @@ struct LookoutHub: View {
     /// One line of the expanded view: the bar's cell on the screen side, its content beside it. The cell always
     /// takes its width, empty or not, so content lines up whether or not its row has something in the bar.
     @ViewBuilder
-    func row<Cell: View, Detail: View>(@ViewBuilder cell: () -> Cell, @ViewBuilder detail: () -> Detail) -> some View {
+    func row<Cell: View, Detail: View>(alignment: VerticalAlignment = .center, @ViewBuilder cell: () -> Cell,
+                                       @ViewBuilder detail: () -> Detail) -> some View {
         let slot = ZStack {
             Color.clear.frame(width: Self.cell, height: 0)
             cell()
         }
         .frame(width: Self.cell)
-        HStack(spacing: 0) {
+        HStack(alignment: alignment, spacing: 0) {
             if edge == .left { slot }
             if showsDetail {
                 detail()
@@ -351,8 +383,11 @@ struct LookoutHub: View {
 
     @ViewBuilder var mainRows: some View {
         // Inbox
-        row(cell: { inboxIcon.padding(.top, 10).padding(.bottom, 4) }, detail: { inboxHeader.padding(.top, 6) })
-        if showsDetail {
+        VStack(alignment: side, spacing: 0) {
+            row(cell: { inboxIcon.padding(.top, 2).padding(.bottom, 4) }, detail: { inboxHeader.padding(.top, 6) })
+        }
+        .modifier(probe(.inbox))
+        if showsDetail && !shrunk(.inbox) {
             Group {
                 if items.isEmpty {
                     row(cell: { EmptyView() }, detail: { emptyInbox })
@@ -375,21 +410,26 @@ struct LookoutHub: View {
         }
         sectionDivider
         // CI: its header, then one line per state, its count in the bar beside the repos in it.
-        Group {
+        VStack(alignment: side, spacing: 0) {
             if store.ciRepos.isEmpty {
                 row(cell: { ciCell }, detail: { linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) } })
             } else {
                 row(cell: { ciCell }, detail: { ciHeader })
-                ForEach(Self.ciOrder, id: \.self) { state in
-                    row(cell: { ciCount(state) }, detail: { ciLine(state) })
+                if !shrunk(.ci) {
+                    ForEach(Self.ciOrder, id: \.self) { state in
+                        row(cell: { ciCount(state) }, detail: { ciLine(state) })
+                    }
+                    .transition(.hubReveal)
                 }
             }
         }
+        .modifier(probe(.ci))
         // A search doesn't look in CI.
         .opacity(searching ? 0.4 : 1)
         if store.agents.enabled {
             sectionDivider
-            agentRowsView
+            VStack(alignment: side, spacing: 0) { agentRowsView }
+                .modifier(probe(.agents))
         }
         if store.updater.showsInPill {
             row(cell: { UpdateButton(updater: store.updater, horizontal: false).padding(.vertical, 4) },
@@ -399,8 +439,10 @@ struct LookoutHub: View {
     }
 
     @ViewBuilder var agentRowsView: some View {
-        row(cell: { agentsCell.padding(.vertical, 4) }, detail: { agentsHeader })
-        if showsDetail {
+        row(cell: { agentsCell }, detail: { agentsHeader })
+        if showsDetail && shrunk(.agents) {
+            EmptyView()
+        } else if showsDetail {
             Group {
                 // The sessions scroll with their tiles, so each stays beside its row.
                 CappedScroll(cap: caps.agents, selection: hub.selection) { sessionRows }
@@ -417,16 +459,15 @@ struct LookoutHub: View {
         let rows = agentRows
         VStack(alignment: side, spacing: 0) {
             ForEach(rows.kept) { r in
-                row(cell: { tile(r, size: 26) }, detail: {
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, highlight: hub.query, showsKept: searching, inHub: true)
-                })
-                .id("a:" + r.id)
+                // Its first line level with the tile; what it did, or what it left running, under it.
+                row(alignment: .top, cell: { tile(r, size: 26) }, detail: { sessionBlock(r, twoLines: false) })
+                    .id("a:" + r.id)
             }
             if !rows.pending.isEmpty {
                 row(cell: { Capsule().fill(Color.white.opacity(0.12)).frame(width: 14, height: 1.5).frame(height: 14) },
                     detail: { pendingLabel.padding(.horizontal, 8) })
                 ForEach(rows.pending) { r in
-                    row(cell: { tile(r, size: 22) }, detail: { DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true) })
+                    row(alignment: .top, cell: { tile(r, size: 22) }, detail: { sessionBlock(r, twoLines: false) })
                         .id("a:" + r.id)
                 }
             }
@@ -438,7 +479,17 @@ struct LookoutHub: View {
     }
 
     /// Heights the two lists may scroll within: what's left once the fixed parts are laid out, inbox first.
+    /// With a section focused, it takes everything the shrunk sections' headers leave.
     var caps: (inbox: CGFloat, agents: CGFloat) {
+        switch hub.focus {
+        case .inbox: (max(160, maxLength - 260), 0)
+        case .agents: (0, max(144, maxLength - 260))
+        default: sharedCaps
+        }
+    }
+
+    /// No section focused: what's left once the fixed parts are laid out, inbox first.
+    var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
         let free = max(160, maxLength - 360)
         guard store.agents.enabled else { return (free, 0) }
         // Whole 36pt session rows, so the last one showing is never cut through its tile.
@@ -474,30 +525,44 @@ struct LookoutHub: View {
         Group {
             HStack(spacing: 8) {
                 inboxIcon
-                if wide { inboxHeader.transition(.hubReveal) }
+                if wide && !shrunk(.inbox) { inboxHeader.transition(.hubReveal) }
+                if wide && shrunk(.inbox) { Spacer(minLength: 0); focusButton(.inbox) }
             }
             .padding(.leading, Self.inset + 1)
             .padding(.trailing, Self.inset)
-            .frame(width: wide ? Self.detail : nil, alignment: .leading)
+            .frame(width: wide ? columnWidth(.inbox) : nil, alignment: .leading)
+            .frame(maxHeight: .infinity)
+            .modifier(probe(.inbox))
             stripDivider
             // CI: its icon and title on the left like the agents', then its counts.
             HStack(spacing: 2) {
                 ciCell
                 // 6 more than the 2 between the counts: the title as far from its icon as the agents'.
-                if wide { ciHeader.padding(.leading, 6).transition(.hubReveal) }
+                if wide && !shrunk(.ci) { ciHeader.padding(.leading, 6).transition(.hubReveal) }
                 ForEach(Self.ciOrder, id: \.self) { ciCount($0) }
+                if wide && shrunk(.ci) { Spacer(minLength: 0); focusButton(.ci) }
             }
             .padding(.leading, Self.inset + 1)
             .padding(.trailing, Self.inset)
-            .frame(width: wide ? Self.ciWidth : nil, alignment: .leading)
+            .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
+            .frame(maxHeight: .infinity)
+            .modifier(probe(.ci))
             .opacity(searching ? 0.4 : 1)
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {
                     agentsCell
-                    if wide {
+                    if wide && shrunk(.agents) {
+                        // Shrunk: just its counts, like CI's.
+                        let counts = store.agentCounts
+                        dotCount(counts.blocked, Theme.amber)
+                        dotCount(counts.done, Theme.accent)
+                        Spacer(minLength: 0)
+                        focusButton(.agents)
+                    } else if wide {
                         agentsHeader.transition(.hubReveal)
                     } else {
+                        // (At rest: the tiles.)
                         let rows = agentRows
                         ForEach(rows.kept) { tile($0, size: 26) }
                         if !rows.pending.isEmpty {
@@ -509,10 +574,19 @@ struct LookoutHub: View {
                 // The asterisk over the column's session tiles (inset, the row's 10, half a 24pt tile).
                 .padding(.leading, Self.inset + 10 + 12 - 15)
                 .padding(.trailing, Self.inset)
-                .frame(width: wide ? Self.detail : nil, alignment: .leading)
+                .frame(width: wide ? columnWidth(.agents) : nil, alignment: .leading)
+                .frame(maxHeight: .infinity)
+                .modifier(probe(.agents))
             }
         }
         .opacity(pageOpen ? 0.5 : 1)
+        if !expanded {
+            stripDivider
+            controlsCell
+                .padding(.horizontal, Self.inset)
+                .frame(maxHeight: .infinity)
+                .modifier(probe(.controls))
+        }
         if expanded {
             Spacer(minLength: 0)
             stripDivider
@@ -549,16 +623,17 @@ struct LookoutHub: View {
         if expanded {
             Group {
                 if hub.page == .main {
+                    // A focused column widens; the others shrink to what their segment in the strip shows. The last
+                    // takes what's left under the strip's trailing group.
                     HStack(alignment: .top, spacing: 0) {
-                        inboxColumn.frame(width: Self.detail)
+                        column(.inbox) { inboxColumn }
                         columnDivider
-                        // The last column takes the width left under the strip's trailing group.
                         if store.agents.enabled {
-                            ciColumn.frame(width: Self.ciWidth, alignment: .topLeading)
+                            column(.ci) { ciColumn }
                             columnDivider
-                            agentsColumn.frame(idealWidth: Self.detail, maxWidth: .infinity, alignment: .topLeading)
+                            column(.agents, last: true) { agentsColumn }
                         } else {
-                            ciColumn.frame(idealWidth: Self.ciWidth, maxWidth: .infinity, alignment: .topLeading)
+                            column(.ci, last: true) { ciColumn }
                         }
                     }
                     .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.1)),
@@ -630,8 +705,98 @@ struct LookoutHub: View {
     }
 
     func twoLineRow(_ r: AgentRow) -> some View {
-        DrawerRow(row: r, store: store, ui: ui, number: 0, twoLines: true, highlight: hub.query, showsKept: searching)
-            .id("a:" + r.id)
+        sessionBlock(r, twoLines: true).id("a:" + r.id)
+    }
+
+    // MARK: Focus
+
+    static let refocus = Animation.spring(duration: 0.34, bounce: 0.06)
+
+    /// Shrunk to its header because another section is focused (in the full view only).
+    func shrunk(_ section: HubSection) -> Bool {
+        showsDetail && hub.focus != nil && hub.focus != section
+    }
+
+    /// Along the top and bottom: a column's width, wider focused, narrow shrunk.
+    func columnWidth(_ section: HubSection) -> CGFloat {
+        let focused = hub.focus == section
+        return switch section {
+        case .inbox: focused ? 640 : shrunk(.inbox) ? 116 : Self.detail
+        case .ci: focused ? 480 : shrunk(.ci) ? 196 : Self.ciWidth
+        default: focused ? 640 : shrunk(.agents) ? 210 : Self.detail
+        }
+    }
+
+    /// A column under its segment: its content, or nothing while shrunk.
+    @ViewBuilder func column<Content: View>(_ section: HubSection, last: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
+        let width = columnWidth(section)
+        Group {
+            if shrunk(section) { Color.clear.frame(height: 1) } else { content() }
+        }
+        .frame(minWidth: width, idealWidth: width, maxWidth: last ? .infinity : width, alignment: .topLeading)
+    }
+
+    /// A count with its colour's dot, as CI's in the bar.
+    func dotCount(_ n: Int, _ color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(n == 0 ? Theme.tertiary : color).frame(width: 7, height: 7)
+            Text("\(n)").font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .foregroundStyle(n == 0 ? Theme.tertiary : Theme.text)
+        }
+    }
+
+    /// A section header's button: give this section all the room (the others shrink to their header), or back.
+    func focusButton(_ section: HubSection) -> some View {
+        let focused = hub.focus == section
+        return IconButton(symbol: focused ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                          help: focused ? "Back to all sections" : "Make room for this",
+                          detail: focused ? "Esc" : "The other sections shrink to their counts",
+                          size: IconButton.Size.header) {
+            withAnimation(Self.refocus) { hub.focus = focused ? nil : section }
+        }
+    }
+
+    /// A session in the full view: its line, then (short) what it did and what it left running. One block: it
+    /// highlights, opens and shows its actions as a whole, wherever the pointer is on it.
+    func sessionBlock(_ r: AgentRow, twoLines: Bool) -> some View {
+        let selected = ui.drawerSelection == r.id
+        return VStack(alignment: .leading, spacing: 0) {
+            DrawerRow(row: r, store: store, ui: ui, number: 0, twoLines: twoLines, highlight: hub.query,
+                      showsKept: searching, inHub: !twoLines, plain: true)
+            // Under the title: past the tile on two-line rows (10 + 24 + 9), else at the title's 8.
+            sessionDetails(r)
+                .padding(.leading, twoLines ? 43 : 8)
+                .padding(.trailing, 8)
+                .padding(.top, twoLines ? -4 : -3)
+                .padding(.bottom, 7)
+        }
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(selected ? 0.06 : 0)))
+        // The same actions as an inbox item's, over the title line's right end, centred on it.
+        .overlay(alignment: .topTrailing) {
+            if selected {
+                AgentActions(row: r, store: store, size: IconButton.Size.row)
+                    .padding(.top, twoLines ? 9 : 0)
+                    .padding(.trailing, 4)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: selected)
+        .contentShape(Rectangle())
+        .onTapGesture { store.openAgent(r.id) }
+        .onHover { if $0 { ui.drawerSelection = r.id } }
+    }
+
+    /// At most two short lines: the turn's summary, and what's still running after it.
+    @ViewBuilder func sessionDetails(_ r: AgentRow) -> some View {
+        let summary = r.session.running ? nil : r.session.summary?.detail
+        if summary?.isEmpty == false || !r.tasks.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                if let summary, !summary.isEmpty {
+                    Text(summary).font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
+                }
+                if !r.tasks.isEmpty { RunningLine(tasks: r.tasks) }
+            }
+        }
     }
 }
 

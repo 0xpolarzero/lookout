@@ -40,7 +40,7 @@ struct CappedScroll<Content: View>: View {
     }
 }
 
-/// An inbox item on two short lines; its snippet and actions show on hover or when picked with the keys.
+/// An inbox item on two short lines; its actions show on hover or when picked with the keys.
 struct CompactItemRow: View {
     let item: InboxItem
     let store: Store
@@ -85,16 +85,6 @@ struct CompactItemRow: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.tertiary)
                         .lineLimit(1)
-                    if open && !item.snippet.isEmpty {
-                        Text(item.snippet)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.secondary)
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 2)
-                            .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.18).delay(0.05)),
-                                                    removal: .opacity.animation(.easeIn(duration: 0.08))))
-                    }
                 }
             }
             .padding(.horizontal, 8)
@@ -118,7 +108,7 @@ struct CompactItemRow: View {
 
     private var actions: some View {
         let size = IconButton.Size.row
-        return HStack(spacing: 0) {
+        return RowActions {
             if item.state.isOpen {
                 IconButton(symbol: unread ? "checkmark" : "circle.fill", help: unread ? "Mark as read" : "Mark as unread",
                            detail: store.shortcut(.toggleRead).display, size: size) { unread ? store.markRead(item) : store.markUnread(item) }
@@ -132,9 +122,19 @@ struct CompactItemRow: View {
                 store.open(item)
             }
         }
-        .padding(2)
-        .background(Capsule().fill(Color(white: 0.16)))
-        .overlay(Capsule().strokeBorder(Theme.stroke))
+    }
+}
+
+/// A row's actions on hover, the same for inbox items and sessions: icon buttons in a capsule laid over the row's
+/// right end (so showing them never changes the row's size).
+struct RowActions<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 0) { content }
+            .padding(2)
+            .background(Capsule().fill(Color(white: 0.16)))
+            .overlay(Capsule().strokeBorder(Theme.stroke))
     }
 }
 
@@ -181,20 +181,6 @@ extension Store {
         NewSessionRow.startScratch()
     }
 
-    /// The repos in a CI state, one per line with the branch they're watched on.
-    func ciList(_ state: CIState) -> String {
-        ciRepos(in: state).map { "\($0.fullName) (\(ci[$0.fullName]?.branch ?? "main"))" }.joined(separator: "\n")
-    }
-
-    /// CI's tooltip detail: every state that has repos, worst first.
-    var ciSummary: String {
-        let parts = LookoutHub.ciOrder.compactMap { state -> String? in
-            let repos = ciRepos(in: state).map(\.fullName)
-            return repos.isEmpty ? nil : "\(state.title): " + repos.joined(separator: ", ")
-        }
-        return parts.isEmpty ? (ciRepos.isEmpty ? "No repository shows its CI" : "No runs yet") : parts.joined(separator: "\n")
-    }
-
     /// Sessions as the hub lists them: yours and the pending ones, or any session matching the search.
     func hubSessions(_ hub: HubState) -> [AgentRow] {
         guard agents.enabled else { return [] }
@@ -221,10 +207,10 @@ struct InboxCell: View {
                 if vertical {
                     // Always as tall as icon + count, so the bar never shifts: the tray just slides to the middle.
                     ZStack(alignment: .top) {
-                        icon.offset(y: badge == nil ? 10 : 0)
-                        if let badge { badge.offset(y: 23) }
+                        icon.offset(y: badge == nil ? 9 : 0)
+                        if let badge { badge.offset(y: 32) }
                     }
-                    .frame(height: 38, alignment: .top)
+                    .frame(height: 47, alignment: .top)
                 } else {
                     HStack(spacing: 6) {
                         icon
@@ -235,7 +221,6 @@ struct InboxCell: View {
             .padding(.vertical, vertical ? 7 : 5)
             .padding(.horizontal, vertical ? 4 : 7)
             .frame(minWidth: vertical ? 36 : nil)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(hover ? 0.08 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -244,20 +229,27 @@ struct InboxCell: View {
         .animation(.snappy, value: needsYou)
         .animation(.snappy, value: bots)
         .animation(.spring(duration: 0.3, bounce: 0.1), value: showsCount)
-        .tip("Inbox", detail)
     }
 
+    /// The tray; on a solid amber tile (like a session's) when something needs you, so it shows from afar.
     private var icon: some View {
-        Image(systemName: needsYou > 0 ? "tray.full.fill" : "tray.fill")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(needsYou > 0 ? Theme.text : Theme.secondary)
-            .frame(height: 18)
+        let lit = needsYou > 0
+        return Image(systemName: lit ? "tray.full.fill" : "tray.fill")
+            .font(.system(size: lit ? 13.5 : 15, weight: .semibold))
+            .foregroundStyle(lit ? Color.black.opacity(0.78) : hover ? Theme.text : Theme.secondary)
+            .frame(width: 28, height: 28)
+            // Hover brightens the tile (or the tray), no box around it.
+            .background(RoundedRectangle(cornerRadius: 8.4, style: .continuous)
+                .fill(lit ? Theme.amber : Color.white.opacity(hover ? 0.08 : 0)))
+            .brightness(lit && hover ? 0.06 : 0)
+            .animation(.snappy, value: lit)
     }
 
     private var badge: AnyView? {
         guard showsCount else { return nil }
-        if needsYou > 0 { return AnyView(count(needsYou, fill: Theme.amber, text: Color.black.opacity(0.82))) }
-        if bots > 0 { return AnyView(count(bots, fill: Color.white.opacity(0.14), text: Theme.secondary)) }
+        // The tile is already amber: the count beside it stays quiet.
+        if needsYou > 0 { return AnyView(count(needsYou, fill: Color.white.opacity(0.14), text: Theme.text)) }
+        if bots > 0 { return AnyView(count(bots, fill: Color.white.opacity(0.08), text: Theme.secondary)) }
         return nil
     }
 
@@ -272,11 +264,6 @@ struct InboxCell: View {
             .transition(.scale(scale: 0.6).combined(with: .opacity))
     }
 
-    private var detail: String {
-        let parts = [needsYou > 0 ? "\(needsYou) need\(needsYou == 1 ? "s" : "") you" : nil,
-                     bots > 0 ? "\(bots) from bots" : nil].compactMap { $0 }
-        return (parts.isEmpty ? "All caught up" : parts.joined(separator: " · ")) + " · click for what needs you"
-    }
 }
 
 /// A repo in CI's lines: its name (and how many checks fail), opening its latest run.
@@ -337,5 +324,21 @@ struct NewSessionTile: View {
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
         .tip("New session", "Scratch chat · or pick a project")
+    }
+}
+
+/// What a session left running, on one line: each subagent and command with its icon.
+struct RunningLine: View {
+    let tasks: [ClaudeTask]
+
+    var body: some View {
+        tasks.enumerated().reduce(Text("")) { line, item in
+            let (i, task) = item
+            let icon = Text(Image(systemName: task.kind == .agent ? "asterisk" : "terminal")).foregroundStyle(Theme.claude)
+            return line + (i == 0 ? Text("") : Text("   ")) + icon + Text(" " + task.title).foregroundStyle(Theme.secondary)
+        }
+        .font(.system(size: 11))
+        .lineLimit(1)
+        .truncationMode(.tail)
     }
 }

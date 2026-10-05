@@ -164,10 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             playground?.run()
             return
         }
-        if let i = CommandLine.arguments.firstIndex(of: "--bar"), i + 1 < CommandLine.arguments.count {
-            BarSnapshot.run(to: CommandLine.arguments[i + 1])
-            return
-        }
         if let i = CommandLine.arguments.firstIndex(of: "--update"), i + 1 < CommandLine.arguments.count {
             UpdateCheck.run(as: CommandLine.arguments[i + 1])
             return

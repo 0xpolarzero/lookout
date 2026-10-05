@@ -465,7 +465,7 @@ struct AgentActions: View {
     var keepsInline = false
 
     var body: some View {
-        HStack(spacing: 2) {
+        RowActions {
             if row.pending && !keepsInline {
                 IconButton(symbol: "pin.fill", help: "Keep", detail: "Pins it to your list · \(store.shortcut(.keepSession).display)", size: size) {
                     store.keepAgent(row.id)
@@ -493,9 +493,6 @@ struct AgentActions: View {
                 store.openAgent(row.id)
             }
         }
-        .padding(2)
-        .background(Capsule().fill(Theme.bg))
-        .overlay(Capsule().strokeBorder(Theme.stroke))
     }
 }
 
