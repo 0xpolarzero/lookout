@@ -339,10 +339,12 @@ final class HubController {
     private func watchKeys() {
         if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
             guard let self else { return event }
-            return MainActor.assumeIsolated {
-                guard self.window.isKeyWindow, !self.store.isRecordingShortcut else { return event }
-                return self.keys.key(event) ? nil : event
+            // Only a Bool crosses the isolation hop: NSEvent is not Sendable.
+            let consumed = MainActor.assumeIsolated {
+                guard self.window.isKeyWindow, !self.store.isRecordingShortcut else { return false }
+                return self.keys.key(event)
             }
+            return consumed ? nil : event
         }) { monitors.append(local) }
     }
 

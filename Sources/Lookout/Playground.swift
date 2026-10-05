@@ -164,23 +164,26 @@ final class Playground: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown]) { [weak self] event in
             guard let self else { return event }
-            return MainActor.assumeIsolated { self.handle(event) }
+            // Only a Bool crosses the isolation hop: NSEvent is not Sendable.
+            let consumed = MainActor.assumeIsolated { self.handle(event) }
+            return consumed ? nil : event
         }
     }
 
     func windowWillClose(_ notification: Notification) { NSApp.terminate(nil) }
 
-    private func handle(_ event: NSEvent) -> NSEvent? {
+    /// True when the event was consumed.
+    private func handle(_ event: NSEvent) -> Bool {
         switch event.type {
         case .flagsChanged:
             if tap.flagsChanged(keyCode: event.keyCode, flags: event.modifierFlags.rawValue) == 54 { keys.toggleTap() }
-            return event
+            return false
         case .leftMouseDown:
             tap.interrupt()
-            return event
+            return false
         default:
             tap.interrupt()
-            return keys.key(event) ? nil : event
+            return keys.key(event)
         }
     }
 }

@@ -30,6 +30,19 @@ enum CappedScrollSpace {
         guard edges.contains(where: { $0 > cap + 0.5 }) else { return cap }
         return edges.filter { $0 <= cap + 0.5 }.max().map { min($0, cap) } ?? cap
     }
+
+    /// `fit` for a lazy list, which only measures the rows it has realized (and may report a stray edge far past the
+    /// rest while it settles): the rows beyond the last measured edge within the cap are taken to repeat the measured
+    /// pitch (the gaps between consecutive edges within it, which must agree within a point), and the cap snaps down to a whole number of them.
+    /// Never below the first row; with fewer than two edges within the cap there is no pitch to go by.
+    static func fitLazy(cap: CGFloat, edges: [CGFloat]) -> CGFloat {
+        let within = edges.filter { $0 <= cap + 0.5 }
+        guard within.count >= 2, let last = within.last else { return fit(cap: cap, edges: edges) }
+        let gaps = zip(within, within.dropFirst()).map { $1 - $0 }
+        // Only uniform rows can be extrapolated; otherwise the unmeasured rows' heights are unknown.
+        guard let pitch = gaps.max(), pitch > 1, gaps.allSatisfy({ pitch - $0 <= 1 }) else { return fit(cap: cap, edges: edges) }
+        return min(last + ((cap - last + 0.5) / pitch).rounded(.down) * pitch, cap)
+    }
 }
 
 /// A vertical stack that is lazy only for long lists: a list of up to 150 rows is laid out whole, so every row's edge is measured
@@ -72,7 +85,7 @@ struct CappedScroll<Content: View>: View {
 
     var body: some View {
         // Whole rows only; with no rows marked (or none ending within the cap) the plain cap.
-        let limit = CappedScrollSpace.fit(cap: cap, edges: edges)
+        let limit = lazy ?CappedScrollSpace.fitLazy(cap: cap, edges: edges) : CappedScrollSpace.fit(cap: cap, edges: edges)
         // A lazy list's measured height can lag behind the rows it has since laid out: they count too.
         let cut = lazy ? lazyShort == nil : max(height, edges.last ?? 0) > cap + 0.5
         let shown = cut ? limit : lazy ? lazyShort ?? cap : height
@@ -96,6 +109,8 @@ struct CappedScroll<Content: View>: View {
                     edges = sorted
                     // Rows came or went: measure again at the cap.
                     if lazy, lazyShort != nil { lazyShort = nil }
+                    // The content's height may already be known at the cap (a list that shrank): settle on it now.
+                    settle()
                 }
             }
             // No scroller: a legacy one ("Show scroll bars: Always") would take its width out of the rows and push
@@ -122,7 +137,9 @@ extension CappedScroll {
     /// Lazy: trusts the content's height only when it was measured in a viewport as tall as the cap.
     fileprivate func settle() {
         guard lazy, height > 0 else { return }
-        if viewport >= cap - 0.5 {
+        // A viewport snapped down to whole rows is as good as the cap when the content is shorter than it.
+        let snapped = CappedScrollSpace.fitLazy(cap: cap, edges: edges)
+        if viewport >= cap - 0.5 || (viewport >= snapped - 0.5 && height < snapped - 0.5) {
             let short: CGFloat? = height < cap - 0.5 ? height : nil
             if short != lazyShort { lazyShort = short }
         } else if let short = lazyShort {
@@ -609,8 +626,6 @@ struct SessionBlock: View {
                 .padding(.bottom, twoLines ? 4 : 7)
         }
         .background(Theme.Radius.shape(Theme.Radius.md).fill(selected ? Theme.Fill.field : Theme.Fill.rest))
-        // The card has its own fill: pulsing tiles on it fade to that, not to the hub's background.
-        .environment(\.pulseBackdrop, selected ? Theme.composite(Theme.Fill.field) : Theme.bg)
         // The same actions as an inbox item's, over the title line's right end, centred on it.
         .overlay(alignment: .topTrailing) {
             if selected {

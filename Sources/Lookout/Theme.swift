@@ -3,16 +3,6 @@ import SwiftUI
 
 enum Theme {
     static let bg = Color(red: 0.078, green: 0.078, blue: 0.086)
-    /// White at `whiteOpacity` composited over `bg`, as an opaque colour: what a translucent white fill looks like on the surface.
-    static func composite(_ whiteOpacity: Double) -> Color {
-        let base = 0.078 * (1 - whiteOpacity) + whiteOpacity
-        let blue = 0.086 * (1 - whiteOpacity) + whiteOpacity
-        return Color(.sRGB, red: base, green: base, blue: blue, opacity: 1)
-    }
-    /// The same for a translucent white fill such as `Fill.field`.
-    static func composite(_ whiteFill: Color) -> Color {
-        composite(Double(NSColor(whiteFill).usingColorSpace(.sRGB)?.alphaComponent ?? 0))
-    }
     /// Tooltip bubbles, a step above `bg`.
     static let popover = Color(white: 0.17)
     static let raised = Color.white.opacity(0.045)

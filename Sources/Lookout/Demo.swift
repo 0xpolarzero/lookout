@@ -264,6 +264,8 @@ enum ClaudeCheck {
     }
 
     /// `--claude --watch`: the extension live against the real app, nothing saved; prints every change.
+    private static var watchers: [FolderWatcher] = []
+
     private static func watch() {
         let store = Store()
         store.persists = false
@@ -283,7 +285,8 @@ enum ClaudeCheck {
             fflush(stdout)
         }
         dump("start")
-        let watcher = FolderWatcher([Claude.sessionsDir, Claude.localStorageDir]) { MainActor.assumeIsolated { dump("files") } }
-        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in MainActor.assumeIsolated { _ = watcher; dump("timer") } }
+        // Held for the life of the process (the run loop never returns), so the stream keeps delivering.
+        watchers.append(FolderWatcher([Claude.sessionsDir, Claude.localStorageDir]) { MainActor.assumeIsolated { dump("files") } })
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in MainActor.assumeIsolated { dump("timer") } }
     }
 }

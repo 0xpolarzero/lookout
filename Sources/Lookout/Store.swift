@@ -320,7 +320,8 @@ final class Store {
                     wait = 1
                 }
             }
-            let task = Task<Void, Never> { try? await Task.sleep(for: .seconds(wait)) }
+            let seconds = wait
+            let task = Task<Void, Never> { try? await Task.sleep(for: .seconds(seconds)) }
             sleeper = task
             await task.value
         }
@@ -388,11 +389,12 @@ final class Store {
         }
         saveDirty = false
         let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents))
-        let write = {
+        let url = Self.fileURL
+        let write: @Sendable () -> Void = {
             let enc = JSONEncoder()
             enc.dateEncodingStrategy = .iso8601
             if let data = try? enc.encode(box.state) {
-                try? data.write(to: Self.fileURL, options: .atomic)
+                try? data.write(to: url, options: .atomic)
             }
         }
         if wait { Self.writer.sync(execute: write) } else { Self.writer.async(execute: write) }

@@ -154,7 +154,6 @@ extension View {
             .padding(.vertical, 6)
             .background(Theme.Radius.shape(Theme.Radius.md).fill(on ? Theme.Fill.field : Theme.Fill.rest))
             .contentShape(Theme.Radius.shape(Theme.Radius.md))
-            .transformEnvironment(\.pulseBackdrop) { if on { $0 = Theme.composite(Theme.Fill.field) } }
             .motion(Theme.Motion.hover, value: on)
     }
 

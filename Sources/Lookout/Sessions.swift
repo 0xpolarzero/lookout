@@ -13,6 +13,54 @@ struct AgentTile: View {
 
     var body: some View {
         let shape = Tile.shape(size)
+        // Busy (Claude answering, or a subagent or command still running after it): the tile fades and pulses,
+        // quieter than the sessions waiting on you. The face is rendered to an image that Core Animation fades.
+        let busy = (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty
+        Group {
+            if busy {
+                Pulse(from: 0.6, to: 0.28, duration: 1.1, id: AgentTileFace.Key(row: row, size: size)) {
+                    AgentTileFace(row: row, size: size)
+                }
+            } else {
+                AgentTileFace(row: row, size: size)
+            }
+        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(row.session.title)
+            .accessibilityValue(row.stateName)
+            .overlay {
+                if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
+            }
+            // The project's colour, as an underline.
+            .overlay(alignment: .bottom) {
+                if let color = row.color {
+                    Capsule().fill(color.opacity(row.pending ? 0.6 : 1))
+                        .frame(width: size * 0.62, height: max(2.5, size * 0.12))
+                        .offset(y: size * 0.12 + 2.5)
+                }
+            }
+    }
+}
+
+/// The tile itself, without its busy pulse (what `Pulse` renders to an image).
+private struct AgentTileFace: View {
+    let row: AgentRow
+    var size: CGFloat
+
+    /// What the face depends on.
+    struct Key: Hashable {
+        let label: String
+        let icon: String?
+        let tint: Color?
+        let pending: Bool
+        let size: CGFloat
+        init(row: AgentRow, size: CGFloat) {
+            label = row.label; icon = row.icon; tint = row.tint; pending = row.pending; self.size = size
+        }
+    }
+
+    var body: some View {
+        let shape = Tile.shape(size)
         let emoji = row.label.unicodeScalars.first.map { $0.properties.isEmoji && $0.value > 0xFF } ?? false
         Group {
             if let icon = row.icon {
@@ -30,23 +78,6 @@ struct AgentTile: View {
             .frame(width: size, height: size)
             .background(shape.fill(row.tint ?? Theme.Fill.tile))
             .opacity(row.pending ? 0.55 : 1)
-            // Busy (Claude answering, or a subagent or command still running after it): the tile fades and
-            // pulses, quieter than the sessions waiting on you.
-            .modifier(BusyPulse(on: (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty, cornerRadius: size * 0.3))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(row.session.title)
-            .accessibilityValue(row.stateName)
-            .overlay {
-                if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
-            }
-            // The project's colour, as an underline.
-            .overlay(alignment: .bottom) {
-                if let color = row.color {
-                    Capsule().fill(color.opacity(row.pending ? 0.6 : 1))
-                        .frame(width: size * 0.62, height: max(2.5, size * 0.12))
-                        .offset(y: size * 0.12 + 2.5)
-                }
-            }
     }
 }
 
@@ -74,21 +105,6 @@ struct ProjectLabel: View {
                 Image(systemName: "text.bubble").font(.system(size: 9))
             }
             Text(session.folderName)
-        }
-    }
-}
-
-/// A busy session's tile: see-through, slowly pulsing.
-private struct BusyPulse: ViewModifier {
-    let on: Bool
-    var cornerRadius: CGFloat = 0
-
-    func body(content: Content) -> some View {
-        if on {
-            // A render-server opacity loop over the tile (the tile itself stays SwiftUI); clicks fall through.
-            Pulse(from: 0.6, to: 0.28, duration: 1.1, cornerRadius: cornerRadius) { content }
-        } else {
-            content
         }
     }
 }
@@ -419,7 +435,6 @@ struct DrawerRow: View {
                     .frame(height: twoLines ? 44 : nil)
                     .frame(maxHeight: twoLines ? 44 : .infinity)
                     .background(Theme.Radius.shape(Theme.Radius.md).fill(selected && !plain ? Theme.Fill.hover : Theme.Fill.rest))
-                    .transformEnvironment(\.pulseBackdrop) { if selected && !plain { $0 = Theme.composite(0.07) } }
             }
         }
         .contentShape(Rectangle())
