@@ -210,14 +210,19 @@ enum TokenProvider {
 }
 
 enum Keychain {
-    private static let base: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "dev.polarzero.lookout",
-        kSecAttrAccount as String: "github-token",
-    ]
+    static let github = "github-token"
+    static let typesafe = "typesafe-key"
 
-    static func read() -> String? {
-        var q = base
+    private static func base(_ account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "dev.polarzero.lookout",
+            kSecAttrAccount as String: account,
+        ]
+    }
+
+    static func read(_ account: String = github) -> String? {
+        var q = base(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
@@ -225,14 +230,14 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func write(_ token: String) {
-        delete()
-        var q = base
+    static func write(_ token: String, _ account: String = github) {
+        delete(account)
+        var q = base(account)
         q[kSecValueData as String] = Data(token.utf8)
         SecItemAdd(q as CFDictionary, nil)
     }
 
-    static func delete() {
-        SecItemDelete(base as CFDictionary)
+    static func delete(_ account: String = github) {
+        SecItemDelete(base(account) as CFDictionary)
     }
 }

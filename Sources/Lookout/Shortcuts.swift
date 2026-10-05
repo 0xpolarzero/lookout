@@ -100,7 +100,7 @@ struct ModifierTap {
 }
 
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case togglePanel, openItem, toggleRead, discard, markAllRead, refresh
+    case togglePanel, sessionSwitcher, openItem, toggleRead, discard, markAllRead, refresh, keepSession, removeSession
 
     var id: String { rawValue }
 
@@ -112,11 +112,17 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .discard: "Discard / back to inbox"
         case .markAllRead: "Mark all as read"
         case .refresh: "Refresh now"
+        case .sessionSwitcher: "Switch Claude session"
+        case .keepSession: "Keep a pending session"
+        case .removeSession: "Remove / dismiss a session"
         }
     }
 
     /// Works from any app (registered system-wide) rather than only while the panel has focus.
-    var isGlobal: Bool { self == .togglePanel }
+    var isGlobal: Bool { self == .togglePanel || self == .sessionSwitcher }
+
+    /// Only meaningful with the Claude sessions extension on.
+    var isAgents: Bool { self == .sessionSwitcher || self == .keepSession || self == .removeSession }
 
     var defaultShortcut: Shortcut {
         switch self {
@@ -126,6 +132,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .discard: Shortcut(keyCode: UInt16(kVK_Delete))
         case .markAllRead: Shortcut(keyCode: UInt16(kVK_Space), modifiers: [.option])
         case .refresh: Shortcut(keyCode: UInt16(kVK_ANSI_R), modifiers: [.command])
+        case .sessionSwitcher: Shortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.control, .option])
+        case .keepSession: Shortcut(keyCode: UInt16(kVK_ANSI_K), modifiers: [.command])
+        // ⌘⌫ rather than a bare ⌫: removing a session is easy to hit by accident and awkward to undo.
+        case .removeSession: Shortcut(keyCode: UInt16(kVK_Delete), modifiers: [.command])
         }
     }
 }

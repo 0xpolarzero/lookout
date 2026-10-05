@@ -23,6 +23,7 @@ import Testing
     @Test func displayUsesSymbols() {
         #expect(ShortcutAction.togglePanel.defaultShortcut.display.hasPrefix("⌃⌥"))
         #expect(ShortcutAction.discard.defaultShortcut.display == "⌫")
+        #expect(ShortcutAction.removeSession.defaultShortcut.display == "⌘⌫")
         #expect(ShortcutAction.markAllRead.defaultShortcut.display == "⌥Space")
     }
 
@@ -53,14 +54,14 @@ import Testing
         let rightCmd = Shortcut(keyCode: 54)
         #expect(rightCmd.isModifierTap)
         #expect(rightCmd.display == "Right ⌘")
-        #expect(!ShortcutAction.togglePanel.defaultShortcut.isModifierTap)
+        #expect(!ShortcutAction.sessionSwitcher.defaultShortcut.isModifierTap)
     }
 
     @Test func customizeAndReset() {
         let store = Store()
         store.persists = false
         var registered: Shortcut?
-        store.onGlobalShortcutChange = { registered = $0 }
+        store.onGlobalShortcutChange = { _, shortcut in registered = shortcut }
         let custom = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
         store.setShortcut(custom, for: .togglePanel)
         #expect(store.shortcut(.togglePanel) == custom)

@@ -17,6 +17,16 @@ final class Store {
         }
     }
 
+    /// Claude sessions extension (see Agents.swift).
+    var agents = AgentsState() {
+        didSet { save() }
+    }
+    var claudeSessions: [String: ClaudeSession] = [:]
+    var claudeActivity: [String: ClaudeActivity] = [:]
+    var hasTypesafeKey = Keychain.read(Keychain.typesafe)?.isEmpty == false
+    var iconError: String?
+    var claudeLink: ClaudeLink = .off
+
     var me: GHUser?
     var tokenSource: TokenSource?
     var authError: String?
@@ -36,7 +46,16 @@ final class Store {
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
-    @ObservationIgnored var onGlobalShortcutChange: ((Shortcut) -> Void)?
+    @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Void)?
+    @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
+    @ObservationIgnored let claudeReader = Claude.SessionReader()
+    @ObservationIgnored let activityReader = Claude.ActivityReader()
+    @ObservationIgnored var iconTask: Task<Void, Never>?
+    @ObservationIgnored var iconsPausedUntil = Date.distantPast
+    @ObservationIgnored var typesafeKeyCache: String?
+    @ObservationIgnored private var claudeWatcher: FolderWatcher?
+    @ObservationIgnored private var transcriptWatcher: FolderWatcher?
+    @ObservationIgnored private var claudeTimer: Timer?
 
     private static let fileURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -63,6 +82,27 @@ final class Store {
         updater.onSkip = { [weak self] in self?.settings.skippedVersion = $0 }
         updater.start()
         restartPolling()
+        watchClaude()
+    }
+
+    /// File events give near-instant updates; the timer catches what they can't (the clock, the app quitting).
+    func watchClaude() {
+        claudeWatcher = nil
+        transcriptWatcher = nil
+        claudeTimer?.invalidate()
+        claudeTimer = nil
+        guard agents.enabled else { return }
+        claudeWatcher = FolderWatcher([Claude.sessionsDir, Claude.localStorageDir]) { [weak self] in
+            MainActor.assumeIsolated { self?.refreshClaude() }
+        }
+        // Transcripts change with every step an agent takes: only the working sessions' tails are read.
+        transcriptWatcher = FolderWatcher([Claude.transcriptsDir], latency: 0.5) { [weak self] in
+            MainActor.assumeIsolated { self?.refreshActivity() }
+        }
+        claudeTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshClaude() }
+        }
+        refreshClaude()
     }
 
     func restartPolling() {
@@ -93,13 +133,14 @@ final class Store {
         items = state.items
         ci = state.ci
         settings = state.settings
+        agents = state.agents ?? AgentsState()
     }
 
     func save() {
         guard persists, !loading else { return }
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
-        let state = PersistedState(repos: repos, items: items, ci: ci, settings: settings)
+        let state = PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents)
         if let data = try? enc.encode(state) {
             try? data.write(to: Self.fileURL, options: .atomic)
         }
@@ -198,7 +239,7 @@ final class Store {
         var all = settings.shortcuts ?? [:]
         all[action.rawValue] = shortcut == action.defaultShortcut ? nil : shortcut
         settings.shortcuts = all.isEmpty ? nil : all
-        if action.isGlobal { onGlobalShortcutChange?(self.shortcut(action)) }
+        if action.isGlobal { onGlobalShortcutChange?(action, self.shortcut(action)) }
     }
 
     func addBot(_ handle: String) {

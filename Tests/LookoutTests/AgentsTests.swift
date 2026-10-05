@@ -1,0 +1,285 @@
+import Foundation
+import Testing
+@testable import Lookout
+
+@MainActor
+@Suite struct Agents {
+    private let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+    private func session(_ id: String, turns: Int = 3, minutesAgo: Double = 5, messageMinutesAgo: Double? = nil,
+                         focusedMinutesAgo: Double? = 60, folder: String? = "/code/app", blocked: Bool = false,
+                         running: Bool = false, archived: Bool = false) -> ClaudeSession {
+        ClaudeSession(id: id, title: "Session \(id)", folder: folder, isArchived: archived, completedTurns: turns,
+                      lastActivity: now.addingTimeInterval(-minutesAgo * 60),
+                      lastFocused: focusedMinutesAgo.map { now.addingTimeInterval(-$0 * 60) },
+                      lastUserMessage: now.addingTimeInterval(-(messageMinutesAgo ?? minutesAgo + 1) * 60),
+                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
+    }
+
+    /// A store that has already seen `sessions` once (seeded), so later reads are "new activity".
+    private func store(_ sessions: [ClaudeSession], dots: Set<String> = []) -> Store {
+        let s = Store()
+        s.persists = false
+        s.agents.enabled = true
+        s.agents.enabledAt = now.addingTimeInterval(-3600)
+        s.ingest(sessions, appUnread: dots, claudeFrontmost: false, now: now)
+        return s
+    }
+
+    private func entry(_ s: Store, _ id: String) -> AgentEntry? { s.agents.entries.first { $0.id == id } }
+
+    @Test func firstReadOffersRecentSessionsOnly() {
+        let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
+        #expect(s.agents.entries.map(\.id) == ["a"])
+        #expect(entry(s, "a")?.kept == false)
+        #expect(entry(s, "a")?.unread == true)  // the sidebar dot decides on first sight
+        #expect(s.agentRows.pending.map(\.id) == ["a"])
+    }
+
+    @Test func finishedTurnMarksUnread() {
+        let s = store([session("a")])
+        s.toggleAgentRead("a")
+        s.toggleAgentRead("a")
+        #expect(entry(s, "a")?.unread == false)
+        s.ingest([session("a", turns: 4, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "a")?.unread == true)
+    }
+
+    @Test func finishedWhileYouWatchItStaysRead() {
+        let s = store([session("a", focusedMinutesAgo: 10), session("b", focusedMinutesAgo: 50)])
+        s.ingest([session("a", turns: 4, minutesAgo: 0, focusedMinutesAgo: 10), session("b", focusedMinutesAgo: 50)],
+                 appUnread: [], claudeFrontmost: true, now: now)
+        #expect(entry(s, "a")?.unread == false)
+    }
+
+    @Test func sendingAMessageOrOpeningItMarksRead() {
+        let s = store([session("a"), session("b")], dots: ["a", "b"])
+        // A new message (running, no new finished turn).
+        s.ingest([session("a", messageMinutesAgo: 0, running: true), session("b")], appUnread: ["a", "b"], claudeFrontmost: false, now: now)
+        #expect(entry(s, "a")?.unread == false)
+        // Focused in the app.
+        s.ingest([session("a", messageMinutesAgo: 0, running: true), session("b", focusedMinutesAgo: 1)],
+                 appUnread: ["a", "b"], claudeFrontmost: true, now: now)
+        #expect(entry(s, "b")?.unread == false)
+    }
+
+    @Test func sidebarDotChangesWinButYourChoiceStandsOtherwise() {
+        let s = store([session("a")], dots: [])
+        s.ingest([session("a")], appUnread: ["a"], claudeFrontmost: false, now: now)
+        #expect(entry(s, "a")?.unread == true)
+        // Marked read in Lookout: the app still shows the dot, unchanged, so Lookout keeps your choice.
+        s.toggleAgentRead("a")
+        s.ingest([session("a")], appUnread: ["a"], claudeFrontmost: false, now: now)
+        #expect(entry(s, "a")?.unread == false)
+        // Marked unread here, then the app clears its dot: read again.
+        s.toggleAgentRead("a")
+        s.ingest([session("a")], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "a")?.unread == false)
+        // Unreadable dots (nil) change nothing.
+        s.toggleAgentRead("a")
+        s.ingest([session("a")], appUnread: nil, claudeFrontmost: false, now: now)
+        #expect(entry(s, "a")?.unread == true)
+    }
+
+    @Test func dismissedPendingComesBackOnNewActivity() {
+        let s = store([session("a")])
+        s.dismissAgent("a")
+        #expect(s.agentRows.pending.isEmpty)
+        s.ingest([session("a")], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(s.agentRows.pending.isEmpty)
+        s.ingest([session("a", turns: 4, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(s.agentRows.pending.map(\.id) == ["a"])
+    }
+
+    @Test func removedKeptSessionReturnsAsPending() {
+        let s = store([session("a")])
+        s.keepAgent("a")
+        #expect(s.agentRows.kept.map(\.id) == ["a"])
+        s.dismissAgent("a")
+        #expect(s.agentRows.kept.isEmpty && s.agentRows.pending.isEmpty)
+        s.ingest([session("a", turns: 4, minutesAgo: 0)], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(s.agentRows.kept.isEmpty)
+        #expect(s.agentRows.pending.map(\.id) == ["a"])
+    }
+
+    @Test func archivedSessionsLeave() {
+        let s = store([session("a")])
+        s.keepAgent("a")
+        s.ingest([session("a", archived: true)], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(s.agents.entries.isEmpty)
+        #expect(s.agentRows.kept.isEmpty)
+    }
+
+    @Test func newSessionsAfterSeedingArePendingUnlessMuted() {
+        let s = store([session("a")])
+        s.setFolderMuted("", true)  // scratch chats
+        s.ingest([session("a"), session("new", minutesAgo: 0), session("chat", minutesAgo: 0, folder: nil)],
+                 appUnread: [], claudeFrontmost: false, now: now)
+        #expect(Set(s.agentRows.pending.map(\.id)) == ["a", "new"])
+        #expect(entry(s, "new")?.unread == true)
+        #expect(entry(s, "chat") == nil)
+        // Old sessions with nothing new stay out.
+        s.ingest([session("a"), session("new", minutesAgo: 0), session("stale", minutesAgo: 600)],
+                 appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "stale") == nil)
+    }
+
+    @Test func keptOrderAndReorder() {
+        let s = store([session("a"), session("b"), session("c")])
+        s.keepAgent("b")
+        s.keepAgent("a")
+        s.keepAgent("c")
+        #expect(s.agentRows.kept.map(\.id) == ["b", "a", "c"])
+        s.moveAgent("c", onto: "b")
+        #expect(s.agentRows.kept.map(\.id) == ["c", "b", "a"])
+    }
+
+    @Test func searchAndKeepAnySession() {
+        var old = session("old", minutesAgo: 3 * 24 * 60, folder: "/code/lookout")
+        old.title = "Agent completion notifications"
+        let s = store([session("a"), old])
+        #expect(entry(s, "old") == nil)  // too old to be offered as pending
+        #expect(s.agentCandidates(matching: "agent notif").map(\.id) == ["old"])
+        #expect(s.agentCandidates(matching: "lookout").map(\.id) == ["old"])
+        #expect(s.agentCandidates(matching: "").map(\.id) == ["a", "old"])
+        s.keepAgent("old")
+        #expect(s.agentRows.kept.map(\.id) == ["old"])
+        #expect(s.agentCandidates(matching: "agent").isEmpty)
+    }
+
+    @Test func keptSessionsGroupByProject() {
+        let s = store([session("a", folder: "/code/x"), session("b", folder: "/code/y"), session("c", folder: "/code/x")])
+        for id in ["a", "b", "c"] { s.keepAgent(id) }
+        #expect(s.agentRows.kept.map(\.id) == ["a", "c", "b"])
+        #expect(s.groups(s.agentRows.kept).map { $0.map(\.id) } == [["a", "c"], ["b"]])
+        // Each project got its own colour.
+        #expect(s.agents.folderColors["/code/x"] != s.agents.folderColors["/code/y"])
+        #expect(s.agentRows.kept.first?.color != nil)
+    }
+
+    @Test func searchFindsAnySessionKeptFirst() {
+        var other = session("other", minutesAgo: 1, folder: "/code/sandbox")
+        other.title = "Storage directory"
+        var mine = session("mine", minutesAgo: 50)
+        mine.title = "Sandbox on Linux"
+        let s = store([other, mine])
+        s.keepAgent("mine")
+        #expect(s.searchSessions("sand").map(\.id) == ["mine", "other"])  // title prefix and kept first
+        #expect(s.searchSessions("sto dir").map(\.id) == ["other"])
+        #expect(s.searchSessions("").isEmpty)
+    }
+
+    @Test func countsSplitBlockedFromDone() {
+        let s = store([session("a", blocked: true), session("b"), session("c"), session("d", running: true)], dots: ["a", "b", "d"])
+        let counts = s.agentCounts
+        #expect(counts.blocked == 1)
+        #expect(counts.done == 1)
+    }
+
+    @Test func oldStateFilesStillLoad() throws {
+        let state = try JSONDecoder().decode(PersistedState.self, from: Data(#"{"repos":[],"items":[],"ci":{},"settings":{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"reviewRequests":true,"didInitialReviewSync":true}}"#.utf8))
+        #expect(state.agents == nil)
+        let partial = try JSONDecoder().decode(AgentsState.self, from: Data(#"{"enabled":true}"#.utf8))
+        #expect(partial.enabled && !partial.expanded && partial.entries.isEmpty)
+    }
+}
+
+@Suite struct AgentLabels {
+    @Test func initialsThenAlternativesWhenTaken() {
+        #expect(AgentLabel.candidates("CI failure diagnosis").first == "CF")
+        #expect(AgentLabel.candidates("Fix the CI").first == "FC")  // "the" skipped
+        let labels = AgentLabel.assign([(id: "1", title: "Lookout agents", custom: nil),
+                                        (id: "2", title: "Lookout auth", custom: nil),
+                                        (id: "3", title: "Anything", custom: "LA")])
+        #expect(labels["3"] == "LA")
+        #expect(Set(labels.values).count == 3)
+        #expect(labels["1"] != "LA" && labels["2"] != "LA")
+    }
+
+    @Test func lettersSkipTheProjectName() {
+        #expect(AgentLabel.candidates("LCU update notifications", folder: "lcu").first == "UN")
+        #expect(AgentLabel.candidates("LCU computer use", folder: "lcu-research").first == "CU")
+        #expect(AgentLabel.candidates("Lookout", folder: "lookout").first == "LO")  // nothing else to use
+    }
+
+    @Test func singleWordAndEmptyTitles() {
+        let labels = AgentLabel.assign([(id: "1", title: "Zed", custom: nil), (id: "2", title: "", custom: nil),
+                                        (id: "3", title: "", custom: nil)])
+        #expect(labels["1"] == "ZE")
+        #expect(labels["2"] != labels["3"])
+    }
+
+    @Test func sanitizeKeepsTwoLettersOrOneEmoji() {
+        #expect(AgentLabel.sanitize(" ab c ") == "AB")
+        #expect(AgentLabel.sanitize("🐧 linux") == "🐧")
+        #expect(AgentLabel.sanitize("1") == "1")
+        #expect(AgentLabel.sanitize("   ") == nil)
+    }
+}
+
+@Suite struct ClaudeFiles {
+    private func json(_ fields: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: fields) }
+
+    @Test func decodesFinishedSessionWithItsSummary() {
+        let s = Claude.decodeSession(json([
+            "sessionId": "local_1", "title": "Fix CI", "cwd": "/code/app/.claude/worktrees/x", "gitAnchorsFolderRealpath": "/code/app",
+            "completedTurns": 3, "lastActivityAt": 1_700_000_000_000.0, "latestUserFrameAt": 1_699_999_000_000.0,
+            "postTurnSummary": ["status_category": "blocked", "status_detail": " Which one? "],
+            "postTurnSummaryFor": "u1", "lastAssistantUuid": "u1", "someNewField": ["x": 1],
+        ]))
+        #expect(s?.folder == "/code/app")
+        #expect(s?.folderName == "app")
+        #expect(s?.summary == .init(blocked: true, detail: "Which one?"))
+        #expect(s?.running == false)
+    }
+
+    @Test func runningWhileTheSummaryLagsBehind() {
+        let now = Date()
+        let s = Claude.decodeSession(json([
+            "sessionId": "local_2", "latestUserFrameAt": now.addingTimeInterval(-60).timeIntervalSince1970 * 1000,
+            "postTurnSummary": ["status_category": "review_ready"], "postTurnSummaryFor": "old", "lastAssistantUuid": "new",
+            "cwd": "/Users/me/Library/Application Support/Claude/scratch-workspaces/a/b/scratch-1",
+        ]), now: now)
+        #expect(s?.running == true)
+        #expect(s?.summary == nil)
+        #expect(s?.folder == nil)
+        #expect(s?.title == "Untitled session")
+        // A turn that started hours ago with no summary died with the app.
+        let stale = Claude.decodeSession(json([
+            "sessionId": "local_3", "latestUserFrameAt": now.addingTimeInterval(-3 * 3600).timeIntervalSince1970 * 1000,
+        ]), now: now)
+        #expect(stale?.running == false)
+    }
+
+    @Test func activityIsTheLastStep() {
+        func line(_ obj: [String: Any]) -> String { String(data: try! JSONSerialization.data(withJSONObject: obj), encoding: .utf8)! }
+        let tool = line(["type": "assistant", "timestamp": "2026-10-05T08:33:04.292Z",
+                         "message": ["content": [["type": "thinking"], ["type": "tool_use", "name": "Bash",
+                                                                         "input": ["command": "swift test", "description": "Run the tests"]]]]])
+        let result = line(["type": "user", "timestamp": "2026-10-05T08:33:09.000Z", "message": ["content": [["type": "tool_result"]]]])
+        let other = line(["type": "attachment"])
+        let running = Claude.activity(tail: Data(("partial line\n" + tool + "\n" + other + "\n").utf8))
+        #expect(running?.text == "Run the tests")
+        #expect(Claude.activity(tail: Data((tool + "\n" + result + "\n").utf8))?.text == "Thinking")
+        let question = line(["type": "assistant", "timestamp": "2026-10-05T08:40:00.000Z",
+                             "message": ["content": [["type": "tool_use", "name": "AskUserQuestion", "input": [:]]]]])
+        #expect(Claude.activity(tail: Data((question + "\n").utf8))?.waitsForYou == true)
+        #expect(running?.waitsForYou == false)
+        #expect(Claude.describe(tool: "Edit", input: ["file_path": "/a/b/PillView.swift"]) == "Editing PillView.swift")
+        #expect(Claude.describe(tool: "mcp__lcu__js", input: [:]) == "Using lcu")
+        #expect(Claude.describe(tool: "Bash", input: ["command": "git status --short"]) == "Running git status --short")
+    }
+
+    @Test func rejectsOtherFiles() {
+        #expect(Claude.decodeSession(json(["scheduledTasks": []])) == nil)
+        #expect(Claude.decodeSession(Data("not json".utf8)) == nil)
+    }
+
+    @Test func parsesTheSidebarDots() {
+        let value = [UInt8(1)] + Array(#"{"state":{"unreadIds":["local_a","local_b"],"explicitUnreadIds":[]},"version":0}"#.utf8)
+        #expect(Claude.parseUnread(value) == ["local_a", "local_b"])
+        let utf16 = [UInt8(0)] + Array(#"{"state":{"unreadIds":["local_c"]}}"#.data(using: .utf16LittleEndian)!)
+        #expect(Claude.parseUnread(utf16) == ["local_c"])
+        #expect(Claude.parseUnread([1, 0x7b]) == nil)
+    }
+}

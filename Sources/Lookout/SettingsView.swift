@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Bindable var store: Store
     @State private var token = ""
     @State private var botInput = ""
+    @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
 
@@ -14,6 +15,7 @@ struct SettingsView: View {
                 account
                 notifications
                 bots
+                extensions
                 shortcuts
                 updates
                 general
@@ -113,7 +115,7 @@ struct SettingsView: View {
 
     private var shortcuts: some View {
         section("Shortcuts") {
-            ForEach(ShortcutAction.allCases) { action in
+            ForEach(ShortcutAction.allCases.filter { !$0.isAgents || store.agents.enabled }) { action in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(action.title).font(.system(size: 12.5))
@@ -131,6 +133,122 @@ struct SettingsView: View {
             }
             hint("Click a shortcut, then press the new keys (Esc cancels). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
         }
+    }
+
+    private var extensions: some View {
+        section("Extensions") {
+            let installed = Claude.isInstalled
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "asterisk").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.claude)
+                        Text("Claude sessions").font(.system(size: 12.5))
+                    }
+                    Text("Extension for the Claude desktop app")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.tertiary)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(get: { store.agents.enabled }, set: { store.setAgentsEnabled($0) }))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(!installed && !store.agents.enabled)
+            }
+            if !installed && !store.agents.enabled {
+                hint("Needs the Claude desktop app, with Claude Code sessions.")
+            } else if store.agents.enabled {
+                mutedFolders
+                Divider().opacity(0.4)
+                sessionIcons
+                Divider().opacity(0.4)
+                hint("Your Claude Code sessions on the pill and in an Agents tab: what's working, done or waiting for you. "
+                     + "Sessions with new activity arrive as pending; keep the ones you use. Read-only: Lookout never writes to the app.")
+            } else {
+                hint("Your Claude Code sessions on the pill and in an Agents tab, to see which agents are done or waiting and jump between them.")
+            }
+        }
+    }
+
+    @ViewBuilder private var sessionIcons: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Icons picked for you").font(.system(size: 12.5))
+                Text("By Jev, from TypeSafe").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(get: { store.agents.iconsEnabled }, set: { store.setIconsEnabled($0) }))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+        if store.agents.iconsEnabled {
+            if store.hasTypesafeKey {
+                HStack {
+                    Label("TypeSafe API key saved in the Keychain", systemImage: "key.fill")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondary)
+                    Spacer()
+                    Button("Remove") { store.setTypesafeKey(nil) }.controlSize(.small)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    SecureField("Paste a TypeSafe API key", text: $typesafeKey).fieldStyle()
+                    Button("Save") {
+                        store.setTypesafeKey(typesafeKey)
+                        typesafeKey = ""
+                    }
+                    .controlSize(.small)
+                    .disabled(typesafeKey.isEmpty)
+                }
+            }
+            if let error = store.iconError {
+                Text(error).font(.system(size: 11)).foregroundStyle(Theme.amber)
+            }
+            hint("Each session in your list gets an icon instead of letters. Its title, project name and first message go to "
+                 + "TypeSafe (api.typesafe.ai), whose Jev model picks one of \(SessionIcons.available.count) icons not already on screen, "
+                 + "for about $0.0001 a session. Keys come from console.typesafe.ai.")
+        }
+    }
+
+    @ViewBuilder private var mutedFolders: some View {
+        let muted = store.agents.mutedFolders
+        let unmuted = store.knownFolders.filter { !muted.contains($0) }
+        HStack {
+            Text("Muted folders").font(.system(size: 12.5))
+            Spacer()
+            Menu("Mute…") {
+                ForEach(unmuted, id: \.self) { folder in
+                    Button(folderName(folder)) { store.setFolderMuted(folder, true) }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(unmuted.isEmpty)
+        }
+        if !muted.isEmpty {
+            FlowLayout(spacing: 6) {
+                ForEach(muted, id: \.self) { folder in
+                    HStack(spacing: 4) {
+                        Text(folderName(folder))
+                        Button { store.setFolderMuted(folder, false) } label: {
+                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.tertiary)
+                    }
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(Capsule().fill(Color.white.opacity(0.07)))
+                    .help(folder.isEmpty ? "Chats not tied to a folder" : folder)
+                }
+            }
+        }
+    }
+
+    private func folderName(_ folder: String) -> String {
+        folder.isEmpty ? "Scratch chats" : URL(fileURLWithPath: folder).lastPathComponent
     }
 
     private var updates: some View {

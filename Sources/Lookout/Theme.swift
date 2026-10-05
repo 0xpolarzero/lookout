@@ -14,6 +14,19 @@ enum Theme {
     static let green = Color(red: 0.32, green: 0.82, blue: 0.50)
     static let red = Color(red: 0.97, green: 0.38, blue: 0.38)
     static let purple = Color(red: 0.68, green: 0.55, blue: 1.0)
+    /// Claude's clay, for anything about Claude sessions.
+    static let claude = Color(red: 0.85, green: 0.47, blue: 0.34)
+    /// Project colours for Claude sessions: as far apart as possible, and nowhere near the status colours (amber
+    /// needs you, blue unread, clay working) or CI's red. In assignment order, so the first projects differ most.
+    static let projectColors: [Color] = [
+        Color(red: 0.30, green: 0.82, blue: 0.47),  // green
+        Color(red: 0.67, green: 0.52, blue: 1.00),  // violet
+        Color(red: 0.96, green: 0.42, blue: 0.75),  // pink
+        Color(red: 0.24, green: 0.82, blue: 0.93),  // cyan
+        Color(red: 0.78, green: 0.90, blue: 0.24),  // lime
+        Color(red: 0.86, green: 0.86, blue: 0.90),  // silver
+    ]
+    static let projectColorNames = ["Green", "Violet", "Pink", "Cyan", "Lime", "Silver"]
 }
 
 func shortAgo(_ date: Date, now: Date = Date()) -> String {

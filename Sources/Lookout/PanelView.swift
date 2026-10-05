@@ -13,6 +13,7 @@ struct PanelView: View {
                 switch ui.tab {
                 case .inbox: InboxView(store: store, ui: ui, close: close)
                 case .ci: CIView(store: store, ui: ui)
+                case .agents: AgentsView(store: store, ui: ui)
                 case .repos: ReposView(store: store)
                 case .settings: SettingsView(store: store)
                 }
@@ -39,6 +40,9 @@ struct PanelView: View {
             HStack(spacing: 2) {
                 IconButton(symbol: "tray.fill", help: "Inbox", active: ui.tab == .inbox) { ui.tab = .inbox }
                 IconButton(symbol: "checkmark.seal.fill", help: "CI", active: ui.tab == .ci) { ui.tab = .ci }
+                if store.agents.enabled {
+                    IconButton(symbol: "asterisk", help: "Agents", detail: "Your Claude Code sessions", active: ui.tab == .agents) { ui.tab = .agents }
+                }
                 IconButton(symbol: "square.stack.3d.up.fill", help: "Repositories", active: ui.tab == .repos) { ui.tab = .repos }
                 IconButton(symbol: "gearshape.fill", help: "Settings", active: ui.tab == .settings) { ui.tab = .settings }
             }
@@ -55,7 +59,9 @@ struct PanelView: View {
     private var footer: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             HStack(spacing: 6) {
-                if let error = store.authError {
+                if ui.tab == .agents {
+                    claudeStatus
+                } else if let error = store.authError {
                     Circle().fill(Theme.red).frame(width: 6, height: 6)
                     Text(error).lineLimit(1).truncationMode(.tail)
                 } else if store.me == nil {
@@ -69,14 +75,14 @@ struct PanelView: View {
                 }
                 Spacer()
                 // Only worth showing when the shared GitHub rate limit is running low.
-                if let rate = store.rateRemaining, rate < 500 {
+                if let rate = store.rateRemaining, rate < 500, ui.tab != .agents {
                     Label("\(rate.formatted()) API calls left this hour", systemImage: "exclamationmark.triangle.fill")
                         .monospacedDigit()
                         .foregroundStyle(Theme.amber)
                         .tip("GitHub rate limit low",
                              "Shared with gh and other tools using your account. Syncing pauses at 0 until the hour resets.")
                 }
-                if store.me != nil {
+                if store.me != nil && ui.tab != .agents {
                     IconButton(symbol: "arrow.clockwise", help: "Refresh now",
                                detail: "Checks every repository, CI and review requests · \(store.shortcut(.refresh).display)", size: 20) { store.refreshNow() }
                         .disabled(store.isSyncing)
@@ -88,6 +94,19 @@ struct PanelView: View {
             .padding(.trailing, 8)
             .frame(height: 30)
         }
+    }
+
+    /// The Agents tab reads the Claude app's files as they change, so its footer is about that link instead.
+    @ViewBuilder private var claudeStatus: some View {
+        let (color, text, detail): (Color, String, String) = switch store.claudeLink {
+        case .ok where Claude.isRunning: (Theme.green, "Synced with Claude", "Updates as the Claude app writes its session files")
+        case .ok, .off: (Theme.tertiary, "Claude isn't running", "Sessions update again when the app is open")
+        case .missing: (Theme.red, "Claude's sessions not found", "Open the Claude desktop app once")
+        case .unreadable: (Theme.red, "Can't read Claude's sessions", "The app's session format changed")
+        }
+        Circle().fill(color).frame(width: 6, height: 6)
+        Text(text).tip(text, detail)
+        Text("· Extension for the Claude app").foregroundStyle(Theme.tertiary.opacity(0.7))
     }
 
     /// "Up to date" while polling is healthy; says how stale things are only when that matters.

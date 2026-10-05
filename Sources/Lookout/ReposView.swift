@@ -6,6 +6,8 @@ struct ReposView: View {
     @State private var error: String?
     @State private var adding = false
     @FocusState private var fieldFocused: Bool
+    /// Keeps the suggestions up while the pointer is on them: clicking one ends the editing before the click lands.
+    @State private var overList = false
 
     private var matches: [String] {
         let q = input.lowercased().trimmingCharacters(in: .whitespaces)
@@ -59,7 +61,7 @@ struct ReposView: View {
             if let error {
                 Text(error).font(.system(size: 11)).foregroundStyle(Theme.red).padding(.horizontal, 4)
             }
-            if (fieldFocused || !input.isEmpty) && !matches.isEmpty {
+            if (fieldFocused || overList) && !matches.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(matches, id: \.self) { name in
                         SuggestionRow(name: name) { add(name) }
@@ -68,6 +70,7 @@ struct ReposView: View {
                 .padding(4)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.raised))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.stroke))
+                .onHover { overList = $0 }
             }
         }
         .padding(.bottom, 4)
@@ -81,7 +84,11 @@ struct ReposView: View {
             let err = await store.addRepo(name)
             adding = false
             error = err
-            if err == nil { input = "" }
+            if err == nil {
+                input = ""
+                fieldFocused = false
+                overList = false
+            }
         }
     }
 }

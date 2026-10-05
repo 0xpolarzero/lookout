@@ -199,6 +199,7 @@ struct PersistedState: Codable {
     var items: [InboxItem]
     var ci: [String: CIStatus]
     var settings: AppSettings
+    var agents: AgentsState?
 }
 
 enum InboxFilter: String, CaseIterable {
@@ -214,12 +215,13 @@ enum InboxFilter: String, CaseIterable {
 }
 
 enum PanelTab {
-    case inbox, ci, repos, settings
+    case inbox, ci, agents, repos, settings
 
     var title: String {
         switch self {
         case .inbox: "Inbox"
         case .ci: "CI"
+        case .agents: "Agents"
         case .repos: "Repositories"
         case .settings: "Settings"
         }

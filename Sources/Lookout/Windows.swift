@@ -12,6 +12,19 @@ final class UIState {
     }
     /// Inbox row that keyboard shortcuts act on: the hovered row, or the one picked with ↑↓.
     var selection: String?
+    /// Same, in the Agents tab.
+    var agentSelection: String?
+    /// Pill drawer: open while the strip or the drawer is hovered, or from the keyboard (the switcher).
+    var drawerOpen = false
+    var switcher = false
+    /// Drawer row the switcher keys act on (also follows the mouse).
+    var drawerSelection: String?
+    /// What you've typed in the switcher: it then lists every matching session.
+    var switcherQuery = ""
+    /// Where the strip's tiles are in the pill window (top-left origin), and the pill's size: the drawer is its own
+    /// window and lines its rows up with these.
+    var tileFrames: [String: CGRect] = [:]
+    var pillSize: CGSize = .zero
     var edge: DockEdge = DockEdge(rawValue: UserDefaults.standard.string(forKey: "pill.edge") ?? "")
         ?? (UserDefaults.standard.bool(forKey: "pill.onLeft") ? .left : .right) {
         didSet { if persists { UserDefaults.standard.set(edge.rawValue, forKey: "pill.edge") } }
@@ -80,6 +93,7 @@ final class SizingHostingView<Content: View>: NSHostingView<Content> {
 
 struct PillActions {
     let toggle: (PanelTab) -> Void
+    var hoverAgents: (Bool) -> Void = { _ in }
 }
 
 /// The whole pill is draggable. A mouse-down is held back until we know whether it's a click (forwarded to
@@ -132,6 +146,8 @@ final class UIController {
 
     private var pill: FloatingPanel!
     private var panel: FloatingPanel!
+    private var drawer: FloatingPanel!
+    private var drawerHost: SizingHostingView<AgentDrawer>!
     private var pillHost: SizingHostingView<PillView>!
     private var screen: NSScreen = NSScreen.main ?? NSScreen.screens[0]
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
@@ -140,11 +156,13 @@ final class UIController {
     private var previousApp: NSRunningApplication?
     private var monitor: Any?
     private var keyMonitor: Any?
+    private var clickMonitor: Any?
 
     init(store: Store) {
         self.store = store
         let actions = PillActions(
-            toggle: { [weak self] tab in self?.toggle(tab) })
+            toggle: { [weak self] tab in self?.toggle(tab) },
+            hoverAgents: { [weak self] inside in self?.hoverAgents(inside) })
 
         let pillPanel = PillPanel(size: NSSize(width: 60, height: 200))
         pillPanel.onDragChanged = { [weak self] point in self?.dragChanged(to: point) }
@@ -163,8 +181,31 @@ final class UIController {
         panel.contentView = NSHostingView(rootView: PanelView(store: store, ui: ui, close: { [weak self] in self?.hidePanel() }))
         panel.onCancel = { [weak self] in self?.hidePanel() }
 
+        drawer = FloatingPanel(size: NSSize(width: AgentDrawer.width, height: 200))
+        drawerHost = SizingHostingView(rootView: AgentDrawer(
+            store: store, ui: ui, showAgents: { [weak self] in self?.toggle(.agents) },
+            onHover: { [weak self] inside in self?.hoverDrawer(inside) }))
+        drawerHost.onSizeChange = { [weak self] _ in self?.positionDrawer() }
+        drawer.contentView = drawerHost
+        observeDrawer()
+
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.hidePanel() }
+            Task { @MainActor in
+                self?.hidePanel()
+                self?.closeSwitcher(refocus: false)
+            }
+        }
+        // A click outside the field being edited ends the editing (SwiftUI only does that for other fields), which
+        // closes search suggestions the way you'd expect.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self else { return event }
+            MainActor.assumeIsolated {
+                if event.window === self.panel, let field = self.editedField(), let superview = field.superview,
+                   !superview.convert(field.frame, to: nil).contains(event.locationInWindow) {
+                    self.panel.makeFirstResponder(nil)
+                }
+            }
+            return event
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
@@ -201,12 +242,15 @@ final class UIController {
         guard dragStart == nil, !snapping else { return }
         pill.setFrame(pillTarget(), display: true)
         if ui.isOpen { positionPanel() }
+        if drawer?.isVisible == true { positionDrawer() }
     }
 
     private func dragChanged(to mouse: NSPoint) {
         if dragStart == nil {
             dragStart = (mouse, pill.frame.origin)
             hidePanel()
+            closeSwitcher(refocus: false)
+            ui.drawerOpen = false
         }
         guard let start = dragStart else { return }
         pill.setFrameOrigin(NSPoint(x: start.origin.x + mouse.x - start.mouse.x, y: start.origin.y + mouse.y - start.mouse.y))
@@ -251,9 +295,15 @@ final class UIController {
 
     /// Panel shortcuts. Returns nil when the key was handled. Typing in a text field is never intercepted.
     private func handleKey(_ event: NSEvent) -> NSEvent? {
+        if ui.switcher, drawer.isKeyWindow { return handleSwitcherKey(event) }
         guard ui.isOpen, panel.isKeyWindow, !store.isRecordingShortcut else { return event }
         if event.keyCode == 53, event.modifierFlags.intersection(Shortcut.relevant).isEmpty {
-            hidePanel()
+            // Esc leaves a search field first (closing its suggestions); the next one closes the panel.
+            if editedField() != nil {
+                panel.makeFirstResponder(nil)
+            } else {
+                hidePanel()
+            }
             return nil
         }
         if panel.firstResponder is NSText { return event }
@@ -262,6 +312,7 @@ final class UIController {
             store.refreshNow()
             return nil
         }
+        if ui.tab == .agents { return handleAgentsKey(event, pressed) }
         guard ui.tab == .inbox else { return event }
         let list = store.list(ui.filter)
         let current = list.first { $0.id == ui.selection }
@@ -285,10 +336,215 @@ final class UIController {
         return nil
     }
 
+    /// The text field being edited in the panel, if any (its field editor is the first responder).
+    private func editedField() -> NSView? {
+        guard let editor = panel.firstResponder as? NSTextView, editor.isFieldEditor else { return nil }
+        return editor.delegate as? NSView
+    }
+
     private func moveSelection(_ delta: Int, in list: [InboxItem]) {
         guard !list.isEmpty else { return }
         let index = list.firstIndex { $0.id == ui.selection } ?? (delta > 0 ? -1 : list.count)
         ui.selection = list[min(max(index + delta, 0), list.count - 1)].id
+    }
+
+    // MARK: Agents strip
+
+    private var drawerClose: DispatchWorkItem?
+    private var stripHovered = false
+    private var drawerHovered = false
+
+    private func hoverAgents(_ inside: Bool) {
+        stripHovered = inside
+        hoverChanged()
+    }
+
+    private func hoverDrawer(_ inside: Bool) {
+        drawerHovered = inside
+        hoverChanged()
+    }
+
+    /// The drawer opens with the pointer over the strip and closes a moment after it has left both windows.
+    private func hoverChanged() {
+        drawerClose?.cancel()
+        guard !ui.switcher else { return }
+        if stripHovered || drawerHovered {
+            ui.drawerOpen = true
+        } else {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, !self.ui.switcher, !self.stripHovered, !self.drawerHovered else { return }
+                self.ui.drawerOpen = false
+                self.ui.drawerSelection = nil
+            }
+            drawerClose = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        }
+    }
+
+    /// Shows, moves or hides the drawer window whenever what it depends on changes.
+    private func observeDrawer() {
+        withObservationTracking {
+            syncDrawer()
+        } onChange: { [weak self] in
+            DispatchQueue.main.async { self?.observeDrawer() }
+        }
+    }
+
+    private func syncDrawer() {
+        let visible = store.agents.enabled && (store.agents.expanded || ui.switcher) && ui.drawerOpen && !ui.isOpen
+            && dragStart == nil
+        _ = ui.edge
+        if visible {
+            positionDrawer()
+            if !drawer.isVisible { drawer.orderFrontRegardless() }
+        } else if drawer.isVisible {
+            drawer.orderOut(nil)
+            drawerHovered = false
+        }
+    }
+
+    /// Beside a vertical pill, exactly as tall as it (rows line up with tiles); under or over a horizontal one.
+    private func positionDrawer() {
+        guard let drawer, let drawerHost else { return }
+        let size = drawerHost.fittingSize
+        let pf = pill.frame
+        let vf = screen.visibleFrame
+        let gap: CGFloat = 6
+        let x = min(max(pf.midX - size.width / 2, vf.minX + 4), vf.maxX - size.width - 4)
+        let origin = switch ui.edge {
+        case .right: NSPoint(x: pf.minX - gap - size.width, y: pf.maxY - size.height)
+        case .left: NSPoint(x: pf.maxX + gap, y: pf.maxY - size.height)
+        case .top: NSPoint(x: x, y: pf.minY - gap - size.height)
+        case .bottom: NSPoint(x: x, y: pf.maxY + gap)
+        }
+        drawer.setFrame(NSRect(origin: origin, size: size), display: true)
+    }
+
+    func agentsChanged() {
+        if !store.agents.enabled {
+            closeSwitcher(refocus: true)
+            if ui.tab == .agents { ui.tab = .inbox }
+        }
+        layoutPill()
+    }
+
+    /// The keyboard way in: expands the strip, opens the drawer and takes focus until a pick or Esc.
+    func showSwitcher() {
+        guard store.agents.enabled else { return }
+        if ui.switcher {
+            closeSwitcher(refocus: true)
+            return
+        }
+        hidePanel()
+        store.refreshClaude()
+        let rows = store.allAgentRows
+        let front = NSWorkspace.shared.frontmostApplication
+        if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
+        ui.switcher = true
+        ui.switcherQuery = ""
+        ui.drawerOpen = true
+        // Start on what most likely needs you: the first unread session, else the first one.
+        ui.drawerSelection = (rows.first { $0.unread && !$0.session.running } ?? rows.first)?.id
+        syncDrawer()
+        drawer.allowsKey = true
+        NSApp.activate(ignoringOtherApps: true)
+        drawer.makeKeyAndOrderFront(nil)
+    }
+
+    /// `refocus`: hand focus back to the app you were in (not when a session was opened or you clicked away).
+    func closeSwitcher(refocus: Bool) {
+        guard ui.switcher else { return }
+        ui.switcher = false
+        ui.switcherQuery = ""
+        ui.drawerOpen = false
+        ui.drawerSelection = nil
+        drawer.allowsKey = false
+        drawer.resignKey()
+        if refocus, NSApp.isActive, let app = previousApp { app.activate() }
+        previousApp = nil
+    }
+
+    /// What the switcher's keys move through: your strip's sessions, or what matches what you typed.
+    private var switcherRows: [AgentRow] {
+        ui.switcherQuery.isEmpty
+            ? Array(store.allAgentRows.prefix(store.agentRows.kept.count + PillView.pendingTiles))
+            : store.searchSessions(ui.switcherQuery)
+    }
+
+    private func handleSwitcherKey(_ event: NSEvent) -> NSEvent? {
+        let rows = switcherRows
+        let current = rows.first { $0.id == ui.drawerSelection }
+        let pressed = Shortcut(event)
+        let plain = event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+        let digits: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28, 25]  // 1…9 by key position (no ⇧ needed on AZERTY)
+        let typed = event.characters ?? ""
+        if event.keyCode == 53 {
+            // Esc clears what you typed first, then closes.
+            if ui.switcherQuery.isEmpty { closeSwitcher(refocus: true) } else { setQuery("") }
+        } else if event.keyCode == 125 || event.keyCode == 126 {
+            guard !rows.isEmpty else { return nil }
+            let i = rows.firstIndex { $0.id == ui.drawerSelection } ?? (event.keyCode == 125 ? -1 : rows.count)
+            ui.drawerSelection = rows[min(max(i + (event.keyCode == 125 ? 1 : -1), 0), rows.count - 1)].id
+        } else if let n = digits.firstIndex(of: event.keyCode), plain, ui.switcherQuery.isEmpty {
+            if n < rows.count { open(rows[n]) }
+        } else if let row = current, pressed == store.shortcut(.openItem) {
+            open(row)
+        } else if event.keyCode == 51, plain, !ui.switcherQuery.isEmpty {
+            setQuery(String(ui.switcherQuery.dropLast()))
+        } else if let row = current, pressed == store.shortcut(.keepSession) {
+            store.keepAgent(row.id)
+        } else if let row = current, ui.switcherQuery.isEmpty, pressed == store.shortcut(.toggleRead) {
+            store.toggleAgentRead(row.id)
+        } else if let row = current, pressed == store.shortcut(.removeSession) {
+            let i = rows.firstIndex(of: row) ?? 0
+            store.dismissAgent(row.id)
+            let left = switcherRows
+            ui.drawerSelection = left.isEmpty ? nil : left[min(i, left.count - 1)].id
+        } else if plain, let c = typed.first, typed.count == 1, c.isLetter || c.isNumber || c.isPunctuation || c.isSymbol || c == " " {
+            // Anything else you type searches every session.
+            if c == " " && ui.switcherQuery.isEmpty { return nil }
+            setQuery(ui.switcherQuery + typed)
+        } else {
+            return event
+        }
+        return nil
+    }
+
+    private func setQuery(_ query: String) {
+        ui.switcherQuery = query
+        let rows = switcherRows
+        ui.drawerSelection = (query.isEmpty ? rows.first { $0.unread && !$0.session.running } ?? rows.first : rows.first)?.id
+    }
+
+    private func open(_ row: AgentRow) {
+        closeSwitcher(refocus: false)
+        store.openAgent(row.id)
+    }
+
+    private func handleAgentsKey(_ event: NSEvent, _ pressed: Shortcut) -> NSEvent? {
+        let rows = store.allAgentRows
+        let current = rows.first { $0.id == ui.agentSelection }
+        switch event.keyCode {
+        case 125, 126:
+            guard !rows.isEmpty else { return nil }
+            let i = rows.firstIndex { $0.id == ui.agentSelection } ?? (event.keyCode == 125 ? -1 : rows.count)
+            ui.agentSelection = rows[min(max(i + (event.keyCode == 125 ? 1 : -1), 0), rows.count - 1)].id
+            return nil
+        default: break
+        }
+        guard let row = current else { return event }
+        if pressed == store.shortcut(.openItem) {
+            store.openAgent(row.id)
+        } else if pressed == store.shortcut(.toggleRead) {
+            store.toggleAgentRead(row.id)
+        } else if row.pending, pressed == store.shortcut(.keepSession) {
+            store.keepAgent(row.id)
+        } else if pressed == store.shortcut(.removeSession) {
+            store.dismissAgent(row.id)
+        } else {
+            return event
+        }
+        return nil
     }
 
     // MARK: Panel
@@ -320,6 +576,11 @@ final class UIController {
     }
 
     private func showPanel() {
+        // From the switcher (its "more pending" row): keep the app to hand focus back to.
+        let saved = previousApp
+        closeSwitcher(refocus: false)
+        previousApp = saved
+        ui.drawerOpen = false
         positionPanel()
         if !ui.isOpen {
             // Take keyboard focus so the inbox shortcuts work without clicking into the panel first.

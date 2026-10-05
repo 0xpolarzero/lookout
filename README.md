@@ -36,6 +36,7 @@ Requires macOS 14+. Auth comes from `gh auth token` (or a token pasted in Settin
 - **Inbox**: *Needs you* / *Bots* / *Done*. Hover a row to mark it read, discard it, or open it. Keys act on the hovered row (or pick one with ↑↓): Return opens, Space toggles read, ⌫ discards or restores, ⌥Space marks all read, ⌘R refreshes, Esc closes. All customizable in Settings → Shortcuts.
 - **States**: unread → read (you saw it) → **addressed** (you replied after it, so this happens automatically) → **resolved** (review thread resolved, synced through GraphQL). Discarded items go to Done.
 - **Bots**: GitHub Apps (`…[bot]`) plus any handles you add arrive silently in the Bots tab.
+- **Claude sessions (extension, off by default)**: for people using the Claude desktop app's Code tab. Turn it on in Settings → Extensions. Your Claude Code sessions show up on the pill and in an **Agents** tab: done and unread (blue), waiting for you (amber), or still working (a pulsing dot, with what it's doing right now: *Running swift test · 2m*, *Editing PillView.swift*). Collapsed, the pill shows the two counts; the caret expands it to one tile per session: two letters (or an emoji you pick), underlined in its project's colour, projects grouped together. Optionally, each session gets an SF Symbol picked for it instead: paste a [TypeSafe](https://typesafe.ai) API key in Settings and Jev picks one from the title, project and first message (one of ~250 icons not already on screen; about $0.0001 a session; the key stays in the Keychain). Hover the tiles for a drawer of full titles, each level with its tile; click to jump to the conversation. Sessions with new activity arrive as *pending* (smaller, dimmer): keep the ones you use (drag to reorder, or search any session by name in the Agents tab) or dismiss them until their next activity. `⌃⌥S` opens the switcher from anywhere: ↑↓ or 1–9 and Return to open, or just type to find any session by name; ⌘K keeps, ⌘⌫ removes, Esc goes back. Read state follows the app (a finished turn, opening a session, the sidebar's dot) and can be changed in Lookout without touching the app. Lookout only reads the app's files (`~/Library/Application Support/Claude`, and `~/.claude/projects` for what a working agent is doing), which aren't a public API: if an app update changes them, the Agents tab says so and the GitHub side keeps working.
 - **Extras**: review requests from any repo (closed automatically once you review), CI red/green transition notifications, snooze, launch at login.
 
 ## Releasing
@@ -54,7 +55,8 @@ Releases are signed with one self-signed certificate, so macOS keeps Lookout's A
 
 ## Dev flags
 
-    .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty] --open   # mock data, nothing saved
+    .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty|agents] --open   # mock data, nothing saved
+    .build/debug/Lookout --claude [--watch]                      # what the Claude extension reads; --watch prints live changes
     .build/debug/Lookout --snapshot docs/screenshots                                 # render every state + overview.png
     build/Lookout.app/Contents/MacOS/Lookout --update 0.1.0   # pretend to be 0.1.0: check, download and verify the latest release
     .build/debug/Lookout --check owner/repo [--days N] [--all]   # headless live sync, prints the inbox

@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 enum Demo {
     enum Scenario: String, CaseIterable {
-        case busy, botsOnly, allClear, snoozed, error, empty
+        case busy, botsOnly, allClear, snoozed, error, empty, agents
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -55,6 +55,8 @@ enum Demo {
             store.ci["0xpolarzero/lookout"]?.state = .failure
             store.ci["0xpolarzero/lookout"]?.failing = ["test (macos-15)"]
             store.ci["0xpolarzero/lookout"]?.title = "Drag the pill from anywhere"
+        case .agents:
+            agents(store, now)
         case .empty:
             store.repos = []
             store.ci = [:]
@@ -65,6 +67,59 @@ enum Demo {
 
     static let hoverID = "demo-hover"
     static let selectedID = "demo-selected"
+    static let blockedAgentID = "local_demo-lcu"
+
+    /// The Claude sessions extension, on, with kept and pending sessions in every state.
+    static func agents(_ store: Store, _ now: Date) {
+        func session(_ id: String, _ title: String, _ folder: String?, minutes: Double, turns: Int = 4,
+                     blocked: Bool = false, detail: String = "", running: Bool = false) -> ClaudeSession {
+            let at = now.addingTimeInterval(-minutes * 60)
+            return ClaudeSession(id: id, title: title, folder: folder.map { "/Users/me/code/\($0)" }, completedTurns: turns,
+                                 lastActivity: at, lastFocused: at.addingTimeInterval(-600), lastUserMessage: at.addingTimeInterval(-90),
+                                 summary: running ? nil : ClaudeSession.Summary(blocked: blocked, detail: detail), running: running)
+        }
+        let sessions = [
+            session(blockedAgentID, "LCU update notifications", "lcu", minutes: 2, blocked: true,
+                    detail: "Should updates install silently, or ask first each time?"),
+            session("local_demo-ci", "CI failure diagnosis", "microsandbox", minutes: 4,
+                    detail: "Fixed the flaky sandbox test; CI is green on the branch."),
+            session("local_demo-lookout", "Agent completion notifications", "lookout", minutes: 1, running: true),
+            session("local_demo-transfer", "Repository ownership transfer setup", "microsandbox", minutes: 180,
+                    detail: "Transfer is done; both remotes point at the new org."),
+            session("local_demo-linux", "LCU JavaScript sandbox on Linux", "microsandbox", minutes: 1500,
+                    detail: "Sandbox runs on Linux; two follow-ups listed."),
+            session("local_demo-calc", "Calculator display reading", "lcu-research", minutes: 1,
+                    detail: "The display reads 1,234.5; the screenshot is attached."),
+            session("local_demo-games", "Game recommendations", nil, minutes: 25,
+                    detail: "Single-player immersion or online squads?"),
+            session("local_demo-storage", "Sandbox storage directory customization", "microsandbox", minutes: 2900,
+                    detail: "Storage path is configurable through the CLI and the env."),
+        ]
+        store.claudeSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        store.claudeLink = .ok
+        store.claudeActivity = ["local_demo-lookout": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-20))]
+        var state = AgentsState()
+        state.folderColors = ["/Users/me/code/lcu": 0, "/Users/me/code/microsandbox": 1, "/Users/me/code/lookout": 2,
+                              "/Users/me/code/lcu-research": 3]
+        state.enabled = true
+        state.enabledAt = now.addingTimeInterval(-86400)
+        state.seeded = true
+        func entry(_ id: String, kept: Bool, unread: Bool, label: String? = nil, icon: String? = nil) -> AgentEntry {
+            let s = store.claudeSessions[id]!
+            return AgentEntry(id: id, kept: kept, label: label, unread: unread, seen: s.activity, focusedAt: s.lastFocused, icon: icon)
+        }
+        state.iconsEnabled = true
+        state.entries = [
+            entry(blockedAgentID, kept: true, unread: true, icon: "bell.badge"),
+            entry("local_demo-ci", kept: true, unread: true, icon: "ladybug"),
+            entry("local_demo-lookout", kept: true, unread: false),
+            entry("local_demo-transfer", kept: true, unread: false, icon: "key"),
+            entry("local_demo-linux", kept: true, unread: false, label: "🐧"),
+            entry("local_demo-calc", kept: false, unread: true),
+            entry("local_demo-games", kept: false, unread: false),
+        ]
+        store.agents = state
+    }
 
     private static func items(_ now: Date) -> [InboxItem] {
         var counter = 0
@@ -148,6 +203,34 @@ enum Snapshot {
             host(label + " · top", pill: true, PillView(store: top, ui: UIState(persists: false, edge: .top), actions: actions))
         }
         host("Docked top / bottom", pill: true, PillView(store: store(.busy), ui: UIState(persists: false, edge: .top), actions: actions))
+        host("Agents · counts", pill: true, PillView(store: store(.agents), ui: UIState(persists: false, edge: .right), actions: actions))
+        let expanded = store(.agents)
+        expanded.agents.expanded = true
+        host("Agents · sessions", pill: true, PillView(store: expanded, ui: UIState(persists: false, edge: .right), actions: actions))
+        // The drawer is its own window next to the pill; here they're drawn side by side.
+        func withDrawer(_ edge: DockEdge, selection: String, switcher: Bool = false) -> AnyView {
+            let ui = UIState(persists: false, edge: edge)
+            ui.drawerOpen = true
+            ui.switcher = switcher
+            ui.drawerSelection = selection
+            let pill = PillView(store: expanded, ui: ui, actions: actions)
+            let drawer = AgentDrawer(store: expanded, ui: ui, showAgents: {})
+            return edge.isHorizontal
+                ? AnyView(VStack(spacing: 6) { pill; drawer })
+                : AnyView(HStack(alignment: .top, spacing: 6) { drawer; pill })
+        }
+        host("Agents · hover drawer", pill: true, withDrawer(.right, selection: Demo.blockedAgentID))
+        host("Agents · switcher (keyboard)", pill: true, withDrawer(.right, selection: "local_demo-ci", switcher: true))
+        host("Agents · docked top", pill: true, withDrawer(.top, selection: "local_demo-ci"))
+        let searchUI = UIState(persists: false, edge: .right)
+        searchUI.drawerOpen = true
+        searchUI.switcher = true
+        searchUI.switcherQuery = "sand"
+        searchUI.drawerSelection = "local_demo-linux"
+        host("Agents · type to find", pill: true, AnyView(HStack(alignment: .top, spacing: 6) {
+            AgentDrawer(store: expanded, ui: searchUI, showAgents: {})
+            PillView(store: expanded, ui: searchUI, actions: actions)
+        }))
         func panel(_ label: String, _ scenario: Demo.Scenario, _ tab: PanelTab, _ filter: InboxFilter = .needsYou) {
             let ui = UIState(persists: false, edge: .right)
             ui.tab = tab
@@ -159,7 +242,7 @@ enum Snapshot {
                     : label.contains("tooltip") ? "superradcompany/microsandbox|Issue comments"
                     : label.hasPrefix("Inbox · hover") ? "Discard"
                     : label.hasPrefix("Bots") ? "Mark all as read" : nil)
-                .environment(\.previewHover, Demo.hoverID)
+                .environment(\.previewHover, scenario == .agents ? "local_demo-ci" : Demo.hoverID)
 )
         }
         panel("Inbox · hover actions", .busy, .inbox)
@@ -171,8 +254,9 @@ enum Snapshot {
         panel("CI · default branches", .busy, .ci)
         panel("CI · failures", .error, .ci)
         panel("Settings · snoozed", .snoozed, .settings)
+        panel("Agents · kept and pending", .agents, .agents)
         // Full-height settings, written as a file but kept out of the gallery.
-        let updating = store(.busy)
+        let updating = store(.agents)
         updating.updater.preview(.available)
         host("_settings-full", pill: false, SettingsView(store: updating)
             .frame(width: UIController.panelContent.width, height: 1400)
@@ -181,8 +265,11 @@ enum Snapshot {
             .tipSpace())
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            for shot in shots { shot.window.contentView?.layoutSubtreeIfNeeded() }
             var images: [(String, NSImage, Bool)] = []
             for (i, shot) in shots.enumerated() {
+                // Content measured after the first layout (the drawer's rows need the tiles' frames).
+                if let view = shot.window.contentView { shot.window.setContentSize(view.fittingSize) }
                 guard let view = shot.window.contentView,
                       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
                 view.cacheDisplay(in: view.bounds, to: rep)
@@ -286,5 +373,65 @@ enum Check {
             print("second poll rate:", store.gh.rateRemaining ?? -1, "items:", store.items.count)
             exit(0)
         }
+    }
+}
+
+/// `--claude`: what the Claude sessions extension reads from the desktop app right now.
+@MainActor
+enum ClaudeCheck {
+    static func run() {
+        var start = Date()
+        let result = Claude.SessionReader().read()
+        let sessionsMS = Int(Date().timeIntervalSince(start) * 1000)
+        start = Date()
+        let unread = Claude.unreadIDs()
+        print("installed:", Claude.isInstalled, "running:", Claude.isRunning, "sessions read in", sessionsMS, "ms, dots in",
+              Int(Date().timeIntervalSince(start) * 1000), "ms")
+        switch result {
+        case .failure(let error): print("sessions:", error)
+        case .success(let sessions):
+            print("sessions:", sessions.count, "archived:", sessions.filter(\.isArchived).count)
+            for s in sessions.filter({ !$0.isArchived }).sorted(by: { $0.lastActivity > $1.lastActivity }).prefix(12) {
+                let state = s.running ? "running" : s.summary?.blocked == true ? "blocked" : s.summary == nil ? "-" : "done"
+                print(String(format: "%-8@ %-7@ %-5@ turns=%-4d %@ · %@", state, shortAgo(s.lastActivity),
+                             unread?.contains(s.id) == true ? "dot" : "", s.completedTurns, s.title, s.folderName))
+            }
+        }
+        print("unread dots:", unread.map { "\($0.count)" } ?? "unreadable")
+        if case .success(let sessions) = result {
+            let reader = Claude.ActivityReader()
+            for s in sessions where s.running {
+                print("  working:", s.title, "→", s.cliID.flatMap { reader.activity(for: $0) }.map { "\($0.text) (since \(shortAgo($0.since)))" } ?? "no transcript")
+            }
+        }
+        if CommandLine.arguments.contains("--watch") { watch(); return }
+        if case .success(let sessions) = result, let unread {
+            for s in sessions where unread.contains(s.id) { print("  dot:", s.title, s.isArchived ? "(archived)" : "", shortAgo(s.lastActivity)) }
+        }
+        exit(0)
+    }
+
+    /// `--claude --watch`: the extension live against the real app, nothing saved; prints every change.
+    private static func watch() {
+        let store = Store()
+        store.persists = false
+        store.agents.enabled = true
+        store.agents.enabledAt = Date()
+        var last = ""
+        func dump(_ reason: String) {
+            store.refreshClaude()
+            let rows = store.agentRows
+            let lines = (rows.kept + rows.pending).map { r in
+                "\(r.label) \(r.pending ? "pending" : "kept   ") \(r.unread ? "UNREAD" : "read  ") \(r.statusText.padding(toLength: 10, withPad: " ", startingAt: 0)) \(r.session.title)"
+            }
+            let text = lines.joined(separator: "\n")
+            guard text != last else { return }
+            last = text
+            print("--- \(Date().formatted(date: .omitted, time: .standard)) (\(reason)) counts=\(store.agentCounts)\n" + text)
+            fflush(stdout)
+        }
+        dump("start")
+        let watcher = FolderWatcher([Claude.sessionsDir, Claude.localStorageDir]) { MainActor.assumeIsolated { dump("files") } }
+        Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in MainActor.assumeIsolated { _ = watcher; dump("timer") } }
     }
 }
