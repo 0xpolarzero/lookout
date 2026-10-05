@@ -40,17 +40,17 @@ import Testing
     private func pill(_ x: CGFloat, _ y: CGFloat) -> NSRect { NSRect(x: x - 20, y: y - 20, width: 40, height: 40) }
 
     @Test func snapsToNearestEdge() {
-        #expect(UIController.snap(pill(30, 500), in: screen).0 == .left)
-        #expect(UIController.snap(pill(1490, 500), in: screen).0 == .right)
-        #expect(UIController.snap(pill(700, 920), in: screen).0 == .top)
-        #expect(UIController.snap(pill(700, 25), in: screen).0 == .bottom)
+        #expect(EdgeSnap.snap(pill(30, 500), in: screen).0 == .left)
+        #expect(EdgeSnap.snap(pill(1490, 500), in: screen).0 == .right)
+        #expect(EdgeSnap.snap(pill(700, 920), in: screen).0 == .top)
+        #expect(EdgeSnap.snap(pill(700, 25), in: screen).0 == .bottom)
     }
 
     @Test func positionFollowsTheEdge() {
-        let (edge, position) = UIController.snap(pill(378, 920), in: screen)
+        let (edge, position) = EdgeSnap.snap(pill(378, 920), in: screen)
         #expect(edge == .top)
         #expect(abs(position - 0.25) < 0.001)
-        let (side, height) = UIController.snap(pill(1490, 472), in: screen)
+        let (side, height) = EdgeSnap.snap(pill(1490, 472), in: screen)
         #expect(side == .right)
         #expect(abs(height - 0.5) < 0.001)
     }

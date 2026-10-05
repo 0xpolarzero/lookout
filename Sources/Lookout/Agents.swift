@@ -6,7 +6,7 @@ import SwiftUI
 /// What Lookout remembers about a Claude session it has shown.
 struct AgentEntry: Codable, Hashable, Identifiable {
     var id: String
-    /// Kept sessions stay in your list (in your order); the others are pending until you keep or dismiss them.
+    /// Kept sessions stay in your list (in your order); the others are pending until you keep or remove them.
     var kept = false
     /// Two letters or an emoji chosen by you; nil uses letters from the title.
     var label: String?
@@ -15,7 +15,7 @@ struct AgentEntry: Codable, Hashable, Identifiable {
     var unread = false
     /// Activity last seen (see `ClaudeSession.activity`).
     var seen = ""
-    /// Removed or dismissed at this activity: hidden until there is newer activity.
+    /// Removed at this activity: hidden until there is newer activity.
     var hiddenAt: String?
     var focusedAt: Date?
     /// SF Symbol picked by Jev (shown unless you set a label yourself).
@@ -109,7 +109,7 @@ struct AgentRow: Identifiable, Hashable {
     var unread: Bool { entry.unread }
     var pending: Bool { !entry.kept }
 
-    /// Mid-turn but stopped on you (a question, a plan): counts as needing you, not as working.
+    /// Mid-turn but stopped on you (a question, a plan): counts as waiting, not as working.
     var waitsForYou: Bool { session.running && activity?.waitsForYou == true }
 
     var status: AgentStatus {
@@ -119,7 +119,7 @@ struct AgentRow: Identifiable, Hashable {
         return entry.unread ? .finished : .idle
     }
 
-    /// What the strip shows: amber needs you, blue done and unread, grey otherwise.
+    /// What the strip shows: amber waiting, blue done and unread, grey otherwise.
     var tint: Color? {
         if waitsForYou { return Theme.amber }
         guard !session.running, entry.unread else { return nil }
@@ -142,9 +142,22 @@ struct AgentRow: Identifiable, Hashable {
     var statusText: String {
         switch status {
         case .running: "working"
-        case .blocked: "needs you"
-        case .finished: "done \(shortAgo(session.lastActivity))"
+        case .blocked: "waiting"
+        case .finished: shortAgo(session.lastActivity) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity))"
         case .idle: shortAgo(session.lastActivity)
+        }
+    }
+
+    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / done / pending.
+    var stateName: String {
+        // A pending session keeps what it left running: "pending, 2 running".
+        let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
+        if pending && !unread && status != .running && status != .blocked { return "pending" + running }
+        switch status {
+        case .blocked: return "waiting"
+        case .running: return "working"
+        case .finished: return (unread ? "done, unread" : "done") + running
+        case .idle: return (pending ? "pending" : "idle") + running
         }
     }
 

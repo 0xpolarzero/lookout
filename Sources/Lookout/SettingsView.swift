@@ -11,7 +11,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Theme.Space.lg) {
                 account
                 notifications
                 bots
@@ -20,7 +20,7 @@ struct SettingsView: View {
                 updates
                 general
             }
-            .padding(12)
+            .padding(Theme.Space.lg)
         }
         .scrollIndicators(.never)
     }
@@ -32,28 +32,37 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Avatar(url: store.me?.avatarUrl, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(store.me.map { "@\($0.login)" } ?? "Not connected").font(.system(size: 13, weight: .semibold))
+                    Text(store.me.map { "@\($0.login)" } ?? "Not connected").font(Theme.Typography.title)
                     Text(store.tokenSource.map { "Token from \($0.rawValue)" } ?? (store.authError ?? ""))
-                        .font(.system(size: 11))
+                        .font(Theme.Typography.meta)
                         .foregroundStyle(store.authError == nil ? Theme.tertiary : Theme.red)
                         .lineLimit(2)
                 }
                 Spacer()
                 if store.tokenSource == .keychain {
-                    Button("Use gh CLI") { store.setToken(nil) }.controlSize(.small)
+                    ActionButton("Use gh CLI") { store.setToken(nil) }
                 }
             }
             HStack(spacing: 6) {
                 SecureField("Paste a personal access token (optional)", text: $token).fieldStyle()
-                Button("Save") {
-                    store.setToken(token)
-                    token = ""
-                }
-                .controlSize(.small)
-                .disabled(token.isEmpty)
+                    .onSubmit(saveToken)
+                ActionButton("Save", height: Theme.Metrics.field, action: saveToken)
+                    .disabled(token.isEmpty)
             }
             hint("Uses `gh auth token` by default. A pasted token is kept in the Keychain and needs `repo` scope for private repos.")
         }
+    }
+
+    private func saveToken() {
+        guard !token.isEmpty else { return }
+        store.setToken(token)
+        token = ""
+    }
+
+    private func saveTypesafeKey() {
+        guard !typesafeKey.isEmpty else { return }
+        store.setTypesafeKey(typesafeKey)
+        typesafeKey = ""
     }
 
     private var notifications: some View {
@@ -61,12 +70,12 @@ struct SettingsView: View {
             toggle("Desktop notifications", isOn: $store.settings.notifications)
             toggle("Review requests from any repo", isOn: $store.settings.reviewRequests)
             HStack {
-                Text("Snooze").font(.system(size: 12.5))
+                Text("Snooze").font(Theme.Typography.body)
                 Spacer()
                 if store.isSnoozed, let until = store.settings.snoozeUntil {
                     Text("Until \(until.formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 12)).foregroundStyle(Theme.purple)
-                    Button("Resume") { store.snooze(for: nil) }.controlSize(.small)
+                        .font(Theme.Typography.control).foregroundStyle(Theme.purple)
+                    ActionButton("Resume") { store.snooze(for: nil) }
                 } else {
                     Menu("Off") {
                         Button("30 minutes") { store.snooze(for: 1800) }
@@ -91,7 +100,7 @@ struct SettingsView: View {
                 TextField("Add a handle, e.g. vercel", text: $botInput)
                     .fieldStyle()
                     .onSubmit(addBot)
-                Button("Add", action: addBot).controlSize(.small).disabled(botInput.isEmpty)
+                ActionButton("Add", height: Theme.Metrics.field, action: addBot).disabled(botInput.isEmpty)
             }
             if !store.settings.botHandles.isEmpty {
                 FlowLayout(spacing: 6) {
@@ -109,12 +118,12 @@ struct SettingsView: View {
             ForEach(ShortcutAction.allCases.filter { !$0.isAgents || store.agents.enabled }) { action in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(action.title).font(.system(size: 12.5))
+                        Text(action.title).font(Theme.Typography.body)
                         if action.isGlobal {
-                            Text("Works from any app").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                            Text("Works from any app").font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
                             if (store.shortcut(action).isModifierTap || store.shortcut(action).mouseButton != nil) && !AXIsProcessTrusted() {
                                 Text("Needs Accessibility access (System Settings › Privacy & Security)")
-                                    .font(.system(size: 10.5)).foregroundStyle(Theme.amber)
+                                    .font(Theme.Typography.caption).foregroundStyle(Theme.amber)
                             }
                         }
                     }
@@ -132,11 +141,11 @@ struct SettingsView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
-                        Image(systemName: "asterisk").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.claude)
-                        Text("Claude sessions").font(.system(size: 12.5))
+                        Image(systemName: "asterisk").font(Theme.Typography.glyph(10, .bold)).foregroundStyle(Theme.claude)
+                        Text("Claude sessions").font(Theme.Typography.body)
                     }
                     Text("Extension for the Claude desktop app")
-                        .font(.system(size: 10.5))
+                        .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.tertiary)
                 }
                 Spacer()
@@ -150,13 +159,13 @@ struct SettingsView: View {
                 hint("Needs the Claude desktop app, with Claude Code sessions.")
             } else if store.agents.enabled {
                 mutedFolders
-                Divider().opacity(0.4)
+                Hairline()
                 sessionIcons
-                Divider().opacity(0.4)
-                hint("Your Claude Code sessions on the bar: what's working, done or waiting for you. "
+                Hairline()
+                hint("Your Claude Code sessions on the bar: what is working, done or waiting. "
                      + "Sessions with new activity arrive as pending; keep the ones you use. Read-only: Lookout never writes to the app.")
             } else {
-                hint("Your Claude Code sessions on the bar, to see which agents are done or waiting and jump between them.")
+                hint("Your Claude Code sessions on the bar, to see which are working, done or waiting, and jump between them.")
             }
         }
     }
@@ -168,24 +177,21 @@ struct SettingsView: View {
             if store.hasTypesafeKey {
                 HStack {
                     Label("TypeSafe API key saved in the Keychain", systemImage: "key.fill")
-                        .font(.system(size: 11.5))
+                        .font(Theme.Typography.meta)
                         .foregroundStyle(Theme.secondary)
                     Spacer()
-                    Button("Remove") { store.setTypesafeKey(nil) }.controlSize(.small)
+                    ActionButton("Remove") { store.setTypesafeKey(nil) }
                 }
             } else {
                 HStack(spacing: 6) {
                     SecureField("Paste a TypeSafe API key", text: $typesafeKey).fieldStyle()
-                    Button("Save") {
-                        store.setTypesafeKey(typesafeKey)
-                        typesafeKey = ""
-                    }
-                    .controlSize(.small)
-                    .disabled(typesafeKey.isEmpty)
+                        .onSubmit(saveTypesafeKey)
+                    ActionButton("Save", height: Theme.Metrics.field, action: saveTypesafeKey)
+                        .disabled(typesafeKey.isEmpty)
                 }
             }
             if let error = store.iconError {
-                Text(error).font(.system(size: 11)).foregroundStyle(Theme.amber)
+                Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.amber)
             }
             hint("Each session in your list gets an icon instead of letters. Its title, project name and first message go to "
                  + "TypeSafe (api.typesafe.ai), whose Jev model picks what kind of icon fits (code, debugging, data, people…), "
@@ -198,9 +204,9 @@ struct SettingsView: View {
         let muted = store.agents.mutedFolders
         let unmuted = store.knownFolders.filter { !muted.contains($0) }
         HStack {
-            Text("Muted folders").font(.system(size: 12.5))
+            Text("Muted folders").font(Theme.Typography.body)
             Spacer()
-            Menu(muted.isEmpty ? "None" : "\(muted.count) folder\(muted.count == 1 ? "" : "s")") {
+            Menu(muted.isEmpty ? "None" : plural(muted.count, "folder")) {
                 ForEach(unmuted, id: \.self) { folder in
                     Button(folderName(folder)) { store.setFolderMuted(folder, true) }
                 }
@@ -208,7 +214,7 @@ struct SettingsView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .accessibilityLabel("Muted folders")
-            .accessibilityValue(muted.isEmpty ? "None" : "\(muted.count) folder\(muted.count == 1 ? "" : "s")")
+            .accessibilityValue(muted.isEmpty ? "None" : plural(muted.count, "folder"))
             .disabled(unmuted.isEmpty)
         }
         if !muted.isEmpty {
@@ -232,9 +238,9 @@ struct SettingsView: View {
         return section("Updates") {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Lookout \(updater.current)").font(.system(size: 12.5))
+                    Text("Lookout \(updater.current)").font(Theme.Typography.body)
                     Ticking(coarse: true) { now in
-                        Text(updateStatus(now)).font(.system(size: 11)).foregroundStyle(updateStatusColor)
+                        Text(updateStatus(now)).font(Theme.Typography.meta).foregroundStyle(updateStatusColor)
                     }
                 }
                 Spacer()
@@ -253,17 +259,16 @@ struct SettingsView: View {
         let updater = store.updater
         switch updater.phase {
         case .available, .failed:
-            Button(updater.phase == .available ? "Download & install" : "Try again") { updater.advance() }.controlSize(.small)
+            ActionButton(updater.phase == .available ? "Download & install" : "Try again") { updater.advance() }
         case .ready:
-            Button("Restart to update") { updater.install() }.controlSize(.small)
+            ActionButton("Restart to update") { updater.install() }
         case .downloading, .installing:
             EmptyView()
         case .idle:
-            Button(updater.checking ? "Checking…" : "Check now") {
+            ActionButton(updater.checking ? "Checking…" : "Check now") {
                 store.settings.skippedVersion = nil
                 Task { await updater.check(manual: true) }
             }
-            .controlSize(.small)
             .disabled(updater.checking)
         }
     }
@@ -281,14 +286,8 @@ struct SettingsView: View {
         case .idle:
             if let error = updater.checkError { return error }
             guard let last = updater.lastCheck else { return "Not checked yet" }
-            return "Up to date · checked \(checkedPhrase(last, now: now))"
+            return "Up to date · checked \(agoPhrase(last, now: now))"
         }
-    }
-
-    private func checkedPhrase(_ date: Date, now: Date) -> String {
-        let ago = shortAgo(date, now: now)
-        if ago == "now" { return "just now" }
-        return now.timeIntervalSince(date) < 7 * 86400 ? "\(ago) ago" : "on \(ago)"
     }
 
     private var updateStatusColor: Color {
@@ -302,7 +301,7 @@ struct SettingsView: View {
     private var general: some View {
         section("General") {
             HStack {
-                Text("Check every").font(.system(size: 12.5))
+                Text("Check every").font(Theme.Typography.body)
                 Spacer()
                 Picker("Check every", selection: $store.settings.pollInterval) {
                     Text("30s").tag(30.0)
@@ -319,7 +318,7 @@ struct SettingsView: View {
                 .onChange(of: launchAtLogin) { _, on in
                     do { try LaunchAtLogin.set(on); launchError = nil } catch { launchError = error.localizedDescription }
                 }
-            if let launchError { Text(launchError).font(.system(size: 11)).foregroundStyle(Theme.red) }
+            if let launchError { Text(launchError).font(Theme.Typography.meta).foregroundStyle(Theme.red) }
             toggle("Keep the bar centered on its edge", isOn: Binding(
                 get: { store.settings.centerPill ?? false },
                 set: { store.settings.centerPill = $0 }
@@ -329,7 +328,7 @@ struct SettingsView: View {
                      ? "Drag the bar to any screen edge; it stays at the middle."
                      : "Drag the bar to any screen edge.")
                 Spacer()
-                Button("Quit Lookout") { NSApp.terminate(nil) }.controlSize(.small)
+                ActionButton("Quit Lookout") { NSApp.terminate(nil) }
             }
         }
     }
@@ -342,11 +341,9 @@ struct SettingsView: View {
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(0.6)
-                .foregroundStyle(Theme.tertiary)
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            Eyebrow(title)
+                .accessibilityAddTraits(.isHeader)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -357,8 +354,8 @@ struct SettingsView: View {
     private func toggle(_ label: String, detail: String? = nil, isOn: Binding<Bool>) -> some View {
         HStack(alignment: detail == nil ? .center : .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(.system(size: 12.5))
-                if let detail { Text(detail).font(.system(size: 10.5)).foregroundStyle(Theme.tertiary) }
+                Text(label).font(Theme.Typography.body)
+                if let detail { Text(detail).font(Theme.Typography.caption).foregroundStyle(Theme.tertiary) }
             }
             Spacer(minLength: 8)
             Toggle(label, isOn: isOn)
@@ -370,7 +367,7 @@ struct SettingsView: View {
 
     private func hint(_ text: String) -> some View {
         Text(.init(text))
-            .font(.system(size: 11))
+            .font(Theme.Typography.meta)
             .foregroundStyle(Theme.tertiary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -387,17 +384,18 @@ private struct RemovableTag: View {
         HStack(spacing: 4) {
             Text(text)
             Button(action: remove) {
-                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                Image(systemName: "xmark").font(Theme.Typography.glyph(8, .bold)).frame(width: 14, height: 14)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(HoverFillButtonStyle(shape: Circle()))
             .foregroundStyle(Theme.tertiary)
             .accessibilityLabel(removeLabel)
             .tip(removeLabel)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 9)
+        .font(Theme.Typography.control)
+        .padding(.leading, 9)
+        .padding(.trailing, 5)
         .frame(height: 24)
-        .background(Capsule().fill(Color.white.opacity(0.07)))
+        .background(Capsule().fill(Theme.Fill.hover))
         .modifier(OptionalTip(title: tip))
     }
 }
@@ -406,5 +404,31 @@ private struct OptionalTip: ViewModifier {
     let title: String?
     func body(content: Content) -> some View {
         if let title { content.tip(title) } else { content }
+    }
+}
+
+/// A small bordered text button: reads as a button at rest, brightens on hover, fades only when disabled.
+/// `height` matches the field it sits beside (`Theme.Metrics.field`) or a row's controls (`Theme.Metrics.chip`).
+struct ActionButton: View {
+    let title: String
+    var height: CGFloat = Theme.Metrics.chip
+    let action: () -> Void
+
+    init(_ title: String, height: CGFloat = Theme.Metrics.chip, action: @escaping () -> Void) {
+        self.title = title
+        self.height = height
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Typography.control)
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 12)
+                .frame(height: height)
+                .overlay(Theme.Radius.shape(Theme.Radius.md).strokeBorder(Theme.stroke))
+        }
+        .buttonStyle(HoverFillButtonStyle(rest: Theme.Fill.field, hover: Theme.Fill.selected, pressed: Theme.Fill.pressed))
     }
 }

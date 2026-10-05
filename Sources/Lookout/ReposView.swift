@@ -17,7 +17,7 @@ struct ReposView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: Theme.Space.md) {
                 addField
                 if !store.repos.isEmpty { legend }
                 ForEach(store.repos) { repo in
@@ -25,13 +25,13 @@ struct ReposView: View {
                 }
                 if store.repos.isEmpty {
                     Text("Watch your own repos or any public one you contribute to. You'll only hear about the events you pick.")
-                        .font(.system(size: 12))
+                        .font(Theme.Typography.control)
                         .foregroundStyle(Theme.tertiary)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 4)
+                        .padding(.horizontal, Theme.Space.xs)
+                        .padding(.top, Theme.Space.xs)
                 }
             }
-            .padding(12)
+            .padding(Theme.Space.lg)
         }
         .scrollIndicators(.never)
         .task { await store.loadSuggestions() }
@@ -40,22 +40,23 @@ struct ReposView: View {
     /// Column header over the toggles of every card, in the same order and spacing as the badges.
     private var legend: some View {
         HStack(spacing: 10) {
-            Text("WATCHING").font(.system(size: 9.5, weight: .semibold)).tracking(0.6)
-            Spacer(minLength: 6)
+            Eyebrow("Watching", count: store.repos.count)
+            Spacer(minLength: Theme.Space.sm)
             RepoToggleColumns.legend
             Color.clear.frame(width: 20, height: 1)
         }
         .foregroundStyle(Theme.tertiary)
-        .padding(.leading, 12)
-        .padding(.trailing, 6)
+        .padding(.leading, Theme.Space.lg)
+        .padding(.trailing, Theme.Space.sm)
         .padding(.top, 2)
+        .accessibilityHidden(true)
     }
 
     private var addField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary).font(.system(size: 12))
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            HStack(spacing: Theme.Space.sm) {
+                HStack(spacing: Theme.Space.sm) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary).font(Theme.Typography.control)
                     TextField("owner/repo or GitHub URL", text: $input)
                         .textFieldStyle(.plain)
                         .focused($fieldFocused)
@@ -65,16 +66,17 @@ struct ReposView: View {
                 .fieldStyle()
                 Button { add(input) } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.85))
-                        .frame(width: 32, height: 32)
-                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.amber))
+                        .font(Theme.Typography.glyph(13, .bold))
+                        .foregroundStyle(Theme.onTint)
+                        .frame(width: Theme.Metrics.field, height: Theme.Metrics.field)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(HoverFillButtonStyle(rest: Theme.amber, hover: Theme.amber.opacity(0.85), pressed: Theme.amber.opacity(0.7)))
                 .disabled(input.isEmpty || adding)
+                .accessibilityLabel("Watch repository")
+                .tip("Watch repository", "Add the repo typed on the left")
             }
             if let error {
-                Text(error).font(.system(size: 11)).foregroundStyle(Theme.red).padding(.horizontal, 4)
+                Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.red).padding(.horizontal, Theme.Space.xs)
             }
             if (fieldFocused || overList) && !matches.isEmpty {
                 VStack(spacing: 0) {
@@ -82,13 +84,13 @@ struct ReposView: View {
                         SuggestionRow(name: name) { add(name) }
                     }
                 }
-                .padding(4)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.raised))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.stroke))
+                .padding(Theme.Space.xs)
+                .background(Theme.Radius.shape(Theme.Radius.lg).fill(Theme.raised))
+                .overlay(Theme.Radius.shape(Theme.Radius.lg).strokeBorder(Theme.stroke))
                 .onHover { overList = $0 }
             }
         }
-        .padding(.bottom, 4)
+        .padding(.bottom, Theme.Space.xs)
     }
 
     private func add(_ name: String) {
@@ -111,25 +113,31 @@ struct ReposView: View {
 private struct SuggestionRow: View {
     let name: String
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "book.closed").font(.system(size: 11)).foregroundStyle(Theme.tertiary)
+            SuggestionLabel(name: name)
+        }
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.sm)))
+        .accessibilityLabel("Watch \(name)")
+    }
+}
+
+private struct SuggestionLabel: View {
+    let name: String
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+            HStack(spacing: Theme.Space.md) {
+                Image(systemName: "book.closed").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
                 Text(name.split(separator: "/").first.map { "\($0)/" } ?? "").foregroundStyle(Theme.tertiary)
                     + Text(name.split(separator: "/").last.map(String.init) ?? "").foregroundStyle(Theme.text)
                 Spacer()
-                if hover { Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.secondary) }
+                if hover { Image(systemName: "plus").font(Theme.Typography.glyph(11)).foregroundStyle(Theme.secondary) }
             }
-            .font(.system(size: 12.5))
-            .padding(.horizontal, 8)
+            .font(Theme.Typography.body)
+            .padding(.horizontal, Theme.Space.md)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Theme.hover : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
     }
 }
 
@@ -153,8 +161,8 @@ private enum RepoToggleColumns {
     private static func group(_ text: String, columns: Int) -> some View {
         let width = CGFloat(columns) * 24 + CGFloat(columns - 1) * spacing
         return VStack(spacing: 2) {
-            Text(text).font(.system(size: 9, weight: .medium)).lineLimit(1).fixedSize()
-            RoundedRectangle(cornerRadius: 0.5).fill(Theme.stroke).frame(height: 1)
+            Text(text).font(Theme.Typography.glyph(9, .medium)).lineLimit(1).fixedSize()
+            Hairline()
         }
         .frame(width: width)
     }
@@ -166,40 +174,43 @@ struct RepoCard: View {
     @State private var dropTarget = false
     @State private var hover = false
     @Environment(\.previewTip) private var previewTip
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(repo.owner).font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
-                Text(repo.name).font(.system(size: 13, weight: .semibold))
+                Text(repo.owner).font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
+                Text(repo.name).font(Theme.Typography.title)
             }
             .lineLimit(1)
             .truncationMode(.middle)
             .layoutPriority(1)
-            Spacer(minLength: 6)
+            Spacer(minLength: Theme.Space.sm)
             if let error = store.repoErrors[repo.fullName] {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
+                    .font(Theme.Typography.meta)
                     .foregroundStyle(Theme.amber)
                     .frame(width: 18, height: 24)
+                    .accessibilityLabel("Sync failed: \(error)")
                     .tip("Sync failed", error)
             }
             HStack(spacing: RepoToggleColumns.spacing) {
                 ForEach(RepoToggleColumns.kinds) { kind in
                     badge(kind)
                 }
-                Rectangle().fill(Theme.stroke).frame(width: 1, height: 14).padding(.horizontal, 2)
+                Hairline(axis: .vertical).frame(height: 14).padding(.horizontal, 2)
                 allCommentsBadge
                 ciBadge
             }
             menu
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 6)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(hover ? Theme.hover : Theme.raised))
+        .padding(.leading, Theme.Space.lg)
+        .padding(.trailing, Theme.Space.sm)
+        .padding(.vertical, Theme.Space.md)
+        .background(Theme.Radius.shape(Theme.Radius.lg).fill(hover ? Theme.Fill.hover : Theme.raised))
+        .motion(Theme.Motion.hover, value: hover)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            Theme.Radius.shape(Theme.Radius.lg)
                 .strokeBorder(dropTarget ? Theme.accent : Theme.stroke, lineWidth: dropTarget ? 1.5 : 1)
         )
         .onHover { hover = $0 }
@@ -209,15 +220,15 @@ struct RepoCard: View {
         })
         .draggable(repo.fullName) {
             Text(repo.fullName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Theme.Typography.heading)
                 .padding(.horizontal, 10)
-                .frame(height: 26)
+                .frame(height: Theme.Metrics.chip)
                 .background(Capsule().fill(Theme.bg))
                 .foregroundStyle(Theme.text)
         }
         .dropDestination(for: String.self) { names, _ in
             guard let name = names.first else { return false }
-            withAnimation(.spring(duration: 0.25)) { store.moveRepo(name, onto: repo.fullName) }
+            withAnimation(Theme.Motion.spring.resolved(reduce: reduceMotion)) { store.moveRepo(name, onto: repo.fullName) }
             return true
         } isTargeted: { dropTarget = $0 }
     }
@@ -248,12 +259,13 @@ struct RepoCard: View {
         let status = store.ci[repo.fullName]
         let state = status?.state ?? .none
         let symbol = on ? state.symbol : "seal"
-        let branch = status?.branch ?? repo.defaultBranch ?? "main"
+        let branch = status?.branch ?? repo.defaultBranch ?? "default branch"
         var detail = on ? "\(branch) \(state.label)" : "Hidden from the bar · click to show"
         if on, state == .failure, let failing = status?.failing, !failing.isEmpty {
             detail += "\n" + failing.prefix(4).joined(separator: "\n")
         }
-        return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on, label: "CI") {
+        return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on, label: "CI",
+                           value: on ? "\(state.label), shown on the bar" : "Hidden from the bar") {
             store.toggle(.ciMain, on: repo)
         }
         .tip("CI", detail)
@@ -269,12 +281,14 @@ struct RepoCard: View {
             Divider()
             Button("Stop watching", role: .destructive) { store.removeRepo(repo) }
         } label: {
-            Image(systemName: "ellipsis").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.tertiary)
+            Image(systemName: "ellipsis").font(Theme.Typography.glyph(11, .bold)).foregroundStyle(Theme.tertiary)
                 .frame(width: 20, height: 24)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .accessibilityLabel("More actions for \(repo.fullName)")
+        .tip("More", "Open on GitHub, or stop watching")
     }
 }
 
@@ -283,29 +297,33 @@ private struct BadgeButton: View {
     let color: Color
     let on: Bool
     var label = ""
+    /// What VoiceOver reads as the state; defaults to On/Off.
+    var value: String? = nil
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(on ? color : Theme.tertiary.opacity(hover ? 1 : 0.7))
-                .frame(width: 24, height: 24)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(on ? color.opacity(hover ? 0.24 : 0.15) : Color.white.opacity(hover ? 0.07 : 0))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(on ? color.opacity(0.25) : Theme.stroke)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityValue(on ? "On" : "Off")
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: on)
+        Button(action: action) { BadgeLabel(symbol: symbol, color: color, on: on) }
+            .buttonStyle(HoverFillButtonStyle(
+                shape: Theme.Radius.shape(Theme.Radius.sm),
+                rest: on ? color.opacity(0.15) : Theme.Fill.rest,
+                hover: on ? color.opacity(0.24) : Theme.Fill.hover,
+                pressed: on ? color.opacity(0.32) : Theme.Fill.selected))
+            .accessibilityLabel(label)
+            .accessibilityValue(value ?? (on ? "On" : "Off"))
+    }
+}
+
+private struct BadgeLabel: View {
+    let symbol: String
+    let color: Color
+    let on: Bool
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(Theme.Typography.glyph(10.5))
+            .foregroundStyle(on ? color : Theme.tertiary.opacity(hover ? 1 : 0.7))
+            .frame(width: 24, height: 24)
+            .overlay(Theme.Radius.shape(Theme.Radius.sm).strokeBorder(on ? color.opacity(0.25) : Theme.stroke))
     }
 }

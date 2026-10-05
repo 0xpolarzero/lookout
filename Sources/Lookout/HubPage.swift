@@ -8,12 +8,12 @@ extension LookoutHub {
     var page: some View {
         VStack(spacing: 0) {
             pageHeader
-            Rectangle().fill(Theme.stroke).frame(height: 1)
+            Hairline()
             Group {
                 if hub.page == .repos { ReposView(store: store) } else { SettingsView(store: store) }
             }
             .id(hub.page)
-            .transition(Self.reduceMotion ? .opacity : .push(from: hub.forward ? .trailing : .leading))
+            .transition(reduce ? .opacity.animation(Theme.Motion.fade) : .push(from: hub.forward ? .trailing : .leading))
             .frame(maxHeight: .infinity, alignment: .top)
             // Cut short by the hub's height: the last line fades into the bottom padding instead of hitting the edge.
             .mask {
@@ -27,7 +27,7 @@ extension LookoutHub {
 
     /// The one way back, and the switch between the two pages (which doubles as their title).
     var pageHeader: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Theme.Space.sm) {
             IconButton(symbol: "chevron.left", help: "Back", detail: "Esc", size: IconButton.Size.header) { hub.back() }
             // The switch is the title: it says which page is open.
             pageSwitch
@@ -46,6 +46,6 @@ extension LookoutHub {
             }
         }
         .padding(2)
-        .background(Capsule().fill(Color.white.opacity(0.05)))
+        .background(Capsule().fill(Theme.Fill.faint))
     }
 }

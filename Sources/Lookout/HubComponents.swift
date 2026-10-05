@@ -3,45 +3,138 @@ import SwiftUI
 
 // Building blocks of the hub.
 
-/// Scrolls only once its content is taller than `cap`; otherwise exactly as tall as the content. Follows the
-/// keyboard selection (never the pointer's: hovering a row mustn't move the list under it).
-struct CappedScroll<Content: View>: View {
-    let cap: CGFloat
-    /// Read here, in this view's own body, so the parent doesn't depend on it.
-    var hub: HubState?
-    @ViewBuilder let content: () -> Content
-    @State private var height: CGFloat = 0
+/// The bottom edges of the rows that mark themselves with `.capEdge()`, in the scrolled content's own space.
+struct CapEdges: PreferenceKey {
+    static let defaultValue: [CGFloat] = []
+    static func reduce(value: inout [CGFloat], nextValue: () -> [CGFloat]) { value += nextValue() }
+}
 
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                content()
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
-                        // The first measure lands as is (the hub's own spring reveals it); later ones glide.
-                        if height == 0 { height = h } else { withAnimation(.easeOut(duration: 0.2)) { height = h } }
-                    }
-            }
-            // No scroller: a legacy one ("Show scroll bars: Always") would take its width out of the rows and push
-            // them off the bar's cells they line up with.
-            .scrollIndicators(.never)
-            .scrollDisabled(height <= cap)
-            .frame(height: min(max(height, 1), cap))
-            // Cut short: the last visible row fades out, so it reads as "more below" rather than clipped.
-            .mask {
-                VStack(spacing: 0) {
-                    Color.black
-                    LinearGradient(colors: [.black, .black.opacity(height > cap ? 0.15 : 1)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 14)
-                }
-            }
-            .onChange(of: hub?.keyboardSelection) { _, request in
-                if let id = request?.id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
+extension View {
+    /// Marks a row of a `CappedScroll`'s content: the list may stop at its bottom edge, never through it.
+    func capEdge() -> some View {
+        background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: CapEdges.self, value: [proxy.frame(in: .named(CappedScrollSpace.name)).maxY])
             }
         }
     }
 }
 
-/// An inbox item on two short lines; its actions show on hover or when picked with the keys.
+enum CappedScrollSpace {
+    static let name = "capped-content"
+
+    /// The tallest height up to `cap` that ends on a row's bottom edge, when the cap falls inside a measured row (a
+    /// row ends past it). A lazy list only measures the rows it has laid out: with none ending past the cap, the cut
+    /// is somewhere unmeasured, and the cap itself stands.
+    static func fit(cap: CGFloat, edges: [CGFloat]) -> CGFloat {
+        guard edges.contains(where: { $0 > cap + 0.5 }) else { return cap }
+        return edges.filter { $0 <= cap + 0.5 }.max().map { min($0, cap) } ?? cap
+    }
+}
+
+/// A vertical stack that is lazy only for long lists: a list of up to 150 rows is laid out whole, so every row's edge is measured
+/// (`CappedScroll` can then cut between rows, not through one).
+struct AdaptiveStack<Content: View>: View {
+    let count: Int
+    var alignment: HorizontalAlignment = .center
+    var spacing: CGFloat? = nil
+    @ViewBuilder let content: () -> Content
+
+    /// Whether a list of `count` rows is laid out lazily.
+    static func isLazy(_ count: Int) -> Bool { count > 150 }
+
+    var body: some View {
+        if !Self.isLazy(count) {
+            VStack(alignment: alignment, spacing: spacing, content: content)
+        } else {
+            LazyVStack(alignment: alignment, spacing: spacing, content: content)
+        }
+    }
+}
+
+/// Scrolls only once its content is taller than `cap`; otherwise exactly as tall as the content. Cut short, it stops
+/// at the last row that fits whole (rows mark themselves with `.capEdge()`), its fade saying "more below". Follows
+/// the keyboard selection (never the pointer's: hovering a row mustn't move the list under it).
+struct CappedScroll<Content: View>: View {
+    let cap: CGFloat
+    /// Read here, in this view's own body, so the parent doesn't depend on it.
+    var hub: HubState?
+    /// The content is a lazy stack or grid: it only measures the rows its viewport reaches, so the list starts at the
+    /// cap (a full viewport) and only shrinks once content measured *at the cap* turns out shorter.
+    var lazy = false
+    @ViewBuilder let content: () -> Content
+    @State private var height: CGFloat = 0
+    @State private var viewport: CGFloat = 0
+    /// Lazy only: the content's height, once measured in a viewport as tall as the cap and found shorter than it.
+    @State private var lazyShort: CGFloat?
+    @State private var edges: [CGFloat] = []
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        // Whole rows only; with no rows marked (or none ending within the cap) the plain cap.
+        let limit = CappedScrollSpace.fit(cap: cap, edges: edges)
+        // A lazy list's measured height can lag behind the rows it has since laid out: they count too.
+        let cut = lazy ? lazyShort == nil : max(height, edges.last ?? 0) > cap + 0.5
+        let shown = cut ? limit : lazy ? lazyShort ?? cap : height
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                content()
+                    .coordinateSpace(.named(CappedScrollSpace.name))
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                        // The first measure lands as is (the hub's own spring reveals it); later ones glide.
+                        if height == 0 { height = h } else { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { height = h } }
+                        settle()
+                    }
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                viewport = h
+                settle()
+            }
+            .onPreferenceChange(CapEdges.self) { new in
+                let sorted = Array(Set(new.map { ($0 * 2).rounded() / 2 })).sorted()
+                if sorted != edges {
+                    edges = sorted
+                    // Rows came or went: measure again at the cap.
+                    if lazy, lazyShort != nil { lazyShort = nil }
+                }
+            }
+            // No scroller: a legacy one ("Show scroll bars: Always") would take its width out of the rows and push
+            // them off the bar's cells they line up with.
+            .scrollIndicators(.never)
+            .scrollDisabled(!cut)
+            .frame(height: max(shown, 1))
+            // Cut short: the last visible row fades out, so it reads as "more below" rather than clipped.
+            .mask {
+                VStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .black.opacity(cut ? 0.15 : 1)], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 14)
+                }
+            }
+            .onChange(of: hub?.keyboardSelection) { _, request in
+                if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
+            }
+        }
+    }
+}
+
+extension CappedScroll {
+    /// Lazy: trusts the content's height only when it was measured in a viewport as tall as the cap.
+    fileprivate func settle() {
+        guard lazy, height > 0 else { return }
+        if viewport >= cap - 0.5 {
+            let short: CGFloat? = height < cap - 0.5 ? height : nil
+            if short != lazyShort { lazyShort = short }
+        } else if let short = lazyShort {
+            // Shrunk to its content: rows added make it overflow its viewport (measure again at the cap); rows removed
+            // leave it short still.
+            if height > short + 0.5 { lazyShort = nil } else if height < short - 0.5 { lazyShort = height }
+        }
+    }
+}
+
+/// An inbox item on two short lines; its actions show on hover or when picked with the keys. Done, Addressed and
+/// Resolved items carry a small state tag and read in the quieter text tokens (never a dimmed row: contrast stays).
 struct CompactItemRow: View {
     let item: InboxItem
     let store: Store
@@ -62,10 +155,10 @@ struct CompactItemRow: View {
                     .frame(width: 6, height: 6)
                     .padding(.top, 8)
                 ZStack(alignment: .bottomTrailing) {
-                    Avatar(url: item.avatar, size: 22)
+                    Avatar(url: item.avatar, size: 22, name: item.author)
                     Image(systemName: item.kind.symbol)
-                        .font(.system(size: 6, weight: .bold))
-                        .foregroundStyle(Color.black.opacity(0.8))
+                        .font(Theme.Typography.glyph(6, .bold))
+                        .foregroundStyle(Theme.onTint)
                         .frame(width: 11, height: 11)
                         .background(Circle().fill(item.kind.color))
                         .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 1.5))
@@ -75,33 +168,36 @@ struct CompactItemRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(item.title)
-                            .font(.system(size: 12.5, weight: unread ? .semibold : .regular))
-                            .foregroundStyle(Theme.text)
+                            .font(unread ? Theme.Typography.bodyStrong : Theme.Typography.body)
+                            .foregroundStyle(unread || open ? Theme.text : Theme.secondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         // The actions take the timestamp's place; the title stops short of them.
-                        Text(shortAgo(item.createdAt)).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(Theme.tertiary)
+                        Text(shortAgo(item.createdAt)).font(Theme.Typography.caption.monospacedDigit()).foregroundStyle(Theme.tertiary)
                             .opacity(open ? 0 : 1)
                             .frame(width: open ? actionsWidth - 6 : nil, alignment: .trailing)
                     }
-                    Text("\(item.repo.split(separator: "/").last ?? "")#\(item.number) · \(item.kind.label) · @\(item.author)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.tertiary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text("\(item.repo.split(separator: "/").last ?? "")#\(item.number) · \(item.kind.label) · @\(item.author)")
+                            .font(Theme.Typography.meta)
+                            .foregroundStyle(Theme.tertiary)
+                            .lineLimit(1)
+                        if !item.state.isOpen { StateTag(state: item.state) }
+                    }
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(open ? Color.white.opacity(0.06) : .clear))
-            .opacity(unread || open ? 1 : 0.72)
-            .contentShape(Rectangle())
+            .rowHighlight(open)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(item.title), \(item.repo) #\(item.number)")
+        .accessibilityValue(unread ? "Unread" : item.state.isOpen ? "" : StateTag.label(item.state))
+        .accessibilityHint("Opens it on GitHub")
         .overlay(alignment: .topTrailing) {
             // Centred on the title line (6pt row padding + half its 15pt line = 13.5; the capsule is 26 tall).
             if open { actions.padding(.top, 1).padding(.trailing, 4).transition(.opacity) }
         }
+        .contextMenu { InboxItemMenu(item: item, store: store, low: store.isLowPriority(item)) }
         .onHover {
             hover = $0
             if $0 {
@@ -109,7 +205,7 @@ struct CompactItemRow: View {
                 ui.drawerSelection = nil
             }
         }
-        .animation(.easeOut(duration: 0.15), value: open)
+        .motion(Theme.Motion.hover, value: open)
     }
 
     /// Room the action capsule takes over the title line: its buttons, its 2pt insets, and its 4pt from the edge.
@@ -121,7 +217,7 @@ struct CompactItemRow: View {
             if item.state.isOpen {
                 IconButton(symbol: unread ? "checkmark" : "circle.fill", help: unread ? "Mark as read" : "Mark as unread",
                            detail: store.shortcut(.toggleRead).display, size: size) { unread ? store.markRead(item) : store.markUnread(item) }
-                IconButton(symbol: "xmark", help: "Done", detail: "Moves it out of the inbox · \(store.shortcut(.discard).display)",
+                IconButton(symbol: "xmark", help: "Done", detail: "Moves it to Done · \(store.shortcut(.discard).display)",
                            size: size) { store.discard(item) }
             } else {
                 IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", detail: store.shortcut(.discard).display,
@@ -134,6 +230,35 @@ struct CompactItemRow: View {
     }
 }
 
+/// What became of an inbox item that's no longer open: Done, Addressed (you replied) or Resolved.
+struct StateTag: View {
+    let state: ItemState
+
+    static func label(_ state: ItemState) -> String {
+        switch state {
+        case .addressed: "Addressed"
+        case .resolved: "Resolved"
+        default: "Done"
+        }
+    }
+
+    var body: some View {
+        let (symbol, color): (String, Color) = switch state {
+        case .addressed: ("arrowshape.turn.up.left.fill", Theme.green)
+        case .resolved: ("checkmark.circle.fill", Theme.purple)
+        default: ("checkmark", Theme.secondary)
+        }
+        Label(Self.label(state), systemImage: symbol)
+            .font(Theme.Typography.caption.weight(.semibold))
+            .foregroundStyle(color)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 6)
+            .frame(height: 16)
+            .background(Capsule().fill(color.opacity(0.14)))
+            .fixedSize()
+    }
+}
+
 /// A row's actions on hover, the same for inbox items and sessions: icon buttons in a capsule laid over the row's
 /// right end (so showing them never changes the row's size).
 struct RowActions<Content: View>: View {
@@ -142,7 +267,7 @@ struct RowActions<Content: View>: View {
     var body: some View {
         HStack(spacing: 0) { content }
             .padding(2)
-            .background(Capsule().fill(Color(white: 0.16)))
+            .background(Capsule().fill(Theme.raised))
             .overlay(Capsule().strokeBorder(Theme.stroke))
     }
 }
@@ -150,7 +275,7 @@ struct RowActions<Content: View>: View {
 extension AnyTransition {
     /// Content of the expanded view: fades in once the shape has started to grow, and out at once on close.
     static var hubReveal: AnyTransition {
-        .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.08)),
+        .asymmetric(insertion: .opacity.animation(Theme.Motion.fade.delay(0.08)),
                     removal: .opacity.animation(.easeIn(duration: 0.08)))
     }
 }
@@ -158,10 +283,7 @@ extension AnyTransition {
 /// A blinking text cursor for the typed search.
 struct Caret: View {
     var body: some View {
-        Pulse(from: 1, to: 0, duration: 0.55) {
-            RoundedRectangle(cornerRadius: 1).fill(Theme.accent).frame(width: 1.5, height: 14)
-        }
-        .frame(width: 1.5, height: 14)
+        PulseBlock(color: Theme.accent, size: CGSize(width: 1.5, height: 14), cornerRadius: 1, from: 1, to: 0, duration: 0.55)
     }
 }
 
@@ -233,8 +355,26 @@ extension Store {
             return result
         }
         let rows = agentRows
-        return rows.kept + rows.pending.prefix(PillView.pendingTiles)
+        return rows.kept + rows.pending.prefix(LookoutHub.pendingTiles)
     }
+}
+
+/// A session's context menu (open, read state, label, keep/remove, colour, mute) and the popover its label editor
+/// opens in. Attach with `.sessionMenu(row, store)`.
+private struct SessionContextMenu: ViewModifier {
+    let row: AgentRow
+    let store: Store
+    @State private var editing = false
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu { SessionMenu(row: row, store: store, editLabel: { editing = true }) }
+            .popover(isPresented: $editing, arrowEdge: .bottom) { LabelEditor(row: row, store: store) }
+    }
+}
+
+extension View {
+    func sessionMenu(_ row: AgentRow, _ store: Store) -> some View { modifier(SessionContextMenu(row: row, store: store)) }
 }
 
 /// The inbox in the bar: the tray, and under it (beside it along the top and bottom) one count. Amber for what
@@ -246,71 +386,86 @@ struct InboxCell: View {
     /// Off while the filter chips beside it already show the counts.
     var showsCount = true
     let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        Button(action: action) { InboxCellLabel(needsYou: needsYou, bots: bots, vertical: vertical, showsCount: showsCount) }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Inbox")
+            .accessibilityValue([needsYou > 0 ? "\(needsYou) need you" : nil, bots > 0 ? plural(bots, "bot item") : nil]
+                .compactMap { $0 }.joined(separator: ", "))
+            .accessibilityHint("Shows what needs you")
+            .motion(.snappy, value: needsYou)
+            .motion(.snappy, value: bots)
+            .motion(Theme.Motion.spring, value: showsCount)
+    }
+}
+
+private struct InboxCellLabel: View {
+    let needsYou: Int
+    let bots: Int
+    let vertical: Bool
+    let showsCount: Bool
     @State private var hover = false
 
     var body: some View {
-        Button(action: action) {
-            Group {
-                if vertical {
-                    // Always as tall as icon + count, so the bar never shifts: the tray just slides to the middle.
-                    ZStack(alignment: .top) {
-                        icon.offset(y: badge == nil ? 9 : 0)
-                        if let badge { badge.offset(y: 32) }
-                    }
-                    .frame(height: 47, alignment: .top)
-                } else {
-                    HStack(spacing: 6) {
-                        icon
-                        if let badge { badge }
-                    }
+        Group {
+            if vertical {
+                // Always as tall as icon + count, so the bar never shifts: the tray just slides to the middle.
+                ZStack(alignment: .top) {
+                    icon.offset(y: badge == nil ? 9 : 0)
+                    if let badge { badge.offset(y: 32) }
                 }
+                .frame(height: 47, alignment: .top)
+            } else {
+                HStack(spacing: 6) {
+                    icon
+                    if let badge { badge }
+                }
+                // Never squeezed by the tabs beside it.
+                .fixedSize()
             }
-            .padding(.vertical, vertical ? 7 : 5)
-            .padding(.horizontal, vertical ? 4 : 7)
-            .frame(minWidth: vertical ? 36 : nil)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, vertical ? 7 : 5)
+        .padding(.horizontal, vertical ? 4 : 7)
+        .frame(minWidth: vertical ? Theme.Metrics.row : nil)
+        .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
-        .animation(.snappy, value: needsYou)
-        .animation(.snappy, value: bots)
-        .animation(.spring(duration: 0.3, bounce: 0.1), value: showsCount)
+        .motion(Theme.Motion.hover, value: hover)
     }
 
     /// The tray; on a solid amber tile (like a session's) when something needs you, so it shows from afar.
     private var icon: some View {
         let lit = needsYou > 0
         return Image(systemName: lit ? "tray.full.fill" : "tray.fill")
-            .font(.system(size: lit ? 13.5 : 15, weight: .semibold))
-            .foregroundStyle(lit ? Color.black.opacity(0.78) : hover ? Theme.text : Theme.secondary)
+            .font(Theme.Typography.glyph(lit ? 13.5 : 15))
+            .foregroundStyle(lit ? Theme.onTint : hover ? Theme.text : Theme.secondary)
             .frame(width: 28, height: 28)
             // Hover brightens the tile (or the tray), no box around it.
-            .background(RoundedRectangle(cornerRadius: 8.4, style: .continuous)
-                .fill(lit ? Theme.amber : Color.white.opacity(hover ? 0.08 : 0)))
+            .background(Tile.shape(28).fill(lit ? Theme.amber : hover ? Theme.Fill.hover : Theme.Fill.rest))
             .brightness(lit && hover ? 0.06 : 0)
-            .animation(.snappy, value: lit)
+            .motion(.snappy, value: lit)
     }
 
     private var badge: AnyView? {
         guard showsCount else { return nil }
         // The tile is already amber: the count beside it stays quiet.
-        if needsYou > 0 { return AnyView(count(needsYou, fill: Color.white.opacity(0.14), text: Theme.text)) }
-        if bots > 0 { return AnyView(count(bots, fill: Color.white.opacity(0.08), text: Theme.secondary)) }
+        if needsYou > 0 { return AnyView(count(needsYou, fill: Theme.Fill.selected, text: Theme.text)) }
+        if bots > 0 { return AnyView(count(bots, fill: Theme.Fill.hover, text: Theme.secondary)) }
         return nil
     }
 
     private func count(_ n: Int, fill: Color, text: Color) -> some View {
         Text(n > 99 ? "99+" : "\(n)")
-            .font(.system(size: 10.5, weight: .bold, design: .rounded).monospacedDigit())
+            .font(Theme.Typography.glyph(10.5, .bold).monospacedDigit())
             .contentTransition(.numericText(value: Double(n)))
             .foregroundStyle(text)
             .padding(.horizontal, 5)
             .frame(minWidth: 18, minHeight: 15)
             .background(Capsule().fill(fill))
-            .transition(.scale(scale: 0.6).combined(with: .opacity))
+            .transition(.scaleFade(0.6, reduce: reduce))
     }
-
+    @Environment(\.accessibilityReduceMotion) private var reduce
 }
 
 /// A repo in CI's lines: its name (and how many checks fail), opening its latest run.
@@ -319,29 +474,26 @@ struct RepoChip: View {
     let status: CIStatus?
     let state: CIState
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Text(repo.name).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.text)
+                Text(repo.name).font(Theme.Typography.control).foregroundStyle(Theme.text)
                 if state == .failure, let n = status?.failing.count, n > 0 {
-                    Text("\(n) check\(n == 1 ? "" : "s")").font(.system(size: 10.5)).foregroundStyle(Theme.red)
+                    Text(plural(n, "check")).font(Theme.Typography.caption).foregroundStyle(Theme.red)
                 }
             }
             .padding(.horizontal, 8)
             .frame(height: 22)
-            .background(Capsule().fill(Color.white.opacity(hover ? 0.12 : 0.07)))
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
+        .buttonStyle(HoverFillButtonStyle(shape: Capsule(), rest: Theme.Fill.hover, hover: Theme.Fill.selected))
+        .accessibilityLabel("\(repo.name), \(state == .none ? "no runs" : state.label)")
+        .accessibilityHint("Opens its latest checks")
         .tip(repo.fullName, detail)
     }
 
     private var detail: String {
-        var lines = [status?.branch ?? "main"]
+        var lines = [status?.branch ?? repo.defaultBranch ?? "default branch"]
         if let title = status?.title, !title.isEmpty { lines[0] += " · " + title }
         if state == .failure, let failing = status?.failing, !failing.isEmpty {
             lines.append("Failing: " + failing.joined(separator: ", "))
@@ -353,24 +505,27 @@ struct RepoChip: View {
 
 /// The "+" tile: shaped and filled like a session's tile, so it reads as the next one in the column.
 struct NewSessionTile: View {
-    var size: CGFloat = 26
+    var size: CGFloat = Theme.Metrics.chip
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(.system(size: size * 0.42, weight: .bold))
-                .foregroundStyle(hover ? Theme.text : Theme.secondary)
-                .frame(width: size, height: size)
-                .background(shape.fill(Color.white.opacity(hover ? 0.1 : 0.06)))
-                .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
-        .tip("New session", "Scratch chat · or pick a project")
+        Button(action: action) { NewSessionTileLabel(size: size) }
+            .buttonStyle(HoverFillButtonStyle(shape: Tile.shape(size), rest: Theme.Fill.field, hover: Theme.Fill.tile))
+            .accessibilityLabel("New session")
+            .accessibilityHint("Scratch chat, or pick a project")
+            .tip("New session", "Scratch chat, or pick a project")
+    }
+}
+
+private struct NewSessionTileLabel: View {
+    let size: CGFloat
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        Image(systemName: "plus")
+            .font(Theme.Typography.glyph(size * 0.42, .bold))
+            .foregroundStyle(hover ? Theme.text : Theme.secondary)
+            .frame(width: size, height: size)
     }
 }
 
@@ -384,9 +539,11 @@ struct RunningLine: View {
             let icon = Text(Image(systemName: task.kind == .agent ? "asterisk" : "terminal")).foregroundStyle(Theme.claude)
             return line + (i == 0 ? Text("") : Text("   ")) + icon + Text(" " + task.title).foregroundStyle(Theme.secondary)
         }
-        .font(.system(size: 11))
+        .font(Theme.Typography.meta)
         .lineLimit(1)
         .truncationMode(.tail)
+        // Cut short at the row's width: hovering has the whole list.
+        .tip("Running", tasks.map(\.title).joined(separator: "\n"))
     }
 }
 
@@ -395,7 +552,7 @@ struct SummaryText: View {
     let row: AgentRow
 
     var body: some View {
-        Text(row.summaryText).font(.system(size: 11)).foregroundStyle(Theme.tertiary).lineLimit(1)
+        Text(row.summaryText).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1)
     }
 }
 
@@ -413,7 +570,11 @@ struct BarTile: View {
             AgentTile(row: row, size: size, selected: hub.selection == "a:" + row.id)
         }
         .buttonStyle(.plain)
-        .frame(height: 36)
+        .frame(height: Theme.Metrics.row)
+        .accessibilityLabel(row.session.title)
+        .accessibilityValue(row.stateName)
+        .accessibilityHint("Opens it in Claude")
+        .sessionMenu(row, store)
         .onHover {
             if $0 {
                 hub.selection = "a:" + row.id
@@ -438,6 +599,8 @@ struct SessionBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             DrawerRow(row: row, store: store, ui: ui, number: 0, twoLines: twoLines, highlight: hub.query,
                       showsKept: !hub.query.isEmpty, inHub: !twoLines, plain: true)
+                // The card below is the one button; its inner row's own (a second, unnamed-or-duplicate button) is hidden.
+                .accessibilityHidden(true)
             // Under the title: past the tile on two-line rows (10 + 24 + 9), else at the title's 8.
             Group { if twoLines { cardDetail } else { details } }
                 .padding(.leading, twoLines ? 43 : 8)
@@ -445,7 +608,9 @@ struct SessionBlock: View {
                 .padding(.top, twoLines ? -8 : -3)
                 .padding(.bottom, twoLines ? 4 : 7)
         }
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(selected ? 0.06 : 0)))
+        .background(Theme.Radius.shape(Theme.Radius.md).fill(selected ? Theme.Fill.field : Theme.Fill.rest))
+        // The card has its own fill: pulsing tiles on it fade to that, not to the hub's background.
+        .environment(\.pulseBackdrop, selected ? Theme.composite(Theme.Fill.field) : Theme.bg)
         // The same actions as an inbox item's, over the title line's right end, centred on it.
         .overlay(alignment: .topTrailing) {
             if selected {
@@ -455,9 +620,17 @@ struct SessionBlock: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: selected)
+        .motion(Theme.Motion.hover, value: selected)
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(row.id) }
+        // One button for the card (named, with its state); the hover actions stay reachable inside it.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(row.session.title)
+        .accessibilityValue(row.stateName)
+        .accessibilityHint("Opens it in Claude")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { store.openAgent(row.id) }
+        .sessionMenu(row, store)
         .onHover { if $0 { ui.drawerSelection = row.id } }
     }
 
@@ -474,7 +647,7 @@ struct SessionBlock: View {
         } else if !row.tasks.isEmpty {
             RunningLine(tasks: row.tasks)
         } else {
-            Text(" ").font(.system(size: 11))
+            Text(" ").font(Theme.Typography.meta)
         }
     }
 

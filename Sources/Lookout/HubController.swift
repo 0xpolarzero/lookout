@@ -58,7 +58,7 @@ private struct EdgeLayout: Layout {
     let edge: DockEdge
     let position: Double
     let restLength: CGFloat
-    private let inset: CGFloat = 6
+    private let inset = Theme.Metrics.inset
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -91,7 +91,7 @@ struct HubRoot: View {
 
     var body: some View {
         GeometryReader { geo in content(in: geo.size) }
-            .coordinateSpace(.named("hub-root"))
+            .coordinateSpace(.named(LookoutHub.rootSpace))
             // Tooltips are drawn over the whole window, outside the hub's clipped shape, so they're never cut off.
             .tipSpace()
     }
@@ -107,7 +107,7 @@ struct HubRoot: View {
 
     @ViewBuilder private func content(in size: CGSize) -> some View {
         let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), maxWidth: size.width)
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hub-root")) } action: { frame in
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
                 layout.frame = frame
                 if !hub.expanded, hub.page == .main {
@@ -121,7 +121,7 @@ struct HubRoot: View {
             } else {
                 EdgeLayout(edge: ui.edge, position: store.settings.centerPill == true ? 0.5 : ui.position,
                            restLength: layout.restLength) { view }
-                    .animation(hub.expanded ? LookoutHub.opening : LookoutHub.closing, value: hub.expanded)
+                    .motion(hub.expanded ? LookoutHub.opening : LookoutHub.closing, value: hub.expanded)
             }
         }
     }
@@ -150,7 +150,6 @@ final class HubController {
     private var previousApp: NSRunningApplication?
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
 
-    private static let barDepth: CGFloat = 46
     fileprivate static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
     private let trigger = HoverTrigger(size: NSSize(width: 10, height: 10))
     private var globalMouse: Any?
@@ -240,7 +239,7 @@ final class HubController {
         let hubRect = NSRect(x: f.minX, y: h - f.maxY, width: f.width, height: f.height)
         guard hubRect.contains(p) else { return false }
         if layout.floating || !hub.expanded { return true }
-        let d = ui.edge.isHorizontal ? Self.barDepth : LookoutHub.cell
+        let d = ui.edge.isHorizontal ? Theme.Metrics.bar : LookoutHub.cell
         return switch ui.edge {
         case .right: p.x >= hubRect.maxX - d
         case .left: p.x <= hubRect.minX + d
@@ -458,7 +457,7 @@ final class HubController {
     private func dragEnded(at mouse: NSPoint) {
         screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? screen
         let vf = screen.visibleFrame
-        (ui.edge, ui.position) = UIController.snap(window.frame, in: vf)
+        (ui.edge, ui.position) = EdgeSnap.snap(window.frame, in: vf)
         // Let SwiftUI lay the bar out for its new edge (it may turn), then glide it into place and dock.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             guard let self else { return }

@@ -101,7 +101,7 @@ extension LookoutHub {
                 .overlay(alignment: seamAlignment) { seam(place) }
                 .fixedSize()
                 .onHover { overPanel = $0; hoverChanged() }
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("hub-root")) } action: { hub.panelFrame = $0 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.rootSpace)) } action: { hub.panelFrame = $0 }
                 .onDisappear { hub.panelFrame = .zero }
                 // Hidden until it's been measured and placed, so it never shows up in the wrong spot first.
                 .opacity(place == nil ? 0 : 1)
@@ -113,7 +113,7 @@ extension LookoutHub {
 
     /// Only the first open and the last close fade and slide; switching sections is instant (no Reduce Motion: no slide).
     var peekTransition: AnyTransition {
-        let d: CGFloat = Self.reduceMotion ? 0 : 6
+        let d: CGFloat = reduce ? 0 : Theme.Space.sm
         return .opacity.combined(with: .offset(x: edge == .right ? d : edge == .left ? -d : 0,
                                                y: edge == .top ? -d : edge == .bottom ? d : 0))
     }
@@ -187,7 +187,7 @@ extension LookoutHub {
     /// A panel against the bar: square where it meets the bar, rounded elsewhere, and rounded on the bar's side too
     /// where it runs on past the bar's end.
     func panelShape(_ place: Placement?) -> UnevenRoundedRectangle {
-        let r: CGFloat = 14
+        let r: CGFloat = Theme.Radius.lg + 2
         let past: CGFloat = place?.pastEnd == true ? r : 0
         return switch edge {
         case .right: UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: past, style: .continuous)
@@ -198,9 +198,9 @@ extension LookoutHub {
     }
 
     /// A panel's padding, all round; rows pad their own 8 inside it, so text starts 16pt from the panel's edge.
-    static let peekPad: CGFloat = 8
+    static let peekPad: CGFloat = Theme.Space.md
     /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
-    static let peekLine: CGFloat = 30
+    static let peekLine: CGFloat = Theme.Metrics.line
 
     /// A panel's width: the controls' is a small menu; along the top and bottom, CI's is its column's.
     func panelWidth(_ section: HubSection) -> CGFloat {
@@ -233,18 +233,23 @@ extension LookoutHub {
             case .agents:
                 let rows = agentRows
                 agentsHeader.frame(height: Self.peekLine)
+                ClaudeNotice(store: store).padding(.horizontal, 8)
                 // By project and draggable, like the full view's.
                 let starts = projectStarts(rows.kept)
                 ForEach(rows.kept) { r in
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: 36)
+                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.row)
+                        .sessionMenu(r, store)
                         .modifier(GroupRule(on: starts.contains(r.id)))
                         .modifier(AgentReorder(row: r, store: store))
                 }
                 if !rows.pending.isEmpty {
                     pendingLabel(twoLines: false).frame(height: 14)
-                    ForEach(rows.pending) { r in DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: 36) }
+                    ForEach(rows.pending) { r in
+                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.row)
+                            .sessionMenu(r, store)
+                    }
                 }
-                NewSessionRow(store: store, style: .detail).frame(height: 36)
+                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.row)
             default:
                 // (The controls have their own panel.)
                 EmptyView()
@@ -264,6 +269,7 @@ extension LookoutHub {
                 peekCI
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
+                ClaudeNotice(store: store).padding(.horizontal, 8)
                 let rows = agentRows
                 CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -306,9 +312,9 @@ extension LookoutHub {
         if items.isEmpty {
             emptyInbox
         } else {
-            CappedScroll(cap: 330, hub: hub) {
-                LazyVStack(spacing: 1) { ForEach(items) { itemRow($0).id("i:" + $0.id) } }
-                    .animation(.easeOut(duration: 0.22), value: listKey)
+            CappedScroll(cap: 330, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
+                AdaptiveStack(count: items.count, spacing: 1) { ForEach(items) { itemRow($0).id("i:" + $0.id) } }
+                    .motion(Theme.Motion.fade, value: listKey)
             }
         }
     }
@@ -319,7 +325,10 @@ extension LookoutHub {
             linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) }.frame(height: Self.peekLine)
         } else {
             ciHeader.frame(height: Self.peekLine)
-            ForEach(Self.ciOrder, id: \.self) { ciLine($0).frame(minHeight: Self.peekLine) }
+            ForEach(Self.ciLineOrder, id: \.self) { state in
+                // Repos without a run only get their line when there are some.
+                if state != CIState.none || !ciRepos(listedIn: .none).isEmpty { ciLine(state).frame(minHeight: Self.peekLine) }
+            }
         }
     }
 
@@ -344,20 +353,24 @@ extension LookoutHub {
 struct ControlsGear: View {
     let active: Bool
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(hover || active ? Theme.text : Theme.tertiary)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(Color.white.opacity(hover ? 0.08 : active ? 0.13 : 0)))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.12), value: hover)
+        Button(action: action) { ControlsGearLabel(active: active) }
+            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, active: Theme.Fill.selected, isActive: active))
+            .accessibilityLabel("Controls")
+            .accessibilityHint("Settings, repositories and keeping the hub open")
+    }
+}
+
+private struct ControlsGearLabel: View {
+    let active: Bool
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        Image(systemName: "gearshape.fill")
+            .font(Theme.Typography.glyph(13))
+            .foregroundStyle(hover || active ? Theme.text : Theme.tertiary)
+            .frame(width: IconButton.Size.bar, height: IconButton.Size.bar)
     }
 }
 
@@ -367,26 +380,24 @@ struct MenuRow: View {
     let title: String
     let key: String?
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.Typography.glyph(12))
                     .foregroundStyle(Theme.secondary)
                     .frame(width: 18)
-                Text(title).font(.system(size: 12.5)).foregroundStyle(Theme.text)
+                    .accessibilityHidden(true)
+                Text(title).font(Theme.Typography.body).foregroundStyle(Theme.text)
                 Spacer(minLength: 8)
                 if let key { KeyCap(key) }
             }
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(hover ? 0.07 : 0)))
+            .padding(.horizontal, Theme.Space.md)
+            .frame(height: Theme.Metrics.line)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeOut(duration: 0.1), value: hover)
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.sm + 1)))
+        .accessibilityLabel(title)
     }
 }

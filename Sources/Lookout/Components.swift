@@ -154,6 +154,7 @@ extension View {
             .padding(.vertical, 6)
             .background(Theme.Radius.shape(Theme.Radius.md).fill(on ? Theme.Fill.field : Theme.Fill.rest))
             .contentShape(Theme.Radius.shape(Theme.Radius.md))
+            .transformEnvironment(\.pulseBackdrop) { if on { $0 = Theme.composite(Theme.Fill.field) } }
             .motion(Theme.Motion.hover, value: on)
     }
 
@@ -197,9 +198,9 @@ struct HoverFillButtonStyle: ButtonStyle {
             let hot = enabled && hovering
             let fill = !enabled ? style.rest : configuration.isPressed ? style.pressed : style.isActive ? style.active : hot ? style.hover : style.rest
             configuration.label
-                .opacity(enabled ? 1 : 0.4)
                 .environment(\.hoverFillHovering, hot)
                 .background(style.shape.fill(fill))
+                .opacity(enabled ? 1 : 0.4)
                 .contentShape(style.shape)
                 .onHover { hovering = $0 }
                 .motion(Theme.Motion.hover, value: hovering)

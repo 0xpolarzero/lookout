@@ -105,8 +105,8 @@ final class PillPanel: FloatingPanel {
 }
 
 /// Where the hub docks: the closest screen edge to a dropped window, and where along it.
-enum UIController {
-    /// Closest screen edge to the dropped pill, and where along that edge it sits (0…1).
+enum EdgeSnap {
+    /// Closest screen edge to the dropped window, and where along that edge it sits (0…1).
     nonisolated static func snap(_ f: NSRect, in vf: NSRect) -> (DockEdge, Double) {
         let distances: [(DockEdge, CGFloat)] = [
             (.left, f.midX - vf.minX), (.right, vf.maxX - f.midX), (.top, vf.maxY - f.midY), (.bottom, f.midY - vf.minY),

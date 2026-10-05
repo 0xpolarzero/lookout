@@ -223,7 +223,7 @@ enum PanelTab {
         switch self {
         case .inbox: "Inbox"
         case .ci: "CI"
-        case .agents: "Agents"
+        case .agents: "Sessions"
         case .repos: "Repositories"
         case .settings: "Settings"
         }

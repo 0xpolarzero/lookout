@@ -4,11 +4,6 @@ import SwiftUI
 // Session and inbox views shared by the hub: tiles, rows, actions, label editor, update button, and the
 // menus / status lines the hub ports next (claude link, rate limit, session and inbox context menus).
 
-enum PillView {
-    /// How many pending tiles fit before a "+N" tile takes over.
-    static let pendingTiles = 4
-}
-
 /// A session's tile: its two letters (or emoji) on its status colour. Working agents get a pulsing dot in the
 /// corner; pending sessions are a size smaller and dimmer.
 struct AgentTile: View {
@@ -17,7 +12,7 @@ struct AgentTile: View {
     var selected = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+        let shape = Tile.shape(size)
         let emoji = row.label.unicodeScalars.first.map { $0.properties.isEmoji && $0.value > 0xFF } ?? false
         Group {
             if let icon = row.icon {
@@ -31,13 +26,16 @@ struct AgentTile: View {
                     .lineLimit(1)
             }
         }
-            .foregroundStyle(row.tint == nil ? Theme.text.opacity(0.88) : Color.black.opacity(0.78))
+            .foregroundStyle(row.tint == nil ? Theme.text.opacity(0.88) : Theme.onTint)
             .frame(width: size, height: size)
-            .background(shape.fill(row.tint ?? Color.white.opacity(0.1)))
+            .background(shape.fill(row.tint ?? Theme.Fill.tile))
             .opacity(row.pending ? 0.55 : 1)
             // Busy (Claude answering, or a subagent or command still running after it): the tile fades and
             // pulses, quieter than the sessions waiting on you.
-            .modifier(BusyPulse(on: (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty))
+            .modifier(BusyPulse(on: (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty, cornerRadius: size * 0.3))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(row.session.title)
+            .accessibilityValue(row.stateName)
             .overlay {
                 if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
             }
@@ -83,13 +81,12 @@ struct ProjectLabel: View {
 /// A busy session's tile: see-through, slowly pulsing.
 private struct BusyPulse: ViewModifier {
     let on: Bool
+    var cornerRadius: CGFloat = 0
 
     func body(content: Content) -> some View {
         if on {
-            // A render-server opacity loop; clicks fall through to the tile's own gestures.
-            Pulse(from: 0.6, to: 0.28, duration: 1.1) { content }
-                .allowsHitTesting(false)
-                .overlay { Color.clear.contentShape(Rectangle()) }
+            // A render-server opacity loop over the tile (the tile itself stays SwiftUI); clicks fall through.
+            Pulse(from: 0.6, to: 0.28, duration: 1.1, cornerRadius: cornerRadius) { content }
         } else {
             content
         }
@@ -143,9 +140,9 @@ struct Reorderable: ViewModifier {
             content
                 .draggable("agent:" + row.id) {
                     Text(row.session.title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Theme.Typography.heading)
                         .padding(.horizontal, 10)
-                        .frame(height: 26)
+                        .frame(height: Theme.Metrics.chip)
                         .background(Capsule().fill(Theme.bg))
                         .foregroundStyle(Theme.text)
                 }
@@ -163,7 +160,7 @@ struct AgentActions: View {
     let row: AgentRow
     let store: Store
     var size: CGFloat = 24
-    /// The row already shows Keep and Dismiss (the Agents tab): only read/unread and open here.
+    /// The row already shows Keep and Remove: only read/unread and open here.
     var keepsInline = false
 
     var body: some View {
@@ -172,7 +169,7 @@ struct AgentActions: View {
                 IconButton(symbol: "pin.fill", help: "Keep", detail: "Pins it to your list · \(store.shortcut(.keepSession).display)", size: size) {
                     store.keepAgent(row.id)
                 }
-                IconButton(symbol: "xmark", help: "Dismiss", detail: "Until its next activity · \(store.shortcut(.removeSession).display)", size: size) {
+                IconButton(symbol: "xmark", help: "Remove", detail: "Until its next activity · \(store.shortcut(.removeSession).display)", size: size) {
                     store.dismissAgent(row.id)
                 }
             } else {
@@ -208,9 +205,9 @@ struct LabelEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Label for \(row.session.title)").font(.system(size: 11.5, weight: .semibold)).lineLimit(1)
+            Text("Label for \(row.session.title)").font(Theme.Typography.heading).lineLimit(1)
             Text("Two letters or an emoji; empty goes back to the \(row.entry.icon != nil ? "icon" : "letters")")
-                .font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
+                .font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
             HStack(spacing: 6) {
                 TextField(row.label, text: $text)
                     .focused($focused)
@@ -229,7 +226,7 @@ struct LabelEditor: View {
                     dismiss()
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11))
+                .font(Theme.Typography.meta)
                 .foregroundStyle(Theme.accent)
             }
             if store.agents.iconsEnabled && store.hasTypesafeKey && row.entry.label == nil {
@@ -238,7 +235,7 @@ struct LabelEditor: View {
                     dismiss()
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 11))
+                .font(Theme.Typography.meta)
                 .foregroundStyle(Theme.accent)
             }
         }
@@ -262,50 +259,79 @@ struct LabelEditor: View {
 struct UpdateButton: View {
     let updater: Updater
     let horizontal: Bool
-    @State private var hover = false
 
     var body: some View {
         let version = updater.release?.version ?? ""
-        Button { updater.advance() } label: {
-            HStack(spacing: 5) {
-                ZStack {
-                    Circle().fill(Color.white.opacity(hover ? 0.08 : 0))
-                    if case .downloading(let fraction) = updater.phase {
-                        Circle().stroke(Color.white.opacity(0.12), lineWidth: 2).padding(3)
-                        Circle().trim(from: 0, to: max(0.03, fraction))
-                            .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .padding(3)
-                            .animation(.linear(duration: 0.2), value: fraction)
-                    }
-                    if updater.phase == .installing {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Image(systemName: symbol)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(tint)
-                    }
-                }
-                .frame(width: 28, height: 28)
-                if horizontal && hover {
-                    Text(label(version))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.text)
-                        .padding(.trailing, 8)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.spring(duration: 0.25), value: hover)
-        .help(help(version))
+        Button { updater.advance() } label: { UpdateLabel(updater: updater, horizontal: horizontal, version: version) }
+        .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover))
+        .accessibilityLabel(Self.label(updater.phase, version: version))
+        .accessibilityHint(tooltip(version).0)
+        .tip(tooltip(version).0, tooltip(version).1)
         .contextMenu {
             if let page = updater.release?.page {
                 Button("What's new in \(version)") { NSWorkspace.shared.open(page) }
             }
             Button("Skip \(version)") { updater.skip() }
         }
+    }
+
+    /// The tooltip: what it is, and what a click does.
+    private func tooltip(_ version: String) -> (String, String?) {
+        switch updater.phase {
+        case .available: ("Lookout \(version) is available", "Click to download it · right-click for more")
+        case .downloading(let fraction): ("Downloading Lookout \(version)… \(Int(fraction * 100))%", nil)
+        case .ready: ("Lookout \(version) is ready", "Click to restart into it")
+        case .installing: ("Installing Lookout \(version)…", nil)
+        case .failed(let message): ("Update failed: \(message)", "Click to try again")
+        case .idle: ("", nil)
+        }
+    }
+
+    fileprivate static func label(_ phase: Updater.Phase, version: String) -> String {
+        switch phase {
+        case .downloading(let fraction): "\(Int(fraction * 100))%"
+        case .ready, .installing: "Restart to update"
+        case .failed: "Retry update"
+        default: "Update to \(version)"
+        }
+    }
+}
+
+/// The update button's face: its icon (a progress ring while downloading), and its name beside it on hover.
+private struct UpdateLabel: View {
+    let updater: Updater
+    let horizontal: Bool
+    let version: String
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ZStack {
+                if case .downloading(let fraction) = updater.phase {
+                    Circle().stroke(Theme.Fill.selected, lineWidth: 2).padding(3)
+                    Circle().trim(from: 0, to: max(0.03, fraction))
+                        .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .padding(3)
+                        .animation(.linear(duration: 0.2), value: fraction)
+                }
+                if updater.phase == .installing {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: symbol)
+                        .font(Theme.Typography.glyph(12, .bold))
+                        .foregroundStyle(tint)
+                }
+            }
+            .frame(width: 28, height: 28)
+            if horizontal && hover {
+                Text(UpdateButton.label(updater.phase, version: version))
+                    .font(Theme.Typography.heading)
+                    .foregroundStyle(Theme.text)
+                    .padding(.trailing, 8)
+            }
+        }
+        .motion(Theme.Motion.spring, value: hover)
     }
 
     private var symbol: String {
@@ -324,26 +350,6 @@ struct UpdateButton: View {
         default: Theme.accent
         }
     }
-
-    private func label(_ version: String) -> String {
-        switch updater.phase {
-        case .downloading(let fraction): "\(Int(fraction * 100))%"
-        case .ready, .installing: "Restart to update"
-        case .failed: "Retry update"
-        default: "Update to \(version)"
-        }
-    }
-
-    private func help(_ version: String) -> String {
-        switch updater.phase {
-        case .available: "Lookout \(version) is available\nClick to download it · right-click for more"
-        case .downloading(let fraction): "Downloading Lookout \(version)… \(Int(fraction * 100))%"
-        case .ready: "Lookout \(version) is ready\nClick to restart into it"
-        case .installing: "Installing Lookout \(version)…"
-        case .failed(let message): "Update failed: \(message)\nClick to try again"
-        case .idle: ""
-        }
-    }
 }
 
 
@@ -351,26 +357,28 @@ struct DrawerRow: View {
     let row: AgentRow
     let store: Store
     @Bindable var ui: UIState
-    /// Unused now (the switcher numbers are gone); kept for call sites.
-    let number: Int
+    /// Unused (the switcher numbers are gone); kept so older call sites compile.
+    var number: Int = 0
     /// Under/over a horizontal pill: tile, title, then project and status on a second line.
     var twoLines = false
     /// Search: the words to highlight in the title.
     var highlight: String?
     /// Search results mix kept sessions and others: say which aren't in your list.
     var showsKept = false
-    /// In the hub, beside its bar tile: padded and highlighted like the inbox's rows (8 × 6, white 0.06).
+    /// In the hub, beside its bar tile: padded and highlighted like the inbox's rows (`.rowHighlight`).
     var inHub = false
     /// Inside a larger block that draws the highlight itself (title and details hover as one).
     var plain = false
 
     var body: some View {
         let selected = ui.drawerSelection == row.id
-        HStack(spacing: 9) {
+        // The hub's one-line rows get the shared row look; the two-line and drawer rows pad and fill by hand.
+        let hubRow = inHub && !twoLines
+        let content = HStack(spacing: 9) {
             if twoLines { AgentTile(row: row, size: 24) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 12.5, weight: row.unread ? .semibold : .regular))
+                    .font(row.unread ? Theme.Typography.bodyStrong : Theme.Typography.body)
                     .foregroundStyle(row.unread || row.session.running ? Theme.text : Theme.text.opacity(0.72))
                     .lineLimit(1)
                 if twoLines {
@@ -382,7 +390,7 @@ struct DrawerRow: View {
                             Text("· not in your list").foregroundStyle(Theme.tertiary)
                         }
                     }
-                    .font(.system(size: 10.5))
+                    .font(Theme.Typography.caption)
                     .lineLimit(1)
                 }
             }
@@ -394,24 +402,34 @@ struct DrawerRow: View {
             } else if !twoLines {
                 // In a hub block the actions are laid over this spot instead: the status steps aside without the
                 // row changing size.
-                status.font(.system(size: 10.5).monospacedDigit()).lineLimit(1).truncationMode(.middle)
+                status.font(Theme.Typography.caption.monospacedDigit()).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: busy ? 170 : 110, alignment: .trailing)
                     .fixedSize(horizontal: busy, vertical: false)
                     .layoutPriority(busy ? 2 : 0)
                     .opacity(selected && plain ? 0 : 1)
             }
         }
-        .padding(.leading, inHub && !twoLines ? 8 : 10)
-        .padding(.trailing, selected ? 3 : inHub && !twoLines ? 8 : 10)
-        // 5, not 6: with the 26pt action capsule that is exactly the 36pt of the tile beside it, so picking a row never grows it.
-        .padding(.vertical, inHub && !twoLines ? 5 : 0)
-        .frame(height: twoLines ? 44 : nil)
-        .frame(maxHeight: twoLines ? 44 : .infinity)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .fill(selected && !plain ? Color.white.opacity(inHub ? 0.06 : 0.08) : .clear))
+        Group {
+            if hubRow {
+                content.rowHighlight(selected && !plain)
+            } else {
+                content
+                    .padding(.leading, 10)
+                    .padding(.trailing, selected ? 3 : 10)
+                    .frame(height: twoLines ? 44 : nil)
+                    .frame(maxHeight: twoLines ? 44 : .infinity)
+                    .background(Theme.Radius.shape(Theme.Radius.md).fill(selected && !plain ? Theme.Fill.hover : Theme.Fill.rest))
+                    .transformEnvironment(\.pulseBackdrop) { if selected && !plain { $0 = Theme.composite(0.07) } }
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(row.id) }
         .onHover { if $0 { ui.drawerSelection = row.id } }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(row.session.title)
+        .accessibilityValue(row.stateName)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { store.openAgent(row.id) }
     }
 
     /// Working, or done with something still running: the status says more than the end of the title.
@@ -452,7 +470,6 @@ struct DrawerRow: View {
 struct NewSessionRow: View {
     let store: Store
     var style: Style = .drawer
-    @State private var hover = false
 
     enum Style {
         /// The pill's drawer: a small "+" before the label.
@@ -468,19 +485,9 @@ struct NewSessionRow: View {
     var body: some View {
         let folders = store.agentFolders
         HStack(spacing: 5) {
-            Button { store.startScratchSession() } label: {
-                HStack(spacing: 9) {
-                    if style != .detail { plus }
-                    Text("New session").font(.system(size: 12.5)).foregroundStyle(hover ? Theme.text : Theme.secondary)
-                    Spacer(minLength: 4)
-                }
-                .padding(.leading, leading)
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hover = $0 }
-            .tip("New session", "Scratch chat, no folder · or pick a project")
+            Button { store.startScratchSession() } label: { NewSessionLabel(style: style) }
+                .buttonStyle(HoverFillButtonStyle())
+                .tip("New session", "Scratch chat, no folder · or pick a project")
 
             let shown = Array(folders.prefix(Self.maxTiles))
             let initials = Self.initials(shown.map { URL(fileURLWithPath: $0).lastPathComponent })
@@ -491,28 +498,7 @@ struct NewSessionRow: View {
         }
         .padding(.trailing, style == .drawer ? 4 : 8)
         .frame(height: style == .twoLines ? 44 : nil)
-        .frame(minHeight: style == .detail ? 30 : nil)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .fill(hover ? Color.white.opacity(style == .drawer ? 0.08 : 0.06) : .clear))
-        .animation(.easeOut(duration: 0.12), value: hover)
-    }
-
-    private var leading: CGFloat {
-        switch style {
-        case .drawer: 6
-        case .detail: 8
-        case .twoLines: 10
-        }
-    }
-
-    @ViewBuilder private var plus: some View {
-        let size: CGFloat = style == .twoLines ? 24 : 18
-        Image(systemName: "plus")
-            .font(.system(size: style == .twoLines ? 11 : 10, weight: .bold))
-            .foregroundStyle(hover ? Theme.text : Theme.secondary)
-            .frame(width: size, height: size)
-            .background(RoundedRectangle(cornerRadius: style == .twoLines ? size * 0.3 : 5, style: .continuous)
-                .fill(Color.white.opacity(style == .twoLines ? (hover ? 0.1 : 0.06) : (hover ? 0.14 : 0.08))))
+        .frame(minHeight: style == .detail ? Theme.Metrics.line : nil)
     }
 
     private func menu(_ folders: [String]) -> some View {
@@ -556,36 +542,79 @@ struct NewSessionRow: View {
     }
 }
 
+/// The new-session row's button face: a "+" (except beside a bar cell) and the label, brighter on hover.
+private struct NewSessionLabel: View {
+    let style: NewSessionRow.Style
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        HStack(spacing: 9) {
+            if style != .detail { plus }
+            Text("New session").font(Theme.Typography.body).foregroundStyle(hover ? Theme.text : Theme.secondary)
+            Spacer(minLength: 4)
+        }
+        .padding(.leading, leading)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+    }
+
+    private var leading: CGFloat {
+        switch style {
+        case .drawer: 6
+        case .detail: 8
+        case .twoLines: 10
+        }
+    }
+
+    @ViewBuilder private var plus: some View {
+        let size: CGFloat = style == .twoLines ? 24 : 18
+        Image(systemName: "plus")
+            .font(Theme.Typography.glyph(style == .twoLines ? 11 : 10, .bold))
+            .foregroundStyle(hover ? Theme.text : Theme.secondary)
+            .frame(width: size, height: size)
+            .background(Tile.shape(size).fill(hover ? Theme.Fill.selected : Theme.Fill.field))
+    }
+}
+
 /// A listed project in the new-session row: its colour, its initials, its name on hover.
 private struct ProjectTile: View {
     let folder: String
     let initials: String
     let color: Color?
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         let name = URL(fileURLWithPath: folder).lastPathComponent
-        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
-        Button(action: action) {
-            Text(initials)
-                .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                .foregroundStyle(color == nil ? Theme.text.opacity(0.88) : Color.black.opacity(0.78))
-                .frame(width: 22, height: 22)
-                .background(shape.fill(color ?? Color.white.opacity(0.1)))
-                .opacity(hover ? 1 : 0.8)
-                .overlay { if hover { shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5).padding(-2.5) } }
-                .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+        Button(action: action) { ProjectTileFace(initials: initials, color: color) }
+            // The face does its own hover look (a ring), so the style adds no fill.
+            .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), hover: .clear, pressed: .clear))
+            .accessibilityLabel("New session in \(name)")
+            .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+    }
+}
+
+private struct ProjectTileFace: View {
+    let initials: String
+    let color: Color?
+    @Environment(\.hoverFillHovering) private var hover
+
+    var body: some View {
+        let shape = Theme.Radius.shape(Theme.Radius.xs + 1)
+        Text(initials)
+            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+            .foregroundStyle(color == nil ? Theme.text.opacity(0.88) : Theme.onTint)
+            .frame(width: 22, height: 22)
+            .background(shape.fill(color ?? Theme.Fill.tile))
+            .opacity(hover ? 1 : 0.8)
+            .overlay { if hover { shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5).padding(-2.5) } }
+            .contentShape(shape)
+            .motion(Theme.Motion.hover, value: hover)
     }
 }
 
 // MARK: - Kept for the hub to adopt (the classic UI's menus and warnings)
 
-/// A session's context menu: open, read state, label, keep/dismiss, project colour, mute.
+/// A session's context menu: open, read state, label, keep/remove, project colour, mute.
 struct SessionMenu: View {
     let row: AgentRow
     let store: Store
@@ -599,9 +628,9 @@ struct SessionMenu: View {
         Divider()
         if row.pending {
             Button("Keep") { store.keepAgent(row.id) }
-            Button("Dismiss") { store.dismissAgent(row.id) }
+            Button("Remove") { store.dismissAgent(row.id) }
         } else {
-            Button("Remove from list") { store.dismissAgent(row.id) }
+            Button("Remove") { store.dismissAgent(row.id) }
         }
         if !row.session.folderKey.isEmpty {
             Menu("Colour for \(row.session.folderName)") {
@@ -614,7 +643,7 @@ struct SessionMenu: View {
     }
 }
 
-/// An inbox item's context menu: open, copy link, read state, discard, treat as a bot.
+/// An inbox item's context menu: open, copy link, read state, done, treat as a bot.
 struct InboxItemMenu: View {
     let item: InboxItem
     let store: Store
@@ -632,7 +661,7 @@ struct InboxItemMenu: View {
             Button(item.state == .unread ? "Mark as read" : "Mark as unread") {
                 item.state == .unread ? store.markRead(item) : store.markUnread(item)
             }
-            Button("Discard") { store.discard(item) }
+            Button("Done") { store.discard(item) }
         } else {
             Button("Back to inbox") { store.restore(item) }
         }

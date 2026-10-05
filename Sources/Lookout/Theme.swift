@@ -3,6 +3,18 @@ import SwiftUI
 
 enum Theme {
     static let bg = Color(red: 0.078, green: 0.078, blue: 0.086)
+    /// White at `whiteOpacity` composited over `bg`, as an opaque colour: what a translucent white fill looks like on the surface.
+    static func composite(_ whiteOpacity: Double) -> Color {
+        let base = 0.078 * (1 - whiteOpacity) + whiteOpacity
+        let blue = 0.086 * (1 - whiteOpacity) + whiteOpacity
+        return Color(.sRGB, red: base, green: base, blue: blue, opacity: 1)
+    }
+    /// The same for a translucent white fill such as `Fill.field`.
+    static func composite(_ whiteFill: Color) -> Color {
+        composite(Double(NSColor(whiteFill).usingColorSpace(.sRGB)?.alphaComponent ?? 0))
+    }
+    /// Tooltip bubbles, a step above `bg`.
+    static let popover = Color(white: 0.17)
     static let raised = Color.white.opacity(0.045)
     static let hover = Color.white.opacity(0.07)
     static let stroke = Color.white.opacity(0.085)
@@ -40,6 +52,13 @@ func shortAgo(_ date: Date, now: Date = Date()) -> String {
     return date.formatted(.dateTime.month(.abbreviated).day())
 }
 
+/// `shortAgo` for a sentence: "just now", "3m ago", "on Sep 28" (never "now ago" or "Sep 28 ago").
+func agoPhrase(_ date: Date, now: Date = Date()) -> String {
+    let short = shortAgo(date, now: now)
+    if short == "now" { return "just now" }
+    return now.timeIntervalSince(date) < 7 * 86400 ? "\(short) ago" : "on \(short)"
+}
+
 struct IconButton: View {
     let symbol: String
     var help: String = ""
@@ -53,7 +72,7 @@ struct IconButton: View {
 
     var body: some View {
         let button = Button(action: action) { IconButtonLabel(symbol: symbol, size: size, tint: tint, active: active) }
-            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Color.white.opacity(0.08), isActive: active))
+            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
             .accessibilityLabel(label ?? help)
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
@@ -105,8 +124,8 @@ struct KeyCap: View {
             .foregroundStyle(Theme.secondary)
             .padding(.horizontal, 5)
             .frame(minWidth: 18, minHeight: 16)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).fill(Color.white.opacity(0.08)))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).strokeBorder(Color.white.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).fill(Theme.Fill.tile))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).strokeBorder(Theme.stroke))
     }
 }
 
@@ -123,7 +142,7 @@ struct Avatar: View {
         // A cached image is there on the first frame; otherwise a placeholder, then a quick fade-in.
         let image = loaded.flatMap { $0.url == sized ? $0.image : nil } ?? ImageCache.shared.cached(sized)
         ZStack {
-            Circle().fill(Color.white.opacity(0.1))
+            Circle().fill(Theme.Fill.tile)
             if image == nil { placeholder }
             if let image {
                 Image(nsImage: image).resizable().interpolation(.high).transition(.opacity)
@@ -131,7 +150,7 @@ struct Avatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().strokeBorder(Color.white.opacity(0.08)))
+        .overlay(Circle().strokeBorder(Theme.stroke))
         .task(id: sized) {
             guard let sized, ImageCache.shared.cached(sized) == nil else { loaded = nil; return }
             loaded = nil
@@ -145,9 +164,9 @@ struct Avatar: View {
     @ViewBuilder private var placeholder: some View {
         let initials = name.map { $0.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).prefix(2).compactMap(\.first).map(String.init).joined().uppercased() } ?? ""
         if initials.isEmpty {
-            Image(systemName: "person.fill").font(.system(size: size * 0.5)).foregroundStyle(Color.white.opacity(0.35))
+            Image(systemName: "person.fill").font(.system(size: size * 0.5)).foregroundStyle(Theme.tertiary)
         } else {
-            Text(initials).font(.system(size: size * 0.4, weight: .semibold, design: .rounded)).foregroundStyle(Color.white.opacity(0.55))
+            Text(initials).font(.system(size: size * 0.4, weight: .semibold, design: .rounded)).foregroundStyle(Theme.secondary)
         }
     }
 
@@ -166,10 +185,7 @@ struct CIDot: View {
     var body: some View {
         if state == .pending {
             // Breathing: a render-server animation, with no glow (a shadow can't animate cheaply).
-            Pulse(from: 1, to: 0.35, duration: 0.9) {
-                Circle().fill(state.color).frame(width: size, height: size)
-            }
-            .frame(width: size, height: size)
+            PulseBlock(color: state.color, diameter: size, from: 1, to: 0.35, duration: 0.9)
         } else {
             Circle()
                 .fill(state.color)
@@ -347,8 +363,8 @@ private struct TipBubble: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(white: 0.17)))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.1)))
+        .background(Theme.Radius.shape(Theme.Radius.sm).fill(Theme.popover))
+        .overlay(Theme.Radius.shape(Theme.Radius.sm).strokeBorder(Theme.Fill.tile))
         .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         .fixedSize()
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }

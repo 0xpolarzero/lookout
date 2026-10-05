@@ -169,37 +169,37 @@ struct ShortcutRecorder: View {
     @State private var recording = false
     @State private var monitor: Any?
     @State private var error: String?
-    @State private var hover = false
     @State private var tap = ModifierTap()
 
     var body: some View {
         let current = store.shortcut(action)
         let customized = current != action.defaultShortcut
-        VStack(alignment: .trailing, spacing: 3) {
+        VStack(alignment: .trailing, spacing: Theme.Space.xs) {
             HStack(spacing: 4) {
                 if customized && !recording {
                     Button { store.setShortcut(nil, for: action) } label: {
-                        Image(systemName: "arrow.uturn.backward").font(.system(size: 9, weight: .bold))
+                        Image(systemName: "arrow.uturn.backward").font(Theme.Typography.glyph(9, .bold)).frame(width: 20, height: 20)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(HoverFillButtonStyle(shape: Circle()))
                     .foregroundStyle(Theme.tertiary)
+                    .accessibilityLabel("Reset \(action.title) to default")
                     .tip("Reset", "Back to \(action.defaultShortcut.display)")
                 }
                 Button { recording ? stop() : start() } label: {
                     Text(recording ? "Press keys…" : current.display)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundStyle(recording ? Theme.accent : Theme.text)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, Theme.Space.md)
                         .frame(minWidth: 70, minHeight: 22)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(hover || recording ? 0.1 : 0.07)))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(recording ? Theme.accent : .clear))
-                        .contentShape(Rectangle())
+                        .overlay(Theme.Radius.shape(Theme.Radius.xs).strokeBorder(recording ? Theme.accent : .clear))
                 }
-                .buttonStyle(.plain)
-                .onHover { hover = $0 }
+                .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), rest: Theme.Fill.hover,
+                                                  hover: Theme.Fill.selected, isActive: recording))
+                .accessibilityLabel("Change shortcut for \(action.title)")
+                .accessibilityValue(recording ? "Recording, press the new keys" : current.display)
             }
             if let error {
-                Text(error).font(.system(size: 10.5)).foregroundStyle(Theme.amber)
+                Text(error).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
             }
         }
         .onDisappear(perform: stop)

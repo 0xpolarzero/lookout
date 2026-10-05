@@ -17,7 +17,7 @@ extension LookoutHub {
         InboxCell(needsYou: store.unreadCount(.needsYou), bots: store.unreadCount(.bots), vertical: !edge.isHorizontal,
                   showsCount: !(showsDetail && !shrunk(.inbox))) {
             // Straight to what needs you, its newest item picked so the keys act on it at once.
-            withAnimation(.easeOut(duration: 0.18)) {
+            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
                 hub.go(.main)
                 hub.query = ""
                 hub.filter = .needsYou
@@ -35,24 +35,25 @@ extension LookoutHub {
         Group {
             if searching { searchField.transition(.opacity) } else { filters.transition(.opacity) }
         }
-        .frame(height: 30)
+        .frame(height: Theme.Metrics.line)
     }
 
     var searchField: some View {
         HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.accent)
+            Image(systemName: "magnifyingglass").font(Theme.Typography.glyph(12)).foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
             HStack(spacing: 1) {
-                Text(hub.query).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.text).lineLimit(1)
+                Text(hub.query).font(Theme.Typography.title.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1)
                 Caret()
             }
             Spacer(minLength: 0)
-            Text(searchCount).font(.system(size: 11).monospacedDigit()).foregroundStyle(Theme.tertiary).lineLimit(1)
+            Text(searchCount).font(Theme.Typography.meta.monospacedDigit()).foregroundStyle(Theme.tertiary).lineLimit(1)
             KeyCap("Esc")
         }
         .padding(.leading, 10)
         .padding(.trailing, 7)
-        .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
+        .frame(height: Theme.Metrics.line)
+        .background(Theme.Radius.shape(Theme.Radius.md).fill(Theme.Fill.field))
     }
 
     /// What the search found, by kind: "3 items · 2 sessions".
@@ -60,26 +61,27 @@ extension LookoutHub {
         let found = items.count
         let sessions = store.agents.enabled ? store.hubSessions(hub).count : 0
         if found == 0 && sessions == 0 { return "No match" }
-        func plural(_ n: Int, _ word: String) -> String? { n == 0 ? nil : "\(n) \(word)\(n == 1 ? "" : "s")" }
-        return [plural(found, "item"), plural(sessions, "session")].compactMap { $0 }.joined(separator: " · ")
+        return [found == 0 ? nil : plural(found, "item"), sessions == 0 ? nil : plural(sessions, "session")]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     var filters: some View {
         HStack(spacing: 4) {
-            ForEach(InboxFilter.allCases, id: \.self) { f in filterChip(f) }
+            // The tabs never give up their words: the actions after them are what yields when the column is narrow.
+            ForEach(InboxFilter.allCases, id: \.self) { f in filterChip(f).fixedSize().layoutPriority(2) }
             Spacer(minLength: 0)
             if hub.filter != .done && store.unreadCount(hub.filter) > 0 {
                 IconButton(symbol: "checkmark.circle", help: "Mark all as read",
                            detail: "Everything in \(hub.filter.label) · \(store.shortcut(.markAllRead).display)",
                            size: IconButton.Size.header) {
-                    withAnimation(.easeOut(duration: 0.2)) { store.markAllRead(hub.filter) }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.markAllRead(hub.filter) }
                 }
                 .transition(.opacity)
             }
             if showsDetail { focusButton(.inbox) }
         }
         .padding(.trailing, 3)
-        .animation(.easeOut(duration: 0.15), value: store.unreadCount(hub.filter) > 0)
+        .motion(Theme.Motion.fade, value: store.unreadCount(hub.filter) > 0)
     }
 
     func filterChip(_ f: InboxFilter) -> some View {
@@ -89,10 +91,10 @@ extension LookoutHub {
         let detail = switch f {
         case .needsYou: "Reviews, mentions and replies from people"
         case .bots: "Comments from bots, kept quiet"
-        case .done: "What you marked done · back to the inbox from here"
+        case .done: "What you marked Done · Back to inbox from here"
         }
         return Chip(label: f.label, count: count, selected: hub.filter == f) {
-            withAnimation(.easeOut(duration: 0.18)) { hub.filter = f }
+            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = f }
         }
         .tip(f.label, detail)
     }
@@ -100,19 +102,20 @@ extension LookoutHub {
     var emptyInbox: some View {
         HStack(spacing: 8) {
             Image(systemName: searching ? "magnifyingglass" : hub.filter == .needsYou ? "checkmark.circle.fill" : "tray")
-                .font(.system(size: 12, weight: .semibold))
+                .font(Theme.Typography.glyph(12))
                 .foregroundStyle(hub.filter == .needsYou && !searching ? Theme.green : Theme.tertiary)
+                .accessibilityHidden(true)
             Text(searching ? "No inbox item matches" : hub.filter == .needsYou ? "All caught up"
                  : hub.filter == .bots ? "Bots are quiet" : "Nothing here yet")
-                .font(.system(size: 12.5)).foregroundStyle(Theme.secondary)
+                .font(Theme.Typography.body).foregroundStyle(Theme.secondary)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, Theme.Space.md)
+        .padding(.vertical, Theme.Space.sm)
     }
 
     func itemRow(_ item: InboxItem) -> some View {
-        CompactItemRow(item: item, store: store, ui: ui, hub: hub)
+        CompactItemRow(item: item, store: store, ui: ui, hub: hub).capEdge()
     }
 
     /// A line of text with a link after it, padded like a row ("No CI shown  Choose repositories").
@@ -122,9 +125,9 @@ extension LookoutHub {
             Button(action, action: perform).buttonStyle(.link)
             Spacer(minLength: 0)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 8)
-        .frame(minHeight: 30)
+        .font(Theme.Typography.control)
+        .padding(.horizontal, Theme.Space.md)
+        .frame(minHeight: Theme.Metrics.line)
     }
 
     // MARK: Section headers
@@ -133,34 +136,56 @@ extension LookoutHub {
     func sectionHeader<Trailing: View>(_ title: String, status: [(String, Color)] = [],
                                        @ViewBuilder trailing: () -> Trailing = { EmptyView() }) -> some View {
         HStack(spacing: 8) {
-            Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.secondary)
+            Text(title).font(Theme.Typography.heading).foregroundStyle(Theme.secondary).lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
             ForEach(Array(status.enumerated()), id: \.offset) { _, part in
-                Text(part.0).font(.system(size: 11).monospacedDigit()).foregroundStyle(part.1)
+                Text(part.0).font(Theme.Typography.meta.monospacedDigit()).foregroundStyle(part.1).lineLimit(1)
                     .transition(.opacity)
             }
             Spacer(minLength: 0)
             trailing()
         }
-        .padding(.leading, 8)
+        .padding(.leading, Theme.Space.md)
         .padding(.trailing, 3)
-        .frame(height: 30)
-        .animation(.easeOut(duration: 0.15), value: status.map(\.0))
+        .frame(height: Theme.Metrics.line)
+        .motion(Theme.Motion.fade, value: status.map(\.0))
     }
 
     // MARK: CI
 
     /// One order for CI everywhere: what needs attention first.
     static let ciOrder: [CIState] = [.failure, .pending, .success]
+    /// `ciOrder`, then the repos without a run: for the lines that list repos (the bar's counts keep `ciOrder`).
+    /// Repo chips on one CI line before the rest fold into "+N".
+    static let ciChipLimit = 4
+    static let ciLineOrder: [CIState] = ciOrder + [.none]
+
+    /// The repos in a CI state; `.none` is the ones with no run (nothing known yet, or no checks).
+    func ciRepos(listedIn state: CIState) -> [RepoConfig] {
+        Self.ciRepos(listedIn: state, in: store.ciRepos, status: store.ci)
+    }
+
+    /// Pure form of `ciRepos(listedIn:)`: a repo with no status at all, or one stored as `CIState.none`, is "no runs".
+    static func ciRepos(listedIn state: CIState, in repos: [RepoConfig], status: [String: CIStatus]) -> [RepoConfig] {
+        repos.filter { (status[$0.fullName]?.state ?? CIState.none) == state }
+    }
 
     /// CI's icon in the bar, tinted by the worst state; hovering lists the repos in each.
     var ciCell: some View {
         let worst = store.worstCI
+        let counts = Self.ciOrder.compactMap { state -> String? in
+            let n = ciRepos(listedIn: state).count
+            return n == 0 ? nil : "\(n) \(state.label)"
+        }
         return Image(systemName: worst == .failure ? "xmark.seal.fill" : "checkmark.seal.fill")
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(worst == .none ? Theme.tertiary : worst.color)
+            .font(Theme.Typography.glyph(15))
+            .foregroundStyle(worst == CIState.none ? Theme.tertiary : worst.color)
             .contentTransition(.symbolEffect(.replace))
-            .frame(width: 30, height: 30)
+            .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
             .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("CI: \(worst == CIState.none ? "no runs" : worst.label)")
+            .accessibilityValue(counts.joined(separator: ", "))
     }
 
     /// CI's section header: "CI" and how it's going, worst first.
@@ -168,79 +193,91 @@ extension LookoutHub {
         // Shrunk (another section focused), its lines are gone: every state's count, in its colour.
         let status: [(String, Color)] = shrunk(.ci)
             ? Self.ciOrder.compactMap { state in
-                let n = store.ciRepos(in: state).count
+                let n = ciRepos(listedIn: state).count
                 return n == 0 ? nil : ("\(n) \(state.label)", state.color)
-            }
+            } + (ciRepos(listedIn: .none).isEmpty ? [] : [("\(ciRepos(listedIn: .none).count) no runs", CIState.none.color)])
             : ciStatus.map { [$0] } ?? []
         return sectionHeader("CI", status: status) { if showsDetail { focusButton(.ci) } }
     }
 
     /// "2 failing" in red; "1 running" while nothing fails but something runs; "all passing" once everything has.
     var ciStatus: (String, Color)? {
-        let failing = store.ciRepos(in: .failure).count
-        let running = store.ciRepos(in: .pending).count
-        let passing = store.ciRepos(in: .success).count
+        let failing = ciRepos(listedIn: .failure).count
+        let running = ciRepos(listedIn: .pending).count
+        let passing = ciRepos(listedIn: .success).count
         if failing > 0 { return ("\(failing) failing", Theme.red) }
         if running > 0 { return ("\(running) running", Theme.amber) }
-        if passing > 0 { return ("all passing", Theme.tertiary) }
-        return store.ciRepos.isEmpty ? nil : ("no runs yet", Theme.tertiary)
+        // "All" only when every repo shown has passed; some without a run yet make it a count.
+        if passing > 0 { return (ciRepos(listedIn: CIState.none).isEmpty ? "all passing" : "\(passing) passing", Theme.tertiary) }
+        return store.ciRepos.isEmpty ? nil : ("no runs", Theme.tertiary)
     }
 
     /// The number of repos in a CI state, beside its line; hovering lists them.
     func ciCount(_ state: CIState) -> some View {
-        let n = store.ciRepos(in: state).count
-        return HStack(spacing: 5) {
-            CIDot(state: n == 0 ? .none : state, size: 7)
-            Text("\(n)")
-                .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(n == 0 ? Theme.tertiary : Theme.text)
-                .contentTransition(.numericText(value: Double(n)))
-        }
-        .frame(width: 32, height: 30)
-        .contentShape(Rectangle())
+        let n = ciRepos(listedIn: state).count
+        return DotCount(n, color: state.color)
+            .frame(width: 32, height: Theme.Metrics.line)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(n) \(state.label)")
     }
 
     /// The repos in a CI state, as chips that open their checks.
     /// `compact`: along the top and bottom, where lines don't have to match the bar's cells.
     func ciLine(_ state: CIState, compact: Bool = false) -> some View {
-        let repos = store.ciRepos(in: state)
+        let repos = ciRepos(listedIn: state)
+        // Repos without a run only get a line when there are some.
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(state.title)
-                .font(.system(size: 11, weight: .semibold))
+            Text(state == CIState.none ? "No runs" : state.title)
+                .font(Theme.Typography.count)
                 .foregroundStyle(repos.isEmpty ? Theme.tertiary : state.color)
                 .frame(width: 52, alignment: .leading)
             if repos.isEmpty {
-                Text("—").font(.system(size: 11.5)).foregroundStyle(Theme.tertiary)
+                Text("—").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
             } else {
+                // A few chips, then "+N": a line never grows with the number of repos (it'd push the hub off the screen).
                 FlowLayout(spacing: 5) {
-                    ForEach(repos, id: \.fullName) { repo in
+                    ForEach(repos.prefix(Self.ciChipLimit), id: \.fullName) { repo in
                         RepoChip(repo: repo, status: store.ci[repo.fullName], state: state) { store.openChecks(repo) }
+                    }
+                    if repos.count > Self.ciChipLimit {
+                        let rest = repos.dropFirst(Self.ciChipLimit)
+                        Text("+\(rest.count)").font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                            .padding(.horizontal, 8).frame(height: 22)
+                            .accessibilityLabel("\(rest.count) more")
+                            .tip("\(rest.count) more", rest.map(\.fullName).joined(separator: "\n"))
                     }
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, compact ? 1 : 4)
-        .frame(maxWidth: .infinity, minHeight: compact ? 24 : 30, alignment: .leading)
+        .padding(.horizontal, Theme.Space.md)
+        .padding(.vertical, compact ? 1 : Theme.Space.xs)
+        .frame(maxWidth: .infinity, minHeight: compact ? 24 : Theme.Metrics.line, alignment: .leading)
     }
 
     // MARK: Agents
 
     var claudeMark: some View {
         Image(systemName: "asterisk")
-            .font(.system(size: 14, weight: .bold))
+            .font(Theme.Typography.glyph(14, .bold))
             .foregroundStyle(Theme.claude)
-            .frame(width: 30, height: 30)
+            .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
             .contentShape(Rectangle())
+            .accessibilityLabel("Sessions")
     }
 
-    /// "Agents", then what's waiting for you (amber) and what's done and unread (blue).
+    /// "Sessions", then what's waiting for you (amber) and what's done and unread (blue).
     var agentsHeader: some View {
         let counts = store.agentCounts
         var status: [(String, Color)] = []
         if counts.blocked > 0 { status.append(("\(counts.blocked) waiting", Theme.amber)) }
         if counts.done > 0 { status.append(("\(counts.done) done", Theme.accent)) }
-        return sectionHeader("Agents", status: status) { if showsDetail { focusButton(.agents) } }
+        // Claude's files missing or unreadable: the notice under the header says so; this stays when the list is shrunk.
+        switch store.claudeLink {
+        case .missing, .unreadable: status.append(("!", Theme.red))
+        default: break
+        }
+        return sectionHeader("Sessions", status: status) { if showsDetail { focusButton(.agents) } }
     }
 
     /// A session's tile in the bar; opens it in Claude.
@@ -250,8 +287,8 @@ extension LookoutHub {
 
     /// The "+" in the bar, a tile like the sessions' above it: a scratch session.
     var newSessionCell: some View {
-        NewSessionTile(size: 26) { store.startScratchSession() }
-            .frame(height: 36)
+        NewSessionTile(size: Theme.Metrics.chip) { store.startScratchSession() }
+            .frame(height: Theme.Metrics.row)
     }
 
     /// Beside the "+": the label and the projects to start a session in.
@@ -294,8 +331,12 @@ extension LookoutHub {
 
     /// Sync state, as a dot and a few words: problems first, then checking, snoozed, and up to date.
     var syncStatus: some View {
-        Ticking(coarse: true) { now in
-            syncLabel(now: now)
+        HStack(spacing: 8) {
+            Ticking(coarse: true) { now in
+                syncLabel(now: now)
+            }
+            // The rate limit is part of syncing: it pauses at 0, inbox included.
+            RateNotice(store: store, fill: false).lineLimit(1).layoutPriority(-1)
         }
     }
 
@@ -309,20 +350,22 @@ extension LookoutHub {
                     if s.spinning {
                         ProgressView().controlSize(.mini).scaleEffect(0.6)
                     } else if let symbol = s.symbol {
-                        Image(systemName: symbol).font(.system(size: 9, weight: .bold)).foregroundStyle(s.color)
+                        Image(systemName: symbol).font(Theme.Typography.glyph(9, .bold)).foregroundStyle(s.color)
                     } else {
                         Circle().fill(s.color).frame(width: 6, height: 6)
                     }
                 }
                 .frame(width: 10, height: 10)
-                Text(s.text).font(.system(size: 11)).foregroundStyle(s.color == Theme.green ? Theme.tertiary : s.color)
+                Text(s.text).font(Theme.Typography.meta).foregroundStyle(s.color == Theme.green ? Theme.tertiary : s.color)
                     .lineLimit(1)
             }
             .padding(.horizontal, 8)
-            .frame(height: 26)
+            .frame(height: Theme.Metrics.chip)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(s.text)
+        .accessibilityHint(s.title)
         .disabled(store.isSyncing)
         .tip(s.title, s.detail)
     }
@@ -344,7 +387,7 @@ extension LookoutHub {
         }
         let failed = store.repoErrors.keys.sorted()
         if !failed.isEmpty {
-            return SyncState(color: Theme.amber, text: "\(failed.count) repo\(failed.count == 1 ? "" : "s") failed",
+            return SyncState(color: Theme.amber, text: "\(plural(failed.count, "repo")) failed",
                              title: "Some repositories didn't sync", detail: failed.joined(separator: "\n") + "\n" + refresh)
         }
         if store.isSyncing {
@@ -358,7 +401,7 @@ extension LookoutHub {
         let interval = store.settings.pollInterval
         let checked = "Last checked at \(last.formatted(date: .omitted, time: .shortened))"
         if now.timeIntervalSince(last) > interval * 3 {
-            return SyncState(color: Theme.amber, text: "Synced \(shortAgo(last, now: now)) ago", title: "Not syncing",
+            return SyncState(color: Theme.amber, text: "Synced \(agoPhrase(last, now: now))", title: "Not syncing",
                              detail: "\(checked) · check your connection or token\n" + refresh)
         }
         if store.isSnoozed, let until = store.settings.snoozeUntil {

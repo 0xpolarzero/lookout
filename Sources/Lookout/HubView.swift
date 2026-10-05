@@ -159,7 +159,7 @@ final class HubKeys {
             if editing { event.window?.makeFirstResponder(nil) }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
-            else if hub.focus != nil { withAnimation(LookoutHub.refocus) { hub.focus = nil } }
+            else if hub.focus != nil { withAnimation(LookoutHub.refocus.resolved(reduce: LookoutHub.reduceNow)) { hub.focus = nil } }
             else { close() }
             return true
         }
@@ -189,7 +189,7 @@ final class HubKeys {
             return true
         }
         if shortcut == store.shortcut(.markAllRead) {
-            withAnimation(.easeOut(duration: 0.2)) { store.markAllRead(hub.filter) }
+            withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.markAllRead(hub.filter) }
             return true
         }
         guard let selection = hub.selection else { return false }
@@ -200,15 +200,15 @@ final class HubKeys {
             else if shortcut == store.shortcut(.discard) {
                 let i = targets.firstIndex(of: selection) ?? 0
                 if targets.indices.contains(i + 1) { select(targets[i + 1]) }
-                withAnimation(.easeOut(duration: 0.22)) { item.state.isOpen ? store.discard(item) : store.restore(item) }
+                withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { item.state.isOpen ? store.discard(item) : store.restore(item) }
             } else { return false }
             return true
         }
         if selection.hasPrefix("a:") {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
-            else if shortcut == store.shortcut(.keepSession) { withAnimation(.easeOut(duration: 0.22)) { store.keepAgent(id) } }
-            else if shortcut == store.shortcut(.removeSession) { withAnimation(.easeOut(duration: 0.22)) { store.dismissAgent(id) } }
+            else if shortcut == store.shortcut(.keepSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.keepAgent(id) } }
+            else if shortcut == store.shortcut(.removeSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.dismissAgent(id) } }
             else { return false }
             return true
         }
@@ -222,7 +222,7 @@ final class HubKeys {
 
     /// A new search picks its first result, so ↩ opens it straight away.
     private func setQuery(_ query: String) {
-        withAnimation(.easeOut(duration: 0.15)) {
+        withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) {
             hub.query = query
             // Searching looks everywhere, and what you type shows in the inbox's header: nothing stays shrunk.
             if !query.isEmpty { hub.focus = nil }
@@ -254,26 +254,36 @@ struct LookoutHub: View {
     @State var peekLeave: Task<Void, Never>?
     /// The bar's size and the open panel's natural size, to place the panel against the bar's ends.
     @State var barSize: CGSize = .zero
+    /// The CI block's measured height: what it takes beyond its usual few lines comes off the inbox's room.
+    @State var ciHeight: CGFloat = 0
+    static let ciUsual: CGFloat = 150
+    var ciExtra: CGFloat { max(0, ciHeight - Self.ciUsual) }
     @State var peekSizes: [HubSection: CGSize] = [:]
     /// The strip's trailing group (controls, update button) as laid out, for the sessions' segment to leave room
     /// for; a first guess until it's measured.
     @State var stripTrailingWidth: CGFloat = 140
-
+    @Environment(\.accessibilityReduceMotion) var reduce
 
     /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
-    static let cell: CGFloat = 46
+    static let cell = Theme.Metrics.bar
     /// What sits beside a cell on the sides; the inbox and agents columns along the top and bottom.
     static let detail: CGFloat = 400
     /// The one outer inset. Pieces pad their own 8 inside it, so text starts 14pt from the hub's side everywhere.
-    static let inset: CGFloat = 6
+    static let inset = Theme.Metrics.inset
     /// Along the top and bottom: the CI column, and the narrowest a page gets under the strip.
     static let ciWidth: CGFloat = 300
     static let pageWidth: CGFloat = 480
-    /// With Reduce Motion on, springs and slides become short fades.
-    static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-    static var opening: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.28, bounce: 0.08) }
-    static var closing: Animation { reduceMotion ? .easeOut(duration: 0.12) : .spring(duration: 0.2, bounce: 0) }
-    static var pageSpring: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.28, bounce: 0.06) }
+    /// How many pending sessions the hub lists before the rest stay hidden.
+    static let pendingTiles = 4
+    /// The hub's one coordinate space name (the hosting root's).
+    static let rootSpace = "hub-root"
+    /// Animations: pass through `.motion` / `.resolved(reduce:)`, which follow Reduce Motion live.
+    static let opening = Theme.Motion.spring
+    static let closing = Animation.spring(duration: 0.2, bounce: 0)
+    static let pageSpring = Theme.Motion.spring
+    static let refocus = Animation.spring(duration: 0.34, bounce: 0.06)
+    /// The system's current setting, for code with no view (key handlers).
+    static var reduceNow: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var edge: DockEdge { ui.edge }
     var expanded: Bool { hub.expanded }
@@ -305,14 +315,14 @@ struct LookoutHub: View {
                 .shadow(color: .black.opacity(expanded ? 0.42 : peeking != nil ? 0.42 : 0.22),
                         radius: expanded || peeking != nil ? 20 : 6, y: expanded || peeking != nil ? 7 : 2)
         }
-        .animation(.easeOut(duration: 0.16), value: peeking != nil)
+        .motion(Theme.Motion.fade, value: peeking != nil)
         .fixedSize()
         // Opening has a touch of bounce; closing doesn't, so it never overshoots back past the bar.
-        .animation(expanded ? Self.opening : Self.closing, value: expanded)
-        .animation(Self.pageSpring, value: hub.page)
-        .animation(Self.refocus, value: hub.focus)
+        .motion(expanded ? Self.opening : Self.closing, value: expanded)
+        .motion(Self.pageSpring, value: hub.page)
+        .motion(Self.refocus, value: hub.focus)
         .contextMenu {
-            Button("Keep Open") { hub.pinned = true }
+            Toggle("Keep Open", isOn: $hub.pinned)
             Button("Settings…") { hub.go(.settings) }
             Button("Repositories…") { hub.go(.repos) }
             if store.updater.isRelease {
@@ -335,7 +345,7 @@ struct LookoutHub: View {
     var agentRows: (kept: [AgentRow], pending: [AgentRow]) {
         if searching { return (store.hubSessions(hub), []) }
         let rows = store.agentRows
-        return (rows.kept, Array(rows.pending.prefix(PillView.pendingTiles)))
+        return (rows.kept, Array(rows.pending.prefix(Self.pendingTiles)))
     }
 
     // MARK: Vertical (left / right edges)
@@ -358,7 +368,8 @@ struct LookoutHub: View {
         page
             .frame(width: Self.detail)
             .modifier(FitHeight(cap: maxLength))
-            .transition(Self.reduceMotion ? .opacity : .move(edge: edge == .right ? .trailing : .leading))
+            // (Reduce Motion: no slide, but still a short fade.)
+            .transition(reduce ? .opacity.animation(Theme.Motion.fade) : .slide(from: edge == .right ? .trailing : .leading, reduce: false))
     }
 
     /// The rows: the bar's cells on the screen side, their content beside them. With a page open, the same cells
@@ -430,16 +441,16 @@ struct LookoutHub: View {
                 if items.isEmpty {
                     row(cell: { EmptyView() }, detail: { emptyInbox })
                 }
-                CappedScroll(cap: caps.inbox, hub: hub) {
-                    LazyVStack(alignment: side, spacing: 1) {
+                CappedScroll(cap: caps.inbox, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
+                    AdaptiveStack(count: items.count, alignment: side, spacing: 1) {
                         ForEach(items) { item in
-                            row(cell: { EmptyView() }, detail: { itemRow(item) }).id("i:" + item.id)
+                            row(cell: { EmptyView() }, detail: { itemRow(item) }).capEdge().id("i:" + item.id)
                         }
                     }
                     .padding(.bottom, 4)
                     .id(searching ? "search" : hub.filter.rawValue)
                     .transition(.opacity)
-                    .animation(.easeOut(duration: 0.22), value: listKey)
+                    .motion(Theme.Motion.fade, value: listKey)
                 }
                 // Its own width, so a scroller can't widen it and push its rows off the bar's column.
                 .frame(width: Self.cell + Self.detail)
@@ -454,14 +465,17 @@ struct LookoutHub: View {
             } else {
                 row(cell: { ciCell }, detail: { ciHeader })
                 if !shrunk(.ci) {
-                    ForEach(Self.ciOrder, id: \.self) { state in
-                        row(cell: { ciCount(state) }, detail: { ciLine(state) })
+                    ForEach(Self.ciLineOrder, id: \.self) { state in
+                        if state != CIState.none || !ciRepos(listedIn: .none).isEmpty {
+                            row(cell: { ciCount(state) }, detail: { ciLine(state) })
+                        }
                     }
                     .transition(.hubReveal)
                 }
             }
         }
         .modifier(probe(.ci))
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
         // A search doesn't look in CI.
         .opacity(searching ? 0.4 : 1)
         if store.agents.enabled {
@@ -471,13 +485,14 @@ struct LookoutHub: View {
         }
         if store.updater.showsInPill {
             row(cell: { UpdateButton(updater: store.updater, horizontal: false).padding(.vertical, 4) },
-                detail: { Text(updateText).font(.system(size: 12)).foregroundStyle(Theme.secondary).padding(.horizontal, 8) })
-                .transition(.scale.combined(with: .opacity))
+                detail: { Text(updateText).font(Theme.Typography.control).foregroundStyle(Theme.secondary).padding(.horizontal, 8) })
+                .transition(.scaleFade(0.8, reduce: reduce))
         }
     }
 
     @ViewBuilder var agentRowsView: some View {
         row(cell: { claudeMark }, detail: { agentsHeader })
+        if showsDetail { row(cell: { EmptyView() }, detail: { ClaudeNotice(store: store).padding(.horizontal, Theme.Space.md) }) }
         if showsDetail && shrunk(.agents) {
             EmptyView()
         } else if showsDetail {
@@ -503,13 +518,15 @@ struct LookoutHub: View {
                 row(alignment: .top, cell: { tile(r, size: 26) }, detail: { sessionBlock(r, twoLines: false) })
                     .modifier(ReorderIf(enabled: showsDetail, row: r, store: store))
                     .modifier(GroupRule(on: showsDetail && starts.contains(r.id)))
+                    .capEdge()
                     .id("a:" + r.id)
             }
             if !rows.pending.isEmpty {
-                row(cell: { Capsule().fill(Color.white.opacity(0.12)).frame(width: 14, height: 1.5).frame(height: 14) },
+                row(cell: { Capsule().fill(Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: 14) },
                     detail: { pendingLabel(twoLines: false) })
                 ForEach(rows.pending) { r in
                     row(alignment: .top, cell: { tile(r, size: 22) }, detail: { sessionBlock(r, twoLines: false) })
+                        .capEdge()
                         .id("a:" + r.id)
                 }
             }
@@ -529,7 +546,7 @@ struct LookoutHub: View {
 
     /// "PENDING", aligned with the text of the rows under it (two-line rows pad 10, one-line 8).
     func pendingLabel(twoLines: Bool) -> some View {
-        Text("PENDING").font(.system(size: 9.5, weight: .bold)).foregroundStyle(Theme.tertiary)
+        Eyebrow("Pending")
             .padding(.leading, twoLines ? 10 : 8)
     }
 
@@ -545,7 +562,7 @@ struct LookoutHub: View {
 
     /// No section focused: what's left once the fixed parts are laid out, inbox first.
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
-        let free = max(160, maxLength - 360)
+        let free = max(160, maxLength - 360 - ciExtra)
         guard store.agents.enabled else { return (free, 0) }
         // Whole 36pt session rows, so the last one showing is never cut through its tile.
         let agents = max(2, (free * 0.45 / 36).rounded(.down)) * 36
@@ -554,8 +571,8 @@ struct LookoutHub: View {
 
     /// Across the whole view when expanded; a short rule centred in the bar at rest.
     var sectionDivider: some View {
-        Rectangle().fill(Theme.stroke)
-            .frame(width: showsDetail ? Self.cell + Self.detail : Self.cell - 24, height: 1)
+        Hairline()
+            .frame(width: showsDetail ? Self.cell + Self.detail : Self.cell - 24)
             .frame(width: rowWidth)
             .padding(.vertical, 4)
     }
@@ -589,16 +606,19 @@ struct LookoutHub: View {
             .frame(maxHeight: .infinity)
             .modifier(probe(.inbox))
             stripDivider
-            // CI: its icon and title on the left like the agents', then its counts.
-            HStack(spacing: 2) {
+            // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
+            HStack(spacing: 8) {
                 ciCell
-                // 6 more than the 2 between the counts: the title as far from its icon as the agents'.
-                if wide {
-                    Text("CI").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.secondary)
-                        .padding(.leading, 6).padding(.trailing, 2).transition(.hubReveal)
+                if wide && shrunk(.ci) {
+                    // Shrunk: the counts fit where the header's words wouldn't.
+                    HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
+                    Spacer(minLength: 0)
+                    focusButton(.ci)
+                } else if wide {
+                    ciHeader.transition(.hubReveal)
+                } else {
+                    HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
                 }
-                ForEach(Self.ciOrder, id: \.self) { ciCount($0) }
-                if wide { Spacer(minLength: 0); focusButton(.ci) }
             }
             .padding(.leading, Self.inset + 1)
             .padding(.trailing, Self.inset)
@@ -610,21 +630,14 @@ struct LookoutHub: View {
                 stripDivider
                 HStack(spacing: 8) {
                     claudeMark
-                    if wide && shrunk(.agents) {
-                        // Shrunk: just its counts, like CI's.
-                        let counts = store.agentCounts
-                        dotCount(counts.blocked, Theme.amber)
-                        dotCount(counts.done, Theme.accent)
-                        Spacer(minLength: 0)
-                        focusButton(.agents)
-                    } else if wide {
+                    if wide {
                         agentsHeader.transition(.hubReveal)
                     } else {
                         // (At rest: the tiles.)
                         let rows = agentRows
                         ForEach(rows.kept) { tile($0, size: 26) }
                         if !rows.pending.isEmpty {
-                            Capsule().fill(Color.white.opacity(0.12)).frame(width: 1.5, height: 14)
+                            Capsule().fill(Theme.Fill.selected).frame(width: 1.5, height: 14)
                             ForEach(rows.pending) { tile($0, size: 22) }
                         }
                     }
@@ -648,6 +661,8 @@ struct LookoutHub: View {
         if expanded { Spacer(minLength: 0) }
         HStack(spacing: 0) {
             if expanded {
+                // The rate limit shows here whatever's focused (the sync status itself is in the controls' panel).
+                RateNotice(store: store, fill: false).lineLimit(1).padding(.trailing, Self.inset)
                 stripDivider
                 HStack(spacing: 2) {
                     pinButton
@@ -679,7 +694,7 @@ struct LookoutHub: View {
     }
 
     var stripDivider: some View {
-        Rectangle().fill(Theme.stroke).frame(width: 1, height: 22)
+        Hairline(axis: .vertical).frame(height: 22)
     }
 
     @ViewBuilder var horizontalBody: some View {
@@ -698,7 +713,7 @@ struct LookoutHub: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     inboxColumn
                                     Spacer(minLength: 0)
-                                    Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 12)
+                                    Hairline(inset: 12)
                                     ciColumn
                                 }
                                 .frame(width: Self.githubWidth, alignment: .topLeading)
@@ -715,29 +730,30 @@ struct LookoutHub: View {
                             .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.1)),
-                                            removal: .opacity.animation(.easeIn(duration: 0.1))))
+                    .transition(.asymmetric(insertion: .opacity.animation(Theme.Motion.fade.delay(0.1)),
+                                            removal: .opacity.animation(Theme.Motion.hover)))
                 } else {
                     page
                         .modifier(FitHeight(cap: maxLength - Self.cell))
                         .frame(idealWidth: Self.pageWidth, maxWidth: .infinity)
                         // Settles toward the strip as it fades in.
-                        .transition(.opacity.combined(with: .offset(y: Self.reduceMotion ? 0 : edge == .top ? -8 : 8)))
+                        .transition(reduce ? .opacity.animation(Theme.Motion.fade)
+                                    : .opacity.combined(with: .offset(y: edge == .top ? -8 : 8)))
                 }
             }
-            .overlay(alignment: edge == .top ? .top : .bottom) { Rectangle().fill(Theme.stroke).frame(height: 1) }
+            .overlay(alignment: edge == .top ? .top : .bottom) { Hairline() }
             .transition(.hubReveal)
         }
     }
 
     var columnDivider: some View {
-        Rectangle().fill(Theme.stroke).frame(width: 1).padding(.vertical, 12)
+        Hairline(axis: .vertical, inset: 12)
     }
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
-        CappedScroll(cap: max(160, min(maxLength - Self.cell - 150, Self.listCap)), hub: hub) {
-            LazyVStack(spacing: 1) {
+        CappedScroll(cap: max(160, min(maxLength - Self.cell - 150 - ciExtra, Self.listCap)), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
+            AdaptiveStack(count: items.count, spacing: 1) {
                 if items.isEmpty { emptyInbox }
                 ForEach(items) { itemRow($0).id("i:" + $0.id) }
             }
@@ -745,7 +761,7 @@ struct LookoutHub: View {
             .padding(.vertical, 8)
             .id(searching ? "search" : hub.filter.rawValue)
             .transition(.opacity)
-            .animation(.easeOut(duration: 0.22), value: listKey)
+            .motion(Theme.Motion.fade, value: listKey)
         }
     }
 
@@ -755,11 +771,14 @@ struct LookoutHub: View {
                 linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) }
             } else {
                 // The state's name starts each line, coloured; its count is in the strip above.
-                ForEach(Self.ciOrder, id: \.self) { ciLine($0, compact: true) }
+                ForEach(Self.ciLineOrder, id: \.self) { state in
+                    if state != CIState.none || !ciRepos(listedIn: .none).isEmpty { ciLine(state, compact: true) }
+                }
             }
         }
         .padding(.horizontal, Self.inset)
         .padding(.vertical, 6)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
         .opacity(searching ? 0.4 : 1)
     }
 
@@ -767,9 +786,11 @@ struct LookoutHub: View {
     var agentsColumn: some View {
         let rows = agentRows
         return VStack(alignment: .leading, spacing: 0) {
-            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub) {
+            // Directly under the Sessions header (in the strip above).
+            ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
+            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count)) {
                 // Your sessions by project, a line between projects; then the pending ones, labelled.
-                LazyVStack(alignment: .leading, spacing: 0) {
+                AdaptiveStack(count: rows.kept.count + rows.pending.count, alignment: .leading, spacing: 0) {
                     let starts = projectStarts(rows.kept)
                     ForEach(rows.kept) { r in
                         if starts.contains(r.id) { groupDivider }
@@ -784,8 +805,10 @@ struct LookoutHub: View {
                 .padding(.horizontal, Self.inset)
                 .padding(.top, 8)
             }
-            // At the bottom, whatever height the column gets.
+            // At the bottom, whatever height the column gets; a line keeps a row the list cuts off from running into
+            // the new session row.
             Spacer(minLength: 0)
+            Hairline(inset: Self.inset + 10).padding(.bottom, Theme.Space.xs)
             NewSessionRow(store: store, style: .twoLines)
                 .padding(.horizontal, Self.inset)
                 .padding(.bottom, 8)
@@ -794,17 +817,15 @@ struct LookoutHub: View {
     }
 
     func twoLineRow(_ r: AgentRow) -> some View {
-        sessionBlock(r, twoLines: true).id("a:" + r.id)
+        sessionBlock(r, twoLines: true).capEdge().id("a:" + r.id)
     }
 
     /// A line between one project's sessions and the next's.
     var groupDivider: some View {
-        Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 10).padding(.vertical, 4)
+        Hairline(inset: 10).padding(.vertical, Theme.Space.xs)
     }
 
     // MARK: Focus
-
-    static var refocus: Animation { reduceMotion ? .easeOut(duration: 0.14) : .spring(duration: 0.34, bounce: 0.06) }
 
     /// Shrunk to its header because another section is focused (in the full view only).
     func shrunk(_ section: HubSection) -> Bool {
@@ -835,8 +856,8 @@ struct LookoutHub: View {
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub) {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 6, alignment: .top), GridItem(.flexible(), spacing: 6, alignment: .top)],
+            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
                           alignment: .leading, spacing: 1) {
                     ForEach(items) { itemRow($0).id("i:" + $0.id) }
                 }
@@ -852,15 +873,6 @@ struct LookoutHub: View {
     }
 
 
-    /// A count with its colour's dot, as CI's in the bar.
-    func dotCount(_ n: Int, _ color: Color) -> some View {
-        HStack(spacing: 5) {
-            Circle().fill(n == 0 ? Theme.tertiary : color).frame(width: 7, height: 7)
-            Text("\(n)").font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(n == 0 ? Theme.tertiary : Theme.text)
-        }
-    }
-
     /// A section header's button: give this section all the room (the others shrink to their header), or back.
     func focusButton(_ section: HubSection) -> some View {
         let focused = hub.focus == section
@@ -868,7 +880,7 @@ struct LookoutHub: View {
                           help: focused ? "Back to all sections" : "Make room for this",
                           detail: focused ? "Esc" : "The other sections shrink to their counts",
                           size: IconButton.Size.header) {
-            withAnimation(Self.refocus) { hub.focus = focused ? nil : section }
+            withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = focused ? nil : section }
         }
     }
 
@@ -952,7 +964,7 @@ struct AgentReorder: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(Reorderable(row: row, store: store, dropTarget: $target))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
+            .overlay(Theme.Radius.shape(Theme.Radius.md).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
     }
 }
 
@@ -962,7 +974,38 @@ struct GroupRule: ViewModifier {
 
     func body(content: Content) -> some View {
         content.overlay(alignment: .top) {
-            if on { Rectangle().fill(Theme.stroke).frame(height: 1).padding(.horizontal, 8) }
+            if on { Hairline(inset: 8) }
         }
+    }
+}
+
+/// Under the Sessions header: Claude's session files missing or unreadable (nothing when all is well).
+struct ClaudeNotice: View {
+    let store: Store
+
+    var body: some View {
+        switch store.claudeLink {
+        case .missing, .unreadable:
+            HStack(spacing: 6) { ClaudeLinkStatus(store: store) }
+                .font(Theme.Typography.meta)
+                .foregroundStyle(Theme.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, Theme.Space.xs)
+        default:
+            EmptyView()
+        }
+    }
+}
+
+/// Beside the sync status, on every edge: the GitHub rate limit running low (nothing otherwise).
+struct RateNotice: View {
+    let store: Store
+    /// Takes the whole line (its text at the leading edge); off, only the room it needs.
+    var fill = true
+
+    var body: some View {
+        RateLimitWarning(store: store)
+            .font(Theme.Typography.meta)
+            .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
     }
 }
