@@ -103,6 +103,8 @@ struct PillActions {
 final class PillPanel: FloatingPanel {
     var onDragChanged: ((NSPoint) -> Void)?
     var onDragEnded: ((NSPoint) -> Void)?
+    /// Where a drag may start (window coordinates); clicks elsewhere go straight through.
+    var canDrag: (NSPoint) -> Bool = { _ in true }
     private var pendingDown: NSEvent?
     private var downAt: NSPoint = .zero
     private var dragging = false
@@ -111,6 +113,10 @@ final class PillPanel: FloatingPanel {
         // Screen coordinates from the event itself (stable even though the window moves under the cursor).
         let p = convertPoint(toScreen: event.locationInWindow)
         switch event.type {
+        case .leftMouseDown where !canDrag(event.locationInWindow):
+            pendingDown = nil
+            dragging = false
+            super.sendEvent(event)
         case .leftMouseDown:
             pendingDown = event
             downAt = p

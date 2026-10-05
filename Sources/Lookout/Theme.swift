@@ -47,7 +47,6 @@ struct IconButton: View {
     var active = false
     let action: () -> Void
     @State private var hover = false
-    @Environment(\.systemHelp) private var systemHelp
 
     var body: some View {
         let button = Button(action: action) {
@@ -62,12 +61,41 @@ struct IconButton: View {
         .onHover { hover = $0 }
         .animation(.easeOut(duration: 0.12), value: hover)
 
-        // The pill's window is too small to host our tooltip bubble, so it keeps the system one.
-        if systemHelp || help.isEmpty {
-            button.help(help)
+        // The pill's window is too small to host our tooltip bubble: `.tip` falls back to the system one there.
+        if help.isEmpty {
+            button
         } else {
             button.tip(help, detail)
         }
+    }
+}
+
+extension IconButton {
+    /// The hub's three button sizes: one per kind of place, so the same action looks the same everywhere.
+    enum Size {
+        /// The bar and its trailing group (pin, repositories, settings).
+        static let bar: CGFloat = 28
+        /// A section header's actions (mark all read, back).
+        static let header: CGFloat = 24
+        /// A row's hover actions, in their capsule.
+        static let row: CGFloat = 22
+    }
+}
+
+/// A key as printed on a keycap, e.g. "Esc" or "⌘K": one look everywhere a key is shown.
+struct KeyCap: View {
+    let key: String
+
+    init(_ key: String) { self.key = key }
+
+    var body: some View {
+        Text(key)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(Theme.secondary)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 18, minHeight: 16)
+            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Color.white.opacity(0.06)))
     }
 }
 
@@ -230,8 +258,18 @@ private struct Tip: ViewModifier {
     @State private var pending: Task<Void, Never>?
     @Environment(\.tipCenter) private var center
     @Environment(\.previewTip) private var previewTip
+    @Environment(\.systemHelp) private var systemHelp
 
-    func body(content: Content) -> some View {
+    @ViewBuilder func body(content: Content) -> some View {
+        // No tooltip layer above (or one too small to host the bubble): the system tooltip says the same.
+        if center == nil || systemHelp {
+            content.help(detail.map { $0.isEmpty ? title : "\(title)\n\($0)" } ?? title)
+        } else {
+            styled(content)
+        }
+    }
+
+    private func styled(_ content: Content) -> some View {
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TipSpace.name)) } action: { frame in
                 anchor = frame

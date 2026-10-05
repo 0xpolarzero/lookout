@@ -5,6 +5,9 @@ import Observation
 @Observable
 @MainActor
 final class Store {
+    /// Demo and snapshot runs: never touch the Keychain (a new build would stop on an access prompt).
+    nonisolated static let isDemo = CommandLine.arguments.contains { ["--demo", "--snapshot", "--playground", "--playground-shots", "--bar"].contains($0) }
+
     var repos: [RepoConfig] = []
     var items: [InboxItem] = []
     var ci: [String: CIStatus] = [:]
@@ -200,8 +203,11 @@ final class Store {
         save()
     }
 
+    /// Playground: report what would open instead of opening it.
+    @ObservationIgnored var interceptOpen: ((String) -> Void)?
+
     func open(_ item: InboxItem) {
-        NSWorkspace.shared.open(item.url)
+        if let interceptOpen { interceptOpen("Open on GitHub · \(item.title)") } else { NSWorkspace.shared.open(item.url) }
         if item.state == .unread { markRead(item) }
     }
 

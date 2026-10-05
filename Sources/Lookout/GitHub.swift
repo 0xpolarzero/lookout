@@ -222,6 +222,7 @@ enum Keychain {
     }
 
     static func read(_ account: String = github) -> String? {
+        guard !Store.isDemo else { return nil }
         var q = base(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne

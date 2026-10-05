@@ -5,6 +5,10 @@ struct PillView: View {
     let store: Store
     let ui: UIState
     let actions: PillActions
+    /// Prototype: one bar instead of an island per group, flush against the screen on the left and right edges.
+    var merged = false
+    /// Off when the bar is drawn inside a larger shape (the expanded bar).
+    var chrome = true
     @State private var ripple = false
 
     /// How many pending tiles fit before a "+N" tile takes over.
@@ -13,9 +17,10 @@ struct PillView: View {
     var body: some View {
         // Vertical on the left/right edges, horizontal when docked to the top or bottom.
         let horizontal = ui.edge.isHorizontal
-        let stack = horizontal ? AnyLayout(HStackLayout(spacing: 6)) : AnyLayout(VStackLayout(spacing: 6))
+        let spacing: CGFloat = merged ? 0 : 6
+        let stack = horizontal ? AnyLayout(HStackLayout(spacing: spacing)) : AnyLayout(VStackLayout(spacing: spacing))
         stack {
-            group {
+            group(first: true) {
                 inboxButton
             }
             if !store.ciRepos.isEmpty {
@@ -39,6 +44,10 @@ struct PillView: View {
                     .transition(.scale.combined(with: .opacity))
             }
         }
+        // The inbox badges sit over the button's corner: room for them inside the bar.
+        .padding(merged ? 7 : 0)
+        .background { if merged && chrome { Self.barShape(ui.edge).fill(Theme.bg) } }
+        .overlay { if merged && chrome { Self.barShape(ui.edge).strokeBorder(Theme.stroke) } }
         .animation(.spring(duration: 0.3), value: store.updater.showsInPill)
         // No menu bar icon, so the pill carries the app menu (its update button keeps its own).
         .contextMenu {
@@ -50,7 +59,7 @@ struct PillView: View {
             Divider()
             Button("Quit Lookout") { NSApp.terminate(nil) }
         }
-        .padding(2)
+        .padding(merged ? 0 : 2)
         .fixedSize()
         // Tile positions in window coordinates: the drawer (its own window, beside the pill) lines its rows up with them.
         .coordinateSpace(.named(PillSpace.name))
@@ -230,18 +239,39 @@ struct PillView: View {
             .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2))
     }
 
-    private func group<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(4)
-            .background(Capsule(style: .continuous).fill(Theme.bg))
-            .overlay(Capsule(style: .continuous).strokeBorder(Theme.stroke))
+    @ViewBuilder private func group<Content: View>(first: Bool = false, @ViewBuilder _ content: () -> Content) -> some View {
+        if merged {
+            let horizontal = ui.edge.isHorizontal
+            (horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))) {
+                if !first {
+                    Capsule().fill(Color.white.opacity(0.1))
+                        .frame(width: horizontal ? 1 : 20, height: horizontal ? 20 : 1)
+                }
+                content().padding(4)
+            }
+        } else {
+            content()
+                .padding(4)
+                .background(Capsule(style: .continuous).fill(Theme.bg))
+                .overlay(Capsule(style: .continuous).strokeBorder(Theme.stroke))
+        }
+    }
+
+    /// Square on the side that touches the screen, rounded on the others.
+    static func barShape(_ edge: DockEdge, radius r: CGFloat = 20) -> UnevenRoundedRectangle {
+        switch edge {
+        case .right: UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, style: .continuous)
+        case .left: UnevenRoundedRectangle(bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
+        case .top: UnevenRoundedRectangle(bottomLeadingRadius: r, bottomTrailingRadius: r, style: .continuous)
+        case .bottom: UnevenRoundedRectangle(topLeadingRadius: r, topTrailingRadius: r, style: .continuous)
+        }
     }
 }
 
 /// A new release, fetched in the background: an icon that says what it is on hover; click to restart into it
 /// (or to download it, with a ring for progress, if that didn't happen on its own). Right-click for the release
 /// notes or to skip that version.
-private struct UpdateButton: View {
+struct UpdateButton: View {
     let updater: Updater
     let horizontal: Bool
     @State private var hover = false
@@ -563,7 +593,7 @@ struct AgentDrawer: View {
     }
 }
 
-private struct DrawerRow: View {
+struct DrawerRow: View {
     let row: AgentRow
     let store: Store
     @Bindable var ui: UIState
@@ -574,6 +604,8 @@ private struct DrawerRow: View {
     var highlight: String?
     /// Search results mix kept sessions and others: say which aren't in your list.
     var showsKept = false
+    /// In the hub, beside its bar tile: padded and highlighted like the inbox's rows (8 × 6, white 0.06).
+    var inHub = false
 
     var body: some View {
         let selected = ui.drawerSelection == row.id
@@ -616,11 +648,14 @@ private struct DrawerRow: View {
                     .layoutPriority(busy ? 2 : 0)
             }
         }
-        .padding(.leading, 10)
-        .padding(.trailing, selected ? 3 : 10)
+        .padding(.leading, inHub && !twoLines ? 8 : 10)
+        .padding(.trailing, selected ? 3 : inHub && !twoLines ? 8 : 10)
+        // 5, not 6: with the 26pt action capsule that is exactly the 36pt of the tile beside it, so picking a row never grows it.
+        .padding(.vertical, inHub && !twoLines ? 5 : 0)
         .frame(height: twoLines ? 44 : nil)
         .frame(maxHeight: twoLines ? 44 : .infinity)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(selected ? Color.white.opacity(0.08) : .clear))
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(selected ? Color.white.opacity(inHub ? 0.06 : 0.08) : .clear))
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(row.id) }
         .onHover { if $0 { ui.drawerSelection = row.id } }
@@ -661,32 +696,38 @@ private struct DrawerRow: View {
 
 /// The drawer's last row: a new scratch session on the row itself, one in a listed project from its tile, and
 /// every option by name in the menu when there are more projects than tiles.
-private struct NewSessionRow: View {
+struct NewSessionRow: View {
     let store: Store
+    var style: Style = .drawer
     @State private var hover = false
+
+    enum Style {
+        /// The pill's drawer: a small "+" before the label.
+        case drawer
+        /// The hub, beside its bar cell (the cell is the "+"): the label and the project tiles, padded like a row.
+        case detail
+        /// The hub's two-line session rows (top and bottom edges): a 24pt "+" tile where theirs sit, 44pt tall.
+        case twoLines
+    }
 
     static let maxTiles = 4
 
     var body: some View {
         let folders = store.agentFolders
         HStack(spacing: 5) {
-            Button(action: Self.startScratch) {
+            Button { store.startScratchSession() } label: {
                 HStack(spacing: 9) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(hover ? Theme.text : Theme.secondary)
-                        .frame(width: 18, height: 18)
-                        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.white.opacity(hover ? 0.14 : 0.08)))
+                    if style != .detail { plus }
                     Text("New session").font(.system(size: 12.5)).foregroundStyle(hover ? Theme.text : Theme.secondary)
                     Spacer(minLength: 4)
                 }
-                .padding(.leading, 6)
+                .padding(.leading, leading)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .onHover { hover = $0 }
-            .help("New Claude session in scratch (no folder)")
+            .tip("New session", "Scratch chat, no folder · or pick a project")
 
             let shown = Array(folders.prefix(Self.maxTiles))
             let initials = Self.initials(shown.map { URL(fileURLWithPath: $0).lastPathComponent })
@@ -695,13 +736,35 @@ private struct NewSessionRow: View {
             }
             if folders.count > Self.maxTiles { menu(folders) }
         }
-        .padding(.trailing, 4)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hover ? Color.white.opacity(0.08) : .clear))
+        .padding(.trailing, style == .drawer ? 4 : 8)
+        .frame(height: style == .twoLines ? 44 : nil)
+        .frame(minHeight: style == .detail ? 30 : nil)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(hover ? Color.white.opacity(style == .drawer ? 0.08 : 0.06) : .clear))
+        .animation(.easeOut(duration: 0.12), value: hover)
+    }
+
+    private var leading: CGFloat {
+        switch style {
+        case .drawer: 6
+        case .detail: 8
+        case .twoLines: 10
+        }
+    }
+
+    @ViewBuilder private var plus: some View {
+        let size: CGFloat = style == .twoLines ? 24 : 18
+        Image(systemName: "plus")
+            .font(.system(size: style == .twoLines ? 11 : 10, weight: .bold))
+            .foregroundStyle(hover ? Theme.text : Theme.secondary)
+            .frame(width: size, height: size)
+            .background(RoundedRectangle(cornerRadius: style == .twoLines ? size * 0.3 : 5, style: .continuous)
+                .fill(Color.white.opacity(style == .twoLines ? (hover ? 0.1 : 0.06) : (hover ? 0.14 : 0.08))))
     }
 
     private func menu(_ folders: [String]) -> some View {
         Menu {
-            Button("Scratch (no folder)", action: Self.startScratch)
+            Button("Scratch (no folder)") { store.startScratchSession() }
             Divider()
             ForEach(folders, id: \.self) { folder in
                 Button(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
@@ -714,7 +777,7 @@ private struct NewSessionRow: View {
         .fixedSize()
         .foregroundStyle(Theme.tertiary)
         .frame(width: 20, height: 22)
-        .help("New session in…")
+        .tip("New session in…", "Every project, by name")
     }
 
     /// Two letters per project, told apart from the others shown: the first letters of its first two words
@@ -763,6 +826,6 @@ private struct ProjectTile: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help(name)
+        .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
     }
 }

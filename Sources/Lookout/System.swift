@@ -143,14 +143,29 @@ enum LaunchAtLogin {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store!
-    private var controller: UIController!
+    private var controller: UIController?
+    private var hub: HubController?
     private lazy var hotKeys = HotKeys()
+    private var playground: Playground?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         store = Store()
         if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
             Snapshot.run(to: CommandLine.arguments[i + 1])
+            return
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--playground-shots"), i + 1 < CommandLine.arguments.count {
+            PlaygroundShots.run(to: CommandLine.arguments[i + 1])
+            return
+        }
+        if CommandLine.arguments.contains("--playground") {
+            playground = Playground()
+            playground?.run()
+            return
+        }
+        if let i = CommandLine.arguments.firstIndex(of: "--bar"), i + 1 < CommandLine.arguments.count {
+            BarSnapshot.run(to: CommandLine.arguments[i + 1])
             return
         }
         if let i = CommandLine.arguments.firstIndex(of: "--update"), i + 1 < CommandLine.arguments.count {
@@ -171,7 +186,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             store.start()
         }
-        controller = UIController(store: store)
+        if CommandLine.arguments.contains("--classic") {
+            controller = UIController(store: store)
+        } else {
+            hub = HubController(store: store, demo: CommandLine.arguments.contains("--demo"))
+        }
+        // Demo: the keep-open key on right ⌘ (not saved), to try tap and double-tap.
+        if CommandLine.arguments.contains("--demo"), hub != nil {
+            store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
+        }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         registerHotKey(.togglePanel)
@@ -179,10 +202,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.onGlobalShortcutChange = { [weak self] action, _ in self?.registerHotKey(action) }
         store.onAgentsEnabledChange = { [weak self] _ in
             self?.registerHotKey(.sessionSwitcher)
-            self?.controller.agentsChanged()
+            self?.controller?.agentsChanged()
         }
         if CommandLine.arguments.contains("--open") {
-            controller.toggle(.inbox)
+            controller?.toggle(.inbox)
+            hub?.toggleShortcut()
         }
     }
 
@@ -191,11 +215,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .togglePanel:
             hotKeys.set(1, store.shortcut(action)) { [weak self] in
-                DispatchQueue.main.async { self?.controller.toggle(.inbox) }
+                DispatchQueue.main.async {
+                    self?.controller?.toggle(.inbox)
+                    self?.hub?.toggleShortcut()
+                }
             }
         case .sessionSwitcher:
             hotKeys.set(2, store.agents.enabled ? store.shortcut(action) : nil) { [weak self] in
-                DispatchQueue.main.async { self?.controller.showSwitcher() }
+                DispatchQueue.main.async {
+                    self?.controller?.showSwitcher()
+                    self?.hub?.showSessions()
+                }
             }
         default:
             break

@@ -26,15 +26,11 @@ struct AgentTile: View {
             .frame(width: size, height: size)
             .background(shape.fill(row.tint ?? Color.white.opacity(0.1)))
             .opacity(row.pending ? 0.55 : 1)
+            // Busy (Claude answering, or a subagent or command still running after it): the tile fades and
+            // pulses, quieter than the sessions waiting on you.
+            .modifier(BusyPulse(on: (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty))
             .overlay {
                 if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
-            }
-            .overlay(alignment: .topTrailing) {
-                if row.session.running && !row.waitsForYou {
-                    WorkingDot().offset(x: 3, y: -3)
-                } else if !row.tasks.isEmpty {
-                    BackgroundRing().offset(x: 3, y: -3)
-                }
             }
             // The project's colour, as an underline.
             .overlay(alignment: .bottom) {
@@ -75,40 +71,23 @@ struct ProjectLabel: View {
     }
 }
 
-/// "Still working": a small clay dot that breathes.
-struct WorkingDot: View {
-    var size: CGFloat = 8
-    @State private var breathe = false
+/// A busy session's tile: see-through, slowly pulsing.
+private struct BusyPulse: ViewModifier {
+    let on: Bool
+    @State private var dim = false
 
-    var body: some View {
-        Circle()
-            .fill(Theme.claude)
-            .frame(width: size, height: size)
-            .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 1.5).padding(-1.5))
-            .opacity(breathe ? 0.5 : 1)
-            .scaleEffect(breathe ? 0.85 : 1)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.1).repeatForever()) { breathe = true }
+    func body(content: Content) -> some View {
+        content
+            .opacity(on ? (dim ? 0.28 : 0.6) : 1)
+            .onAppear { if on { start() } }
+            .onChange(of: on) { _, busy in
+                if busy { start() } else { withAnimation(.easeOut(duration: 0.25)) { dim = false } }
             }
     }
-}
 
-/// "Done, but still running something": the working dot's colour, as a turning ring.
-struct BackgroundRing: View {
-    var size: CGFloat = 9
-    @State private var turn = false
-
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.72)
-            .stroke(Theme.claude, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-            .frame(width: size - 1.8, height: size - 1.8)
-            .rotationEffect(.degrees(turn ? 360 : 0))
-            .background(Circle().fill(Theme.bg).padding(-1.5))
-            .frame(width: size, height: size)
-            .onAppear {
-                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { turn = true }
-            }
+    private func start() {
+        dim = false
+        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { dim = true }
     }
 }
 

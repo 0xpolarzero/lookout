@@ -470,11 +470,12 @@ extension Store {
     }
 
     func openAgent(_ id: String) {
-        Claude.open(id)
+        if let interceptOpen { interceptOpen("Open in Claude · \(claudeSessions[id]?.title ?? id)") } else { Claude.open(id) }
         mutateAgent(id) { $0.unread = false }
     }
 
     func startAgent(in folder: String) {
+        if let interceptOpen { interceptOpen("New Claude session in \(folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent)"); return }
         Claude.newSession(in: folder)
     }
 

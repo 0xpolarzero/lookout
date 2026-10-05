@@ -171,17 +171,8 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var sessionIcons: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Icons picked for you").font(.system(size: 12.5))
-                Text("By Jev, from TypeSafe").font(.system(size: 10.5)).foregroundStyle(Theme.tertiary)
-            }
-            Spacer()
-            Toggle("", isOn: Binding(get: { store.agents.iconsEnabled }, set: { store.setIconsEnabled($0) }))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-        }
+        toggle("Icons picked for you", detail: "By Jev, from TypeSafe",
+               isOn: Binding(get: { store.agents.iconsEnabled }, set: { store.setIconsEnabled($0) }))
         if store.agents.iconsEnabled {
             if store.hasTypesafeKey {
                 HStack {
@@ -370,12 +361,19 @@ struct SettingsView: View {
         .card()
     }
 
-    private func toggle(_ label: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            Text(label).font(.system(size: 12.5))
+    /// Label on the left, switch on the trailing edge: the same in every section.
+    private func toggle(_ label: String, detail: String? = nil, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: detail == nil ? .center : .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(.system(size: 12.5))
+                if let detail { Text(detail).font(.system(size: 10.5)).foregroundStyle(Theme.tertiary) }
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
         }
-        .toggleStyle(.switch)
-        .controlSize(.mini)
     }
 
     private func hint(_ text: String) -> some View {
