@@ -337,8 +337,14 @@ struct SettingsView: View {
                     do { try LaunchAtLogin.set(on); launchError = nil } catch { launchError = error.localizedDescription }
                 }
             if let launchError { Text(launchError).font(.system(size: 11)).foregroundStyle(Theme.red) }
+            toggle("Keep the pill centered on its edge", isOn: Binding(
+                get: { store.settings.centerPill ?? false },
+                set: { store.settings.centerPill = $0 }
+            ))
             HStack {
-                hint("Drag the pill to any screen edge.")
+                hint(store.settings.centerPill == true
+                     ? "Drag the pill to any screen edge; it stays at the middle."
+                     : "Drag the pill to any screen edge.")
                 Spacer()
                 Button("Quit Lookout") { NSApp.terminate(nil) }.controlSize(.small)
             }

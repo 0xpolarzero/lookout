@@ -173,6 +173,7 @@ final class UIController {
         pill.contentView = pillHost
         layoutPill()
         pill.orderFrontRegardless()
+        observeCentering()
 
         let pad = Self.panelPadding * 2
         panel = FloatingPanel(size: NSSize(width: Self.panelContent.width + pad, height: Self.panelContent.height + pad))
@@ -227,8 +228,9 @@ final class UIController {
         let size = pillHost.fittingSize
         let vf = screen.visibleFrame
         let inset: CGFloat = 2
-        let alongX = min(max(vf.minX + vf.width * ui.position - size.width / 2, vf.minX), vf.maxX - size.width)
-        let alongY = min(max(vf.minY + vf.height * ui.position - size.height / 2, vf.minY), vf.maxY - size.height)
+        let position = store.settings.centerPill == true ? 0.5 : ui.position
+        let alongX = min(max(vf.minX + vf.width * position - size.width / 2, vf.minX), vf.maxX - size.width)
+        let alongY = min(max(vf.minY + vf.height * position - size.height / 2, vf.minY), vf.maxY - size.height)
         let origin = switch ui.edge {
         case .left: NSPoint(x: vf.minX + inset, y: alongY)
         case .right: NSPoint(x: vf.maxX - size.width - inset, y: alongY)
@@ -243,6 +245,31 @@ final class UIController {
         pill.setFrame(pillTarget(), display: true)
         if ui.isOpen { positionPanel() }
         if drawer?.isVisible == true { positionDrawer() }
+    }
+
+    /// Moves the pill to (or back from) the middle of its edge when the setting changes.
+    private func observeCentering() {
+        withObservationTracking {
+            _ = store.settings.centerPill
+        } onChange: { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.animatePill(to: self.pillTarget())
+                self.observeCentering()
+            }
+        }
+    }
+
+    private func animatePill(to target: NSRect, then done: (() -> Void)? = nil) {
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.28
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            self.pill.animator().setFrame(target, display: true)
+        }, completionHandler: {
+            Task { @MainActor in
+                if let done { done() } else { self.layoutPill() }
+            }
+        })
     }
 
     private func dragChanged(to mouse: NSPoint) {
@@ -265,17 +292,10 @@ final class UIController {
         snapping = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             guard let self else { return }
-            let target = self.pillTarget()
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.28
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                self.pill.animator().setFrame(target, display: true)
-            }, completionHandler: {
-                Task { @MainActor in
-                    self.snapping = false
-                    self.layoutPill()
-                }
-            })
+            self.animatePill(to: self.pillTarget()) {
+                self.snapping = false
+                self.layoutPill()
+            }
         }
     }
 

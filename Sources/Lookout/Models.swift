@@ -192,6 +192,8 @@ struct AppSettings: Codable {
     var checkUpdates: Bool?
     /// A release you chose to skip: not offered again by automatic checks.
     var skippedVersion: String?
+    /// Keep the pill at the middle of its edge: dragging only picks the edge (default off).
+    var centerPill: Bool?
 }
 
 struct PersistedState: Codable {
