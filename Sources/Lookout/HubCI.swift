@@ -259,8 +259,10 @@ private struct CINameRow: View {
                     }
                 }
                 .frame(width: Theme.Metrics.dotSlot)
-                Text(title).font(Theme.Typography.body).foregroundStyle(entry.muted ? Theme.tertiary : Theme.secondary).lineLimit(1)
-                if let note { Text(note).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1) }
+                HStack(spacing: 0) {
+                    Text(title).font(Theme.Typography.body).foregroundStyle(entry.muted ? Theme.tertiary : Theme.secondary).lineLimit(1)
+                    if let note { Text(" · " + note).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1).fixedSize() }
+                }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: Theme.Metrics.menuRow - 12, alignment: .leading)

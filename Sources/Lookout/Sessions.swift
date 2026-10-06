@@ -465,7 +465,7 @@ struct SessionRow: View {
         let text = Text(row.headline).foregroundStyle(Theme.secondary)
         guard placement.namesProject else { return text }
         let project = Text(row.session.folderName).foregroundStyle(Theme.tertiary)
-        return plainHeadline.isEmpty ? project : project + Text("  ") + text
+        return plainHeadline.isEmpty ? project : project + Text(" · ").foregroundStyle(Theme.tertiary) + text
     }
 
     private var plainHeadline: String { String(row.headline.characters) }
@@ -477,8 +477,10 @@ struct SessionRow: View {
                 .font(Theme.Typography.glyph(10))
                 .frame(width: 12)
                 .accessibilityHidden(true)
-            Text(first.title).lineLimit(1)
-            if row.tasks.count > 1 { Text("+\(row.tasks.count - 1) more").fixedSize() }
+            HStack(spacing: 0) {
+                Text(first.title).lineLimit(1)
+                if row.tasks.count > 1 { Text(" · +\(row.tasks.count - 1) more").fixedSize() }
+            }
             Spacer(minLength: 0)
         }
         .font(Theme.Typography.meta)
