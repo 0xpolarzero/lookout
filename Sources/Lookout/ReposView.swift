@@ -520,8 +520,10 @@ struct RepoRow: View {
         .accessibilityAction(named: "Toggle issues") { toggle([.issueOpened, .issueComment]) }
         .accessibilityAction(named: "Toggle pull requests") { toggle([.prOpened, .prComment, .reviewComment]) }
         .accessibilityAction(named: "Toggle CI") { store.toggle(.ciMain, on: repo) }
-        .accessibilityAction(named: "Move up") { move(-1) }
-        .accessibilityAction(named: "Move down") { move(1) }
+        .accessibilityActions {
+            if !isFirst { Button("Move up") { move(-1) } }
+            if !isLast { Button("Move down") { move(1) } }
+        }
         .accessibilityAction(named: "Stop watching") { store.stopWatching(repo) }
     }
 

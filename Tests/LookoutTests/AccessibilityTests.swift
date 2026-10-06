@@ -267,6 +267,11 @@ enum AccessibilityTree {
         #expect(list.first("AXHeading", "Repositories") != nil)
         let repo = try #require(list.all.first { $0.label == "ziglang/zig" })
         #expect(Set(repo.actions) == ["Stop watching", "Move up", "Move down", "Toggle issues", "Toggle pull requests", "Toggle CI"])
+        // The first repository can only go down, the last only up, as in the context menu.
+        let moves = try ["0xpolarzero/lookout", "e2b-dev/runtime"].map { name in
+            Set(try #require(list.all.first { $0.label == name }).actions).filter { $0.hasPrefix("Move") }
+        }
+        #expect(moves == [["Move down"], ["Move up"]], "\(moves)")
     }
 
     @Test func voiceOversPressOnTheInboxCIAndASessionKeepsTheHubOpen() async throws {
