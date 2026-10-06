@@ -19,6 +19,8 @@ final class Updater {
         case ready
         case installing
         case failed(String)
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
     struct Release: Equatable {
@@ -65,6 +67,8 @@ final class Updater {
     @ObservationIgnored private var staged: URL?
     var stagedPath: String? { staged?.path }
     @ObservationIgnored private var progress: NSKeyValueObservation?
+    /// The zip in flight, so Skip can stop the transfer and not only the task waiting on it.
+    @ObservationIgnored private var transfer: URLSessionDownloadTask?
     @ObservationIgnored private var wake: NSObjectProtocol?
     /// Downloads started by a check rather than a click fail quietly and are tried again at the next check.
     @ObservationIgnored private var quiet = false { didSet { refreshPill() } }
@@ -188,23 +192,29 @@ final class Updater {
     func download() {
         guard let release, work == nil else { return }
         fraction = 0
+        staged = nil
         phase = .downloading
         work = Task {
-            defer { work = nil; progress = nil }
+            // Skipped meanwhile (`skip()` has cleared `work` and said where things stand): nothing here may publish.
+            defer { if !Task.isCancelled { work = nil; progress = nil } }
             do {
                 let zip = try await fetch(release.zip)
                 defer { try? FileManager.default.removeItem(at: zip) }
+                var expected: String?
                 if let checksum = release.checksum {
                     let (data, _) = try await URLSession.shared.data(from: checksum)
-                    let expected = String(decoding: data, as: UTF8.self).split(separator: " ").first.map(String.init)?.lowercased()
-                    let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-                    guard expected == actual else { throw UpdateError("The download is corrupted (checksum mismatch)") }
+                    expected = String(decoding: data, as: UTF8.self).split(separator: " ").first.map(String.init)?.lowercased() ?? ""
                 }
-                staged = try Self.unpack(zip, version: release.version)
+                // Reading, hashing, unpacking and checking the signature take a while: not on the main thread.
+                let app = try await Task.detached(priority: .utility) {
+                    if let expected, try Self.sha256(of: zip) != expected { throw UpdateError("The download is corrupted (checksum mismatch)") }
+                    return try Self.unpack(zip, version: release.version)
+                }.value
+                try Task.checkCancellation()
+                staged = app
                 phase = .ready
-            } catch is CancellationError {
-                phase = .available
             } catch {
+                guard !Task.isCancelled else { return }
                 phase = quiet ? .available : .failed(error.localizedDescription)
             }
             quiet = false
@@ -220,7 +230,8 @@ final class Updater {
     }
 
     private func fetch(_ url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
+        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { continuation in
             let task = URLSession.shared.downloadTask(with: url) { file, response, error in
                 if let error { return continuation.resume(throwing: error) }
                 guard let file, (response as? HTTPURLResponse)?.statusCode == 200 else {
@@ -239,8 +250,13 @@ final class Updater {
                 let completed = p.fractionCompleted
                 Task { @MainActor in self?.report(completed) }
             }
+            transfer = task
             task.resume()
         }
+    }
+
+    nonisolated private static func sha256(of file: URL) throws -> String {
+        SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Unzips the release and checks it's this app, at that version, signed like the running one.
@@ -287,7 +303,8 @@ final class Updater {
 
     /// Quits, swaps the bundle (keeping the old one if that fails) and opens the new one.
     func install() {
-        guard phase == .ready, let staged else { return }
+        // Failed: the restart itself did, so the verified app is still here to try again with.
+        guard phase == .ready || phase.isFailed, let staged else { return }
         let target = Bundle.main.bundleURL
         let parent = target.deletingLastPathComponent()
         if target.path.contains("/AppTranslocation/") {
@@ -346,6 +363,10 @@ final class Updater {
     func skip() {
         guard let release else { return }
         work?.cancel()
+        transfer?.cancel()
+        work = nil
+        progress = nil
+        quiet = false
         onSkip(release.version)
         self.release = nil
         phase = .idle
