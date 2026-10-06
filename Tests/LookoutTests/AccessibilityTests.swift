@@ -384,6 +384,14 @@ enum AccessibilityTree {
         #expect(hub.pinned && hub.selection == "a:" + id && hub.voiceOverRequest?.target == "a:" + id)
     }
 
+    @Test func showOnSessionsWithNoneLetsGoOfAnInboxRowAndGoesToTheHeader() {
+        view.show(.inbox)
+        #expect(hub.selection?.hasPrefix("i:") == true)
+        Demo.populate(store, .sessionsNone)
+        view.show(.agents)
+        #expect(hub.selection == nil && hub.keyboardSelection == nil && hub.voiceOverRequest?.target == "h:agents")
+    }
+
     @Test func theInboxCellEndsASearchSoItsTabsAndActionsComeBack() {
         hub.pinned = true
         hub.beginSearch()

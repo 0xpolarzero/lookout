@@ -150,7 +150,13 @@ extension HubState {
         query = ""
         inbox.endSearch()
         if listingAll || id.map({ id in !store.hubSessions(self).contains { $0.id == id } }) == true { sessionsExpanded = true }
-        guard let id = id ?? store.hubSessions(self).first?.id else { return }
+        guard let id = id ?? store.hubSessions(self).first?.id else {
+            // Nothing to pick: another section's row must not stay picked, or VoiceOver goes back to it.
+            selection = nil
+            keyboardSelection = nil
+            ui.drawerSelection = nil
+            return
+        }
         selection = "a:" + id
         requestScroll("a:" + id)
         ui.drawerSelection = id
