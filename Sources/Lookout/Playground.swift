@@ -381,13 +381,36 @@ enum PlaygroundShots {
                 hub.ciPassingOpen = true
             }
         },
-        Shot.edges("open-ci-stale", on: .rightAndTop) { $0.pinned = true; $0.setup = { store, _, _ in store.lastSync = Date().addingTimeInterval(-3 * 3600) } },
+        // Stale: the last answers for CI are old, whatever the last (failed) poll says.
+        Shot.edges("open-ci-stale", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in
+                for key in store.ci.keys { store.ci[key]?.checkedAt = Date().addingTimeInterval(-3 * 3600) }
+                store.lastSync = Date()
+            }
+        },
+        // Muting offers an undo line in the CI section.
+        Shot.edges("open-ci-mute-undo", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in
+                if let repo = store.repos.first(where: { $0.fullName == "apple/swift-format" }) { store.muteCI(repo) }
+            }
+        },
         Shot.edges("open-ci-contrast", on: .rightAndTop) {
             $0.pinned = true
             $0.environment = .contrast
             $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" }
         },
         Shot.edges("open-ci-many-ci-720", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
+        // Fifteen failing repositories on a 720 pt screen: the list scrolls, nothing overflows.
+        Shot.edges("open-ci-failing-15-720", on: .rightAndTop) {
+            $0.pinned = true
+            $0.scenario = .manyCI
+            $0.size = Shot.hd
+            $0.setup = { store, _, _ in
+                for key in store.ci.keys { store.ci[key]?.state = .failure; store.ci[key]?.failing = ["Linux / build"] }
+            }
+        },
         sessions.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .agents) },
         Shot.edges("focus-agents-sessions-12", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents },
         updates.flatMap { slug, scenario in scenarioShots(slug, scenario) },

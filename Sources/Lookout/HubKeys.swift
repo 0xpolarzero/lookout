@@ -52,6 +52,7 @@ final class HubKeys {
             return true
         }
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
+        if flags == .command, event.charactersIgnoringModifiers == "z" { return store.undoLast() }
         guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
@@ -76,7 +77,8 @@ final class HubKeys {
             LookoutHub.animate { store.markAllRead(hub.filter) }
             return true
         }
-        guard let selection = hub.selection else { return false }
+        // Row commands only act on a row that is listed: a pick that turned passing, was muted or lost its CI is gone.
+        guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
             if shortcut == store.shortcut(.openItem) { store.open(item) }

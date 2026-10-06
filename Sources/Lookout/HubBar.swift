@@ -184,7 +184,7 @@ extension LookoutHub {
             // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
             HStack(spacing: 8) {
                 ciCell
-                if wide && showsCI { ciHeader.transition(.hubReveal) }
+                if wide && showsCI && stripShowsCIHeader { ciHeader.transition(.hubReveal) }
             }
             .padding(.leading, Self.inset + 1)
             .padding(.trailing, Self.inset)

@@ -120,6 +120,11 @@ struct CIRow: View {
     private var failing: [String] { entry.state == .failure ? entry.status?.failing ?? [] : [] }
 
     var body: some View {
+        // The age and what VoiceOver says of it come from the same minute, so they never part.
+        Ticking(coarse: true) { now in row(now) }
+    }
+
+    private func row(_ now: Date) -> some View {
         Button { store.openChecks(entry.repo) } label: {
             HStack(alignment: .top, spacing: Theme.Space.md) {
                 Image(systemName: entry.state.symbol)
@@ -131,7 +136,7 @@ struct CIRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
                         Text(title).font(Theme.Typography.body).foregroundStyle(Theme.text).lineLimit(1)
                         Spacer(minLength: 0)
-                        if let changed = entry.changedAt { CIAge(date: changed) }
+                        if let changed = entry.changedAt { CIAge(date: changed, now: now) }
                     }
                     detail
                 }
@@ -143,17 +148,11 @@ struct CIRow: View {
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
         .accessibilityLabel(title)
-        .accessibilityValue(CISpeech.value(entry))
+        .accessibilityValue(CISpeech.value(entry, now: now))
         .accessibilityHint("Opens its checks. More actions available.")
         .help(tooltip)
         .ciActions(entry, store: store)
-        .onHover {
-            hover = $0
-            if $0 {
-                hub.selection = "c:" + entry.id
-                ui.drawerSelection = nil
-            }
-        }
+        .onHover { hover = $0; hub.pointer($0, over: "c:" + entry.id, ui: ui) }
     }
 
     /// Line 2: the checks that failed, in red, or the commit's headline.
@@ -173,50 +172,50 @@ struct CIRow: View {
     }
 }
 
-/// How long ago a repo's runs changed, on the shared clock.
+/// How long ago a repo's runs changed, as of the minute clock's `now`.
 private struct CIAge: View {
     let date: Date
+    let now: Date
 
     var body: some View {
-        Ticking(coarse: true) { now in
-            Text(shortAgo(date, now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
-        }
-        .frame(minWidth: Theme.Metrics.ageColumn, alignment: .trailing)
-        .accessibilityHidden(true)
+        Text(shortAgo(date, now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+            .frame(minWidth: Theme.Metrics.ageColumn, alignment: .trailing)
+            .accessibilityHidden(true)
     }
 }
 
-/// Everything quiet as one 36pt row: "Passing · 11", or "All passing · 11 repositories" once nothing else is there.
-/// Click, or → / ←, opens it in place.
+/// Everything quiet as one 36pt row: "Passing · 11, 1 muted", or "All passing · 11 repositories" once nothing else is
+/// there. Click, or → / ←, opens it in place.
 private struct CIQuietRow: View {
     let list: CIList
     let open: Bool
+    let ui: UIState
     let hub: HubState
     let toggle: () -> Void
     @State private var hover = false
 
     private var selected: Bool { hub.selection == "c:passing" }
-    private var count: Int { list.quiet.count }
-    private var passing: Bool { list.quiet.contains { $0.state == .success || $0.muted } }
 
-    private var title: String {
-        if list.allPassing { return "All passing · \(plural(count, "repository", "repositories"))" }
-        // Only repos with no run yet: not "passing".
-        return "\(passing ? CIState.success.title : CIState.none.title) · \(count)"
+    /// The glyph of what the row mostly holds: a check only when something really passes.
+    private var symbol: String {
+        let (passing, muted, _) = list.quietCounts
+        return passing > 0 || list.allPassing ? CIState.success.symbol : muted > 0 ? "bell.slash" : CIState.none.symbol
     }
 
     var body: some View {
         Button(action: toggle) {
             HStack(spacing: Theme.Space.md) {
-                Image(systemName: passing ? CIState.success.symbol : CIState.none.symbol)
+                Image(systemName: symbol)
                     .font(Theme.Typography.glyph(12, .regular))
                     .foregroundStyle(Theme.tertiary)
                     .frame(width: Theme.Metrics.dotSlot)
                     .accessibilityHidden(true)
-                Text(title).font(Theme.Typography.body).monospacedDigit().foregroundStyle(Theme.secondary).lineLimit(1)
+                Text(list.quietTitle).font(Theme.Typography.body).monospacedDigit().foregroundStyle(Theme.secondary).lineLimit(1)
                 Spacer(minLength: 0)
+                // Its trailing edge is the ages' above it.
                 Image(systemName: open ? "chevron.down" : "chevron.right")
                     .font(Theme.Typography.glyph(11)).foregroundStyle(Theme.tertiary)
+                    .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
                     .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, minHeight: Theme.Metrics.pitch - 12, alignment: .leading)
@@ -224,14 +223,15 @@ private struct CIQuietRow: View {
         }
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
-        .accessibilityLabel(title)
-        .accessibilityValue(open ? "Expanded" : "Collapsed")
+        .accessibilityLabel(list.quietName)
+        .accessibilityValue("\(list.quietSpeech), \(open ? "expanded" : "collapsed")")
         .accessibilityHint(open ? "Hides the repositories" : "Lists the repositories")
-        .onHover { hover = $0; if $0 { hub.selection = "c:passing" } }
+        .onHover { hover = $0; hub.pointer($0, over: "c:passing", ui: ui) }
     }
 }
 
-/// A quiet repo in the opened Passing group: its name, and why it is there when that isn't "passing".
+/// A quiet repo in the opened Passing group: its name, and why it is there when that isn't "passing". A muted repo
+/// keeps its real state's glyph and word, in `tertiary`: it is quieted, not fixed.
 private struct CINameRow: View {
     let entry: CIEntry
     let title: String
@@ -241,13 +241,25 @@ private struct CINameRow: View {
     @State private var hover = false
 
     private var selected: Bool { hub.selection == "c:" + entry.id }
-    private var note: String? { entry.muted ? "muted" : entry.state == .none ? "no runs" : nil }
+    private var note: String? { entry.muted ? "\(entry.state.label), muted" : entry.state == .none ? "no runs" : nil }
 
     var body: some View {
+        Ticking(coarse: true) { now in row(now) }
+    }
+
+    private func row(_ now: Date) -> some View {
         Button { store.openChecks(entry.repo) } label: {
             HStack(spacing: Theme.Space.md) {
-                Color.clear.frame(width: Theme.Metrics.dotSlot, height: 1)
-                Text(title).font(Theme.Typography.body).foregroundStyle(Theme.secondary).lineLimit(1)
+                Group {
+                    if entry.muted {
+                        Image(systemName: entry.state.symbol).font(Theme.Typography.glyph(12)).foregroundStyle(Theme.tertiary)
+                            .accessibilityHidden(true)
+                    } else {
+                        Color.clear.frame(height: 1)
+                    }
+                }
+                .frame(width: Theme.Metrics.dotSlot)
+                Text(title).font(Theme.Typography.body).foregroundStyle(entry.muted ? Theme.tertiary : Theme.secondary).lineLimit(1)
                 if let note { Text(note).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1) }
                 Spacer(minLength: 0)
             }
@@ -257,16 +269,10 @@ private struct CINameRow: View {
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
         .accessibilityLabel(title)
-        .accessibilityValue(CISpeech.value(entry))
+        .accessibilityValue(CISpeech.value(entry, now: now))
         .accessibilityHint("Opens its checks. More actions available.")
         .ciActions(entry, store: store)
-        .onHover {
-            hover = $0
-            if $0 {
-                hub.selection = "c:" + entry.id
-                ui.drawerSelection = nil
-            }
-        }
+        .onHover { hover = $0; hub.pointer($0, over: "c:" + entry.id, ui: ui) }
     }
 }
 
@@ -299,55 +305,82 @@ extension LookoutHub {
         }
     }
 
-    /// The rows under the header: one per failing or running repo, then the Passing row (open in place on request).
-    /// Without any CI, a calm empty state with the way to turn it on.
+    /// The rows under the header: one per failing or running repo, then the Passing row (open in place on request),
+    /// all in one list that scrolls within `ciCap`. Without any CI, one calm line with the way to turn it on.
     var ciRows: some View {
         let list = store.ciList
-        let open = hub.ciPassingOpen || hub.focus == .ci
         return VStack(alignment: .leading, spacing: 0) {
             if list.isEmpty {
-                EmptyBlock(title: "No CI configured") {
-                    Button { hub.go(.repos) } label: {
-                        Text("Choose repositories").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
-                            .frame(minHeight: Theme.Metrics.iconButton).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .focusRing(Theme.Radius.small)
-                }
+                noCI
             } else {
                 staleLine
-                ForEach(list.attention) { entry in
-                    CIRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub).id("c:" + entry.id)
-                }
-                if !list.quiet.isEmpty {
-                    CIQuietRow(list: list, open: open, hub: hub) { hub.setCIPassingOpen(!open) }.id("c:passing")
-                    if open { quietNames(list) }
-                }
+                CappedScroll(cap: ciCap, hub: hub, fades: false, indicators: true) { ciListRows(list) }
+            }
+            if let undo = store.undoStack.visible(in: .ci) {
+                UndoLine(message: undo.message) { store.undoLast() }.padding(.top, Theme.Space.xs)
             }
         }
         .motion(Theme.Motion.fade, value: list.entries.map { "\($0.id) \($0.state.rawValue) \($0.muted)" })
+        .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
+        // A pick on a row that left the list (it passed, was muted, lost its CI) moves on instead of lingering.
+        .onChange(of: hub.ciTargets(store)) { old, new in hub.rehomeCI(from: old, to: new) }
     }
 
-    /// The opened Passing group: names, a few at a time.
-    private func quietNames(_ list: CIList) -> some View {
-        CappedScroll(cap: Theme.Metrics.menuRow * 8, hub: hub) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(list.quiet) { entry in
-                    CINameRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub)
-                        .capEdge()
-                        .id("c:" + entry.id)
+    private func ciListRows(_ list: CIList) -> some View {
+        let open = hub.ciPassingOpen || hub.focus == .ci
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(list.attention) { entry in
+                CIRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub).id("c:" + entry.id)
+            }
+            if !list.quiet.isEmpty {
+                CIQuietRow(list: list, open: open, ui: ui, hub: hub) { hub.setCIPassingOpen(!open) }.id("c:passing")
+                if open {
+                    ForEach(list.quiet) { entry in
+                        CINameRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub)
+                            .id("c:" + entry.id)
+                    }
+                    .transition(.opacity)
                 }
             }
         }
-        .transition(.opacity)
     }
 
-    /// "Last checked 12:03", only when what the rows show is no longer fresh (the footer's "Not syncing" rule).
-    @ViewBuilder private var staleLine: some View {
-        if let last = store.lastSync {
-            Ticking(coarse: true) { now in
-                if now.timeIntervalSince(last) > store.settings.pollInterval * 3 {
-                    Text("Last checked \(last.formatted(date: .omitted, time: .shortened))")
+    /// The most height CI's rows take before they scroll, so every repository and key target stays reachable on a
+    /// small screen. A panel has the room beside the bar. In the full view CI shares the height with the inbox and the
+    /// sessions, and takes all that the other headers leave once it is the focused section.
+    var ciCap: CGFloat {
+        let row = Theme.Metrics.twoLineRow
+        if !showsDetail { return max(4 * row, maxLength - Self.cell - 120) }
+        if hub.focus == .ci { return max(160, maxLength - (edge.isHorizontal ? Self.cell + 60 : 260)) }
+        return max(4 * row, (maxLength - 210) * 0.45)
+    }
+
+    /// Nothing watched has CI on: one line aligned with the glyph column, and where to turn it on.
+    private var noCI: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Text("No CI configured").font(Theme.Typography.body).foregroundStyle(Theme.secondary).lineLimit(1)
+            Text("·").foregroundStyle(Theme.tertiary).accessibilityHidden(true)
+            Button { hub.go(.repos) } label: {
+                Text("Choose repositories").font(Theme.Typography.control).foregroundStyle(Theme.accentText).lineLimit(1)
+                    .frame(minHeight: Theme.Metrics.iconButton)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusRing(Theme.Radius.small)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Metrics.rowPadding)
+        .frame(maxWidth: .infinity, minHeight: Theme.Metrics.pitch, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// "Last checked 12:03", only when the answers the rows show are no longer fresh: the oldest successful check of a
+    /// repository with CI on, so failed polls don't make old rows look new. (The footer's "Not syncing" rule.)
+    private var staleLine: some View {
+        Ticking(coarse: true) { now in
+            VStack(spacing: 0) {
+                if let checked = store.ciFreshness, now.timeIntervalSince(checked) > store.settings.pollInterval * 3 {
+                    Text("Last checked \(checked.formatted(date: .omitted, time: .shortened))")
                         .font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
                         .padding(.horizontal, Theme.Metrics.rowPadding)
                         .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
@@ -356,13 +389,22 @@ extension LookoutHub {
         }
     }
 
-    /// Along the top and bottom, and focused: the rows in their own column. (Its header is in the strip.)
+    /// Along the top and bottom, and focused: its header, then the rows, in their own column (the strip's cell stays
+    /// above). While another section is focused the header is in the strip instead (`stripShowsCIHeader`).
     var ciColumn: some View {
-        Group { if showsCI { ciRows } }
-            .padding(.horizontal, Self.inset)
-            .padding(.vertical, 6)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
+        VStack(alignment: .leading, spacing: 0) {
+            if showsCI {
+                ciHeader
+                ciRows
+            }
+        }
+        .padding(.horizontal, Self.inset)
+        .padding(.vertical, 6)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
     }
+
+    /// The strip's CI segment names its section only when the column under it doesn't.
+    var stripShowsCIHeader: Bool { hub.focus != nil && hub.focus != .ci }
 }
 
 /// CI in the bar: one glyph, the worst state that isn't muted, with the number of failing repos beside it only
@@ -405,6 +447,17 @@ extension HubState {
         LookoutHub.animate(open ? Theme.Motion.move : Theme.Motion.close) { ciPassingOpen = open }
     }
 
+    /// The pointer entering or leaving a row: while it is over it the row is what the keys act on; leaving gives that
+    /// up, unless the keyboard is the one that picked it (DESIGN.md 3.5).
+    func pointer(_ inside: Bool, over target: String, ui: UIState) {
+        if inside {
+            selection = target
+            ui.drawerSelection = nil
+        } else if selection == target, keyboardSelection?.id != target {
+            selection = nil
+        }
+    }
+
     /// CI's rows as keyboard targets, in the order they are listed ("c:<repo>"; "c:passing" is the Passing row).
     func ciTargets(_ store: Store) -> [String] {
         guard query.isEmpty, focus == nil || focus == .ci else { return [] }
@@ -415,6 +468,20 @@ extension HubState {
             if ciPassingOpen || focus == .ci { targets += list.quiet.map { "c:" + $0.id } }
         }
         return targets
+    }
+
+    /// The pick was a CI row that is no longer a target: a pick made with the keyboard moves to the row now in its
+    /// place (the one before it, at the end), a pointer's goes with the pointer.
+    func rehomeCI(from old: [String], to new: [String]) {
+        guard let gone = selection, gone.hasPrefix("c:"), !new.contains(gone) else { return }
+        guard keyboardSelection?.id == gone, !new.isEmpty else {
+            selection = nil
+            if keyboardSelection?.id == gone { keyboardSelection = nil }
+            return
+        }
+        let next = new[min(old.firstIndex(of: gone) ?? 0, new.count - 1)]
+        selection = next
+        requestScroll(next)
     }
 }
 
