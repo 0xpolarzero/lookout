@@ -3,6 +3,12 @@ import SwiftUI
 
 // A session's tile, as the bar draws it.
 
+extension AgentRow {
+    /// Claude is answering, or a subagent or command it started is still running after the turn. Never while it waits
+    /// for you, however it waits (stopped mid-turn, or finished with a question): its amber fill is the mark.
+    var working: Bool { status != .blocked && (session.running || !tasks.isEmpty) }
+}
+
 /// A session's tile: its two letters (or emoji) on its status colour. Working agents carry the working arc;
 /// pending sessions are a size smaller and dimmer.
 struct AgentTile: View {
@@ -11,11 +17,11 @@ struct AgentTile: View {
     var selected = false
 
     var body: some View {
-        // Busy (Claude answering, or a subagent or command still running after it): the arc, on the face as it is.
-        // Never on a session waiting for you: its amber fill is the mark.
-        let busy = !row.waitsForYou && (row.session.running || !row.tasks.isEmpty)
-        AgentTileFace(row: row, size: size)
+        // Busy: the arc, on the neutral face, where it holds 3:1; unread stays a dot.
+        let busy = row.working
+        AgentTileFace(row: row, size: size, tint: busy ? nil : row.tint)
             .overlay { WorkingArc(size: size, working: busy) }
+            .overlay(alignment: .topTrailing) { if busy && row.unread { UnreadDot().offset(x: 3, y: -3) } }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
             .accessibilityValue(row.stateName)
@@ -35,6 +41,8 @@ struct AgentTile: View {
 private struct AgentTileFace: View {
     let row: AgentRow
     var size: CGFloat
+    /// The fill, or nil for the neutral tile.
+    var tint: Color?
     @Environment(\.resolved) private var resolved
 
     var body: some View {
@@ -52,12 +60,23 @@ private struct AgentTileFace: View {
                     .lineLimit(1)
             }
         }
-            .foregroundStyle(row.tint == nil ? Theme.text.opacity(0.88) : Theme.onTint)
+            .foregroundStyle(tint == nil ? Theme.text.opacity(0.88) : Theme.onTint)
             .frame(width: size, height: size)
-            .background(shape.fill(row.tint ?? Theme.Fill.tile))
+            .background(shape.fill(tint ?? Theme.Fill.tile))
             // Waiting is amber, which a colour-blind eye may not tell from the grey tile: a dark outline says it too.
-            .overlay { if resolved.differentiate, row.tint == Theme.amber { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
+            .overlay { if resolved.differentiate, tint == Theme.amber { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
             .opacity(row.pending ? 0.55 : 1)
+    }
+}
+
+/// Unread on a tile that is busy: a 7pt accent dot with a halo in the bar's own colour.
+private struct UnreadDot: View {
+    var body: some View {
+        Circle().fill(Theme.accent)
+            .frame(width: 7, height: 7)
+            .padding(1.5)
+            .background(Circle().fill(Theme.bg))
+            .accessibilityHidden(true)
     }
 }
 

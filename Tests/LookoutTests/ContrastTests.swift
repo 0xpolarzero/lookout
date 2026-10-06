@@ -110,6 +110,29 @@ import Testing
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
     }
 
+    @Test(arguments: [false, true]) func arcOverTheFacesAWorkingTileTakes(contrast: Bool) {
+        // The arc is the one mark of working that isn't colour, so it holds 3:1 over the neutral face (rest, and
+        // hovered or picked) at both ends of its heartbeat. A working tile is never tinted: amber is waiting, which
+        // carries no arc, and unread is a dot.
+        let resolved = Theme.Resolved(contrast: contrast)
+        let surfaces = surfaces(resolved)
+        var failures: [String] = []
+        for level in [Theme.Motion.heartbeat.from, Theme.Motion.heartbeat.to] {
+            for name in ["tile", "selected"] {
+                let face = surfaces[name]!
+                let value = ratio(over(Theme.text.opacity(level), face), face)
+                if value < 3 { failures.append("arc at \(level) on \(name): \(String(format: "%.2f", value))") }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+    }
+
+    @Test func theArcWouldFailOnTheAccentFill() {
+        // Why a working tile keeps its neutral face when unread: white on the accent is 2.7:1 at full opacity.
+        let accent = over(Theme.accent, components(Theme.bg).rgb)
+        #expect(ratio(over(Theme.text, accent), accent) < 3)
+    }
+
     @Test func tintedFillsAreNotMultiplied() {
         // Increase Contrast strengthens white fills only: a hue's fill stays what the glyph was checked against.
         let increased = Theme.Resolved(contrast: true)

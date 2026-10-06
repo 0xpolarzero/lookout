@@ -109,3 +109,38 @@ import Testing
         #expect(inPhase(try #require(loop(occluded)), try #require(loop(running))))
     }
 }
+
+/// Which sessions carry the arc: busy ones, never one waiting for you, however it waits.
+@Suite struct WorkingMark {
+    private let now = Date(timeIntervalSince1970: 2_000_000_000)
+    private let task = ClaudeTask(id: "t", kind: .command, title: "swift test", since: Date(timeIntervalSince1970: 2_000_000_000))
+
+    private func row(running: Bool = false, blocked: Bool = false, unread: Bool = false, tasks: [ClaudeTask] = [],
+                     stopped: Bool = false) -> AgentRow {
+        let session = ClaudeSession(id: "a", title: "A", folder: "/code/a", lastActivity: now,
+                                    summary: running ? nil : .init(blocked: blocked, detail: "Detail"), running: running)
+        let activity = stopped ? ClaudeActivity(text: "Which one?", since: now, waitsForYou: true) : nil
+        return AgentRow(session: session, entry: AgentEntry(id: "a", unread: unread), label: "A", activity: activity, tasks: tasks)
+    }
+
+    @Test func aRunningTurnWorks() {
+        #expect(row(running: true).working)
+    }
+
+    @Test func aFinishedTurnWithTasksStillRunningWorks() {
+        #expect(row(tasks: [task]).working)
+        #expect(row(unread: true, tasks: [task]).working)
+    }
+
+    @Test func aFinishedTurnWithNothingRunningDoesNot() {
+        #expect(!row().working)
+        #expect(!row(unread: true).working)
+    }
+
+    @Test func aSessionWaitingForYouNeverWorks() {
+        #expect(!row(running: true, stopped: true).working)
+        // Finished on a question, with a subagent or command still running behind it.
+        #expect(!row(blocked: true, tasks: [task]).working)
+        #expect(!row(blocked: true, unread: true, tasks: [task]).working)
+    }
+}
