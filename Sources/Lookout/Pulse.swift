@@ -4,98 +4,67 @@ import SwiftUI
 /// Content whose opacity pulses between two values, exact over any background. The content is rendered once to an image
 /// (`ImageRenderer`, at the window's backing scale) and shown in a plain layer-backed view whose opacity loops in Core
 /// Animation: no hosting view, no second SwiftUI graph, no SwiftUI work per frame (the render server runs the loop). The
-/// SwiftUI content stays in the hierarchy at opacity 0 only for layout. The image is re-rendered when `id` changes (pass
-/// every input the content depends on: anything not in `id` is not refreshed), when the size changes and when the
-/// backing scale changes. Static (midpoint) when Reduce Motion is on; shown at full opacity, unpulsed, when `active` is false; the loop
-/// is stopped while the window is occluded.
+/// SwiftUI content stays in the hierarchy at opacity 0 only for layout.
+///
+/// Every pulse breathes in phase: each loop begins at the last multiple of its cycle on the shared media clock, so a
+/// view that is made again, or a loop that is removed and added back, joins the others where they are. The image is
+/// shared by every pulse that draws the same thing, and rendered again when `id` changes (pass every input the content
+/// depends on: anything not in `id` is not refreshed), when Increase Contrast or Differentiate Without Colour changes,
+/// when the size changes and when the backing scale changes. Held at `from` when Reduce Motion is on; shown at `from`,
+/// unpulsed, when `active` is false; the loop is stopped while the window is occluded.
 ///
 /// `content` must be a concrete view, not a ViewModifier's `content` placeholder (ImageRenderer cannot draw that).
-/// For a bare coloured shape use `PulseBlock`, which fades the shape itself.
 struct Pulse<ID: Hashable, Content: View>: View {
     var active = true
-    var from: Double = 1
-    var to: Double = 0.3
-    var duration: Double = 1
-    /// Ease in and out (smooth pulse) or step-like timing (blink).
-    var smooth = true
+    var from = Theme.Motion.heartbeat.from
+    var to = Theme.Motion.heartbeat.to
+    /// Seconds from `from` to `to`; the loop is there and back.
+    var duration = Theme.Motion.heartbeat.period
     /// Everything the content depends on; the image is re-rendered when it changes.
     var id: ID
     @ViewBuilder var content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.resolved) private var resolved
 
     var body: some View {
         // The rendered view gets the environment explicitly: ImageRenderer does not inherit it.
-        let rendered = AnyView(content.environment(\.colorScheme, colorScheme))
+        let rendered = AnyView(content.environment(\.colorScheme, colorScheme).environment(\.resolved, resolved))
         content.opacity(0).overlay {
             PulseLayer(
-                color: nil, cornerRadius: 0, rest: 1, from: from, to: to, duration: duration, smooth: smooth,
+                spec: PulseView.Spec(from: from, to: to, duration: duration),
                 animated: active && !reduceMotion,
-                held: active && reduceMotion ? (from + to) / 2 : nil,
-                image: PulseImage(key: AnyHashable(id), view: rendered))
+                key: PulseKey(id: id, contrast: resolved.contrast, differentiate: resolved.differentiate), view: rendered)
             .allowsHitTesting(false)
         }
     }
 }
 
-/// What a `Pulse` shows: the view to render and the key that says when to render it again.
-struct PulseImage {
-    let key: AnyHashable
-    let view: AnyView
-}
+/// What the image depends on: the content's own inputs, and the two settings the content may draw differently for.
+private struct PulseKey: Hashable {
+    let id: AnyHashable
+    let contrast: Bool
+    let differentiate: Bool
 
-/// A solid rounded block (a dot, a caret) whose own opacity pulses between `from` and `to`; a single layer.
-struct PulseBlock: View {
-    var color: Color
-    var size: CGSize
-    var cornerRadius: CGFloat
-    var from: Double = 1
-    var to: Double = 0.3
-    var duration: Double = 1
-    var smooth = true
-    var active = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    init(color: Color, size: CGSize, cornerRadius: CGFloat, from: Double = 1, to: Double = 0.3, duration: Double = 1, smooth: Bool = true, active: Bool = true) {
-        self.color = color; self.size = size; self.cornerRadius = cornerRadius
-        self.from = from; self.to = to; self.duration = duration; self.smooth = smooth; self.active = active
-    }
-
-    /// A circle.
-    init(color: Color, diameter: CGFloat, from: Double = 1, to: Double = 0.3, duration: Double = 1, smooth: Bool = true, active: Bool = true) {
-        self.init(color: color, size: CGSize(width: diameter, height: diameter), cornerRadius: diameter / 2, from: from, to: to, duration: duration, smooth: smooth, active: active)
-    }
-
-    var body: some View {
-        PulseLayer(
-            color: color, cornerRadius: cornerRadius, rest: 1, from: from, to: to, duration: duration, smooth: smooth,
-            animated: active && !reduceMotion, held: active && reduceMotion ? (from + to) / 2 : nil)
-        .frame(width: size.width, height: size.height)
-        .allowsHitTesting(false)
+    init(id: some Hashable, contrast: Bool, differentiate: Bool) {
+        self.id = AnyHashable(id)
+        self.contrast = contrast
+        self.differentiate = differentiate
     }
 }
 
-/// A plain layer-backed view filled with one colour, with an optional looping opacity animation.
+/// A plain layer-backed view showing the rendered image, with a looping opacity animation.
 private struct PulseLayer: NSViewRepresentable {
-    let color: Color?
-    let cornerRadius: CGFloat
-    /// Opacity when not pulsing and not held.
-    let rest: Double
-    let from: Double
-    let to: Double
-    let duration: Double
-    let smooth: Bool
+    let spec: PulseView.Spec
     let animated: Bool
-    /// A fixed opacity (Reduce Motion).
-    let held: Double?
-    var image: PulseImage?
+    let key: PulseKey
+    let view: AnyView
 
     func makeNSView(context: Context) -> PulseView { PulseView() }
 
-    func updateNSView(_ view: PulseView, context: Context) {
-        view.configure(color: color, cornerRadius: cornerRadius)
-        view.setImage(image)
-        view.set(animated: animated, rest: held ?? (animated ? from : rest), from: from, to: to, duration: duration, smooth: smooth)
+    func updateNSView(_ pulse: PulseView, context: Context) {
+        pulse.setImage(key: key, view: view)
+        pulse.set(spec, animated: animated)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: PulseView, context: Context) -> CGSize? {
@@ -104,19 +73,33 @@ private struct PulseLayer: NSViewRepresentable {
 }
 
 final class PulseView: NSView {
-    private var spec: (from: Double, to: Double, duration: Double, smooth: Bool)?
+    struct Spec: Equatable {
+        let from: Double
+        let to: Double
+        let duration: Double
+
+        /// There and back.
+        var cycle: Double { duration * 2 }
+    }
+
+    private var spec: Spec?
     private var animated = false
     private var observer: NSObjectProtocol?
-    private var source: PulseImage?
-    private var rendered: (key: AnyHashable, size: CGSize, scale: CGFloat)?
+    private var source: (key: PulseKey, view: AnyView)?
+    private var rendered: (key: PulseKey, size: CGSize, scale: CGFloat)?
     private var cgImage: CGImage?
 
-    override var wantsUpdateLayer: Bool { source == nil }
+    /// The images already rendered, by what they show: every arc of a size and appearance is the same picture.
+    private static var images: [ImageKey: CGImage] = [:]
+    private struct ImageKey: Hashable {
+        let key: PulseKey
+        let size: CGSize
+        let scale: CGFloat
+    }
 
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerCurve = .continuous
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -126,29 +109,29 @@ final class PulseView: NSView {
     /// Clicks pass through to the SwiftUI view underneath.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(color: Color?, cornerRadius: CGFloat) {
-        if let color {
-            let cg = NSColor(color).cgColor
-            if layer?.backgroundColor != cg { layer?.backgroundColor = cg }
-        }
-        if layer?.cornerRadius != cornerRadius { layer?.cornerRadius = cornerRadius }
-    }
-
-    func setImage(_ image: PulseImage?) {
-        source = image
+    fileprivate func setImage(key: PulseKey, view: AnyView) {
+        source = (key, view)
         renderIfNeeded()
     }
 
-    /// Renders the content to an image when its key, the size or the backing scale changed.
+    /// Renders the content to an image when its key, the size or the backing scale changed (and no other pulse has).
     private func renderIfNeeded() {
         guard let source, bounds.width > 0, bounds.height > 0 else { return }
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         if let rendered, rendered.key == source.key, rendered.size == bounds.size, rendered.scale == scale { return }
         rendered = (source.key, bounds.size, scale)
-        let renderer = ImageRenderer(content: source.view.frame(width: bounds.width, height: bounds.height))
-        renderer.scale = scale
-        renderer.proposedSize = ProposedViewSize(bounds.size)
-        cgImage = renderer.cgImage
+        let imageKey = ImageKey(key: source.key, size: bounds.size, scale: scale)
+        if let cached = Self.images[imageKey] {
+            cgImage = cached
+        } else {
+            let renderer = ImageRenderer(content: source.view.frame(width: bounds.width, height: bounds.height))
+            renderer.scale = scale
+            renderer.proposedSize = ProposedViewSize(bounds.size)
+            cgImage = renderer.cgImage
+            // A few appearances at most (sizes × contrast × scale); never a reason to keep growing.
+            if Self.images.count > 32 { Self.images.removeAll() }
+            Self.images[imageKey] = cgImage
+        }
         layer?.contentsGravity = .resize
         layer?.contentsScale = scale
         layer?.contents = cgImage
@@ -174,14 +157,20 @@ final class PulseView: NSView {
         ctx.restoreGState()
     }
 
-    func set(animated: Bool, rest: Double, from: Double, to: Double, duration: Double, smooth: Bool) {
-        let changed = spec.map { $0 != (from, to, duration, smooth) } ?? true
+    fileprivate func set(_ spec: Spec, animated: Bool) {
+        let changed = self.spec != spec
         self.animated = animated
-        spec = (from, to, duration, smooth)
+        self.spec = spec
         // The model value is what a snapshot draws, and what shows when the animation is off.
-        if layer?.opacity != Float(rest) { layer?.opacity = Float(rest) }
+        if layer?.opacity != Float(spec.from) { layer?.opacity = Float(spec.from) }
         if changed { layer?.removeAnimation(forKey: "pulse") }
         refresh()
+    }
+
+    /// When a loop of `cycle` seconds begins: the last multiple of it on the media clock, the same for every loop of that
+    /// length, so all of them are at the same point of their cycle whenever they were added.
+    static func beginTime(cycle: Double, at media: CFTimeInterval) -> CFTimeInterval {
+        media - media.truncatingRemainder(dividingBy: cycle)
     }
 
     /// Runs the animation only while the window is on screen and visible; removes it otherwise.
@@ -191,6 +180,7 @@ final class PulseView: NSView {
             layer.removeAnimation(forKey: "pulse")
             return
         }
+        // Already looping: leave it, or it would start over.
         guard layer.animation(forKey: "pulse") == nil else { return }
         let a = CABasicAnimation(keyPath: "opacity")
         a.fromValue = spec.from
@@ -198,7 +188,8 @@ final class PulseView: NSView {
         a.duration = spec.duration
         a.autoreverses = true
         a.repeatCount = .infinity
-        a.timingFunction = CAMediaTimingFunction(name: spec.smooth ? .easeInEaseOut : .linear)
+        a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        a.beginTime = layer.convertTime(Self.beginTime(cycle: spec.cycle, at: CACurrentMediaTime()), from: nil)
         layer.add(a, forKey: "pulse")
     }
 

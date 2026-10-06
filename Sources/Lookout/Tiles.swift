@@ -112,18 +112,34 @@ struct BarTile: View {
     }
 }
 
-/// The working mark: a 270° arc hugging the tile's edge, 1pt in. A static stub: the motion package draws it with a
-/// heartbeat and puts it on working tiles; nothing shows it yet.
+/// The working mark: a 270° arc hugging the tile's edge, 1pt in, that breathes with the heartbeat while Core
+/// Animation runs it (see `Pulse`: every arc is in phase, none runs while the window is hidden). Nothing at all
+/// when not `working`, so a tile can carry it unconditionally. Static at full opacity under Reduce Motion. A
+/// state mark for sighted users only: the tile's own accessibility value says "working".
 struct WorkingArc: View {
     var size: CGFloat = Theme.Metrics.tile
+    var working = true
+
+    var body: some View {
+        if working {
+            Pulse(id: size) { ArcShape(size: size) }
+                .frame(width: size, height: size)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// The arc itself, as `Pulse` renders it once to an image.
+private struct ArcShape: View {
+    let size: CGFloat
     @Environment(\.resolved) private var resolved
 
     var body: some View {
-        Tile.shape(size).inset(by: 1)
+        // The stroke's outer edge sits 1pt inside the tile's.
+        Tile.shape(size).inset(by: 1 + resolved.arcWidth / 2)
             .trim(from: 0, to: 0.75)
             .stroke(Theme.text, style: StrokeStyle(lineWidth: resolved.arcWidth, lineCap: .round))
             .frame(width: size, height: size)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
     }
 }
