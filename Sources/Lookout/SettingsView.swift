@@ -327,6 +327,7 @@ struct SettingsView: View {
         } catch {
             launchAtLogin = LaunchAtLogin.isEnabled
             launchError = error.localizedDescription
+            Announce.say("Couldn't turn \(on ? "on" : "off") Launch at login")
         }
     }
 

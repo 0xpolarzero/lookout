@@ -269,7 +269,6 @@ struct ShortcutRecorder: View {
                     IconButton(symbol: "arrow.uturn.backward", help: "Reset", label: "Reset \(action.title) to default",
                                detail: "Back to \(action.defaultShortcut.display)") {
                         error = store.resetShortcut(for: action).map { "Already used by \($0.title)" }
-                        if let error { AccessibilityNotification.Announcement(error).post() }
                     }
                 } else {
                     Color.clear.frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
@@ -279,7 +278,8 @@ struct ShortcutRecorder: View {
                                                       hover: Theme.Fill.selected, isActive: recording))
                     .focusRing(Theme.Radius.tile)
                     .accessibilityLabel("Change shortcut for \(action.title)")
-                    .accessibilityValue(recording ? "Recording, press the new keys" : current.isUnassigned ? "Not set" : current.display)
+                    .accessibilityValue(recording ? ["Recording, press the new keys", error].compactMap { $0 }.joined(separator: ". ")
+                                        : current.isUnassigned ? "Not set" : current.display)
                     .accessibilityHint("Delete clears it, Escape cancels")
             }
             if let error {
@@ -296,6 +296,8 @@ struct ShortcutRecorder: View {
             error = preview.recorderError
         }
         .onChange(of: current) { error = nil }
+        // A conflict or a refusal appears under the key and is said when it does (WCAG 4.1.3).
+        .onChange(of: error) { _, new in if let new { Announce.say(new) } }
         .onDisappear(perform: stop)
     }
 

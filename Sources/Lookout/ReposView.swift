@@ -387,6 +387,8 @@ struct ReposView: View {
             let reason = await store.addRepo(name)
             adding = false
             failure = reason.map { (name, $0) }
+            // The sentence appears in the list; it is said too, once, as the other notices are (WCAG 4.1.3).
+            if let reason { Announce.say(RepoFailure.add(reason, input: name)) }
             if reason == nil {
                 input = ""
                 fieldFocused = false
