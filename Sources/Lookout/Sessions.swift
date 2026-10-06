@@ -1046,13 +1046,24 @@ struct LabelEditor: View {
     let store: Store
     @State private var mode = Mode.letters
     @State private var text = ""
+    /// What was typed under each style, kept while another is in front.
+    @State private var drafts: [Mode: String] = [:]
+    /// Why the last Save was refused, until the field changes.
+    @State private var problem: String?
     @FocusState private var focused: Bool
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             Text("Label for \(row.session.title)").font(Theme.Typography.title).lineLimit(1)
-            Tabs(label: "Label style", tabs: modes, selection: mode) { mode = $0; text = ""; focused = true }
+            Tabs(label: "Label style", tabs: modes, selection: mode) { new in
+                // The style already in front changes nothing: the field keeps what it holds.
+                guard new != mode else { return }
+                drafts[mode] = text
+                mode = new
+                text = drafts[new] ?? ""
+                focused = true
+            }
             switch mode {
             case .letters:
                 entry(prompt: row.label, name: "Session letters", help: "Two letters; empty goes back to the title's")
@@ -1111,11 +1122,22 @@ struct LabelEditor: View {
                     .onSubmit(save)
                     // Named for what it holds, not the example it shows, and the way back said (what the line below says).
                     .accessibilityLabel(name)
-                    .accessibilityHint(help)
+                    .accessibilityHint(problem ?? help)
+                    .onChange(of: text) { problem = nil }
                 BorderedButton("Save", action: save)
             }
-            Text(help).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+            if let problem {
+                Text(problem).font(Theme.Typography.meta).foregroundStyle(Theme.red).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(help).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+            }
         }
+    }
+
+    /// Why `text` can't be this style's label, if it can't: letters in Emoji, an emoji in Letters.
+    static func problem(_ text: String, mode: Mode) -> String? {
+        guard let label = AgentLabel.sanitize(text), AgentLabel.isEmoji(label) != (mode == .emoji) else { return nil }
+        return mode == .emoji ? "That isn't an emoji. Switch to Letters for letters" : "That's an emoji. Switch to Emoji to use it"
     }
 
     /// The label an emptied field saves: nil clears it, letters from the title replace an icon.
@@ -1126,8 +1148,14 @@ struct LabelEditor: View {
     /// Empty (or only spaces) resets what the mode in front of you holds: Letters go back to the title's (and over an icon
     /// that was picked, since the icon is what clearing the label alone would bring back), an emoji is removed.
     private func save() {
+        if let refusal = Self.problem(text, mode: mode) {
+            // Said where it shows and aloud, with the field still the one being typed in.
+            problem = refusal
+            Announce.say(refusal)
+            focused = true
+            return
+        }
         if let label = AgentLabel.sanitize(text) {
-            guard AgentLabel.isEmoji(label) == (mode == .emoji) else { return }
             store.setAgentLabel(row.id, label)
         } else {
             store.setAgentLabel(row.id, Self.reset(mode, title: row.session.title, folder: row.session.folderName, hasIcon: row.entry.icon != nil))

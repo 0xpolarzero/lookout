@@ -405,6 +405,17 @@ import Testing
     }
 }
 
+@MainActor
+@Suite struct LabelValidation {
+    @Test func theWrongKindOfTextInAStyleIsSaidNotSwallowed() {
+        #expect(LabelEditor.problem("AB", mode: .emoji) == "That isn't an emoji. Switch to Letters for letters")
+        #expect(LabelEditor.problem("🐧", mode: .letters) == "That's an emoji. Switch to Emoji to use it")
+        // What fits the style, and an empty field (which resets it), have nothing to say.
+        #expect(LabelEditor.problem("AB", mode: .letters) == nil && LabelEditor.problem("🐧", mode: .emoji) == nil)
+        #expect(LabelEditor.problem("  ", mode: .emoji) == nil && LabelEditor.problem("", mode: .letters) == nil)
+    }
+}
+
 /// The idle gate runs the real lifecycle on the demo's data (`--demo agents --lifecycle`): what the watchers read from the
 /// empty folder must not take the working sessions, and so the ring, away from what it measures.
 @MainActor
