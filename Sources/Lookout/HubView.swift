@@ -181,6 +181,8 @@ struct LookoutHub: View {
     @State var ciHeight: CGFloat = 0
     /// What the sides' lists measured of themselves, for the one below to take what the one above leaves.
     @State var listHeights: [HubSection: ListHeights] = [:]
+    /// What the bar's run of session tiles measured of itself at rest, for it to leave the rest of the bar its room.
+    @State var restRun: ListHeights?
     /// The strip's trailing group (update button, gear) as laid out; a first guess until it is measured.
     @State var stripTrailingWidth: CGFloat = 140
     @Environment(\.accessibilityReduceMotion) var reduce
@@ -293,6 +295,19 @@ struct LookoutHub: View {
                 barColumn.zIndex(1)
                 if edge == .left, pageOpen { sidePage }
             }
+        }
+    }
+
+    /// The session tiles of the bar at rest, as many whole ones as the screen's length leaves after the rest of the bar
+    /// (the gear is last and stays on screen); a list scrolls on, and the Sessions peek lists them all. Only the sides
+    /// run out of length: the strip is as long as its tiles.
+    @ViewBuilder var restSessions: some View {
+        if edge.isHorizontal {
+            sessionRows
+        } else {
+            // The bar less this run is what the rest of the bar takes.
+            let others = restRun.map { barSize.height - $0.shown } ?? 0
+            CappedScroll(cap: max(maxLength - others, Theme.Metrics.pitch), onHeights: { if restRun != $0 { restRun = $0 } }) { sessionRows }
         }
     }
 

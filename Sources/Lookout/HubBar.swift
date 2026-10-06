@@ -118,7 +118,7 @@ extension LookoutHub {
             }
             .transition(.hubReveal)
         } else {
-            sessionRows
+            restSessions
         }
     }
 

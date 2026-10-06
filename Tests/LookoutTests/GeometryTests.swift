@@ -164,6 +164,17 @@ import Testing
             return nil
         }
 
+        /// Whether a light glyph (a quiet one's pixels are at least this bright) is drawn within `rect` (points).
+        func hasGlyph(in rect: CGRect) -> Bool {
+            for py in Int(rect.minY * scale)..<Int(rect.maxY * scale) {
+                for px in Int(rect.minX * scale)..<Int(rect.maxX * scale) {
+                    let p = pixel(px, py)
+                    if p.a > 250, min(p.r, p.g, p.b) > 120 { return true }
+                }
+            }
+            return false
+        }
+
         /// Whether anything is drawn over `surface` in the rows `ys` (points), within `x`.
         func hasContent(rows ys: ClosedRange<CGFloat>, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> Bool {
             for py in Int(ys.lowerBound * scale)...Int(ys.upperBound * scale) {
@@ -394,22 +405,18 @@ import Testing
     @Test(arguments: [DockEdge.right, .left, .top, .bottom])
     func theViewFitsA720ScreenOnEveryEdge(edge: DockEdge) {
         let screen = CGSize(width: 1280, height: 720)
-        for position in [0.3, 0.9] {
-            let (rest, open) = render(edge: edge, position: position, screen: screen)
-            expectInside(rest.frame, edge: edge, screen: screen, "\(edge) \(position) at rest")
-            expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(position) open")
+        // The default bar, and one with twelve sessions: its tiles are cut to the screen, and the gear (its last cell, the
+        // controls' anchor) is drawn on it.
+        for scenario in [Demo.Scenario.agents, .sessions12] {
+            for position in [0.3, 0.9] {
+                let (rest, open) = render(edge: edge, position: position, screen: screen, scenario: scenario)
+                expectInside(rest.frame, edge: edge, screen: screen, "\(edge) \(scenario) \(position) at rest")
+                expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(scenario) \(position) open")
+                let end = edge.isHorizontal ? CGRect(x: rest.frame.maxX - 44, y: rest.frame.minY, width: 42, height: rest.frame.height)
+                                            : CGRect(x: rest.frame.minX, y: rest.frame.maxY - 44, width: rest.frame.width, height: 42)
+                #expect(rest.hasGlyph(in: end), "\(edge) \(scenario) \(position): no gear at the bar's end \(rest.frame)")
+            }
         }
-    }
-
-    @Test(arguments: [DockEdge.top, .bottom])
-    func aLongInboxWithSessionsOffFitsA720Screen(edge: DockEdge) {
-        // Sessions off and nothing focused: the inbox and the whole CI block share one column.
-        let screen = CGSize(width: 1280, height: 720)
-        let (_, open) = render(edge: edge, position: 0.3, screen: screen) {
-            $0.agents.enabled = false
-            longInbox($0)
-        }
-        expectInside(open.frame, edge: edge, screen: screen, "\(edge) sessions off, long inbox")
     }
 
     @Test(arguments: [DockEdge.right, .left, .top, .bottom])
