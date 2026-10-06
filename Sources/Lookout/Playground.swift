@@ -54,7 +54,8 @@ struct PlaygroundView: View {
     @ViewBuilder private func docked(_ size: CGSize) -> some View {
         let hubView = LookoutHub(store: store, ui: ui, hub: hub,
                                  maxLength: ui.edge.isHorizontal ? size.height - menuBar - 80 : size.height - menuBar - 60,
-                                 maxWidth: size.width)
+                                 maxWidth: size.width,
+                                 barLength: ui.edge.isHorizontal ? size.width - 12 : size.height - menuBar - 60)
             .onHover(perform: hover)
         switch ui.edge {
         case .right: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.top, menuBar + 40)
@@ -312,10 +313,10 @@ struct Shot {
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
 ///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
 /// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
-///   no-ci, all-passing, many-ci (15 repositories); open-no-ci and open-all-passing also on the bottom edge
+///   no-ci, all-passing, many-ci (15 repositories), ci-running, ci-no-runs; open-no-ci and open-all-passing also on the bottom edge
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus
 ///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
-///   sessions-12, sessions-many-new (eleven under New activity); every edge for `peek-agents-`, `open-` and
+///   sessions-12, sessions-waiting-10 (ten waiting: none folds into the +N), sessions-many-new (eleven under New activity); every edge for `peek-agents-`, `open-` and
 ///   `focus-agents-`; `picked-sessions` (right and top: one picked with the keys, one under the pointer), `focus-agents-sessions-more` (tall screen, "+3 more" picked),
 ///   `focus-agents-sessions-end` (scrolled to the end), `open-sessions-12-short` (a 560pt hub on the sides)
 /// Update: `rest-`, `open-` plus
@@ -331,12 +332,16 @@ struct Shot {
 ///   inbox-search-from-focus, inbox-many, inbox-peek-many,
 ///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
+/// A page open: settings-sync-fault on right and top (the gear lit, with its badge)
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// Working arc
 ///   arcs, arcs-contrast (the arc on tiles, no hub)
 /// 1280×720, every edge
-///   open-720, settings-720, repos-720, rest-sessions-12-720, open-sessions-12-720
+///   open-720, settings-720, repos-720, rest-sessions-12-720, open-sessions-12-720; on right and top
+///   rest-sessions-waiting-20-720 and peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
+/// Frozen order, right and top
+///   peek-agents-sessions-late-waiting (the twelfth of twelve starts to wait while the pointer holds the bar)
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -350,11 +355,13 @@ enum PlaygroundShots {
         ("review-requests-failed", .reviewRequestsFailed, nil), ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
         ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil),
     ]
-    private static let ci: [(String, Demo.Scenario)] = [("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI)]
+    private static let ci: [(String, Demo.Scenario)] = [
+        ("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI), ("ci-running", .ciRunning), ("ci-no-runs", .ciNoRuns),
+    ]
     private static let sessions: [(String, Demo.Scenario)] = [
         ("sessions-waiting", .sessionsWaiting), ("sessions-working", .sessionsWorking), ("sessions-unread", .sessionsUnread),
         ("sessions-new-activity", .sessionsNewActivity), ("sessions-scratch", .sessionsScratch),
-        ("sessions-none", .sessionsNone), ("sessions-12", .sessions12),
+        ("sessions-none", .sessionsNone), ("sessions-12", .sessions12), ("sessions-waiting-10", .sessionsWaiting10),
     ]
     private static let updates: [(String, Demo.Scenario)] = [
         ("update-available", .updateAvailable), ("update-downloading", .updateDownloading), ("update-ready", .updateReady),
@@ -495,6 +502,8 @@ enum PlaygroundShots {
             $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci"; $0.environment = .contrast
         },
         Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
+        // The bar beside a page: the same cells, undimmed, the gear lit and still badged.
+        Shot.edges("settings-sync-fault", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.scenario = .syncFault },
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
         // The working arc.
@@ -580,6 +589,28 @@ enum PlaygroundShots {
             $0.pinned = true; $0.scenario = .needsYouEmpty; $0.environment = .contrast
         },
         Shot.edges("open-sessions-12-720") { $0.pinned = true; $0.scenario = .sessions12; $0.size = Shot.hd },
+        // More waiting than the screen has room for: the bar keeps Update and the gear, a "+N" holds the rest.
+        Shot.edges("rest-sessions-waiting-20-720", on: .rightAndTop) { $0.scenario = .sessionsWaiting20; $0.size = Shot.hd },
+        Shot.edges("peek-agents-sessions-waiting-20-720", on: .rightAndTop) {
+            $0.scenario = .sessionsWaiting20; $0.section = .agents; $0.size = Shot.hd
+        },
+        // Twelve new activity with the oldest waiting: the "+4" (and its row) opens the sessions with New activity expanded and
+        // the first it stood for picked (focused here, so the list is tall enough to show it).
+        Shot.edges("rest-sessions-pending-12", on: .rightAndTop) { $0.scenario = .sessionsPending12 },
+        Shot.edges("focus-agents-sessions-pending-12-more", on: .rightAndTop) {
+            $0.pinned = true; $0.scenario = .sessionsPending12; $0.focus = .agents
+            $0.setup = { store, ui, hub in
+                let hidden = BarSessions.arrange(store.barSlots, frozen: nil).hidden
+                hub.showSession(hidden.first?.id, store: store, ui: ui)
+                hub.focus = .agents
+            }
+        },
+        // The pointer holds the bar's order while the twelfth session starts to wait: its tile, and its row, take the eighth's
+        // place, so the "+4" and the cells after it stay where they were.
+        Shot.edges("peek-agents-sessions-late-waiting", on: .rightAndTop) {
+            $0.scenario = .sessionsLateWaiting; $0.section = .agents
+            $0.setup = { store, _, hub in hub.frozenSessions = Demo.lateWaiting(store) }
+        },
     ].flatMap { $0 }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.
@@ -608,7 +639,9 @@ enum PlaygroundShots {
                 let windows = batch.map { (name: $0.name, window: open($0)) }
                 try? await Task.sleep(for: .seconds(2.5))
                 for (name, window) in windows {
-                    capture(window, to: "\(dir)/\(name).png")
+                    if let png = bitmap(of: window)?.representation(using: .png, properties: [:]) {
+                        try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+                    }
                     window.close()
                 }
             }
@@ -670,6 +703,14 @@ enum PlaygroundShots {
 
     private static func capture(_ window: NSWindow, to path: String) {
         try? bitmap(of: window)?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// One shot as pixels, for the tests that measure what the views draw (its window is closed again).
+    static func render(_ shot: Shot) async -> NSBitmapImageRep? {
+        let window = open(shot)
+        defer { window.close() }
+        try? await Task.sleep(for: .seconds(1.5))
+        return bitmap(of: window)
     }
 }
 

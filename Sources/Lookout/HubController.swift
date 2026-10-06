@@ -106,7 +106,8 @@ struct HubRoot: View {
     }
 
     @ViewBuilder private func content(in size: CGSize) -> some View {
-        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), maxWidth: size.width)
+        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), maxWidth: size.width,
+                              barLength: (ui.edge.isHorizontal ? size.width : size.height) - 12)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
                 layout.frame = frame

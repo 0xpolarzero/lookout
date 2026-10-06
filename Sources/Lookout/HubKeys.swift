@@ -136,7 +136,7 @@ final class HubKeys {
 
     /// Every row the arrows walk through, top to bottom: inbox items, CI, then sessions, then the list's own rows; only
     /// those on screen (a focused section shrinks the others).
-    private func targets() -> [String] {
+    func targets() -> [String] {
         (store.hubTargets(hub) + store.sessionExtraTargets(hub)).filter(hub.shows)
     }
 

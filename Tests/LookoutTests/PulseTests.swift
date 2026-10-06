@@ -124,23 +124,23 @@ import Testing
     }
 
     @Test func aRunningTurnWorks() {
-        #expect(row(running: true).working)
+        #expect(row(running: true).tileMarks.working)
     }
 
     @Test func aFinishedTurnWithTasksStillRunningWorks() {
-        #expect(row(tasks: [task]).working)
-        #expect(row(unread: true, tasks: [task]).working)
+        #expect(row(tasks: [task]).tileMarks.working)
+        #expect(row(unread: true, tasks: [task]).tileMarks.working)
     }
 
     @Test func aFinishedTurnWithNothingRunningDoesNot() {
-        #expect(!row().working)
-        #expect(!row(unread: true).working)
+        #expect(!row().tileMarks.working)
+        #expect(!row(unread: true).tileMarks.working)
     }
 
     @Test func aSessionWaitingForYouNeverWorks() {
-        #expect(!row(running: true, stopped: true).working)
+        #expect(!row(running: true, stopped: true).tileMarks.working)
         // Finished on a question, with a subagent or command still running behind it.
-        #expect(!row(blocked: true, tasks: [task]).working)
-        #expect(!row(blocked: true, unread: true, tasks: [task]).working)
+        #expect(!row(blocked: true, tasks: [task]).tileMarks.working)
+        #expect(!row(blocked: true, unread: true, tasks: [task]).tileMarks.working)
     }
 }

@@ -9,12 +9,17 @@ enum HubPage { case main, settings, repos }
 @MainActor
 final class HubState {
     var hovering = false
+    /// The bar's session cells as the pointer found them, held while it is over the hub (see `BarSessions`).
+    var frozenSessions: [BarSessions.Slot]?
     var pinned = false {
         didSet {
             // Pinned or unpinned by hand on a page: that's what you want once back, not what it was before.
             if !navigating, page != .main { pinnedBeforePage = nil }
             // Just closed with the pointer still over the bar: no panel pops back open under it.
-            if oldValue && !pinned { quiet = true }
+            if oldValue && !pinned {
+                quiet = true
+                sessionsExpanded = false
+            }
         }
     }
     /// No hover panels until the pointer has left the bar (set when the full view closes).
@@ -141,6 +146,9 @@ struct LookoutHub: View {
     var maxLength: CGFloat = 700
     /// The window's width: along the top and bottom, the sessions' column takes what the screen has left.
     var maxWidth: CGFloat = .infinity
+    /// Room for the bar at rest along its own axis, whatever is open: the screen's height on the sides, its width
+    /// along the top and bottom, less the margins. The sessions' cells give way to it (`sessionRoom`).
+    var barLength: CGFloat = .infinity
     /// Where each section's cells are in the bar, and whether the pointer is on the bar or a section's panel.
     @State var sectionFrames: [HubSection: CGRect] = [:]
     @State var overBar = false
@@ -246,12 +254,6 @@ struct LookoutHub: View {
     /// What the inbox list animates on: its items changing, or the filter or search swapping them.
     struct ListKey: Equatable { let revision: Int; let filter: InboxFilter; let query: String }
     var listKey: ListKey { ListKey(revision: store.itemsRevision, filter: hub.filter, query: hub.query) }
-    var agentRows: (kept: [AgentRow], pending: [AgentRow]) {
-        if searching { return (store.hubSessions(hub), []) }
-        let rows = store.agentRows
-        return (rows.kept, Array(rows.pending.prefix(Self.pendingTiles)))
-    }
-
     // MARK: Vertical (left / right edges)
 
     /// The screen's side: rows line up against it, so the bar column is straight whatever is beside it.

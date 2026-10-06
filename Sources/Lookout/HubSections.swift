@@ -59,7 +59,7 @@ extension LookoutHub {
 
     /// A session's tile in the bar; opens it in Claude.
     func tile(_ r: AgentRow, size: CGFloat) -> some View {
-        BarTile(row: r, size: size, store: store, ui: ui, hub: hub)
+        BarTile(row: r, size: size, axis: barAxis, onRail: !edge.isHorizontal, store: store, ui: ui, hub: hub)
     }
 
     /// The "+" in the bar, a tile like the sessions' above it: a scratch session.

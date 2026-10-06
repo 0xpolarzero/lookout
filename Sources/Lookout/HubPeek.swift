@@ -86,7 +86,7 @@ extension LookoutHub {
         } else {
             // Its lines stay level with their cells, so it only moves at the ends: it grows to meet the bar's
             // bottom if it ends close to it.
-            start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - Self.peekPad, 0)
+            start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - Self.peekPad - Self.peekLead(section), 0)
             let short = bar - (start + length)
             if short >= 0, short < Self.peekSnap { length = bar - start }
         }
@@ -213,6 +213,8 @@ extension LookoutHub {
     static let peekPad: CGFloat = Theme.Space.md
     /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
     static let peekLine: CGFloat = Theme.Metrics.line
+    /// What a side panel has above its first cell's row: the sessions' header, which the bar has no cell for.
+    static func peekLead(_ section: HubSection) -> CGFloat { section == .agents ? peekLine : 0 }
 
     /// How tall a peek's list of sessions gets before it scrolls (the inbox's is the same).
     static let peekListCap: CGFloat = 330
@@ -288,11 +290,6 @@ extension LookoutHub {
         ClaudeNotice(store: store).padding(.leading, indent + 8).padding(.trailing, 8)
     }
 
-    /// The bar's last cell at rest: a gear. Hovering shows the controls; a click goes to Settings.
-    var controlsCell: some View {
-        ControlsGear(active: hub.page != .main) { hub.go(.settings) }
-    }
-
     /// The controls: how syncing is going, then keep open, repositories and settings, each with its key.
     var peekControls: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -328,30 +325,5 @@ extension LookoutHub {
                 hub.quiet = false
             }
         }
-    }
-}
-
-/// The gear at the end of the bar, without a tooltip: hovering it opens the controls.
-struct ControlsGear: View {
-    let active: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) { ControlsGearLabel(active: active) }
-            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, active: Theme.Fill.selected, isActive: active))
-            .accessibilityLabel("Controls")
-            .accessibilityHint("Settings, repositories and keeping the hub open")
-    }
-}
-
-private struct ControlsGearLabel: View {
-    let active: Bool
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
-        Image(systemName: "gearshape.fill")
-            .font(Theme.Typography.glyph(13))
-            .foregroundStyle(hover || active ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
-            .frame(width: Theme.Metrics.iconHit, height: Theme.Metrics.iconHit)
     }
 }
