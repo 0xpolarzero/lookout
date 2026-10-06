@@ -5,6 +5,8 @@ import SwiftUI
 extension LookoutHub {
     // MARK: Pages
 
+    /// Every page is as tall as the hub opens (the callers' frame), whatever its pane holds: moving between panes
+    /// never resizes the panel, and the rail keeps its cells. The scroll view inside takes up the difference.
     var page: some View {
         VStack(spacing: 0) {
             pageHeader

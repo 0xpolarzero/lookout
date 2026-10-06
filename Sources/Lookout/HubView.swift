@@ -251,8 +251,7 @@ struct LookoutHub: View {
 
     var verticalPage: some View {
         page
-            .frame(width: Self.detail)
-            .modifier(FitHeight(cap: maxLength))
+            .frame(width: Self.detail, height: maxLength)
             // (Reduce Motion: no slide, but still a short fade.)
             .transition(reduce ? .opacity.animation(Theme.Motion.fade) : .slide(from: edge == .right ? .trailing : .leading, reduce: false))
     }
@@ -326,8 +325,8 @@ struct LookoutHub: View {
                                             removal: .opacity.animation(Theme.Motion.hover)))
                 } else {
                     page
-                        .modifier(FitHeight(cap: maxLength - Self.cell))
                         .frame(idealWidth: Self.pageWidth, maxWidth: .infinity)
+                        .frame(height: maxLength - Self.cell)
                         // Settles toward the strip as it fades in.
                         .transition(reduce ? .opacity.animation(Theme.Motion.fade)
                                     : .opacity.combined(with: .offset(y: edge == .top ? -8 : 8)))
@@ -488,31 +487,6 @@ struct SharedWidthStack: Layout {
         }
     }
 }
-
-/// As tall as its content, up to `cap`; a scroll view inside scrolls past that.
-struct FitHeight: ViewModifier {
-    let cap: CGFloat
-
-    func body(content: Content) -> some View {
-        CapHeightLayout(cap: cap) { content }
-    }
-}
-
-private struct CapHeightLayout: Layout {
-    let cap: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let sub = subviews.first else { return .zero }
-        let width = proposal.width ?? sub.sizeThatFits(.unspecified).width
-        let height = sub.sizeThatFits(ProposedViewSize(width: width, height: nil)).height
-        return CGSize(width: width, height: min(height, cap))
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
-    }
-}
-
 
 /// Your sessions in the hub can be dragged onto one another to reorder them (pending ones can't).
 struct AgentReorder: ViewModifier {
