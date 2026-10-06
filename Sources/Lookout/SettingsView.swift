@@ -293,13 +293,13 @@ struct SettingsView: View {
     /// Where the bar rests, without dragging it (WCAG 2.5.7): its display, its edge, and where along the edge, which
     /// centring takes over.
     @ViewBuilder private func placement(_ ui: UIState) -> some View {
-        let screens = NSScreen.screens.map(\.localizedName)
+        let screens = DisplayChoice.connected
         let centred = store.settings.centerPill == true
         if screens.count > 1 {
             FormRow("Display") {
-                PopUp(label: "Display", value: ui.display, room: screens) {
+                PopUp(label: "Display", value: screens.first { $0.id == ui.display }?.title ?? "", room: screens.map(\.title)) {
                     Picker("Display", selection: Binding(get: { ui.display }, set: { ui.place(BarPlacement(display: $0)) })) {
-                        ForEach(screens, id: \.self) { Text($0).tag($0) }
+                        ForEach(screens, id: \.id) { Text($0.title).tag($0.id) }
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()

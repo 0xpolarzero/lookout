@@ -15,8 +15,8 @@ final class UIState {
     var position: Double = UserDefaults.standard.object(forKey: "pill.y") as? Double ?? 0.5 {
         didSet { if persists { UserDefaults.standard.set(position, forKey: "pill.y") } }
     }
-    /// The name of the display the bar is on, for Settings' placement controls.
-    var display = NSScreen.main?.localizedName ?? ""
+    /// The display the bar is on, for Settings' placement controls.
+    var display: CGDirectDisplayID = NSScreen.main?.displayID ?? 0
     /// Off for screenshots, so rendering never moves the real hub.
     @ObservationIgnored var persists = true
     /// Moves the bar for real (its window, its screen): set by the controller. Without one, only what is remembered changes.
@@ -41,8 +41,33 @@ final class UIState {
 struct BarPlacement {
     var edge: DockEdge?
     var position: Double?
-    /// A display's `localizedName`.
-    var display: String?
+    /// A display's `displayID`: two monitors of one model share their name, never their identity.
+    var display: CGDirectDisplayID?
+}
+
+/// A display Settings can put the bar on: what identifies it, and what the pop-up calls it.
+struct DisplayChoice: Hashable {
+    let id: CGDirectDisplayID
+    let title: String
+
+    /// Titles for `screens` in their order: the name, with a number after each of the ones that share it.
+    static func list(_ screens: [(id: CGDirectDisplayID, name: String)]) -> [DisplayChoice] {
+        var seen: [String: Int] = [:]
+        return screens.map { screen in
+            let same = screens.filter { $0.name == screen.name }.count
+            seen[screen.name, default: 0] += 1
+            return DisplayChoice(id: screen.id, title: same > 1 ? "\(screen.name) (\(seen[screen.name]!))" : screen.name)
+        }
+    }
+
+    @MainActor static var connected: [DisplayChoice] { list(NSScreen.screens.map { ($0.displayID, $0.localizedName) }) }
+}
+
+extension NSScreen {
+    /// The identity of the display, which its name is not.
+    var displayID: CGDirectDisplayID {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+    }
 }
 
 enum DockEdge: String, CaseIterable {

@@ -214,7 +214,7 @@ final class HubController {
     }
 
     private func dock() {
-        ui.display = screen.localizedName
+        ui.display = screen.displayID
         layout.floating = false
         host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout)
         window.setFrame(dockFrame(), display: true)
@@ -504,7 +504,7 @@ final class HubController {
         let turns = placement.edge.map { $0.isHorizontal != ui.edge.isHorizontal } ?? false
         let page = hub.page
         if turns, page != .main { hub.go(.main) }
-        if let name = placement.display, let target = NSScreen.screens.first(where: { $0.localizedName == name }) { screen = target }
+        if let id = placement.display, let target = NSScreen.screens.first(where: { $0.displayID == id }) { screen = target }
         if let edge = placement.edge { ui.edge = edge }
         if let position = placement.position { ui.position = position }
         dock()

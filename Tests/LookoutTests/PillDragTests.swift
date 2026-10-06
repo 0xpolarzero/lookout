@@ -90,8 +90,19 @@ import Testing
         #expect(ui.edge == .top && ui.position == 0.25)
         var placed: [BarPlacement] = []
         ui.onPlace = { placed.append($0) }
-        ui.place(BarPlacement(edge: .left, display: "Studio"))
+        ui.place(BarPlacement(edge: .left, display: 42))
         // The controller does the moving: what is remembered is its to set.
-        #expect(placed.count == 1 && placed[0].edge == .left && placed[0].display == "Studio" && ui.edge == .top)
+        #expect(placed.count == 1 && placed[0].edge == .left && placed[0].display == 42 && ui.edge == .top)
     }
 }
+
+@Suite struct DisplayChoices {
+    @Test func monitorsOfOneModelAreToldApartByNumberAndKeepTheirIdentity() {
+        let list = DisplayChoice.list([(1, "Studio Display"), (2, "Built-in Retina Display"), (3, "Studio Display")])
+        #expect(list.map(\.title) == ["Studio Display (1)", "Built-in Retina Display", "Studio Display (2)"])
+        // Each choice is its own display: picking the second reaches the second.
+        #expect(Set(list.map(\.id)).count == 3 && list[2].id == 3)
+        #expect(Set(list.map(\.title)).count == 3)
+    }
+}
+
