@@ -141,6 +141,18 @@ import Testing
         #expect(!press(kVK_ContextualMenu, [], ""))
     }
 
+    @Test func theMenuChordsLeaveAFocusedControlAlone() {
+        let control = UUID()
+        hub.controls.set(control, focused: true)
+        #expect(!press(kVK_ContextualMenu, [], ""))
+        #expect(!press(kVK_F10, [.shift], ""))
+        #expect(!press(kVK_Return, [.control], "\r"))
+        #expect(hub.rowMenuRequest == nil)
+        // Once the ring lets go, the picked row's menu is theirs again.
+        hub.controls.set(control, focused: false)
+        #expect(press(kVK_ContextualMenu, [], "") && hub.rowMenuRequest?.target == "i:one")
+    }
+
     @Test func aBindingOnAMenuChordActsInsteadOfOpeningTheMenu() {
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_Return), modifiers: [.control]), for: .toggleRead)
         #expect(press(kVK_Return, [.control], "\r"))

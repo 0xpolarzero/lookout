@@ -201,9 +201,10 @@ final class HubKeys {
     }
 
     /// The picked row's context menu (the Menu key, ⇧F10 or ⌃Return): every row with one has the same actions in it for
-    /// the mouse and the keyboard. False with no row picked, or one that has none (Passing, "+N more", New session).
+    /// the mouse and the keyboard. False with no row picked, or one that has none (Passing, "+N more", New session), and
+    /// while the Tab ring is on a control, which is the one being driven.
     private func openRowMenu() -> Bool {
-        guard let selection = hub.selection, targets().contains(selection), selection != "c:passing",
+        guard !hub.controls.isActive, let selection = hub.selection, targets().contains(selection), selection != "c:passing",
               ["i:", "c:", "a:"].contains(String(selection.prefix(2))) else { return false }
         hub.openRowMenu(selection)
         return true
