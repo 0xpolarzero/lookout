@@ -63,7 +63,8 @@ extension LookoutHub {
                 row(cell: { ciCell }, detail: { linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) } })
             } else {
                 row(cell: { ciCell }, detail: { ciHeader })
-                if !shrunk(.ci) {
+                // A search doesn't look in CI: its header stays, its lines go and the results have the room.
+                if !shrunk(.ci) && !searching {
                     ForEach(Self.ciLineOrder, id: \.self) { state in
                         if state != CIState.none || !ciRepos(listedIn: .none).isEmpty {
                             row(cell: { ciCount(state) }, detail: { ciLine(state) })
@@ -75,8 +76,6 @@ extension LookoutHub {
         }
         .modifier(probe(.ci))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
-        // A search doesn't look in CI.
-        .opacity(searching ? 0.4 : 1)
         if store.agents.enabled {
             sectionDivider
             VStack(alignment: side, spacing: 0) { agentRowsView }
@@ -99,6 +98,7 @@ extension LookoutHub {
                 // The sessions scroll with their tiles, so each stays beside its row.
                 CappedScroll(cap: caps.agents, hub: hub) { sessionRows }
                     .frame(width: Self.cell + Self.detail)
+                if noSessionsMatch { row(cell: { EmptyView() }, detail: { noSessionsLine }) }
                 row(cell: { newSessionCell }, detail: { newSessionDetail })
             }
             .transition(.hubReveal)
@@ -192,7 +192,6 @@ extension LookoutHub {
             .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
             .frame(maxHeight: .infinity)
             .modifier(probe(.ci))
-            .opacity(searching ? 0.4 : 1)
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {

@@ -162,6 +162,5 @@ extension LookoutHub {
         .padding(.horizontal, Self.inset)
         .padding(.vertical, 6)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
-        .opacity(searching ? 0.4 : 1)
     }
 }

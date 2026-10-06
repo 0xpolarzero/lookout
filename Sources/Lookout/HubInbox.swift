@@ -263,13 +263,31 @@ extension LookoutHub {
         InboxSearchField(hub: hub, ui: ui, summary: searchCount, targets: store.hubTargets(hub))
     }
 
-    /// What the search found, by kind: "3 items · 2 sessions".
+    /// What the search found, by kind, each group counted even at none: "3 items · 0 sessions".
     var searchCount: String {
         let found = items.count
-        let sessions = store.agents.enabled ? store.hubSessions(hub).count : 0
+        let sessions = store.hubSessions(hub).count
         if found == 0 && sessions == 0 { return "No match" }
-        return [found == 0 ? nil : plural(found, "item"), sessions == 0 ? nil : plural(sessions, "session")]
+        return [plural(found, "item"), store.agents.enabled ? plural(sessions, "session") : nil]
             .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The search shows two groups, Inbox and Sessions, each under its own label with its count.
+    var searchGroups: Bool { searching && store.agents.enabled && store.inboxReplacement == nil }
+
+    /// Neither group has a result: one "No match" says so, in place of the groups' own lines.
+    var searchFoundNothing: Bool { searching && items.isEmpty && store.hubSessions(hub).isEmpty }
+
+    /// Sessions found nothing while the inbox did: said under the Sessions header, so an empty group is not a
+    /// broken one.
+    var noSessionsMatch: Bool { searching && store.agents.enabled && !searchFoundNothing && store.hubSessions(hub).isEmpty }
+
+    var noSessionsLine: some View { quietLine("No sessions match") }
+
+    private func quietLine(_ text: String) -> some View {
+        Text(text).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
+            .padding(.horizontal, Theme.Metrics.rowPadding)
+            .frame(maxWidth: .infinity, minHeight: Theme.Metrics.iconButton, alignment: .leading)
     }
 
     var filters: some View {
@@ -343,8 +361,10 @@ extension LookoutHub {
         let notice = store.inboxNotice()
         let undo = store.undoStack.visible(in: .inbox)
         // The banner and the undo line come out of the room the list has, so the whole body stays within `cap`.
+        let groupLabel = searchGroups && !searchFoundNothing
         let listCap = cap - (notice == nil ? 0 : Theme.Metrics.banner + Theme.Space.xs)
             - (undo == nil ? 0 : Theme.Metrics.undoLine + Theme.Space.xs)
+            - (groupLabel ? SearchGroupLabel.height + Theme.Space.xs : 0)
         return VStack(spacing: Theme.Space.xs) {
             if let notice {
                 StatusBanner(symbol: notice.symbol, tint: notice.tint, message: notice.message) {
@@ -355,6 +375,7 @@ extension LookoutHub {
                     }
                 }
             }
+            if groupLabel { SearchGroupLabel(title: "Inbox", count: items.count) }
             if store.inboxReplacement != nil || items.isEmpty {
                 emptyInbox
             } else {
@@ -375,7 +396,8 @@ extension LookoutHub {
     /// found nothing either (they are listed beside the inbox's results).
     @ViewBuilder var emptyInbox: some View {
         if searching && store.inboxReplacement == nil {
-            if !store.agents.enabled || store.hubSessions(hub).isEmpty { EmptyBlock("No match") }
+            if searchFoundNothing { EmptyBlock("No match") }
+            else if searchGroups { quietLine("No items match") }
         } else {
             switch store.inboxEmpty(hub.filter) {
             case .signedOut:
@@ -423,7 +445,7 @@ extension LookoutHub {
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
-        inboxBody(cap: max(160, min(maxLength - Self.cell - 150 - ciExtra, Self.listCap)))
+        inboxBody(cap: max(160, min(maxLength - Self.cell - (searching ? 0 : 150 + ciExtra), Self.listCap)))
             .padding(.horizontal, Self.inset)
             .padding(.vertical, 8)
     }
@@ -627,6 +649,26 @@ struct InboxSearchField: View {
 
     private func requestFocus() {
         DispatchQueue.main.async { focused = true }
+    }
+}
+
+/// A search result group's label: "Inbox 5". The Sessions group's is its section header (see `agentsHeader`).
+struct SearchGroupLabel: View {
+    let title: String
+    let count: Int
+    static let height = Theme.Metrics.iconButton
+
+    var body: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Text(title).font(Theme.Typography.label)
+            Text("\(count)").font(Theme.Typography.numeral)
+        }
+        .foregroundStyle(Theme.secondary)
+        .padding(.horizontal, Theme.Metrics.rowPadding)
+        .frame(maxWidth: .infinity, minHeight: Self.height, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(plural(count, "result"))")
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

@@ -321,7 +321,7 @@ struct Shot {
 /// Inbox, right and top
 ///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
 ///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
-///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none,
+///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none, inbox-search-sessions, inbox-search-sessions-only,
 ///   inbox-search-from-focus, inbox-many, inbox-peek-many,
 ///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
@@ -415,6 +415,10 @@ enum PlaygroundShots {
         Shot.edges("inbox-search-open", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.inbox.startSearch() } },
         Shot.edges("inbox-search", on: .rightAndTop) { $0.pinned = true; $0.query = "format" },
         Shot.edges("inbox-search-none", on: .rightAndTop) { $0.pinned = true; $0.query = "zzzz" },
+        // Both groups with results: Inbox and Sessions each under their count, CI out of the layout.
+        Shot.edges("inbox-search-sessions", on: .rightAndTop) { $0.pinned = true; $0.query = "notifications" },
+        // Only sessions match: the Inbox group says so, instead of leaving a blank.
+        Shot.edges("inbox-search-sessions-only", on: .rightAndTop) { $0.pinned = true; $0.query = "ci" },
         // Search started from a focused CI section: the focus is given up so the field and both result groups show.
         Shot.edges("inbox-search-from-focus", on: .rightAndTop) {
             $0.pinned = true

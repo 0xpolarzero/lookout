@@ -139,6 +139,9 @@ struct LookoutHub: View {
     @State var ciHeight: CGFloat = 0
     static let ciUsual: CGFloat = 150
     var ciExtra: CGFloat { max(0, ciHeight - Self.ciUsual) }
+    /// What CI's lines take beyond the usual; while searching they are gone (the header stays), so their room is the
+    /// results'.
+    var ciSpace: CGFloat { searching ? -(Self.ciUsual - Theme.Metrics.pitch) : ciExtra }
     @State var peekSizes: [HubSection: CGSize] = [:]
     /// The strip's trailing group (controls, update button) as laid out, for the sessions' segment to leave room
     /// for; a first guess until it's measured.
@@ -271,7 +274,7 @@ struct LookoutHub: View {
 
     /// No section focused: what's left once the fixed parts are laid out, inbox first.
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
-        let free = max(160, maxLength - 360 - ciExtra)
+        let free = max(160, maxLength - 360 - ciSpace)
         guard store.agents.enabled else { return (free, 0) }
         // Whole 36pt session rows, so the last one showing is never cut through its tile.
         let agents = max(2, (free * 0.45 / 36).rounded(.down)) * 36
@@ -307,8 +310,11 @@ struct LookoutHub: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     inboxColumn
                                     Spacer(minLength: 0)
-                                    Hairline(inset: 12)
-                                    ciColumn
+                                    // Not while searching: the results are Inbox and Sessions.
+                                    if !searching {
+                                        Hairline(inset: 12)
+                                        ciColumn
+                                    }
                                 }
                                 .frame(width: Self.githubWidth, alignment: .topLeading)
                                 .frame(maxHeight: .infinity, alignment: .top)
@@ -350,6 +356,7 @@ struct LookoutHub: View {
         return VStack(alignment: .leading, spacing: 0) {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
+            if noSessionsMatch { noSessionsLine.padding(.horizontal, Self.inset).padding(.top, 8) }
             CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count)) {
                 // Your sessions by project, a line between projects; then the pending ones, labelled.
                 AdaptiveStack(count: rows.kept.count + rows.pending.count, alignment: .leading, spacing: 0) {

@@ -207,6 +207,27 @@ import Testing
         #expect(!r.hub.inbox.caretAtEnd)
     }
 
+    // MARK: Result groups
+
+    @Test func theSummaryCountsBothGroupsEvenAtNone() {
+        let r = rig()
+        let view = LookoutHub(store: r.store, ui: UIState(), hub: r.hub)
+        r.hub.query = "format"
+        // Sessions off: only the inbox is searched.
+        #expect(view.searchCount == "1 item")
+        #expect(!view.searchGroups)
+        r.store.agents.enabled = true
+        #expect(view.searchCount == "1 item · 0 sessions")
+        #expect(view.searchGroups)
+        // The inbox found something, the sessions nothing: the Sessions group says so.
+        #expect(view.noSessionsMatch)
+        r.hub.query = "no match at all"
+        #expect(view.searchCount == "No match")
+        // Both empty: one "No match", not a line in each group.
+        #expect(view.searchFoundNothing)
+        #expect(!view.noSessionsMatch)
+    }
+
     // MARK: Starting
 
     @Test func searchingFromAFocusedSectionOrAPeekShowsTheCombinedResults() {
