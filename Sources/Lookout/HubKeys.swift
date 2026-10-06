@@ -34,11 +34,15 @@ final class HubKeys {
         onClose()
     }
 
-    /// Returns whether the key was handled. Typing in a text field is left alone, except Esc.
+    /// Returns whether the key was handled. Typing in a text field is left alone, except Esc, and a focused control keeps
+    /// Space and Return.
     func key(_ event: NSEvent) -> Bool {
         // An input method is composing in a text field: Esc, the arrows and Return are the composition's.
         if (event.window?.firstResponder as? NSTextView)?.hasMarkedText() == true { return false }
         if hub.inbox.searchFocused, hub.page == .main, let handled = searchKey(event) { return handled }
+        // A focused control (Clear, More, Undo) takes Space and Return: they are not the search's or the row's.
+        if ControlFocus.isActive, event.modifierFlags.intersection(Shortcut.relevant).isEmpty,
+           [kVK_Space, kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) { return false }
         let editing = event.window?.firstResponder is NSText
         if editing, event.keyCode != UInt16(kVK_Escape) { return false }
         let flags = event.modifierFlags.intersection(Shortcut.relevant)

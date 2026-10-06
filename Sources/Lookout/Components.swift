@@ -31,6 +31,8 @@ import SwiftUI
 //   HoverFillButtonStyle   Hover/active/pressed fill for any button and shape; disabled shows no fill.
 //   .rowHighlight(hover:picked:)  A hub row's padding and fill; picked (keyboard) adds the accent bar.
 //   .focusRing(radius)     The one focus ring: 1.5pt accent, offset 2 (inset for rows), from @FocusState.
+//   .controlFocus(focused) Tells the key monitor a control has focus (so it keeps Space and Return); `focusRing` does
+//                          it for you unless the control keeps its own @FocusState.
 //   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
 //   EmptyBlock, UndoLine (presentation only), Hairline, Avatar, FlowLayout, `.tip(_:_:)` (icon-only controls only).
 //   .tile(size) / Tile.shape(size)   A rounded square filled like a tile, radius 27% of its size.
@@ -264,6 +266,30 @@ private struct FocusRing: ViewModifier {
 
     func body(content: Content) -> some View {
         content.focused($focused).modifier(FocusRingDrawing(radius: radius, inset: inset, focused: focused))
+            .controlFocus(focused && !inset)
+    }
+}
+
+/// Which controls (buttons, tabs, menus: not list rows, whose keys are the hub's) hold keyboard focus right now. The
+/// hub's key monitor reads it to leave Space and Return to a focused control instead of searching or acting on a row.
+@MainActor
+enum ControlFocus {
+    private static var holders: Set<UUID> = []
+    static var isActive: Bool { !holders.isEmpty }
+
+    static func set(_ id: UUID, _ focused: Bool) {
+        if focused { holders.insert(id) } else { holders.remove(id) }
+    }
+}
+
+private struct ControlFocusTracking: ViewModifier {
+    let focused: Bool
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: focused, initial: true) { _, now in ControlFocus.set(id, now) }
+            .onDisappear { ControlFocus.set(id, false) }
     }
 }
 
@@ -279,6 +305,9 @@ extension View {
     func focusRing(_ radius: CGFloat, inset: Bool = false, isFocused: Bool) -> some View {
         modifier(FocusRingDrawing(radius: radius, inset: inset, focused: isFocused))
     }
+
+    /// Reports that this control has keyboard focus (see `ControlFocus`); for a control with its own `@FocusState`.
+    func controlFocus(_ focused: Bool) -> some View { modifier(ControlFocusTracking(focused: focused)) }
 }
 
 // MARK: - Buttons
@@ -357,6 +386,7 @@ struct IconButton: View {
             .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
             .focused($focused)
             .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
+            .controlFocus(focused)
             .accessibilityLabel(label ?? help)
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 

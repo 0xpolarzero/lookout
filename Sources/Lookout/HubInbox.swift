@@ -531,6 +531,7 @@ private struct InboxMoreRow: View {
         .buttonStyle(.plain)
         .focused($focused)
         .focusRing(Theme.Radius.small, isFocused: focused)
+        .controlFocus(focused)
         .onHover { hover = $0 }
         .accessibilityLabel(plural(hidden, "more item"))
         .accessibilityHint("Scrolls the list")

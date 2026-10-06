@@ -73,6 +73,41 @@ import Testing
         #expect(r.hub.selection == nil)
     }
 
+    // MARK: Focused controls
+
+    @Test func aFocusedControlKeepsSpaceAndReturn() {
+        let r = rig()
+        // Tab went from the field to Clear: the field no longer has focus.
+        r.hub.inbox.searchFocused = false
+        r.hub.query = "swift"
+        r.hub.selection = "i:1"
+        let id = UUID()
+        ControlFocus.set(id, true)
+        defer { ControlFocus.set(id, false) }
+        #expect(!r.keys.key(key(kVK_Space)))
+        #expect(!r.keys.key(key(kVK_Return)))
+        #expect(r.hub.query == "swift")
+        #expect(r.opened.titles.isEmpty)
+        #expect(r.store.items[0].state == .unread)
+        // Other keys are still the hub's: typing goes on searching.
+        let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                                     characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: UInt16(kVK_ANSI_X))!
+        #expect(r.keys.key(typed))
+        #expect(r.hub.query == "swiftx")
+        // Focus gone: Space is the search's again, Return opens the pick.
+        ControlFocus.set(id, false)
+        #expect(r.keys.key(key(kVK_Space)))
+        #expect(r.hub.query == "swiftx ")
+    }
+
+    @Test func spaceTogglesReadOnAPickedRowWhenNoControlHasFocus() {
+        let r = rig()
+        r.hub.inbox.searchFocused = false
+        r.hub.selection = "i:1"
+        #expect(r.keys.key(key(kVK_Space)))
+        #expect(r.store.items[0].state == .read)
+    }
+
     // MARK: Composing
 
     @Test func anInputMethodComposingKeepsItsKeys() {
