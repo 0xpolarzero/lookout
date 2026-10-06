@@ -36,6 +36,10 @@ final class Store {
             persistedRevision &+= 1
         }
     }
+    /// Review requests cleared from Done while GitHub still lists them: kept apart from `items` so they don't come back as new.
+    var droppedRequests: Set<String> = [] {
+        didSet { persistedRevision &+= 1 }
+    }
     var settings = AppSettings() {
         didSet {
             memo = Memo()
@@ -370,6 +374,7 @@ final class Store {
         settings = state.settings
         agents = state.agents ?? AgentsState()
         mutedCI = state.mutedCI ?? [:]
+        droppedRequests = Set(state.droppedRequests ?? [])
         savedRevision = persistedRevision
     }
 
@@ -401,7 +406,8 @@ final class Store {
         }
         saveDirty = false
         let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents,
-                                                        mutedCI: mutedCI.isEmpty ? nil : mutedCI))
+                                                        mutedCI: mutedCI.isEmpty ? nil : mutedCI,
+                                                        droppedRequests: droppedRequests.isEmpty ? nil : droppedRequests.sorted()))
         let url = Self.fileURL
         let write: @Sendable () -> Void = {
             let enc = JSONEncoder()
@@ -1033,7 +1039,7 @@ final class Store {
         for pr in result.items {
             let id = "rr#\(pr.id)"
             current.insert(id)
-            guard !items.contains(where: { $0.id == id }), let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
+            guard !items.contains(where: { $0.id == id }), !droppedRequests.contains(id), let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
             let item = InboxItem(
                 id: id, repo: repoName(from: repoURL), kind: .reviewRequested, number: pr.number, title: pr.title,
                 snippet: snippet(pr.body), author: user.login, avatar: user.avatarUrl, authorIsApp: user.isApp,
@@ -1041,6 +1047,8 @@ final class Store {
             items.append(item)
             added.append(item)
         }
+        // Cleared requests are forgotten once GitHub stops listing them, so a new request on the same PR shows again.
+        if !droppedRequests.isSubset(of: current) { droppedRequests.formIntersection(current) }
         // Request disappeared: I reviewed it (or it was withdrawn/closed).
         for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
             items[i].state = .addressed
@@ -1052,9 +1060,9 @@ final class Store {
         }
     }
 
-    private func prune() {
-        let now = Date()
+    func prune(now: Date = Date()) {
         func expired(_ item: InboxItem) -> Bool {
+            if item.isInUndoWindow(now: now) { return false }
             let age = now.timeIntervalSince(item.createdAt)
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
