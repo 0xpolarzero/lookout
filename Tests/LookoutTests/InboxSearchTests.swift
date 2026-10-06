@@ -73,6 +73,62 @@ import Testing
         #expect(r.hub.selection == nil)
     }
 
+    // MARK: The configured Open shortcut
+
+    /// A window whose field editor has the keyboard, as it does while the search field is focused.
+    private func editing() -> (window: NSWindow, text: NSTextView) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: .borderless, backing: .buffered, defer: false)
+        let text = NSTextView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(text)
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        window.makeFirstResponder(text)
+        return (window, text)
+    }
+
+    private func press(_ code: Int, _ typed: String, _ flags: NSEvent.ModifierFlags, in window: NSWindow) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber,
+                         context: nil, characters: typed, charactersIgnoringModifiers: typed, isARepeat: false, keyCode: UInt16(code))!
+    }
+
+    @Test func aReboundOpenShortcutOpensTheResultFromTheField() {
+        let r = rig()
+        let (window, _) = editing()
+        defer { window.orderOut(nil) }
+        r.hub.query = "format"
+        r.hub.selection = "i:1"
+        r.store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_O), modifiers: .command), for: .openItem)
+        #expect(r.keys.key(press(kVK_ANSI_O, "o", .command, in: window)))
+        #expect(r.opened.titles == ["Open on GitHub · Format ranges"])
+        // Return still opens it, and another combination is the field's.
+        #expect(r.keys.key(press(kVK_Return, "\r", [], in: window)))
+        #expect(r.opened.titles.count == 2)
+        #expect(!r.keys.key(press(kVK_ANSI_P, "p", .command, in: window)))
+        #expect(r.opened.titles.count == 2)
+    }
+
+    @Test func anOpenShortcutThatIsALetterStaysTheFieldsToType() {
+        let r = rig()
+        let (window, _) = editing()
+        defer { window.orderOut(nil) }
+        r.hub.query = "format"
+        r.hub.selection = "i:1"
+        r.store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_O)), for: .openItem)
+        #expect(!r.keys.key(press(kVK_ANSI_O, "o", [], in: window)))
+        #expect(r.opened.titles.isEmpty)
+    }
+
+    @Test func aReboundOpenShortcutDoesNotOpenARowTheTypingFilteredOut() {
+        let r = rig()
+        let (window, _) = editing()
+        defer { window.orderOut(nil) }
+        r.hub.query = "no match"
+        r.hub.selection = "i:1"
+        r.store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_O), modifiers: .command), for: .openItem)
+        #expect(!r.keys.key(press(kVK_ANSI_O, "o", .command, in: window)))
+        #expect(r.opened.titles.isEmpty)
+    }
+
     // MARK: Focused controls
 
     @Test func aFocusedControlKeepsSpaceAndReturn() {

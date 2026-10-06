@@ -138,9 +138,13 @@ final class HubKeys {
 // MARK: Search field
 
 extension HubKeys {
-    /// A key while the search field has focus: Esc clears and ends the search, ↑↓ and ↩ walk and open the results;
-    /// everything else (typing, ⌫, Space, ⌘Z) is the field's own. nil leaves the key to the field.
+    /// A key while the search field has focus: Esc clears and ends the search, ↑↓ walk the results and ↩ or the
+    /// configured Open shortcut opens one; everything else (typing, ⌫, Space, ⌘Z) is the field's own. nil leaves the
+    /// key to the field.
     fileprivate func searchKey(_ event: NSEvent) -> Bool? {
+        // Open is the user's to rebind, ⌘O included, which the field would otherwise swallow with the other
+        // modifier combinations. A bare letter is still typed.
+        if Shortcut(event) == store.shortcut(.openItem), !typesText(event) { return openResult() }
         guard event.modifierFlags.intersection(Shortcut.relevant).isEmpty else { return nil }
         switch Int(event.keyCode) {
         case kVK_Escape:
@@ -149,15 +153,26 @@ extension HubKeys {
         case kVK_UpArrow, kVK_DownArrow:
             move(down: Int(event.keyCode) == kVK_DownArrow, in: targets())
         case kVK_Return:
-            // Only a row the results show: a pick the typing has since filtered out is not opened.
-            guard let selection = hub.selection, targets().contains(selection) else { return nil }
-            let id = String(selection.dropFirst(2))
-            if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) { store.open(item) }
-            else if selection.hasPrefix("a:") { store.openAgent(id) }
-            else { return nil }
+            return openResult()
         default:
             return nil
         }
         return true
+    }
+
+    /// Opens the pick, only if it is a row the results show: one the typing has since filtered out is not opened.
+    private func openResult() -> Bool? {
+        guard let selection = hub.selection, targets().contains(selection) else { return nil }
+        let id = String(selection.dropFirst(2))
+        if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) { store.open(item) }
+        else if selection.hasPrefix("a:") { store.openAgent(id) }
+        else { return nil }
+        return true
+    }
+
+    /// Whether a field would put this key in its text: a printable character without ⌃⌥⌘.
+    private func typesText(_ event: NSEvent) -> Bool {
+        guard !Shortcut(event).hasCommandLikeModifier, let typed = event.characters, !typed.isEmpty else { return false }
+        return typed.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }
     }
 }
