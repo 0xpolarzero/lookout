@@ -131,7 +131,7 @@ struct WorkingArc: View {
 }
 
 /// The arc itself, as `Pulse` renders it once to an image.
-private struct ArcShape: View {
+struct ArcShape: View {
     let size: CGFloat
     @Environment(\.resolved) private var resolved
 

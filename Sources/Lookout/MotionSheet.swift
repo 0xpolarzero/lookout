@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The working arc on tiles, for the `arcs` shots: one tile with and without it, and a row of twelve to compare how
-/// they breathe together. A snapshot draws every arc at full opacity (the loop belongs to Core Animation, which a
-/// snapshot does not run), so a shot shows the shape and the stroke, in the normal, Increase Contrast and Reduce
-/// Motion settings.
+/// The working arc on tiles, for the `arcs` shots: one tile with and without it, and the two ends of its heartbeat.
+/// A snapshot cannot show the loop (Core Animation runs it, and a snapshot draws the layer's resting value), so a shot
+/// shows the shape and the stroke, in the normal and Increase Contrast settings, and the arc at its dimmest, to check
+/// it still reads there. That every arc breathes in phase, and rests at full opacity under Reduce Motion, is
+/// `PulseLayers`' to prove, on the layers.
 struct MotionSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -15,9 +16,10 @@ struct MotionSheet: View {
                     tile(Text("🦊").font(.system(size: 14)))
                 }
             }
-            group("Twelve arcs, one phase") {
-                HStack(spacing: Theme.Space.md) {
-                    ForEach(0..<12, id: \.self) { _ in tile(Text("ab")) }
+            group("The heartbeat at its two ends") {
+                HStack(spacing: Theme.Space.lg) {
+                    tile(Text("ab"), level: Theme.Motion.heartbeat.from)
+                    tile(Text("ab"), level: Theme.Motion.heartbeat.to)
                 }
             }
         }
@@ -35,11 +37,18 @@ struct MotionSheet: View {
         }
     }
 
-    private func tile(_ face: some View, working: Bool = true) -> some View {
+    /// A tile with the arc: the real one, or (with a `level`) the arc frozen at that opacity.
+    private func tile(_ face: some View, working: Bool = true, level: Double? = nil) -> some View {
         face
             .font(Theme.Typography.tile)
             .foregroundStyle(Theme.text)
             .tile(Theme.Metrics.tile)
-            .overlay { WorkingArc(size: Theme.Metrics.tile, working: working) }
+            .overlay {
+                if let level {
+                    ArcShape(size: Theme.Metrics.tile).opacity(level)
+                } else {
+                    WorkingArc(size: Theme.Metrics.tile, working: working)
+                }
+            }
     }
 }

@@ -325,7 +325,7 @@ struct Shot {
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// Working arc
-///   arcs, arcs-contrast, arcs-reduce-motion (the arc on tiles, no hub)
+///   arcs, arcs-contrast (the arc on tiles, no hub)
 /// 1280×720, every edge
 ///   open-720, settings-720, repos-720, rest-sessions-12-720
 @MainActor
@@ -394,8 +394,7 @@ enum PlaygroundShots {
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
         // The working arc.
-        [Shot(name: "arcs", sheet: .arcs, size: Shot.arcs), Shot(name: "arcs-contrast", sheet: .arcs, size: Shot.arcs, environment: .contrast),
-         Shot(name: "arcs-reduce-motion", sheet: .arcs, size: Shot.arcs, environment: .motion)],
+        [Shot(name: "arcs", sheet: .arcs, size: Shot.arcs), Shot(name: "arcs-contrast", sheet: .arcs, size: Shot.arcs, environment: .contrast)],
         // A 1280×720 screen.
         Shot.edges("open-720") { $0.pinned = true; $0.size = Shot.hd },
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
