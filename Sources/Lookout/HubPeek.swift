@@ -26,8 +26,11 @@ enum ControlsRow: CaseIterable {
 }
 
 extension HubState {
-    /// Opens the controls peek for the keyboard and VoiceOver: first row highlighted, the keys acting on it.
+    /// The controls for the keyboard and VoiceOver: at rest, the peek, first row highlighted, the keys acting on it; kept
+    /// open, where the footer holds them, VoiceOver's cursor goes to the footer's first control. Either way it lands there.
     func showControls() {
+        moveVoiceOver(to: "h:controls")
+        if expanded { return }
         quiet = false
         cancelDwell()
         section = .controls
@@ -250,8 +253,8 @@ extension LookoutHub {
     /// What a peek's rows may take (their "+N more" included): the room left by its padding and `fixed`, its header and
     /// whatever else is always there. Never less than a whole row and the "+N more" under it: with less room than that
     /// below its first cell, the panel moves up (`placement`) rather than the rows being cut through.
-    func peekCap(_ section: HubSection, fixed: CGFloat) -> CGFloat {
-        max(peekRoom(section) - 2 * HubGeometry.lead - fixed, Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
+    func peekCap(_ section: HubSection, fixed: CGFloat, least: CGFloat = Theme.Metrics.twoLineRow + Theme.Metrics.pitch) -> CGFloat {
+        max(peekRoom(section) - 2 * HubGeometry.lead - fixed, least)
     }
 
     @ViewBuilder func peekContent(_ section: HubSection) -> some View {
@@ -292,7 +295,9 @@ extension LookoutHub {
     /// The sessions as the full view lists them, without their tiles: as many whole rows as fit, then New session.
     @ViewBuilder var peekAgents: some View {
         // Its header and the New session row are always there, and the notice when Claude's files are not.
-        let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store))
+        // A group's header, a whole row and the "+N more" under them are the least it can show.
+        let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store),
+                          least: SessionGroup.headerHeight + Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
         sessionsPeekHeader
         if noSessionsMatch { noSessionsLine }
         sessionsPeek(cap: cap)
@@ -307,37 +312,13 @@ extension LookoutHub {
         MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display, picked: picked == .keepOpen) {
             hub.perform(.keepOpen, store: store)
         }
+        .voiceOverTarget("h:controls", hub: hub)
         MenuRow(symbol: "books.vertical", title: "Repositories…", key: nil, picked: picked == .repositories) {
             hub.perform(.repositories, store: store)
         }
         MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,", picked: picked == .settings) { hub.perform(.settings, store: store) }
         Hairline().padding(.vertical, Theme.Space.xs)
-        syncLine { line in
-            HStack(spacing: Theme.Space.md) {
-                Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
-                Spacer(minLength: 0)
-                if !line.opensSettings {
-                    Button { store.refreshNow() } label: {
-                        HStack(spacing: Theme.Space.sm) {
-                            Text("Sync now").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
-                            Text(store.shortcut(.refresh).display).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)
-                        }
-                        .frame(minHeight: Theme.Metrics.iconButton)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .focusRing(Theme.Radius.small)
-                    .disabled(store.isSyncing)
-                    .accessibilityLabel("Sync now")
-                }
-            }
-            .padding(.horizontal, Theme.Metrics.rowPadding)
-            .frame(height: Theme.Metrics.menuRow)
-            // Picked by the keys: the whole line is the row, as the other rows are.
-            .background(Theme.Radius.shape(Theme.Radius.field).fill(picked == .sync ? Theme.Fill.selected : Theme.Fill.rest))
-            .focusRing(Theme.Radius.field, isFocused: picked == .sync)
-            .help(line.help)
-        }
+        ControlsSyncRow(store: store, picked: picked == .sync)
     }
 
     /// The pointer left the bar and its panel: close the panel (a moment later, so going from one to the other,
@@ -378,5 +359,40 @@ extension HubState {
     /// A peek's "+N more": keeps the hub open on that section, which then has all the room.
     func showAll(_ section: HubSection) {
         LookoutHub.animate(LookoutHub.refocus) { pinned = true; focus = section }
+    }
+}
+
+/// The controls peek's last row: how syncing is going, and Sync now. Its own view, so a poll redraws only this.
+struct ControlsSyncRow: View {
+    let store: Store
+    let picked: Bool
+
+    var body: some View {
+        SyncStatus(store: store) { line in
+            HStack(spacing: Theme.Space.md) {
+                Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
+                Spacer(minLength: 0)
+                if !line.opensSettings {
+                    Button { store.refreshNow() } label: {
+                        HStack(spacing: Theme.Space.sm) {
+                            Text("Sync now").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                            Text(store.shortcut(.refresh).display).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)
+                        }
+                        .frame(minHeight: Theme.Metrics.iconButton)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focusRing(Theme.Radius.small)
+                    .disabled(store.isSyncing)
+                    .accessibilityLabel("Sync now")
+                }
+            }
+            .padding(.horizontal, Theme.Metrics.rowPadding)
+            .frame(height: Theme.Metrics.menuRow)
+            // Picked by the keys: the whole line is the row, as the other rows are.
+            .background(Theme.Radius.shape(Theme.Radius.field).fill(picked ? Theme.Fill.selected : Theme.Fill.rest))
+            .focusRing(Theme.Radius.field, isFocused: picked)
+            .help(line.help)
+        }
     }
 }

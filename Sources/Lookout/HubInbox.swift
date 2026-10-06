@@ -108,6 +108,9 @@ extension Store {
     /// Whether review requests are on and the last search for them failed.
     var reviewRequestsFailing: Bool { settings.reviewRequests && reviewRequestsError != nil }
 
+    /// Whether review requests are on and the last search found only some of them.
+    var reviewRequestsPartial: Bool { settings.reviewRequests && reviewRequestsIncomplete }
+
     /// The cause to show when the list under `filter` is empty.
     func inboxEmpty(_ filter: InboxFilter, now: Date = Date()) -> InboxEmpty {
         if let replacement = inboxReplacement { return replacement }
@@ -116,7 +119,8 @@ extension Store {
         switch filter {
         case .needsYou:
             // Every source checked: the repositories (and the quota they need) and the review-request search.
-            let healthy = repoErrors.isEmpty && rateRemaining != 0 && !reviewRequestsFailing && !syncIsStale(now: now)
+            let healthy = repoErrors.isEmpty && rateRemaining != 0 && !reviewRequestsFailing && !reviewRequestsPartial
+                && !syncIsStale(now: now)
             return healthy ? .caughtUp : .nothingNew
         case .bots: return .botsQuiet
         case .done: return .doneEmpty
@@ -292,32 +296,36 @@ extension LookoutHub {
             if searchFoundNothing { EmptyBlock("No match") }
             else if searchGroups { quietLine("No items match") }
         } else {
-            switch store.inboxEmpty(hub.filter) {
-            case .signedOut:
-                EmptyBlock(title: "Can't sign in to GitHub", detail: "Lookout uses gh or your saved token.",
-                           symbol: "exclamationmark.circle.fill", symbolTint: AnyShapeStyle(Theme.red)) {
-                    BorderedButton("Open Settings") { hub.go(.settings) }
-                }
-            case .noRepos:
-                EmptyBlock(title: "Nothing watched yet", detail: "Add a repository to start.") {
-                    BorderedButton("Add a repository") { hub.go(.repos) }
-                }
-            case .firstSync:
-                EmptyBlock("Checking GitHub…")
-            case .caughtUp:
-                let bots = store.unreadCount(.bots)
-                Ticking(coarse: true) { now in
-                    EmptyBlock(title: "All caught up", detail: store.lastSync.map { "Checked \(agoPhrase($0, now: now))" }, symbol: "checkmark.circle") {
-                        if bots > 0 { InboxLink("\(bots) in Bots") { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = .bots } } }
-                    }
-                }
-            case .nothingNew:
-                EmptyBlock("Nothing new")
-            case .botsQuiet:
-                EmptyBlock("Bots are quiet")
-            case .doneEmpty:
-                EmptyBlock("Cleared items land here")
+            // Its own observation scope, on the minute clock: the cause is judged by the time it is drawn at, so "All caught
+            // up" goes when the sync gets stale, and a poll only redraws this block, not the hub.
+            Ticking(coarse: true) { now in emptyCause(store.inboxEmpty(hub.filter, now: now), now: now) }
+        }
+    }
+
+    @ViewBuilder private func emptyCause(_ cause: InboxEmpty, now: Date) -> some View {
+        switch cause {
+        case .signedOut:
+            EmptyBlock(title: "Can't sign in to GitHub", detail: "Lookout uses gh or your saved token.",
+                       symbol: "exclamationmark.circle.fill", symbolTint: AnyShapeStyle(Theme.red)) {
+                BorderedButton("Open Settings") { hub.go(.settings) }
             }
+        case .noRepos:
+            EmptyBlock(title: "Nothing watched yet", detail: "Add a repository to start.") {
+                BorderedButton("Add a repository") { hub.go(.repos) }
+            }
+        case .firstSync:
+            EmptyBlock("Checking GitHub…")
+        case .caughtUp:
+            let bots = store.unreadCount(.bots)
+            EmptyBlock(title: "All caught up", detail: store.lastSync.map { "Checked \(agoPhrase($0, now: now))" }, symbol: "checkmark.circle") {
+                if bots > 0 { InboxLink("\(bots) in Bots") { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = .bots } } }
+            }
+        case .nothingNew:
+            EmptyBlock("Nothing new")
+        case .botsQuiet:
+            EmptyBlock("Bots are quiet")
+        case .doneEmpty:
+            EmptyBlock("Cleared items land here")
         }
     }
 
@@ -407,11 +415,15 @@ struct InboxList: View {
         VStack(spacing: 0) {
             list
             if cut {
+                // Scrolled to the end the line stays, as the way back up (its room is kept, so the hub doesn't change height
+                // under the pointer).
                 if hub.inbox.hiddenBelow > 0 {
-                    InboxMoreRow(hidden: hub.inbox.hiddenBelow, action: showMore)
+                    InboxMoreRow(text: "+\(hub.inbox.hiddenBelow) more", spoken: plural(hub.inbox.hiddenBelow, "more item"),
+                                 hint: "Scrolls the list", action: showMore)
                 } else {
-                    // Scrolled to the end: the line's room stays, so the hub doesn't change height under the pointer.
-                    Color.clear.frame(height: Self.moreHeight)
+                    InboxMoreRow(text: "Back to top", spoken: "Back to top", hint: "Scrolls to the first item") {
+                        if let first = items.first { hub.requestScroll("i:" + first.id) }
+                    }
                 }
             }
         }
@@ -462,10 +474,12 @@ struct InboxList: View {
     private final class ScrollBox { var offset: CGFloat = 0 }
 }
 
-/// "+3 more", under a list that is cut short: `tertiary` text level with the rows' titles. A button, so it is on the
-/// Tab ring and VoiceOver can use it; it scrolls a page.
+/// "+3 more", under a list that is cut short, and "Back to top" once it is at the end: `tertiary` text level with the
+/// rows' titles. A button, so it is on the Tab ring and VoiceOver can use it; it scrolls a page, or to the first item.
 private struct InboxMoreRow: View {
-    let hidden: Int
+    let text: String
+    let spoken: String
+    let hint: String
     let action: () -> Void
     @Environment(\.resolved) private var resolved
     @FocusState private var focused: Bool
@@ -473,7 +487,7 @@ private struct InboxMoreRow: View {
 
     var body: some View {
         Button(action: action) {
-            Text("+\(hidden) more")
+            Text(text)
                 .font(Theme.Typography.meta)
                 .foregroundStyle(hover || focused ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(resolved.tertiary))
                 .padding(.leading, Theme.Metrics.rowPadding + Theme.Metrics.dotSlot + Theme.Metrics.avatar + Theme.Space.md)
@@ -486,8 +500,8 @@ private struct InboxMoreRow: View {
         .focusRing(Theme.Radius.small, isFocused: focused)
         .reportsControlFocus(focused)
         .onHover { hover = $0 }
-        .accessibilityLabel(plural(hidden, "more item"))
-        .accessibilityHint("Scrolls the list")
+        .accessibilityLabel(spoken)
+        .accessibilityHint(hint)
     }
 }
 

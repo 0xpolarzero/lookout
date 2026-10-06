@@ -912,3 +912,39 @@ import Testing
         #expect(hub.selection == nil)
     }
 }
+
+/// DESIGN.md 8: a poll flips `isSyncing` and sets `lastSync` every time, and must not redraw the hub's body (only the
+/// views that show the sync state, which read it in scopes of their own).
+@MainActor
+@Suite struct PollRedraws {
+    private let store = Store()
+    private let hub = HubState()
+    private let ui = UIState(persists: false, edge: .right)
+
+    private func bodyChanges(pinned: Bool, _ mutate: () -> Void) -> Bool {
+        hub.pinned = pinned
+        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: 700)
+        var changed = false
+        withObservationTracking { _ = view.body } onChange: { changed = true }
+        mutate()
+        return changed
+    }
+
+    init() {
+        Demo.populate(store, .agents)
+        store.agents.expanded = true
+    }
+
+    @Test(arguments: [false, true]) func aPollLeavesTheHubsBodyAlone(pinned: Bool) {
+        let changed = bodyChanges(pinned: pinned) {
+            store.isSyncing = true
+            store.isSyncing = false
+            store.lastSync = Date()
+        }
+        #expect(!changed)
+    }
+
+    @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
+        #expect(bodyChanges(pinned: true) { store.items = [] })
+    }
+}

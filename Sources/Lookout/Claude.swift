@@ -53,8 +53,9 @@ struct ClaudeTask: Hashable, Identifiable {
 
 enum Claude {
     static let bundleID = "com.anthropic.claudefordesktop"
-    static let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Claude", isDirectory: true)
+    /// The Claude app's data folder; `LOOKOUT_CLAUDE_ROOT` stands in for it (the idle gate watches an empty one).
+    static let root = ProcessInfo.processInfo.environment["LOOKOUT_CLAUDE_ROOT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Claude", isDirectory: true)
     static let sessionsDir = root.appendingPathComponent("claude-code-sessions", isDirectory: true)
     static let localStorageDir = root.appendingPathComponent("Local Storage/leveldb", isDirectory: true)
     /// A turn older than this with no summary is a session that died mid-turn, not one still working.

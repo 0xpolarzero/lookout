@@ -63,8 +63,37 @@ extension LookoutHub {
     }
 
     /// "Checked 2m ago", or the fault in its place: a button that checks now (or opens Settings to sign in).
-    var syncButton: some View {
-        syncLine { line in
+    var syncButton: some View { SyncButton(store: store, hub: hub) }
+}
+
+/// The sync state is read here, in views of their own: a poll flips `isSyncing` and `lastSync` every time, and that
+/// redraws these lines, not the hub (DESIGN.md 8).
+struct SyncStatus<Content: View>: View {
+    let store: Store
+    @ViewBuilder let content: (SyncLine) -> Content
+
+    /// Whether the sync line says how long ago it checked, and so has to follow the clock. A fault, "Checking…" and "Not
+    /// checked yet" name no time: they are drawn once, with nothing subscribed to the clock.
+    private var namesTime: Bool {
+        store.authError == nil && store.repoErrors.isEmpty && !store.reviewRequestsFailing && !store.isSyncing && store.lastSync != nil
+    }
+
+    /// The sync line for `content`, redrawn on the minute clock (which never starts the seconds one) only while it counts minutes.
+    var body: some View {
+        if namesTime {
+            Ticking(coarse: true) { content(SyncLine(store, now: $0)) }
+        } else {
+            content(SyncLine(store, now: Date()))
+        }
+    }
+}
+
+struct SyncButton: View {
+    let store: Store
+    let hub: HubState
+
+    var body: some View {
+        SyncStatus(store: store) { line in
             Button {
                 if line.opensSettings { hub.go(.settings) } else { store.refreshNow() }
             } label: {
@@ -81,50 +110,48 @@ extension LookoutHub {
             .help(line.help)
             .accessibilityLabel(line.text)
             .accessibilityHint(line.opensSettings ? "Opens Settings" : "Checks GitHub now")
+            .voiceOverTarget("h:controls", hub: hub)
         }
     }
+}
 
-    /// Whether the sync line says how long ago it checked, and so has to follow the clock. A fault, "Checking…" and "Not
-    /// checked yet" name no time: they are drawn once, with nothing subscribed to the clock.
-    private var syncNamesTime: Bool {
-        store.authError == nil && store.repoErrors.isEmpty && !store.isSyncing && store.lastSync != nil
-    }
-
-    /// The sync line for `content`, redrawn on the minute clock (which never starts the seconds one) only while it counts minutes.
-    @ViewBuilder func syncLine<Content: View>(@ViewBuilder _ content: @escaping (SyncLine) -> Content) -> some View {
-        if syncNamesTime {
-            Ticking(coarse: true) { content(syncLine(now: $0)) }
-        } else {
-            content(syncLine(now: Date()))
-        }
-    }
-
-    func syncLine(now: Date) -> SyncLine {
+extension SyncLine {
+    @MainActor init(_ store: Store, now: Date) {
         let refresh = "Check now  \(store.shortcut(.refresh).display)"
         if let error = store.authError {
-            return SyncLine(text: "Can't sign in to GitHub", color: AnyShapeStyle(Theme.red), help: error + "\nOpens Settings",
-                            opensSettings: true, isFault: true)
+            self.init(text: "Can't sign in to GitHub", color: AnyShapeStyle(Theme.red), help: error + "\nOpens Settings",
+                      opensSettings: true, isFault: true)
+            return
         }
         let failed = store.repoErrors.keys.sorted()
         if !failed.isEmpty {
-            return SyncLine(text: "\(plural(failed.count, "repository", "repositories")) didn't sync", color: AnyShapeStyle(Theme.secondary),
-                            help: failed.joined(separator: "\n") + "\n" + refresh, isFault: true)
+            self.init(text: "\(plural(failed.count, "repository", "repositories")) didn't sync", color: AnyShapeStyle(Theme.secondary),
+                      help: failed.joined(separator: "\n") + "\n" + refresh, isFault: true)
+            return
+        }
+        if store.reviewRequestsFailing {
+            self.init(text: "Review requests didn't sync", color: AnyShapeStyle(Theme.secondary),
+                      help: (store.reviewRequestsError ?? "") + "\n" + refresh, isFault: true)
+            return
         }
         if store.isSyncing {
-            return SyncLine(text: "Checking…", color: AnyShapeStyle(Theme.tertiary), help: "Checking GitHub")
+            self.init(text: "Checking…", color: AnyShapeStyle(Theme.tertiary), help: "Checking GitHub")
+            return
         }
         guard let last = store.lastSync else {
-            return SyncLine(text: store.me == nil ? "Connecting…" : "Not checked yet", color: AnyShapeStyle(Theme.tertiary), help: refresh)
+            self.init(text: store.me == nil ? "Connecting…" : "Not checked yet", color: AnyShapeStyle(Theme.tertiary), help: refresh)
+            return
         }
         let interval = store.settings.pollInterval
         if now.timeIntervalSince(last) > interval * 3 {
-            return SyncLine(text: "Not syncing", color: AnyShapeStyle(Theme.secondary),
-                            help: "Last checked at \(last.formatted(date: .omitted, time: .shortened)): check your connection or token\n" + refresh,
-                            isFault: true)
+            self.init(text: "Not syncing", color: AnyShapeStyle(Theme.secondary),
+                      help: "Last checked at \(last.formatted(date: .omitted, time: .shortened)): check your connection or token\n" + refresh,
+                      isFault: true)
+            return
         }
         let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))
-        return SyncLine(text: "Checked \(agoPhrase(last, now: now))", color: AnyShapeStyle(Theme.tertiary),
-                        help: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n" + refresh)
+        self.init(text: "Checked \(agoPhrase(last, now: now))", color: AnyShapeStyle(Theme.tertiary),
+                  help: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n" + refresh)
     }
 }
 

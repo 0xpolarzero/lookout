@@ -94,6 +94,9 @@ final class Store {
     /// Why the last search for review requests failed, if it did (a rate limit of its own bucket, say): the other
     /// source of the inbox, besides the repositories.
     var reviewRequestsError: String?
+    /// The last search for review requests ended without all of them (GitHub cut it short, or past ten pages): what it
+    /// found is real, but nothing can say the rest is empty. Cleared by the next complete search.
+    var reviewRequestsIncomplete = false
     var isSyncing = false
     var lastSync: Date?
     var rateRemaining: Int?
@@ -198,6 +201,15 @@ final class Store {
                 self.pickIcons()
             }
         }
+    }
+
+    /// What the app does besides drawing, on the demo's data (`--demo --lifecycle`, for the idle gate): polling, with every
+    /// request failing at once (nothing leaves the machine), and the Claude watchers and timers on whatever folder
+    /// `LOOKOUT_CLAUDE_ROOT` names.
+    func startLifecycle() {
+        gh.transport = { _ in throw URLError(.notConnectedToInternet) }
+        restartPolling()
+        watchClaude()
     }
 
     /// File events give near-instant updates: the sessions folder triggers a read of the sessions, the app's local
@@ -322,9 +334,12 @@ final class Store {
     }
 
     private var effectivePollInterval: TimeInterval {
-        let base = settings.pollInterval
-        if hubOpen { return min(base, 30) }
-        return ProcessInfo.processInfo.isLowPowerModeEnabled ? base * 2 : base
+        Self.pollInterval(base: settings.pollInterval, hubOpen: hubOpen, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+
+    /// How often to poll: the setting, at most 30 s while the hub is open, and doubled in Low Power Mode whichever it is.
+    nonisolated static func pollInterval(base: TimeInterval, hubOpen: Bool, lowPower: Bool) -> TimeInterval {
+        (hubOpen ? min(base, 30) : base) * (lowPower ? 2 : 1)
     }
 
     /// Sleeps in slices so a change (hub opening, wake, new interval) can cut it short.
@@ -717,8 +732,9 @@ final class Store {
         }
         if settings.reviewRequests {
             await syncReviewRequests()
-        } else if reviewRequestsError != nil {
-            reviewRequestsError = nil
+        } else {
+            if reviewRequestsError != nil { reviewRequestsError = nil }
+            if reviewRequestsIncomplete { reviewRequestsIncomplete = false }
         }
     }
 
@@ -993,6 +1009,7 @@ final class Store {
             return
         }
         if reviewRequestsError != nil { reviewRequestsError = nil }
+        if reviewRequestsIncomplete == complete { reviewRequestsIncomplete = !complete }
         applyReviewRequests(found, complete: complete)
     }
 
