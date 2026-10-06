@@ -79,7 +79,8 @@ enum Theme {
         /// Outlines of fields, switches and bordered buttons.
         var borderWidth: CGFloat { contrast ? 1.5 : 1 }
         var focusWidth: CGFloat { contrast ? 2 : 1.5 }
-        var arcWidth: CGFloat { contrast ? 2.5 : 2 }
+        /// The working ring: `secondary`, and `text` under Increase Contrast.
+        var workingRing: Color { contrast ? Theme.text : secondary }
 
         /// A white fill token, ×1.6 under Increase Contrast. A tinted fill is left alone: its glyph is the same hue, so
         /// a stronger fill would take the glyph's contrast down, not up (`Theme.Fill.tint`).

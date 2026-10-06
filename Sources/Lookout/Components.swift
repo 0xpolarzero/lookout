@@ -155,13 +155,13 @@ extension Theme {
         /// What a fade becomes under Reduce Motion.
         static let reduced = Animation.easeOut(duration: 0.10)
 
-        /// The working arc's breathing: the one repeating motion, run by Core Animation (a SwiftUI repeat is forbidden).
+        /// The working ring's breathing: the one repeating motion, run by Core Animation (a SwiftUI repeat is forbidden).
         struct Heartbeat: Equatable {
             let period: Double
             let from: Double
             let to: Double
         }
-        static let heartbeat = Heartbeat(period: 1.2, from: 1.0, to: 0.55)
+        static let heartbeat = Heartbeat(period: 1.2, from: 1.0, to: 0.4)
 
         /// The one place Reduce Motion is decided: fills and fades shorten to a cross-fade, anything spatial is
         /// instant (nothing translates, scales or springs).

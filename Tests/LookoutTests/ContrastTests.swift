@@ -110,27 +110,22 @@ import Testing
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
     }
 
-    @Test(arguments: [false, true]) func arcOverTheFacesAWorkingTileTakes(contrast: Bool) {
-        // The arc is the one mark of working that isn't colour, so it holds 3:1 over the neutral face (rest, and
-        // hovered or picked) at both ends of its heartbeat. A working tile is never tinted: amber is waiting, which
-        // carries no arc, and unread is a dot.
+    @Test(arguments: [false, true]) func ringOverTheSurfaceBesideAWorkingTile(contrast: Bool) {
+        // The ring is the one mark of working that isn't colour. It is drawn outside the tile, so it lands on the
+        // surface the bar sits on (the rail, or the strip's `bg`), never on the tile's face, and holds 3:1 there when
+        // it is at full opacity. At the trough of its heartbeat (DESIGN.md 10.1) `secondary` thins to about 2.5:1,
+        // which still reads as an outline next to a tile; Increase Contrast keeps 3:1 there too.
         let resolved = Theme.Resolved(contrast: contrast)
         let surfaces = surfaces(resolved)
         var failures: [String] = []
-        for level in [Theme.Motion.heartbeat.from, Theme.Motion.heartbeat.to] {
-            for name in ["tile", "selected"] {
-                let face = surfaces[name]!
-                let value = ratio(over(Theme.text.opacity(level), face), face)
-                if value < 3 { failures.append("arc at \(level) on \(name): \(String(format: "%.2f", value))") }
-            }
+        for name in ["bg", "rail"] {
+            let surface = surfaces[name]!
+            let full = ratio(over(resolved.workingRing.opacity(Theme.Motion.heartbeat.from), surface), surface)
+            if full < 3 { failures.append("ring at full opacity on \(name): \(String(format: "%.2f", full))") }
+            let trough = ratio(over(resolved.workingRing.opacity(Theme.Motion.heartbeat.to), surface), surface)
+            if trough < (contrast ? 3 : 2) { failures.append("ring at its trough on \(name): \(String(format: "%.2f", trough))") }
         }
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
-    }
-
-    @Test func theArcWouldFailOnTheAccentFill() {
-        // Why a working tile keeps its neutral face when unread: white on the accent is 2.7:1 at full opacity.
-        let accent = over(Theme.accent, components(Theme.bg).rgb)
-        #expect(ratio(over(Theme.text, accent), accent) < 3)
     }
 
     @Test func tintedFillsAreNotMultiplied() {

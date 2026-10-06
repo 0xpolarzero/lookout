@@ -227,8 +227,8 @@ enum ShotSelection {
 enum ShotSheet {
     /// The design system's components, each in its states (`ComponentSheet`).
     case components
-    /// The working arc on tiles (`MotionSheet`).
-    case arcs
+    /// The working ring on tiles (`MotionSheet`).
+    case rings
 }
 
 /// One screenshot: the playground in a given state, rendered offscreen to `<name>.png`. Add one by adding a line to
@@ -237,8 +237,8 @@ struct Shot {
     static let standard = CGSize(width: 1280, height: 820)
     /// A 1280×720 screen: the hub must fit its edge without overflowing.
     static let hd = CGSize(width: 1280, height: 720)
-    /// The arcs sheet: a few rows of tiles.
-    static let arcs = CGSize(width: 480, height: 160)
+    /// The rings sheet: a few rows of tiles.
+    static let rings = CGSize(width: 480, height: 160)
 
     var name: String
     var edge = DockEdge.right
@@ -329,8 +329,8 @@ struct Shot {
 ///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
 ///   peek-inbox-low-720, peek-ci-low-720 (sessions off), peek-agents-low-720 (bar at 0.9, on the sides)
 ///   open-low-sessions-off-720, open-low-no-ci-720 (bar at 0.8, sessions off, on the sides)
-/// Working arc
-///   arcs, arcs-contrast (the arc on tiles, no hub)
+/// Working ring
+///   rings, rings-contrast (the ring on tiles, no hub)
 /// 1280×720, every edge, plus on right and top
 ///   rest-sessions-waiting-20-720 and peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
 /// Frozen order, right and top
@@ -510,8 +510,8 @@ enum PlaygroundShots {
         Shot.edges("settings-sync-fault", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.scenario = .syncFault },
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
-        // The working arc.
-        [Shot(name: "arcs", sheet: .arcs, size: Shot.arcs), Shot(name: "arcs-contrast", sheet: .arcs, size: Shot.arcs, environment: .contrast)],
+        // The working ring.
+        [Shot(name: "rings", sheet: .rings, size: Shot.rings), Shot(name: "rings-contrast", sheet: .rings, size: Shot.rings, environment: .contrast)],
         // Where the bar rests, rest beside kept open: low on the sides it must not move; along the top and bottom a
         // strip too near the end is moved by the least, and a centred one keeps its leading edge.
         Shot.edges("rest-low", on: .sides) { $0.position = 0.7 },
@@ -804,7 +804,7 @@ enum PlaygroundShots {
         let content: AnyView
         switch shot.sheet {
         case .components: content = AnyView(ComponentSheet())
-        case .arcs: content = AnyView(MotionSheet())
+        case .rings: content = AnyView(MotionSheet())
         case nil:
             content = AnyView(PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
                 .environment(\.previewTip, shot.tip)

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Gate 1 of DESIGN.md section 8: idle is 0%. Launches the release build on the demo data (`--demo agents`: working
-# sessions, so the arcs are breathing), lets it settle, then reads the process's cumulative CPU time at the start and
+# sessions, so the rings are breathing), lets it settle, then reads the process's cumulative CPU time at the start and
 # end of a window and asserts the average stays under the limit, once with the bar at rest and once kept open
-# (`--open`). WindowServer's share over the same window is printed apart: it draws the arcs, and is not part of the
+# (`--open`). WindowServer's share over the same window is printed apart: it draws the rings, and is not part of the
 # verdict. This puts the bar on screen for about two minutes, so it is for the final gate, not for every change.
 #
 #   scripts/idle-cpu.sh                 build (release) and measure both

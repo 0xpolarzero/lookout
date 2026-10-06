@@ -99,7 +99,7 @@ final class PulseView: NSView {
     private var rendered: (key: PulseKey, size: CGSize, scale: CGFloat)?
     private var cgImage: CGImage?
 
-    /// The images already rendered, by what they show: every arc of a size and appearance is the same picture.
+    /// The images already rendered, by what they show: every ring of a size and appearance is the same picture.
     private static var images: [ImageKey: CGImage] = [:]
     private struct ImageKey: Hashable {
         let key: PulseKey

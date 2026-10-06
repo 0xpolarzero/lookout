@@ -4,11 +4,11 @@ import SwiftUI
 // A session's tile, and the cell every piece of the bar sits in.
 
 /// What a session's tile says besides its letters (DESIGN.md 4.1). Each is a shape before it is a colour: a solid
-/// amber tile, an arc, a dot. Waiting never shows an arc; working and unread show both.
+/// amber tile, a ring, a dot. Waiting never shows a ring; working and unread show both.
 struct TileMarks: Equatable {
     /// Stopped on you (a question, a plan) or finished with something for you: the whole tile turns amber.
     var waiting = false
-    /// Answering, or finished with a subagent or command still running: an arc around the tile.
+    /// Answering, or finished with a subagent or command still running: a ring around the tile.
     var working = false
     /// Finished and not looked at: a dot on its corner.
     var unread = false
@@ -77,8 +77,8 @@ struct StatusTile: View {
             .overlay {
                 if resolved.differentiate, marks.waiting { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) }
             }
-            .overlay { if marks.working { WorkingArc(size: size) } }
-            .overlay(alignment: .topTrailing) { if marks.unread { UnreadDot(onRail: onRail).offset(x: 3, y: -3) } }
+            .overlay { if marks.working { WorkingRing(size: size) } }
+            .overlay(alignment: .topTrailing) { if marks.unread { UnreadDot(onRail: onRail).offset(x: 5, y: -5) } }
             .brightness(marks.waiting && hovering ? 0.06 : 0)
     }
 
@@ -93,8 +93,9 @@ struct StatusTile: View {
     }
 }
 
-/// The unread mark: a 7pt accent dot with a 1.5pt halo in the surface's own colour, so it reads against the tile it
-/// overlaps; under Differentiate Without Colour a 1pt white ring too.
+/// The unread mark: a 7pt accent dot on the corner of the tile's working ring (where it would be), with a 1.5pt halo in
+/// the surface's own colour, so it reads against the tile it overlaps; under Differentiate Without Colour a 1pt white
+/// ring too.
 private struct UnreadDot: View {
     let onRail: Bool
     @Environment(\.resolved) private var resolved
@@ -226,34 +227,40 @@ struct BarTile: View {
     }
 }
 
-/// The working mark: a 270° arc hugging the tile's edge, 1pt in, that breathes with the heartbeat while Core
-/// Animation runs it (see `Pulse`: every arc is in phase, none runs while the window is hidden). Nothing at all
-/// when not `working`, so a tile can carry it unconditionally. Static at full opacity under Reduce Motion. A
-/// state mark for sighted users only: the tile's own accessibility value says "working".
-struct WorkingArc: View {
+/// The working mark (DESIGN.md 10.1): a full outline round the tile, 1.5pt, drawn 2pt outside it and concentric with
+/// it, that breathes with the heartbeat while Core Animation runs it (see `Pulse`: every ring is in phase, none runs
+/// while the window is hidden). Nothing at all when not `working`, so a tile can carry it unconditionally. Static at
+/// full opacity under Reduce Motion. A state mark for sighted users only: the tile's own accessibility value says
+/// "working".
+struct WorkingRing: View {
+    static let width: CGFloat = 1.5
+    /// Between the tile's edge and the ring's.
+    static let gap: CGFloat = 2
+    /// From the tile's edge to the ring's outer one.
+    static let reach = gap + width
+
     var size: CGFloat = Theme.Metrics.tile
     var working = true
 
     var body: some View {
         if working {
-            Pulse(id: size) { ArcShape(size: size) }
-                .frame(width: size, height: size)
+            Pulse(id: size) { RingShape(size: size) }
+                .frame(width: size + 2 * Self.reach, height: size + 2 * Self.reach)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         }
     }
 }
 
-/// The arc itself, as `Pulse` renders it once to an image.
-struct ArcShape: View {
+/// The ring itself, as `Pulse` renders it once to an image.
+struct RingShape: View {
     let size: CGFloat
     @Environment(\.resolved) private var resolved
 
     var body: some View {
-        // The stroke's outer edge sits 1pt inside the tile's.
-        Tile.shape(size).inset(by: 1 + resolved.arcWidth / 2)
-            .trim(from: 0, to: 0.75)
-            .stroke(Theme.text, style: StrokeStyle(lineWidth: resolved.arcWidth, lineCap: .round))
-            .frame(width: size, height: size)
+        // The outer edge's radius is the tile's plus the ring's reach: the two are concentric.
+        Theme.Radius.shape(size * Tile.ratio + WorkingRing.reach).inset(by: WorkingRing.width / 2)
+            .stroke(resolved.workingRing, lineWidth: WorkingRing.width)
+            .frame(width: size + 2 * WorkingRing.reach, height: size + 2 * WorkingRing.reach)
     }
 }

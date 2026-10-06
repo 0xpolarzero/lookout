@@ -3,7 +3,7 @@ import QuartzCore
 import Testing
 @testable import Lookout
 
-/// Every working arc breathes in phase: a loop starts at a multiple of its cycle on the shared media clock, whenever
+/// Every working ring breathes in phase: a loop starts at a multiple of its cycle on the shared media clock, whenever
 /// it was added.
 @Suite struct PulsePhase {
     private let cycle = 2.0 * Theme.Motion.heartbeat.period
@@ -110,7 +110,7 @@ import Testing
     }
 }
 
-/// Which sessions carry the arc: busy ones, never one waiting for you, however it waits.
+/// Which sessions carry the ring: busy ones, never one waiting for you, however it waits.
 @Suite struct WorkingMark {
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
     private let task = ClaudeTask(id: "t", kind: .command, title: "swift test", since: Date(timeIntervalSince1970: 2_000_000_000))

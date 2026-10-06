@@ -109,7 +109,7 @@ import Testing
         return s
     }
 
-    @Test func tileMarksAreShapesAndWaitingNeverShowsAnArc() {
+    @Test func tileMarksAreShapesAndWaitingNeverShowsARing() {
         let s = store([session("blocked", blocked: true), session("done"), session("busy", running: true)])
         for id in ["blocked", "done", "busy"] { s.agents.entries[s.agents.entries.firstIndex { $0.id == id }!].unread = true }
         let rows = Dictionary(uniqueKeysWithValues: s.allAgentRows.map { ($0.id, $0.tileMarks) })
