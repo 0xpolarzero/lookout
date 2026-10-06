@@ -106,6 +106,21 @@ import Testing
         #expect(Shortcut(keyCode: UInt16(kVK_Return)).menuShortcut == KeyboardShortcut(.return, modifiers: []))
     }
 
+    @Test func specialKeysMapByName() {
+        #expect(Shortcut(keyCode: UInt16(kVK_LeftArrow)).menuShortcut == KeyboardShortcut(.leftArrow, modifiers: []))
+        #expect(Shortcut(keyCode: UInt16(kVK_PageDown), modifiers: [.command]).menuShortcut == KeyboardShortcut(.pageDown, modifiers: .command))
+        #expect(Shortcut(keyCode: UInt16(kVK_Home)).menuShortcut == KeyboardShortcut(.home, modifiers: []))
+        #expect(Shortcut(keyCode: UInt16(kVK_ANSI_KeypadEnter)).menuShortcut == KeyboardShortcut(.return, modifiers: []))
+        #expect(Shortcut(keyCode: UInt16(kVK_ForwardDelete)).menuShortcut == KeyboardShortcut(.deleteForward, modifiers: []))
+    }
+
+    @Test func aKeyWithNoMenuEquivalentIsNotATranslatedLetter() {
+        // F1 is not "f", Page Up is not "p", a cleared binding is nothing.
+        #expect(Shortcut(keyCode: UInt16(kVK_F1)).menuShortcut == nil)
+        #expect(Shortcut(keyCode: UInt16(kVK_F10), modifiers: [.shift]).menuShortcut == nil)
+        #expect(Shortcut.unassigned.menuShortcut == nil)
+    }
+
     @Test func modifierTapsAndMouseButtonsHaveNone() {
         #expect(Shortcut(keyCode: 54).menuShortcut == nil)
         #expect(Shortcut.mouse(3).menuShortcut == nil)

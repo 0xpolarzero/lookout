@@ -87,6 +87,12 @@ struct Shortcut: Codable, Hashable {
         101: "F9", 109: "F10", 103: "F11", 111: "F12",
     ]
 
+    /// The character a printable key types in the current layout, lowercased; nil for a named key or one with no character.
+    static func character(_ code: UInt16) -> Character? {
+        guard named[code] == nil, case let name = keyName(code).lowercased(), name.count == 1 else { return nil }
+        return name.first
+    }
+
     /// Label of a key in the current keyboard layout (so ⌃⌥L shows as such on AZERTY too).
     static func keyName(_ code: UInt16) -> String {
         if let name = named[code] { return name }

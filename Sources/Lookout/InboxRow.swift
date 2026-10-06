@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 // An inbox item: its row, its context menu and what VoiceOver says about it.
@@ -326,18 +327,28 @@ private func spokenAgo(_ date: Date, now: Date = Date()) -> String {
 // MARK: - Context menu
 
 extension Shortcut {
-    /// The key equivalent a menu item shows for this shortcut; nil for combinations SwiftUI has no name for.
+    /// The key equivalent a menu item shows for this shortcut; nil for combinations SwiftUI has no name for (a cleared one,
+    /// the function keys, a mouse button or a modifier alone).
     var menuShortcut: KeyboardShortcut? {
-        guard !isModifierTap, mouseButton == nil else { return nil }
-        let key: KeyEquivalent? = switch keyCode {
-        case 36: .return
-        case 49: .space
-        case 51: .delete
-        case 48: .tab
-        case 53: .escape
-        default: Self.keyName(keyCode).lowercased().first.map { KeyEquivalent($0) }
+        guard !isUnassigned, !isModifierTap, mouseButton == nil else { return nil }
+        let key: KeyEquivalent? = switch Int(keyCode) {
+        case kVK_Return, kVK_ANSI_KeypadEnter: .return
+        case kVK_Space: .space
+        case kVK_Delete: .delete
+        case kVK_ForwardDelete: .deleteForward
+        case kVK_Tab: .tab
+        case kVK_Escape: .escape
+        case kVK_LeftArrow: .leftArrow
+        case kVK_RightArrow: .rightArrow
+        case kVK_UpArrow: .upArrow
+        case kVK_DownArrow: .downArrow
+        case kVK_Home: .home
+        case kVK_End: .end
+        case kVK_PageUp: .pageUp
+        case kVK_PageDown: .pageDown
+        default: Self.character(keyCode).map { KeyEquivalent($0) }
         }
-        var modifiers: EventModifiers = []
+        var modifiers: SwiftUI.EventModifiers = []
         if flags.contains(.command) { modifiers.insert(.command) }
         if flags.contains(.option) { modifiers.insert(.option) }
         if flags.contains(.control) { modifiers.insert(.control) }
