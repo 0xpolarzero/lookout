@@ -170,6 +170,21 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
 extension Store {
     var hasCustomShortcuts: Bool { !(settings.shortcuts ?? [:]).isEmpty }
 
+    /// The action that already holds `shortcut`, which `action` can't take as well.
+    func shortcutConflict(_ shortcut: Shortcut, for action: ShortcutAction) -> ShortcutAction? {
+        guard !shortcut.isUnassigned else { return nil }
+        return ShortcutAction.allCases.first { $0 != action && self.shortcut($0) == shortcut }
+    }
+
+    /// Back to the default, unless another action has taken that key since: the reset would give both the same key,
+    /// and the system would drop one of them. Returns the action in the way, with nothing changed.
+    @discardableResult
+    func resetShortcut(for action: ShortcutAction) -> ShortcutAction? {
+        if let other = shortcutConflict(action.defaultShortcut, for: action) { return other }
+        setShortcut(nil, for: action)
+        return nil
+    }
+
     /// Every shortcut back to its default. The global ones are unregistered first and registered again after: with
     /// the two swapped, registering one default while the other still holds its key would be refused, and Settings
     /// would show a default that does nothing.
@@ -245,7 +260,10 @@ struct ShortcutRecorder: View {
             HStack(spacing: Theme.Space.sm) {
                 if customized && !recording {
                     IconButton(symbol: "arrow.uturn.backward", help: "Reset", label: "Reset \(action.title) to default",
-                               detail: "Back to \(action.defaultShortcut.display)") { store.setShortcut(nil, for: action) }
+                               detail: "Back to \(action.defaultShortcut.display)") {
+                        error = store.resetShortcut(for: action).map { "Already used by \($0.title)" }
+                        if let error { AccessibilityNotification.Announcement(error).post() }
+                    }
                 } else {
                     Color.clear.frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
                 }
@@ -270,6 +288,7 @@ struct ShortcutRecorder: View {
             recording = true
             error = preview.recorderError
         }
+        .onChange(of: current) { error = nil }
         .onDisappear(perform: stop)
     }
 
@@ -328,7 +347,7 @@ struct ShortcutRecorder: View {
     }
 
     private func accept(_ shortcut: Shortcut) {
-        if let other = ShortcutAction.allCases.first(where: { $0 != action && store.shortcut($0) == shortcut }) {
+        if let other = store.shortcutConflict(shortcut, for: action) {
             error = "Already used by \(other.title)"
         } else {
             store.setShortcut(shortcut, for: action)

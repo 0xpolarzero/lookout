@@ -138,6 +138,30 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
+    @MainActor @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keepDefault = ShortcutAction.togglePanel.defaultShortcut
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        store.setShortcut(moved, for: .togglePanel)
+        // Open on sessions takes the key Keep open used to have: nothing holds it, so the recorder allows it.
+        #expect(store.shortcutConflict(keepDefault, for: .sessionSwitcher) == nil)
+        store.setShortcut(keepDefault, for: .sessionSwitcher)
+        registrar.refused = []
+        #expect(store.resetShortcut(for: .togglePanel) == .sessionSwitcher)
+        #expect(store.shortcut(.togglePanel) == moved)
+        #expect(store.shortcut(.sessionSwitcher) == keepDefault)
+        #expect(registrar.registered == [1: moved, 2: keepDefault])
+        #expect(registrar.refused.isEmpty)
+        // Once the other action lets go of it, the reset goes through.
+        store.setShortcut(nil, for: .sessionSwitcher)
+        #expect(store.resetShortcut(for: .togglePanel) == nil)
+        #expect(store.shortcut(.togglePanel) == keepDefault)
+        #expect(registrar.registered == [1: keepDefault, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        withExtendedLifetime(globals) {}
+    }
+
     @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
         let store = Store()
         let registrar = FakeRegistrar()
