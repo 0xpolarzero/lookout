@@ -95,10 +95,11 @@ extension Store {
         return ([parts.joined(separator: ", ")] + faults).joined(separator: ". ")
     }
 
-    /// Each repository's state that counts (CI on, checked, not muted): what a change is told from.
+    /// Each repository's state that counts (CI on, checked): what a change is told from. A muted one is `.none` (nothing to
+    /// say of it), so the change that ends its mute, even to the state it was muted at, is told like any other.
     var ciStates: [String: CIState] {
         var states: [String: CIState] = [:]
-        for entry in ciList.entries where entry.checked && !entry.muted { states[entry.id] = entry.state }
+        for entry in ciList.entries where entry.checked { states[entry.id] = entry.muted ? CIState.none : entry.state }
         return states
     }
 

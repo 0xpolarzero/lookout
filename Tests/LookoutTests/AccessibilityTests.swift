@@ -466,4 +466,16 @@ enum AccessibilityTree {
         // A repository with no earlier answer is not a change.
         #expect(store.ciChangeAnnouncement(from: [:], to: store.ciStates) == nil)
     }
+
+    @Test func aChangeThatEndsAMuteIsSaidEvenToTheStateItWasMutedAt() {
+        store.ci["ziglang/zig"]?.state = .pending
+        store.mutedCI["ziglang/zig"] = store.ci["ziglang/zig"]?.sha ?? ""
+        let muted = store.ciStates
+        // Muting is no change to tell.
+        #expect(store.ciChangeAnnouncement(from: muted, to: store.ciStates) == nil)
+        // The running CI fails, which ends the mute.
+        store.mutedCI["ziglang/zig"] = nil
+        store.ci["ziglang/zig"]?.state = .failure
+        #expect(store.ciChangeAnnouncement(from: muted, to: store.ciStates) == "CI failing: zig")
+    }
 }
