@@ -512,7 +512,7 @@ enum AccessibilityTree {
         store.ci["ziglang/zig"]?.state = .failure
         store.ci["ziglang/zig"]?.failing = ["Linux / test"]
         store.ci["apple/swift-format"]?.state = .success
-        states["ziglang/zig"] = .pending
+        states["ziglang/zig"] = .state(.pending)
         #expect(store.ciChangeAnnouncement(from: states, to: store.ciStates) == "CI failing: zig. CI passing: swift-format")
         // A repository with no earlier answer is not a change.
         #expect(store.ciChangeAnnouncement(from: [:], to: store.ciStates) == nil)
@@ -528,5 +528,17 @@ enum AccessibilityTree {
         store.mutedCI["ziglang/zig"] = nil
         store.ci["ziglang/zig"]?.state = .failure
         #expect(store.ciChangeAnnouncement(from: muted, to: store.ciStates) == "CI failing: zig")
+    }
+
+    @Test func aRepositoryGoingToNoRunsIsSaidAndAMuteIsNotNoRuns() {
+        store.ci["ziglang/zig"]?.state = .pending
+        let before = store.ciStates
+        store.ci["ziglang/zig"]?.state = .none
+        store.ci["ziglang/zig"]?.failing = []
+        #expect(store.ciChangeAnnouncement(from: before, to: store.ciStates) == "No CI runs: zig")
+        // Muting a repository is not it having no runs.
+        store.ci["ziglang/zig"]?.state = .pending
+        store.mutedCI["ziglang/zig"] = store.ci["ziglang/zig"]?.sha ?? ""
+        #expect(store.ciChangeAnnouncement(from: before, to: store.ciStates) == nil)
     }
 }

@@ -111,25 +111,33 @@ extension Store {
         return ([parts.joined(separator: ", ")] + faults).joined(separator: ". ")
     }
 
-    /// Each repository's state that counts (CI on, checked): what a change is told from. A muted one is `.none` (nothing to
-    /// say of it), so the change that ends its mute, even to the state it was muted at, is told like any other.
-    var ciStates: [String: CIState] {
-        var states: [String: CIState] = [:]
-        for entry in ciList.entries where entry.checked { states[entry.id] = entry.muted ? CIState.none : entry.state }
+    /// Each repository's state that counts (CI on, checked): what a change is told from. A muted one is `.muted` (nothing to
+    /// say of it, and no state of its own: "No runs" is one), so the change that ends its mute, even to the state it was muted
+    /// at, is told like any other.
+    var ciStates: [String: CIVoice] {
+        var states: [String: CIVoice] = [:]
+        for entry in ciList.entries where entry.checked { states[entry.id] = entry.muted ? .muted : .state(entry.state) }
         return states
     }
 
     /// What CI changing under an open hub says, by repository and what each became: "CI failing: swift-format and zig.
     /// CI passing: lookout". Only repositories that were already known (a first answer is not a change). nil when none.
-    func ciChangeAnnouncement(from old: [String: CIState], to new: [String: CIState]) -> String? {
+    func ciChangeAnnouncement(from old: [String: CIVoice], to new: [String: CIVoice]) -> String? {
         let list = ciList
-        let words: [(CIState, String)] = [(.failure, "failing"), (.pending, "running"), (.success, "passing")]
-        let parts = words.compactMap { state, word -> String? in
-            let names = list.entries.filter { new[$0.id] == state && old[$0.id] != nil && old[$0.id] != state }.map { list.title($0.repo) }
-            return names.isEmpty ? nil : "CI \(word): \(CISpeech.list(names))"
+        let words: [(CIState, String)] = [(.failure, "CI failing"), (.pending, "CI running"), (.success, "CI passing"), (.none, "No CI runs")]
+        let parts = words.compactMap { state, phrase -> String? in
+            let names = list.entries.filter { new[$0.id] == .state(state) && old[$0.id] != nil && old[$0.id] != .state(state) }
+                .map { list.title($0.repo) }
+            return names.isEmpty ? nil : "\(phrase): \(CISpeech.list(names))"
         }
         return parts.isEmpty ? nil : parts.joined(separator: ". ")
     }
+}
+
+/// How a repository's CI is told of: by its state, or muted.
+enum CIVoice: Equatable {
+    case muted
+    case state(CIState)
 }
 
 /// What Lookout says to VoiceOver on its own, from one place: the hub's summary, CI changes, notices that just appeared.
@@ -159,7 +167,7 @@ struct HubAnnouncer: View {
     let store: Store
     let hub: HubState
     /// The CI states before the changes now waiting to be said, and the wait that gathers them.
-    @State private var ciBase: [String: CIState]?
+    @State private var ciBase: [String: CIVoice]?
     @State private var ciWait: Task<Void, Never>?
 
     var body: some View {
@@ -186,7 +194,7 @@ struct HubAnnouncer: View {
     }
 
     /// Repositories that change within a moment of one another are told together, by name.
-    private func ciChanged(from old: [String: CIState]) {
+    private func ciChanged(from old: [String: CIVoice]) {
         guard hub.expanded, Announce.voiceOverIsOn else { return }
         if ciBase == nil { ciBase = old }
         ciWait?.cancel()
