@@ -36,7 +36,8 @@ extension ItemState {
 }
 
 /// An inbox item on two lines, 44pt in every tab (see DESIGN.md 4.4):
-/// `[dot][avatar] title … age / kind · meta … action`. The one action (Done, or Restore) shows on hover, on the
+/// `[dot][avatar] title … age / kind · meta … action`; from `wideFrom` points of row, on the title's baseline:
+/// `[dot][avatar] title kind · meta … age action`. The one action (Done, or Restore) shows on hover, on the
 /// keyboard's pick and on VoiceOver focus; everything else is in the context menu, a key and the
 /// accessibility actions. A click opens the item on GitHub and reads it.
 struct InboxRow: View {
@@ -47,8 +48,13 @@ struct InboxRow: View {
     /// Set by the list that holds the row, so the "Unread" rotor can find it.
     var rotor: Namespace.ID?
     @State private var hover = false
+    /// The row is wide enough (a focused inbox along the top or bottom) for the meta to join the title's line.
+    @State private var wide = false
     @AccessibilityFocusState private var spoken: Bool
     @Environment(\.resolved) private var resolved
+
+    /// How wide a row is before its meta moves up beside the title (the focused inbox, 560 with its insets).
+    static let wideFrom: CGFloat = 520
 
     /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
     private var selected: Bool { hub.selection == key }
@@ -58,11 +64,20 @@ struct InboxRow: View {
     private var unread: Bool { item.state == .unread }
     private var isOpen: Bool { item.state.isOpen }
     private var low: Bool { store.isLowPriority(item) }
+    /// What the keyboard picked (not the pointer): its detail shows as a tip, which `.help` can't do for a key.
+    private var keyboardPicked: Bool { selected && hub.keyboardSelection?.id == key }
+    /// The one date the row's age is counted from, shown and spoken: when it arrived, or in Done when it was cleared.
+    private var ageDate: Date { isOpen ? item.createdAt : item.clearedAt ?? item.createdAt }
 
     var body: some View {
+        // The age and what VoiceOver says of it come from the same minute, so they never part.
+        Ticking(coarse: true) { now in row(now) }
+    }
+
+    private func row(_ now: Date) -> some View {
         let showsAction = hover || selected || spoken
-        ZStack(alignment: .bottomTrailing) {
-            Button { store.open(item) } label: { label }
+        return ZStack(alignment: wide ? .trailing : .bottomTrailing) {
+            Button { store.open(item) } label: { label(now) }
                 .buttonStyle(.plain)
                 .focusable(false)
                 .help(tooltip)
@@ -70,16 +85,18 @@ struct InboxRow: View {
                 // In the room line 2 keeps for it (`secondLine`), level with it and with the age above.
                 action
                     .padding(.trailing, Theme.Metrics.rowPadding)
-                    .padding(.bottom, 1)
+                    .padding(.bottom, wide ? 0 : 1)
                     .transition(.opacity)
             }
         }
+        .onGeometryChange(for: Bool.self) { $0.size.width >= Self.wideFrom } action: { if wide != $0 { wide = $0 } }
+        .tip(item.title, tipDetail, focused: keyboardPicked, hover: false)
         .onHover(perform: hovered)
         .motion(Theme.Motion.hover, value: showsAction)
         .contextMenu { InboxRowMenu(item: item, store: store, low: low) }
         // One element: the visible action is reached through the actions below.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel)
+        .accessibilityLabel(spokenLabel(now))
         .accessibilityValue(isOpen ? (unread ? "Unread" : "") : item.state.doneLabel)
         .accessibilityHint("Opens on GitHub. More actions available.")
         .accessibilityAddTraits(.isButton)
@@ -95,15 +112,21 @@ struct InboxRow: View {
         .modifier(RotorEntry(id: item.id, namespace: rotor))
     }
 
-    private var label: some View {
+    private func label(_ now: Date) -> some View {
         HStack(alignment: .top, spacing: 0) {
-            dot
+            dot.padding(.top, wide ? 8 : 0)
             Avatar(url: item.avatar, name: item.author)
                 .padding(.top, 4)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Theme.Space.hair) {
-                firstLine
-                secondLine
+            Group {
+                if wide {
+                    wideLine(now)
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Space.hair) {
+                        firstLine(now)
+                        secondLine
+                    }
+                }
             }
             .padding(.leading, Theme.Space.md)
         }
@@ -122,20 +145,53 @@ struct InboxRow: View {
             .accessibilityHidden(true)
     }
 
-    private var firstLine: some View {
+    private func firstLine(_ now: Date) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
-            Text(item.title)
-                .font(unread ? Theme.Typography.title : Theme.Typography.body)
-                .foregroundStyle(Theme.text)
-                .lineLimit(1)
+            title
             Spacer(minLength: 0)
-            // In Done, when it was cleared; elsewhere, when it arrived.
-            Ticking(coarse: true) { now in
-                Text(shortAgo(isOpen ? item.createdAt : item.clearedAt ?? item.createdAt, now: now))
-                    .font(Theme.Typography.numeral)
-                    .foregroundStyle(Theme.secondary)
-                    .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
+            age(now)
+        }
+    }
+
+    private var title: some View {
+        Text(item.title)
+            .font(unread ? Theme.Typography.title : Theme.Typography.body)
+            .foregroundStyle(Theme.text)
+            .lineLimit(1)
+    }
+
+    /// In Done, when it was cleared; elsewhere, when it arrived.
+    private func age(_ now: Date) -> some View {
+        Text(shortAgo(ageDate, now: now))
+            .font(Theme.Typography.numeral)
+            .foregroundStyle(Theme.secondary)
+            .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
+    }
+
+    /// The wide row: everything on the title's baseline, the meta after it, then the age and the action's room (always
+    /// kept). The title keeps its whole text while it fits with the meta (the kind's word goes first); with a title too long
+    /// for that, the meta keeps its room and the title is what is cut.
+    private func wideLine(_ now: Date) -> some View {
+        ViewThatFits(in: .horizontal) {
+            wide(now, kind: true, titleCut: false)
+            wide(now, kind: false, titleCut: false)
+            wide(now, kind: false, titleCut: true)
+        }
+        .frame(height: Self.contentHeight)
+    }
+
+    private func wide(_ now: Date, kind: Bool, titleCut: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
+            if titleCut { title } else { title.fixedSize() }
+            HStack(spacing: Theme.Space.xs) {
+                glyph(item.kind.rowSymbol)
+                meta(kind: kind)
             }
+            .foregroundStyle(Theme.tertiary)
+            .layoutPriority(1)
+            Spacer(minLength: 0)
+            age(now)
+            Color.clear.frame(width: Theme.Metrics.iconButton, height: 1)
         }
     }
 
@@ -185,9 +241,9 @@ struct InboxRow: View {
     private var action: some View {
         Group {
             if isOpen {
-                IconButton(symbol: "checkmark", help: "Done", detail: store.shortcut(.discard).display) { store.done(item) }
+                IconButton(symbol: "checkmark", help: "Done", detail: store.shortcut(.discard).display, tabStop: false) { store.done(item) }
             } else {
-                IconButton(symbol: "arrow.uturn.backward", help: "Restore", detail: store.shortcut(.discard).display) { store.restore(item) }
+                IconButton(symbol: "arrow.uturn.backward", help: "Restore", detail: store.shortcut(.discard).display, tabStop: false) { store.restore(item) }
             }
         }
     }
@@ -207,16 +263,19 @@ struct InboxRow: View {
         if unread { store.markRead(item) } else { store.markUnread(item) }
     }
 
-    /// The title and the first lines of the comment.
-    private var tooltip: String {
-        ([item.title] + item.snippet.split(separator: "\n", omittingEmptySubsequences: true).prefix(3).map(String.init))
-            .joined(separator: "\n")
+    /// The first lines of the comment.
+    private var tipDetail: String? {
+        let lines = item.snippet.split(separator: "\n", omittingEmptySubsequences: true).prefix(3).map(String.init)
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
+    /// The title and the first lines of the comment.
+    private var tooltip: String { ([item.title] + (tipDetail.map { [$0] } ?? [])).joined(separator: "\n") }
+
     /// "Review comment from andrewrk on zig #21877: std.Io: add vectored reads to File, 3 minutes ago".
-    private var spokenLabel: String {
+    private func spokenLabel(_ now: Date) -> String {
         let name = item.repo.split(separator: "/").last.map(String.init) ?? item.repo
-        return "\(item.kind.label) from \(item.author) on \(name) #\(item.number): \(item.title), \(spokenAgo(item.createdAt))"
+        return "\(item.kind.label) from \(item.author) on \(name) #\(item.number): \(item.title), \(spokenAgo(ageDate, now: now))"
     }
 }
 
