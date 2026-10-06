@@ -220,7 +220,7 @@ struct SessionGroupHeader: View {
                     .font(Theme.Typography.label)
                     .foregroundStyle(group.kind == .waiting ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
                     .lineLimit(1)
-                if folder != nil { Text("\(group.rows.count)").font(Theme.Typography.numeral).foregroundStyle(Theme.tertiary) }
+                if folder != nil { Text("\(group.total)").font(Theme.Typography.numeral).foregroundStyle(Theme.tertiary) }
                 Spacer(minLength: 0)
                 if group.kind == .newActivity { keepAll }
             }

@@ -324,6 +324,14 @@ import Testing
         #expect(s.agents.entries[0].icon == nil && s.agents.entries[0].rejectedIcons == ["hammer"])
     }
 
+    @Test func aPeekCutsRowsButNotTheCountOfTheirProject() {
+        let s = store((0..<5).map { session("x\($0)", folder: "/code/x", minutesAgo: Double($0 + 1)) }, kept: (0..<5).map { "x\($0)" })
+        // Room for the header, two rows and "+N more".
+        let peek = SessionGroup.peek(s.sessionGroups, cap: SessionGroup.headerHeight + 2 * Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
+        #expect(peek.groups[0].rows.count == 2 && peek.hidden == 3)
+        #expect(peek.groups[0].total == 5)
+    }
+
     @Test func newSessionOffersTheMostRecentProjectFirst() {
         let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1),
                        session("c", folder: nil, minutesAgo: 0)])

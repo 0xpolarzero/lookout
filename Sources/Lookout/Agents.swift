@@ -224,7 +224,16 @@ struct SessionGroup: Identifiable {
     }
 
     var kind: Kind
+    /// The rows listed: a peek or New activity's cap leaves some out.
     var rows: [AgentRow]
+    /// How many sessions the group has, however many of them are listed.
+    let total: Int
+
+    init(kind: Kind, rows: [AgentRow]) {
+        self.kind = kind
+        self.rows = rows
+        total = rows.count
+    }
 
     var id: String {
         switch kind {
