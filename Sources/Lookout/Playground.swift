@@ -319,7 +319,7 @@ struct Shot {
 ///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
 ///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-review-requests-cut, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
 ///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none, inbox-search-sessions, inbox-search-sessions-only,
-///   inbox-search-from-focus, inbox-many, inbox-peek-many,
+///   inbox-search-from-focus, inbox-search-focus-agents, inbox-many, inbox-peek-many,
 ///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
 /// A page open: settings-sync-fault and settings-review-requests-cut on right and top (the gear lit, with its badge)
@@ -553,6 +553,8 @@ enum PlaygroundShots {
             $0.query = "format"
             $0.afterOpen = { _, _, hub in hub.beginSearch() }
         },
+        // Sessions focused while searching: the inbox is only its header, and the search field its sessions are filtered by stays.
+        Shot.edges("inbox-search-focus-agents", on: .rightAndTop) { $0.pinned = true; $0.focus = .agents; $0.query = "lcu" },
         Shot.edges("inbox-undo", on: .rightAndTop) {
             $0.pinned = true
             $0.setup = { store, _, _ in if let first = store.list(.needsYou).first { store.done(first) } }

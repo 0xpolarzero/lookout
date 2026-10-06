@@ -33,6 +33,10 @@ extension LookoutHub {
     /// Between sections: a hairline across, with its room.
     var openDivider: some View { Hairline().padding(.vertical, Theme.Space.xs) }
 
+    /// The inbox is only a header with its counts: another section has the room, and no search is being read there (its
+    /// field stays up while a focused Sessions lists what it found).
+    var foldsInboxHeader: Bool { shrunk(.inbox) && !(hub.inbox.searchOpen || searching) }
+
     /// The inbox as a header with its counts, when another section has the room.
     var collapsedInboxHeader: some View {
         let needs = store.unreadCount(.needsYou)
@@ -170,7 +174,7 @@ extension LookoutHub {
             // Inbox: its header level with its cell, the tile where it is at rest.
             VStack(alignment: .leading, spacing: 0) {
                 railRow(alignment: .top, cell: { openInboxCell }, detail: {
-                    headerSlot(.inbox, owns: shrunk(.inbox)) { shrunk(.inbox) ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
+                    headerSlot(.inbox, owns: foldsInboxHeader) { foldsInboxHeader ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
                 })
                 if !shrunk(.inbox) { sideInbox(cap: caps.inbox) }
             }
@@ -291,7 +295,7 @@ extension LookoutHub {
         .padding(.trailing, HubGeometry.lead)
         let inbox = HStack(spacing: 0) {
             openInboxCell
-            headerSlot(.inbox, owns: shrunk(.inbox)) { shrunk(.inbox) ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
+            headerSlot(.inbox, owns: foldsInboxHeader) { foldsInboxHeader ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
                 .padding(.leading, Theme.Metrics.contentEdge - Self.inset - Theme.Space.md)
                 .padding(.trailing, Self.inset)
         }

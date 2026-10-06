@@ -182,6 +182,17 @@ enum AccessibilityTree {
         #expect(lookout.first("AXButton", "CI") != nil)
     }
 
+    @Test func theSearchFieldStaysWhenSessionsAreFocusedOnItsResults() async throws {
+        // ⌘3 while searching: the inbox folds to its header, but the field the sessions are filtered by is still there.
+        for edge in [DockEdge.right, .top] {
+            let lookout = try root(try await AccessibilityTree.render(edge: edge) { _, hub in
+                hub.pinned = true; hub.query = "zig"; hub.focus = .agents
+            })
+            let field = try #require(lookout.all.first { $0.role == "AXTextField" })
+            #expect(field.label == "Search inbox and sessions" && field.value == "zig")
+        }
+    }
+
     @Test func settingsAndRepositoriesAreNamedPagesWithTheirTabsAndHeadings() async throws {
         let settings = try root(try await AccessibilityTree.render { _, hub in hub.go(.settings) })
         let page = try #require(settings.children.first { $0.label == "Settings" })
