@@ -50,22 +50,20 @@ struct Shortcut: Codable, Hashable {
         if isUnassigned { return "None" }
         if let tap = Self.tapKeys[keyCode] { return tap.name }
         if let button = mouseButton {
-            let mods = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
-                + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
             let name = switch button {
             case 2: "Middle click"
             case 3: "Mouse back"
             case 4: "Mouse forward"
             default: "Mouse button \(button + 1)"
             }
-            return mods + name
+            return modifierSymbols + name
         }
-        var s = ""
-        if flags.contains(.control) { s += "⌃" }
-        if flags.contains(.option) { s += "⌥" }
-        if flags.contains(.shift) { s += "⇧" }
-        if flags.contains(.command) { s += "⌘" }
-        return s + Self.keyName(keyCode)
+        return modifierSymbols + Self.keyName(keyCode)
+    }
+
+    private var modifierSymbols: String {
+        (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
+            + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
     }
 
     /// Modifier keys that work as a shortcut tapped on their own, by side: key code → device-dependent flag bit.
@@ -343,7 +341,7 @@ struct ShortcutRecorder: View {
         var body: some View {
             Text(recording ? "Press keys…" : shortcut.display)
                 .font(Theme.Typography.control)
-                .foregroundStyle(recording ? AnyShapeStyle(Theme.text) : shortcut.isUnassigned ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(Theme.text))
+                .foregroundStyle(!recording && shortcut.isUnassigned ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(Theme.text))
                 .padding(.horizontal, Theme.Space.lg)
                 .frame(minWidth: 76, minHeight: Theme.Metrics.button)
                 .overlay(Theme.Radius.shape(Theme.Radius.tile)
