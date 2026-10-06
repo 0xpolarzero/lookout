@@ -287,7 +287,7 @@ struct Shot {
 /// Baseline, every edge
 ///   rest, open, settings, search, peek-inbox, peek-ci, peek-agents, peek-controls
 /// Baseline, right and top
-///   repos, tip, picked, focus-inbox, focus-agents
+///   repos, tip, picked (also left), focus-inbox, focus-agents, peek-controls-keys (the menu VoiceOver asked for)
 /// Inbox, right and top
 ///   open-bots, open-done, search-none, search-sessions, focus-ci
 /// Causes, open on right and top; at rest on every edge (the bar's own state)
@@ -307,9 +307,9 @@ struct Shot {
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// Position: `rest-`, `open-` plus
-///   low (a third of the way down is not low: 0.7, on the sides), clamped (0.9) and centred (0.5), on the top and bottom
+///   low (0.7, on the sides), clamped (0.9) and centred (0.5, on the top and bottom); the other shots rest at 0.3
 /// 1280×720, every edge
-///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-agents-720,
+///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-ci-many-ci-720, peek-agents-720,
 ///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
 @MainActor
 enum PlaygroundShots {

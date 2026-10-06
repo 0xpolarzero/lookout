@@ -102,6 +102,20 @@ import Testing
             return CGRect(x: box.minX / scale, y: box.minY / scale, width: (box.width) / scale, height: (box.height) / scale)
         }
 
+        /// How far above `y` (points) the nearest row with anything drawn over the surface colour is, within `x`.
+        func gapAbove(y: CGFloat, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> CGFloat? {
+            let xs = Int(x.lowerBound * scale)...Int(x.upperBound * scale)
+            var py = Int(y * scale) - 1
+            while py >= 0 {
+                for px in xs {
+                    let p = pixel(px, py)
+                    if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return y - CGFloat(py) / scale }
+                }
+                py -= 1
+            }
+            return nil
+        }
+
         /// The hub's first opaque column along a row (its leading edge when it hangs from the top or bottom).
         func firstOpaque(row y: CGFloat) -> CGFloat? {
             let py = Int(y * scale)
@@ -208,6 +222,19 @@ import Testing
         #expect(open.frame.maxX == screen.width - HubGeometry.inset, "\(edge): opens to \(open.frame)")
         #expect(open.frame.minX < rest.frame.minX && open.frame.width > rest.frame.width, "\(edge): \(rest.frame) then \(open.frame)")
         expectInside(open.frame, edge: edge, screen: screen, "\(edge) 0.9")
+    }
+
+    @Test func theBottomColumnsRestOnTheStripTheirHeadersAreIn() {
+        // The inbox has fewer rows than the sessions need: its rows still sit on their header, not a band above it.
+        let screen = CGSize(width: 1280, height: 800)
+        let (_, open) = render(edge: .bottom, position: 0.3, screen: screen)
+        let stripTop = open.frame.maxY - Theme.Metrics.bar
+        let surface = open.pixel(Int((open.frame.minX + 100) * open.scale), Int((open.frame.minY + 4) * open.scale))
+        // A few points above the hairline over the strip, in each column.
+        let left = open.gapAbove(y: stripTop - 3, x: (open.frame.minX + 24)...(open.frame.minX + 380), surface: surface)
+        let right = open.gapAbove(y: stripTop - 3, x: (open.frame.minX + 460)...(open.frame.maxX - 24), surface: surface)
+        #expect(left != nil && left! < 16, "inbox rows end \(left ?? -1)pt above the strip")
+        #expect(right != nil && right! < 16, "session rows end \(right ?? -1)pt above the strip")
     }
 
     @Test(arguments: [DockEdge.right, .left, .top, .bottom])

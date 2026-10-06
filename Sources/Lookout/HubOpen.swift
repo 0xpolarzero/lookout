@@ -253,7 +253,9 @@ extension LookoutHub {
     @ViewBuilder func openStripBody(columns: Bool, width: CGFloat) -> some View {
         let room = maxLength - Self.cell - Theme.Metrics.pitch - 2 * HubGeometry.lead - 2
         if columns {
-            HStack(alignment: .top, spacing: 0) {
+            // Both columns hug the strip their headers are in: along the bottom the shorter one rests on it, so its
+            // rows stay next to their header and any void is at the far end, beside the footer.
+            HStack(alignment: edge == .bottom ? .bottom : .top, spacing: 0) {
                 leftColumn(room: room).frame(width: HubGeometry.leftColumn)
                 Hairline(axis: .vertical, inset: 12).frame(width: HubGeometry.gutter)
                 rightColumn(room: room).frame(width: width - HubGeometry.leftColumn - HubGeometry.gutter)
