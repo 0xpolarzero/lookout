@@ -262,16 +262,21 @@ final class GlobalShortcuts {
         self.perform = perform
     }
 
-    /// Registers both and follows the store from here on.
+    /// Registers both and follows the store from here on. A key another app already holds is said once, here: at launch
+    /// nothing else tells anyone it does nothing.
     func start() {
-        for action in ShortcutAction.allCases where action.isGlobal { register(action) }
+        for action in ShortcutAction.allCases where action.isGlobal && !register(action) { announceRefusal(action) }
         store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) ?? true }
         store.onAgentsEnabledChange = { [weak self] _ in
             guard let self, !self.register(.sessionSwitcher) else { return }
             // Turning the extension on is what registers it, and nothing on screen says it did not take: the recorder only does
             // in Settings.
-            Announce.say("\(ShortcutAction.sessionSwitcher.title): \(store.shortcut(.sessionSwitcher).display) is used by another app, so it does nothing")
+            self.announceRefusal(.sessionSwitcher)
         }
+    }
+
+    private func announceRefusal(_ action: ShortcutAction) {
+        Announce.say("\(action.title): \(store.shortcut(action).display) is used by another app, so it does nothing")
     }
 
     /// `shortcut` is what the store has just set, or its current one. `false` when the system refused it, which the store
