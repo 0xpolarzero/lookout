@@ -401,8 +401,8 @@ struct SettingsView: View {
                 BorderedButton(updater.phase == .available ? "Download and install" : "Try again") { updater.advance() }
             case .ready:
                 BorderedButton("Restart to update") { updater.install() }
-            case .downloading(let fraction):
-                DownloadBar(fraction: fraction)
+            case .downloading:
+                DownloadBar(fraction: updater.fraction)
             case .installing:
                 EmptyView()
             case .idle:
@@ -421,7 +421,7 @@ struct SettingsView: View {
         let version = updater.release?.version ?? ""
         switch updater.phase {
         case .available: return "Version \(version) is available"
-        case .downloading(let fraction): return "Downloading \(version)… \(Int(fraction * 100))%"
+        case .downloading: return "Downloading \(version)… \(Int(updater.fraction * 100))%"
         case .ready: return "Version \(version) is ready to install"
         case .installing: return "Installing…"
         case .failed(let message): return message

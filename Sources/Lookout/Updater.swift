@@ -13,7 +13,8 @@ final class Updater {
     enum Phase: Equatable {
         case idle
         case available
-        case downloading(Double)
+        /// How far along it is is `Updater.fraction`, not part of the phase: the phase changes a few times, the fraction many.
+        case downloading
         /// Verified and unpacked, waiting for a restart.
         case ready
         case installing
@@ -30,8 +31,11 @@ final class Updater {
     static let repo = "0xpolarzero/lookout"
     static let interval: TimeInterval = 3600
 
-    private(set) var phase: Phase = .idle
-    private(set) var release: Release?
+    private(set) var phase: Phase = .idle { didSet { refreshPill() } }
+    private(set) var release: Release? { didSet { refreshPill() } }
+    /// The download's progress in whole percents (0...1). Read only by the views that draw it, so the hub, which reads
+    /// `showsInPill`, is not redrawn as it moves (DESIGN.md 8).
+    private(set) var fraction = 0.0
     private(set) var checking = false
     private(set) var lastCheck: Date?
     /// Why the last check failed (only surfaced when you asked for it).
@@ -48,7 +52,7 @@ final class Updater {
     @ObservationIgnored private var progress: NSKeyValueObservation?
     @ObservationIgnored private var wake: NSObjectProtocol?
     /// Downloads started by a check rather than a click fail quietly and are tried again at the next check.
-    @ObservationIgnored private var quiet = false
+    @ObservationIgnored private var quiet = false { didSet { refreshPill() } }
 
     let current: String
     private var forceRelease: Bool
@@ -66,13 +70,19 @@ final class Updater {
 
     /// Releases download in the background: the pill shows a button once one is ready to restart into, or when
     /// it's left to you (found by a check that doesn't download, or a background download that failed).
-    var showsInPill: Bool {
-        guard release != nil else { return false }
+    /// Stored and set only when it flips, so what reads it (every layout of the hub) is not invalidated by a phase that
+    /// changes without changing it.
+    private(set) var showsInPill = false
+
+    private func refreshPill() {
+        let shows: Bool
         switch phase {
-        case .available, .ready, .installing, .failed: return true
-        case .downloading: return !quiet
-        case .idle: return false
+        case _ where release == nil: shows = false
+        case .available, .ready, .installing, .failed: shows = true
+        case .downloading: shows = !quiet
+        case .idle: shows = false
         }
+        if shows != showsInPill { showsInPill = shows }
     }
 
     /// Checks shortly after launch, every hour and on wake from sleep.
@@ -155,7 +165,8 @@ final class Updater {
     /// Downloads and verifies the release; the pill then offers a restart.
     func download() {
         guard let release, work == nil else { return }
-        phase = .downloading(0)
+        fraction = 0
+        phase = .downloading
         work = Task {
             defer { work = nil; progress = nil }
             do {
@@ -178,6 +189,14 @@ final class Updater {
         }
     }
 
+    /// The download's progress as it is reported (many times a second): kept in whole percents, which is all that is drawn, and
+    /// each change redraws only the views that read `fraction`.
+    func report(_ completed: Double) {
+        let percent = (completed * 100).rounded(.down) / 100
+        guard phase == .downloading, fraction != percent else { return }
+        fraction = percent
+    }
+
     private func fetch(_ url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let task = URLSession.shared.downloadTask(with: url) { file, response, error in
@@ -195,10 +214,8 @@ final class Updater {
                 }
             }
             progress = task.progress.observe(\.fractionCompleted) { [weak self] p, _ in
-                let fraction = p.fractionCompleted
-                Task { @MainActor in
-                    if case .downloading = self?.phase { self?.phase = .downloading(fraction) }
-                }
+                let completed = p.fractionCompleted
+                Task { @MainActor in self?.report(completed) }
             }
             task.resume()
         }
@@ -283,12 +300,13 @@ final class Updater {
     }
 
     /// Screenshots and demos: show a release in a given phase without touching the network.
-    func preview(_ phase: Phase, version: String = "0.3.0") {
+    func preview(_ phase: Phase, version: String = "0.3.0", fraction: Double = 0) {
         let page = URL(string: "https://github.com/\(Self.repo)/releases/tag/v\(version)")!
         forceRelease = true
         release = Release(version: version, zip: page, checksum: nil, page: page)
         lastCheck = Date().addingTimeInterval(-600)
         self.phase = phase
+        self.fraction = fraction
     }
 
     // MARK: Pill actions
@@ -334,7 +352,8 @@ enum UpdateCheck {
             guard updater.phase == .available else { exit(updater.checkError == nil ? 0 : 1) }
             updater.download()
             var shown = -1
-            while case .downloading(let fraction) = updater.phase {
+            while updater.phase == .downloading {
+                let fraction = updater.fraction
                 if Int(fraction * 10) != shown { shown = Int(fraction * 10); print("downloading", "\(shown * 10)%") }
                 try? await Task.sleep(for: .milliseconds(100))
             }

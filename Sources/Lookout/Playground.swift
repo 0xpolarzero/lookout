@@ -658,7 +658,7 @@ enum PlaygroundShots {
         },
         Shot.edges("settings-update-idle", on: [.right]) { settingsShot(&$0, .idle) },
         Shot.edges("settings-update-available", on: [.right]) { settingsShot(&$0, .available) },
-        Shot.edges("settings-update-downloading", on: [.right]) { settingsShot(&$0, .downloading(0.42)) },
+        Shot.edges("settings-update-downloading", on: [.right]) { settingsShot(&$0, .downloading, fraction: 0.42) },
         Shot.edges("settings-update-ready", on: [.right]) { settingsShot(&$0, .ready) },
         Shot.edges("settings-update-failed", on: [.right]) { settingsShot(&$0, .failed("Couldn't verify the download: the checksum doesn't match")) },
         Shot.edges("settings-notifications-off", on: [.right]) {
@@ -749,10 +749,10 @@ enum PlaygroundShots {
     ].flatMap { $0 }
 
     /// The General pane with the updater in a phase (a release, as the dev build is never one).
-    private static func settingsShot(_ shot: inout Shot, _ phase: Updater.Phase) {
+    private static func settingsShot(_ shot: inout Shot, _ phase: Updater.Phase, fraction: Double = 0) {
         shot.pinned = true
         shot.page = .settings
-        shot.setup = { store, _, _ in store.updater.preview(phase, version: "0.5.0") }
+        shot.setup = { store, _, _ in store.updater.preview(phase, version: "0.5.0", fraction: fraction) }
     }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.

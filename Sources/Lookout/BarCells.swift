@@ -117,7 +117,7 @@ struct UpdateBarCell: View {
         let version = updater.release?.version ?? ""
         BarCell(axis: axis, name: Self.name(updater.phase, version: version), value: value, hint: help.title, help: help,
                 show: show, actions: menuActions(version), action: { updater.advance() }) { hovering in
-            Face(phase: updater.phase, hovering: hovering)
+            Face(updater: updater, hovering: hovering)
         }
         .contextMenu {
             if let page = updater.release?.page { Button("What's new in \(version)") { NSWorkspace.shared.open(page) } }
@@ -142,7 +142,7 @@ struct UpdateBarCell: View {
 
     private var value: String {
         switch updater.phase {
-        case .downloading(let fraction): "Downloading, \(Int(fraction * 100)) percent"
+        case .downloading: "Downloading, \(Int(updater.fraction * 100)) percent"
         case .installing: "Installing"
         case .failed(let error): "Failed: \(error)"
         case .ready: "Ready"
@@ -153,7 +153,7 @@ struct UpdateBarCell: View {
     private var help: BarHelp {
         let version = updater.release?.version ?? ""
         return switch updater.phase {
-        case .downloading(let fraction): BarHelp(title: "Downloading Lookout \(version)… \(Int(fraction * 100))%")
+        case .downloading: BarHelp(title: "Downloading Lookout \(version)… \(Int(updater.fraction * 100))%")
         case .ready: BarHelp(title: "Lookout \(version) is ready", detail: "Click to restart into it")
         case .installing: BarHelp(title: "Installing Lookout \(version)…")
         case .failed(let error): BarHelp(title: "Update failed: \(error)", detail: "Click to try again")
@@ -162,16 +162,17 @@ struct UpdateBarCell: View {
     }
 
     private struct Face: View {
-        let phase: Updater.Phase
+        let updater: Updater
         let hovering: Bool
         @Environment(\.resolved) private var resolved
+        private var phase: Updater.Phase { updater.phase }
 
         var body: some View {
             let ready = phase == .ready
             ZStack {
-                if case .downloading(let fraction) = phase {
+                if phase == .downloading {
                     Circle().stroke(resolved.fill(Theme.Fill.selected), lineWidth: 1.5).frame(width: 22, height: 22)
-                    Circle().trim(from: 0, to: max(0.03, fraction))
+                    Circle().trim(from: 0, to: max(0.03, updater.fraction))
                         .stroke(Theme.accent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .frame(width: 22, height: 22)

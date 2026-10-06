@@ -988,6 +988,19 @@ import Testing
         if pinned { #expect(bodyChanges(pinned: true) { store.rateRemaining = 0 }) }
     }
 
+    @Test(arguments: [false, true]) func aBackgroundDownloadsProgressLeavesTheHubsBodyAlone(pinned: Bool) {
+        // The hourly check downloads silently: its progress arrives many times a second and only the views that draw it
+        // (the update cell, Settings) read it. The hub reads whether the update shows, which it does not change.
+        store.updater.preview(.downloading, version: "0.5.0")
+        let changed = bodyChanges(pinned: pinned) {
+            for completed in stride(from: 0.0, through: 1.0, by: 0.013) { store.updater.report(completed) }
+        }
+        #expect(!changed)
+        #expect(store.updater.fraction == 0.98)
+        // The phase changing is another matter: the cell turns green, and the hub makes room for it.
+        #expect(bodyChanges(pinned: true) { store.updater.preview(.ready, version: "0.5.0") })
+    }
+
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
         #expect(bodyChanges(pinned: true) { store.items = [] })
     }

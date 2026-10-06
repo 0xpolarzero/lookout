@@ -210,7 +210,7 @@ enum Demo {
             store.updater.preview(.available, version: "0.5.0")
         case .updateDownloading:
             agents(store, now)
-            store.updater.preview(.downloading(0.42), version: "0.5.0")
+            store.updater.preview(.downloading, version: "0.5.0", fraction: 0.42)
         case .updateReady:
             agents(store, now)
             store.updater.preview(.ready, version: "0.5.0")
