@@ -828,6 +828,22 @@ import Testing
         #expect(!hub.pinned)
     }
 
+    @Test func aSectionThatIsNotThereCannotBeFocusedOrKeepItsFocus() {
+        var sessionsOn = true
+        hub.offers = { $0 != .agents || sessionsOn }
+        hub.focus = .agents
+        #expect(hub.focus == .agents)
+        // Claude is turned off with Sessions focused: Inbox and CI get their room back.
+        sessionsOn = false
+        hub.reconcileFocus()
+        #expect(hub.focus == nil)
+        // ⌘3, a header or a bar cell asking for it is turned down, and what was focused stays.
+        hub.focus = .ci
+        hub.toggleFocus(.agents)
+        hub.focus = .agents
+        #expect(hub.focus == .ci)
+    }
+
     @Test func endingTheSearchEndsTheFieldAsWellAsTheQuery() {
         hub.query = "swift"
         hub.beginSearch()

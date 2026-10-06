@@ -158,6 +158,7 @@ final class HubController {
         let edge = arguments.firstIndex(of: "--edge").flatMap { arguments.dropFirst($0 + 1).first }.flatMap(DockEdge.init(rawValue:))
         ui = demo ? UIState(persists: false, edge: edge ?? .right) : UIState()
         keys = HubKeys(store: store, ui: ui, hub: hub)
+        hub.offers = { [unowned store] in $0 != .agents || store.agents.enabled }
         // The screen you're looking at: the one with the mouse.
         screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
         window = PillPanel(size: NSSize(width: 100, height: 100))

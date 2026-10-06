@@ -136,6 +136,8 @@ final class HubState {
     /// In the full view, the section given all the room it needs; the others shrink to their header (and counts).
     var focus: HubSection? {
         didSet {
+            // A section that isn't there (Sessions with the extension off) can't be given the room.
+            if let focus, !offers(focus) { self.focus = oldValue; return }
             // A pick in a section that just shrank is no longer a row the keys may act on.
             if let selection, !isVisible(selection) { self.selection = nil; keyboardSelection = nil }
             // CI isn't drawn while there is a query, and the inbox, shrunk to its header, would hide the field it is typed in:
@@ -149,6 +151,15 @@ final class HubState {
                 passingBeforeFocus = nil
             }
         }
+    }
+
+    /// Whether a section exists to be focused: the app says (Sessions is the extension's), a bare state offers them all.
+    @ObservationIgnored var offers: (HubSection) -> Bool = { _ in true }
+
+    /// A section went away while it was focused: the others get their room back.
+    func reconcileFocus() {
+        guard let focus, !offers(focus) else { return }
+        LookoutHub.animate(LookoutHub.refocus) { self.focus = nil }
     }
 
     /// The query and the field it is typed in, both: what closing the hub, by key or by leaving, and a focused CI end.
@@ -326,6 +337,7 @@ struct LookoutHub: View {
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
         .background(SessionFreeze(store: store, hub: hub))
+        .background(SectionAvailability(store: store, hub: hub))
         .background(HubAnnouncer(store: store, hub: hub))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lookout")

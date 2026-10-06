@@ -214,3 +214,15 @@ struct SessionFreeze: View {
         hub.frozenSessions = store.barSlots
     }
 }
+
+/// The Sessions section going away (Claude turned off in Settings) while it is the focused one: the others get their room
+/// back, instead of Inbox and CI staying folded to their headers. From a view of its own, so only this body reads the switch.
+struct SectionAvailability: View {
+    let store: Store
+    let hub: HubState
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .onChange(of: store.agents.enabled) { hub.reconcileFocus() }
+    }
+}
