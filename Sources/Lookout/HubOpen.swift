@@ -42,7 +42,7 @@ extension LookoutHub {
 
     /// What the sides' full view takes besides its lists: its header and footer, the dividers, the update row, the padding
     /// at both ends, and whatever each section keeps when it is not a list. `ciBody`: what the CI block takes under its
-    /// header (none when it is folded, shrunk or searched away).
+    /// header (none when it is folded, shrunk or searched away; its cell keeps its row while searching).
     private func fixedLength(ciBody: CGFloat) -> CGFloat {
         let pitch = Theme.Metrics.pitch
         let divider = 2 * Theme.Space.xs + 1
@@ -50,7 +50,7 @@ extension LookoutHub {
         let sessions = agents && !shrunk(.agents)
         // The inbox's header, the footer and its divider, and the padding at both ends.
         var fixed = 2 * HubGeometry.lead + 2 * pitch + divider
-        if !searching { fixed += divider + pitch + ciBody }
+        if showsCIRow { fixed += divider + pitch + (searching ? 0 : ciBody) }
         if agents { fixed += divider + pitch + (sessions ? pitch + ClaudeNotice.room(store) : 0) }
         if store.updater.showsInPill { fixed += pitch }
         return fixed
@@ -70,7 +70,11 @@ extension LookoutHub {
     var ciIsHeaderOnly: Bool { showsDetail && (shrunk(.ci) || (!edge.isHorizontal && foldsCI)) }
 
     /// Whether CI's lines show under its header.
-    var showsCIBody: Bool { !shrunk(.ci) && !foldsCI && !store.ciRepos.isEmpty }
+    var showsCIBody: Bool { !searching && !shrunk(.ci) && !foldsCI && !store.ciRepos.isEmpty }
+
+    /// Whether the sides' full view has CI's row: its block, or while searching (when the block goes) just its cell,
+    /// which stays in the rail where the bar has it (DESIGN.md 10.6).
+    var showsCIRow: Bool { !searching || !store.ciRepos.isEmpty }
 
     /// What the full view of the sides' lists may scroll within: what the screen's length leaves once the fixed parts
     /// are laid out, the inbox first. A focused section takes all of it; shrunk ones are headers. Both lists end on a
@@ -168,7 +172,7 @@ extension LookoutHub {
                 if !shrunk(.inbox) { sideInbox(cap: caps.inbox) }
             }
             .section("Inbox")
-            if !searching {
+            if showsCIRow {
                 openDivider
                 VStack(alignment: .leading, spacing: 0) {
                     if store.ciRepos.isEmpty {
@@ -176,7 +180,10 @@ extension LookoutHub {
                         railRow(cell: { Color.clear.frame(height: Theme.Metrics.pitch) }, detail: { noCI })
                     } else {
                         railRow(cell: { openCICell.frame(height: Theme.Metrics.pitch) },
-                                detail: { headerSlot(.ci, owns: true) { ciHeader } })
+                                detail: {
+                                    // Searching: CI's block is out of the layout, its cell is not.
+                                    if searching { Color.clear.frame(height: Theme.Metrics.pitch) } else { headerSlot(.ci, owns: true) { ciHeader } }
+                                })
                         if showsCIBody { railRow(cell: { Color.clear }, detail: { ciColumn }) }
                     }
                 }

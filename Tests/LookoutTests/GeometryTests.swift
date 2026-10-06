@@ -212,7 +212,8 @@ import Testing
     /// The hub at rest, then kept open (on `page` when one is given, with `focus` on a section) or, given a `section`,
     /// with just that panel open as when it is hovered, in a window of `screen`.
     private func render(edge: DockEdge, position: Double, screen: CGSize, page: HubPage? = nil, scenario: Demo.Scenario = .agents,
-                        focus: HubSection? = nil, section: HubSection? = nil, setup: ((Store) -> Void)? = nil) -> (rest: Shot, open: Shot) {
+                        focus: HubSection? = nil, section: HubSection? = nil, query: String = "",
+                        setup: ((Store) -> Void)? = nil) -> (rest: Shot, open: Shot) {
         let store = Store()
         Demo.populate(store, scenario)
         store.agents.expanded = true
@@ -220,6 +221,7 @@ import Testing
         let ui = UIState(persists: false, edge: edge)
         ui.position = position
         let hub = HubState()
+        hub.query = query
         let layout = HubLayout()
         let root = HubRoot(store: store, ui: ui, hub: hub, layout: layout).frame(width: screen.width, height: screen.height)
         let hosting = NSHostingView(rootView: root)
@@ -464,6 +466,28 @@ import Testing
         #expect(open.panel.height > 0, "\(edge) \(section): no panel")
         #expect(!open.scrolls, "\(edge) \(section): the peek has a scroll view")
         #expect(open.panel.maxY <= screen.height - HubGeometry.inset + 0.5, "\(edge) \(section): the panel is at \(open.panel)")
+    }
+
+    @Test(arguments: [DockEdge.right, .left])
+    func searchLeavesCIsCellInTheRail(edge: DockEdge) {
+        // CI's block leaves the layout while searching, its bar cell does not (DESIGN.md 10.6): the failing glyph, the one
+        // red thing on the bar (a few antialiased pixels apart), is in the rail.
+        let screen = CGSize(width: 1280, height: 720)
+        func redInRail(_ shot: Shot) -> Int {
+            let rail = edge == .right ? (shot.frame.maxX - Theme.Metrics.bar)...shot.frame.maxX : shot.frame.minX...(shot.frame.minX + Theme.Metrics.bar)
+            var count = 0
+            for py in Int(shot.frame.minY * shot.scale)..<Int(shot.frame.maxY * shot.scale) {
+                for px in Int(rail.lowerBound * shot.scale)..<Int(rail.upperBound * shot.scale) {
+                    let p = shot.pixel(px, py)
+                    if p.a > 250, p.r > 200, p.g < 150, p.b < 150 { count += 1 }
+                }
+            }
+            return count
+        }
+        let (_, kept) = render(edge: edge, position: 0.3, screen: screen)
+        let (_, searching) = render(edge: edge, position: 0.3, screen: screen, query: "sand")
+        #expect(redInRail(kept) > 100, "\(edge): the control found no red glyph in the rail")
+        #expect(redInRail(searching) > 100, "\(edge): search took CI's cell out of the rail")
     }
 
     @Test func aKeptOpenListThatIsTooLongDoesScroll() {
