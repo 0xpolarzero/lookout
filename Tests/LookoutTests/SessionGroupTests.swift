@@ -268,6 +268,18 @@ import Testing
         #expect(s.neighbour(of: "a4", 1, frozen: hub.frozenSessions, expanded: false) == "a5")
     }
 
+    @Test func aPeekKeepsTheSessionUnderThePointerAtTheCostOfTheLastRow() throws {
+        let s = store((0..<8).map { session("a\($0)", folder: "/code/x") }, kept: (0..<8).map { "a\($0)" })
+        let listed = s.listedGroups(HubState())
+        let cap = SessionGroup.headerHeight + 5 * SessionGroup.height(of: try #require(listed.groups.first?.rows.first)) + Theme.Metrics.pitch
+        let peek = SessionGroup.peek(listed.groups, hidden: listed.hidden, cap: cap, keeping: "a7")
+        #expect(peek.groups.first?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a7"] && peek.hidden == 3)
+        #expect(SessionGroup.height(peek.groups) + Theme.Metrics.pitch <= cap)
+        // One that is listed already changes nothing.
+        let same = SessionGroup.peek(listed.groups, hidden: listed.hidden, cap: cap, keeping: "a1")
+        #expect(same.groups.first?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4"])
+    }
+
     @Test func dropsOnAnotherProjectAreIgnored() {
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y")], kept: ["x1", "y1"])
         s.moveAgent("y1", onto: "x1")

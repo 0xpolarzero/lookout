@@ -91,7 +91,12 @@ struct SessionsList: View {
     var body: some View {
         let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
         let capped = store.listedGroups(hub)
-        let peeked = peekCap.map { SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: $0) }
+        let peeked = peekCap.map { cap in
+            let plain = SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: cap)
+            // A cut peek still lists the session under the pointer, whose tile is in the bar. Read only then: a peek that lists
+            // them all is not redrawn as the pointer moves.
+            return plain.hidden > 0 ? SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: cap, keeping: ui.drawerSelection) : plain
+        }
         let listed = (groups: peeked?.groups ?? capped.groups, hidden: peeked?.hidden ?? capped.hidden)
         AdaptiveStack(count: store.hubSessions(hub).count, alignment: .leading, spacing: 0) {
             if searching {
@@ -249,8 +254,9 @@ extension SessionGroup {
 
     /// What a peek of `cap` points lists of `groups` (which `hidden` sessions were already left out of, by
     /// `SessionCap`): in order, whole rows only (a header never stands alone), and how many sessions are left out. With
-    /// any left out the last line is the "+N more" row, which is in the cap.
-    static func peek(_ groups: [SessionGroup], hidden: Int = 0, cap: CGFloat) -> (groups: [SessionGroup], hidden: Int, waiting: Int) {
+    /// any left out the last line is the "+N more" row, which is in the cap. `keeping`: a session that is listed whatever
+    /// the cut, in its place, at the cost of the rows at the end (the one under the pointer, whose tile is in the bar).
+    static func peek(_ groups: [SessionGroup], hidden: Int = 0, cap: CGFloat, keeping: String? = nil) -> (groups: [SessionGroup], hidden: Int, waiting: Int) {
         let total = groups.reduce(0) { $0 + $1.rows.count }
         var shown: [SessionGroup] = []
         outer: for group in groups {
@@ -277,6 +283,21 @@ extension SessionGroup {
             shown[shown.count - 1].rows.removeLast()
             shown.removeAll { $0.rows.isEmpty }
             count -= 1
+        }
+        if let keeping, !shown.contains(where: { $0.rows.contains { $0.id == keeping } }),
+           groups.contains(where: { $0.rows.contains { $0.id == keeping } }) {
+            var ids = shown.flatMap(\.rows).map(\.id) + [keeping]
+            func listed() -> [SessionGroup] {
+                groups.compactMap { group in
+                    var group = group
+                    group.rows = group.rows.filter { ids.contains($0.id) }
+                    return group.rows.isEmpty ? nil : group
+                }
+            }
+            // The "+N more" stays under it, so it has to fit too.
+            while height(listed()) + Theme.Metrics.pitch > cap, let last = ids.last(where: { $0 != keeping }) { ids.removeAll { $0 == last } }
+            shown = listed()
+            count = ids.count
         }
         return (shown, total + hidden - count, Self.waiting(groups) - Self.waiting(shown))
     }

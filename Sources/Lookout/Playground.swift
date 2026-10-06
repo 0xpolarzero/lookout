@@ -684,6 +684,10 @@ enum PlaygroundShots {
         Shot.edges("peek-ci-720") { $0.section = .ci; $0.size = Shot.hd },
         Shot.edges("peek-ci-many-ci-720") { $0.section = .ci; $0.scenario = .manyCI; $0.size = Shot.hd },
         Shot.edges("peek-agents-720") { $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd },
+        // A session whose tile is in the bar but whose row the cut left out: hovering it lists it, at the cost of the last row.
+        Shot.edges("peek-agents-hover-cut-720", on: .rightAndTop) {
+            $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd; $0.hoveredSession = "t4"
+        },
         Shot.edges("peek-controls-720") { $0.section = .controls; $0.size = Shot.hd },
         Shot.edges("focus-inbox-720") { $0.pinned = true; $0.focus = .inbox; $0.size = Shot.hd },
         // A bar low on the edge, with little room below its cells: each peek keeps whole rows, "+N more" and the screen.
