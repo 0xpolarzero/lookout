@@ -134,6 +134,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
     @State private var restoreError: String?
+    @State private var accessibilityTrusted = AXIsProcessTrusted()
     @State private var notificationsBlocked = false
     @FocusState private var botFocused: Bool
 
@@ -549,7 +550,7 @@ struct SettingsView: View {
         let visible = ShortcutAction.allCases.filter { !$0.isAgents || store.agents.enabled }
         let anywhere = visible.filter(\.isGlobal)
         let needsAccess = anywhere.contains { store.shortcut($0).isModifierTap || store.shortcut($0).mouseButton != nil }
-            && !(preview.accessibilityTrusted ?? AXIsProcessTrusted())
+            && !(preview.accessibilityTrusted ?? accessibilityTrusted)
         return paneStack("Shortcuts") {
             VStack(alignment: .leading, spacing: Theme.Space.md) {
                 FormGroup(title: "Anywhere") { shortcutRows(anywhere) }
@@ -584,6 +585,10 @@ struct SettingsView: View {
             .padding(.horizontal, Theme.Metrics.rowPadding)
             .onAppear { restoreError = preview.restoreError }
             .onChange(of: store.hasCustomShortcuts) { restoreError = nil }
+        }
+        // Granted in System Settings, which Lookout comes back from.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            accessibilityTrusted = AXIsProcessTrusted()
         }
         // The notice that appears is said, once.
         .onChange(of: needsAccess, initial: true) { _, now in if now { Announce.say("Needs Accessibility access") } }
