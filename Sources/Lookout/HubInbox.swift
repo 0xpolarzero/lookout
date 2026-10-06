@@ -156,7 +156,7 @@ extension LookoutHub {
     }
 
     var searchField: some View {
-        InboxSearchField(hub: hub, ui: ui, summary: searchCount, targets: store.hubTargets(hub))
+        InboxSearchField(hub: hub, ui: ui, summary: searchCount, showsSummary: !searchFoundNothing, targets: store.hubTargets(hub))
     }
 
     /// What the search found, by kind, each group counted even at none: "3 items · 0 sessions".
@@ -543,6 +543,8 @@ struct InboxSearchField: View {
     @Bindable var hub: HubState
     let ui: UIState
     let summary: String
+    /// Whether the summary is drawn: not for "No match", which the body says once (it is still announced).
+    var showsSummary = true
     /// The rows the results show: when they change, the pick follows (edits to the field don't go through the keys).
     let targets: [String]
     @FocusState private var focused: Bool
@@ -559,7 +561,9 @@ struct InboxSearchField: View {
                 .accessibilityLabel("Search inbox and sessions")
             if !hub.query.isEmpty {
                 // Its own element after the field: VoiceOver reads it, and the field keeps its text as its value.
-                Text(summary).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1).fixedSize()
+                if showsSummary {
+                    Text(summary).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1).fixedSize()
+                }
                 IconButton(symbol: "xmark.circle.fill", help: "Clear", detail: "Esc") { hub.query = ""; focused = true }
             }
             Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)
