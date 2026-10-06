@@ -522,6 +522,11 @@ private struct UnfadedButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View { configuration.label }
 }
 
+enum SwitchKnob {
+    /// Around the white knob of a switch that is on.
+    static let edge = Theme.onTint
+}
+
 /// A drawn switch, 32 x 20: accent when on, whatever the window's key state (the system one greys out in a panel
 /// that isn't key). The whole label row is the target; VoiceOver gets a toggle that says On or Off. Disabled changes
 /// the switch only (never fades the label).
@@ -562,7 +567,10 @@ struct SwitchStyle: ToggleStyle {
                 .fill(!enabled ? resolved.fill(Theme.Fill.field) : on ? Theme.accent : resolved.fill(Theme.switchOff))
                 .overlay(Capsule().strokeBorder(!enabled ? resolved.divider : on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
                 .overlay(alignment: on ? .trailing : .leading) {
-                    Circle().fill(enabled ? AnyShapeStyle(.white) : AnyShapeStyle(resolved.tertiary)).frame(width: 16, height: 16).padding(2)
+                    Circle().fill(enabled ? AnyShapeStyle(.white) : AnyShapeStyle(resolved.tertiary)).frame(width: 16, height: 16)
+                        // White on the accent is 2.9:1, and the knob's side is the switch's state: a dark edge holds it (WCAG 1.4.11).
+                        .overlay { if on && enabled { Circle().strokeBorder(SwitchKnob.edge, lineWidth: 1) } }
+                        .padding(2)
                 }
                 .brightness(hovering && enabled ? 0.06 : 0)
                 .frame(width: 32, height: 20)
@@ -698,11 +706,18 @@ struct Tabs<ID: Hashable>: View {
                 .fixedSize()
             }
             .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover, active: Theme.Fill.tile, isActive: selected))
+            // The fill alone is 1.3:1 on the page: the selected tab is told apart by its outline too (WCAG 1.4.11).
+            .overlay { if selected { Capsule().strokeBorder(TabStyle.selectedOutline, lineWidth: resolved.borderWidth).allowsHitTesting(false) } }
             .focusRing(Theme.Metrics.tab / 2)
             .help(tab.help ?? "")
             .accessibilityAddTraits(selected ? .isSelected : [])
         }
     }
+}
+
+/// What a selected tab is told apart by besides its fill, at the contrast a border holds on the page (ContrastTests).
+enum TabStyle {
+    static let selectedOutline = Theme.fieldBorder
 }
 
 // MARK: - Sections

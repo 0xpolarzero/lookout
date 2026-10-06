@@ -178,4 +178,25 @@ import Testing
         // And Increase Contrast does change them.
         #expect((Theme.Resolved(contrast: true).secondary == Theme.Resolved().secondary) == false)
     }
+
+    @Test(arguments: [false, true]) func theSelectedTabIsToldApartByAnOutlineAtBorderContrast(contrast: Bool) {
+        // The selected capsule's fill is 1.3:1 on the page, so the outline carries it: over the page, a group and the rail.
+        let resolved = Theme.Resolved(contrast: contrast)
+        let surfaces = surfaces(resolved)
+        for name in ["bg", "rail", "group"] {
+            let below = surfaces[name]!
+            #expect(ratio(over(TabStyle.selectedOutline, below), below) >= 3, "outline on \(name)")
+        }
+    }
+
+    @Test func theSwitchKnobHoldsItsEdgeOnTheTrackAtRestAndHovered() {
+        // White on the accent is 2.9:1 (2.5:1 hovered), whatever Increase Contrast says (a hue's fill is not multiplied). The
+        // knob's dark edge against the track is the contrast that counts.
+        let bg = components(Theme.bg).rgb
+        let accent = over(Theme.accent, bg)
+        let lifted = RGB(r: min(accent.r + 0.06, 1), g: min(accent.g + 0.06, 1), b: min(accent.b + 0.06, 1))  // `.brightness(0.06)`
+        for (state, track) in [("rest", accent), ("hovered", lifted)] {
+            #expect(ratio(over(SwitchKnob.edge, track), track) >= 3, "edge on the \(state) track")
+        }
+    }
 }
