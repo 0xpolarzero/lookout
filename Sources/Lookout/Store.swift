@@ -844,13 +844,17 @@ final class Store {
         await checkCI(name)
     }
 
-    /// Checks one repository's CI and keeps what went wrong in its sync health, as the poll does: a check that fails is a
-    /// fault, and one that succeeds clears its own, whichever asked (the poll, a switch turned on, Check now). The
-    /// conversations' failure, if there is one, stays.
+    /// Checks one repository's CI. What went wrong is kept in its sync health by the check itself (`syncCI`), as the poll does: a
+    /// check that fails is a fault, and one that succeeds clears its own, whichever asked (the poll, a switch turned on, Check
+    /// now). The conversations' failure, if there is one, stays.
     func checkCI(_ name: String) async {
-        var failure: String?
-        do { try await syncCI(name) } catch { failure = error.localizedDescription }
-        guard repos.contains(where: { $0.fullName == name }) else { return }
+        try? await syncCI(name)
+    }
+
+    /// What a check of the repository's CI came to, for its sync health: nothing if the check was overtaken, by CI being turned
+    /// off (and perhaps on again, whose own check is the newer one) or by the repository's removal.
+    func publishCIHealth(_ name: String, failure: String?, ticket: Int) {
+        guard ciTickets[name] == ticket, repos.contains(where: { $0.fullName == name && $0.events.contains(.ciMain) }) else { return }
         ciErrors[name] = failure
         publishHealth(name)
     }

@@ -189,8 +189,14 @@ extension Store {
         let check = Task { @MainActor [self] in
             // A check `endCIChecks` already gave up on leaves what a newer one registered.
             defer { if ciTickets[name] == ticket { ciChecks[name] = nil } }
-            let status = try await (ciFetch ?? fetchCI)(repo)
-            publishCI(name, status, ticket: ticket)
+            do {
+                let status = try await (ciFetch ?? fetchCI)(repo)
+                publishCI(name, status, ticket: ticket)
+                publishCIHealth(name, failure: nil, ticket: ticket)
+            } catch {
+                publishCIHealth(name, failure: error.localizedDescription, ticket: ticket)
+                throw error
+            }
         }
         ciChecks[name] = check
         try await check.value

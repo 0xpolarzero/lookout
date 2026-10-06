@@ -296,6 +296,11 @@ import Testing
             guard waiting.indices.contains(index) else { Issue.record("No check \(index) is waiting"); return }
             waiting[index].resume(returning: status)
         }
+
+        func fail(_ index: Int, _ message: String) {
+            guard waiting.indices.contains(index) else { Issue.record("No check \(index) is waiting"); return }
+            waiting[index].resume(throwing: NSError(domain: "CI", code: 1, userInfo: [NSLocalizedDescriptionKey: message]))
+        }
     }
 
     private func quiet(_ store: Store) -> (Store, Answers) {
@@ -346,6 +351,38 @@ import Testing
         await older
         #expect(store.ci["a/x"]?.sha == "s2")
         #expect(store.mutedCI == ["a/x": "s2"])
+    }
+
+    @Test func aFailureThatArrivesAfterCIWasTurnedOffIsNoFault() async {
+        let (store, answers) = quiet(store([:], ["a/x"]))
+        let repo = store.repos[0]
+        async let check: () = store.checkCI("a/x")
+        await settle { answers.waiting.count == 1 }
+        store.toggle(.ciMain, on: repo)
+        answers.fail(0, "Timed out")
+        await check
+        #expect(store.repoErrors.isEmpty && store.syncFault(stale: false) == nil)
+    }
+
+    @Test func anOlderFailureDoesNotReplaceTheNewerChecksHealth() async {
+        let (store, answers) = quiet(store([:], ["a/x"]))
+        let repo = store.repos[0]
+        async let older: () = store.checkCI("a/x")
+        await settle { answers.waiting.count == 1 }
+        store.toggle(.ciMain, on: repo)
+        store.toggle(.ciMain, on: repo)
+        await settle { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.success, sha: "s1"))
+        await settle { store.ci["a/x"]?.sha == "s1" }
+        answers.fail(0, "Timed out")
+        await older
+        #expect(store.repoErrors.isEmpty)
+        // The newer check's own failure is a fault, and a later success clears it.
+        async let newer: () = store.checkCI("a/x")
+        await settle { answers.waiting.count == 3 }
+        answers.fail(2, "Server error")
+        await newer
+        #expect(store.repoErrors["a/x"] == "Server error")
     }
 
     @Test func aFailureIsNotifiedOnceWhenTwoChecksBothSeeIt() async {
