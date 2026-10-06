@@ -166,7 +166,8 @@ extension Theme {
             let from: Double
             let to: Double
         }
-        static let heartbeat = Heartbeat(period: 1.2, from: 1.0, to: 0.4)
+        // The trough holds 3:1 on every surface the ring lands on (ContrastTests), which is why it is not lower.
+        static let heartbeat = Heartbeat(period: 1.2, from: 1.0, to: 0.65)
 
         /// The one place Reduce Motion is decided: fills and fades shorten to a cross-fade, anything spatial is
         /// instant (nothing translates, scales or springs).
@@ -334,9 +335,12 @@ struct HoverFillButtonStyle: ButtonStyle {
     var active: Color = Theme.Fill.selected
     var pressed: Color = Theme.Fill.pressed
     var isActive = false
+    /// How far past the drawn shape the button takes clicks, on every side (a 24pt circle hit as 28pt).
+    var hitOutset: CGFloat = 0
 
     init(shape: some Shape = Theme.Radius.shape(Theme.Radius.row), rest: Color = Theme.Fill.rest, hover: Color = Theme.Fill.hover,
-         active: Color = Theme.Fill.selected, pressed: Color = Theme.Fill.pressed, isActive: Bool = false) {
+         active: Color = Theme.Fill.selected, pressed: Color = Theme.Fill.pressed, isActive: Bool = false, hitOutset: CGFloat = 0) {
+        self.hitOutset = hitOutset
         self.shape = AnyShape(shape)
         self.rest = rest
         self.hover = hover
@@ -363,7 +367,7 @@ struct HoverFillButtonStyle: ButtonStyle {
                 .environment(\.hoverFillHovering, hot)
                 .background(style.shape.fill(resolved.fill(fill)))
                 .opacity(enabled ? 1 : 0.6)
-                .contentShape(style.shape)
+                .contentShape(style.hitOutset > 0 ? AnyShape(Rectangle().inset(by: -style.hitOutset)) : style.shape)
                 .onHover { hovering = $0 }
                 .motion(Theme.Motion.hover, value: hovering)
                 .motion(Theme.Motion.hover, value: configuration.isPressed)
@@ -390,12 +394,15 @@ struct IconButton: View {
     var label: String? = nil
     var detail: String? = nil
     var active = false
+    /// Off for a row's action, which the row's keys and VoiceOver actions reach: Tab walks the chrome only (DESIGN.md 6.2).
+    var tabStop = true
     let action: () -> Void
     @FocusState private var focused: Bool
 
     var body: some View {
         let button = Button(action: action) { IconButtonLabel(symbol: symbol, active: active) }
-            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
+            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active,
+                                              hitOutset: (Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
             .focused($focused)
             .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
             .reportsControlFocus(focused)
@@ -403,10 +410,14 @@ struct IconButton: View {
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
         if help.isEmpty {
-            button
+            reachable(button)
         } else {
-            button.tip(help, detail, focused: focused)
+            reachable(button.tip(help, detail, focused: focused))
         }
+    }
+
+    @ViewBuilder private func reachable(_ view: some View) -> some View {
+        if tabStop { view } else { view.focusable(false) }
     }
 }
 
@@ -421,8 +432,6 @@ private struct IconButtonLabel: View {
             .font(Theme.Typography.glyph(14, .medium))
             .foregroundStyle(active || hover ? Theme.text : resolved.secondary)
             .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
-            // 28pt to hit, without taking the room.
-            .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
     }
 }
 

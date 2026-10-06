@@ -84,6 +84,23 @@ import Testing
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
     }
 
+    @Test(arguments: [false, true]) func textOnAButtonInsideASettingsGroup(contrast: Bool) {
+        // A bordered button's fill is drawn over the group's own (the recorder, pop-ups, Add): the surface is both, and
+        // pressed is the lightest of them. Checked as layered, not as each fill alone.
+        let resolved = Theme.Resolved(contrast: contrast)
+        let bg = components(Theme.bg).rgb
+        let group = over(resolved.fill(Theme.Fill.group), bg)
+        var failures: [String] = []
+        for (name, fill) in [("tile", Theme.Fill.tile), ("selected", Theme.Fill.selected), ("pressed", Theme.Fill.pressed)] {
+            let surface = over(resolved.fill(fill), group)
+            for (token, color) in [("text", Theme.text), ("secondary", resolved.secondary)] {
+                let value = ratio(over(color, surface), surface)
+                if value < 4.5 { failures.append("\(token) on \(name) over the group: \(String(format: "%.2f", value))") }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+    }
+
     @Test func textOnTintedFills() {
         // Amber, green and the accent (a checked checkbox) are solid, unaffected by Increase Contrast.
         for fill in [Theme.amber, Theme.green, Theme.accent] {
@@ -110,20 +127,19 @@ import Testing
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
     }
 
-    @Test(arguments: [false, true]) func ringOverTheSurfaceBesideAWorkingTile(contrast: Bool) {
+    @Test(arguments: [false, true]) func ringHoldsThreeToOneThroughItsWholeHeartbeat(contrast: Bool) {
         // The ring is the one mark of working that isn't colour. It is drawn outside the tile, so it lands on the
-        // surface the bar sits on (the rail, or the strip's `bg`), never on the tile's face, and holds 3:1 there when
-        // it is at full opacity. At the trough of its heartbeat (DESIGN.md 10.1) `secondary` thins to about 2.5:1,
-        // which still reads as an outline next to a tile; Increase Contrast keeps 3:1 there too.
+        // surface the bar sits on (the rail, or the strip's `bg`) or on the row that is lit beside it (hovered or
+        // picked): it holds 3:1 there at both ends of its heartbeat (DESIGN.md 10.1), and so at every opacity between.
         let resolved = Theme.Resolved(contrast: contrast)
         let surfaces = surfaces(resolved)
         var failures: [String] = []
-        for name in ["bg", "rail"] {
+        for name in ["bg", "rail", "hover", "selected"] {
             let surface = surfaces[name]!
-            let full = ratio(over(resolved.workingRing.opacity(Theme.Motion.heartbeat.from), surface), surface)
-            if full < 3 { failures.append("ring at full opacity on \(name): \(String(format: "%.2f", full))") }
-            let trough = ratio(over(resolved.workingRing.opacity(Theme.Motion.heartbeat.to), surface), surface)
-            if trough < (contrast ? 3 : 2) { failures.append("ring at its trough on \(name): \(String(format: "%.2f", trough))") }
+            for (end, opacity) in [("full opacity", Theme.Motion.heartbeat.from), ("its trough", Theme.Motion.heartbeat.to)] {
+                let value = ratio(over(resolved.workingRing.opacity(opacity), surface), surface)
+                if value < 3 { failures.append("ring at \(end) on \(name): \(String(format: "%.2f", value))") }
+            }
         }
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
     }

@@ -244,6 +244,8 @@ final class TipCenter {
         let title: String
         let detail: String?
         var anchor: CGRect
+        /// Which side of the anchor it goes on instead of over or under it (a cell of a bar on a side edge).
+        var beside: HorizontalEdge? = nil
     }
 
     var current: Request?
@@ -264,6 +266,10 @@ private struct Tip: ViewModifier {
     let title: String
     let detail: String?
     let focused: Bool
+    /// Also on pointer hover; off where the system's `.help` already does that (a row's, with the keyboard's pick as the
+    /// only thing this one adds).
+    let hover: Bool
+    let beside: HorizontalEdge?
     @State private var id = UUID()
     @State private var anchor = CGRect.zero
     @State private var pending: Task<Void, Never>?
@@ -274,7 +280,7 @@ private struct Tip: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         // No tooltip layer above (or one too small to host the bubble): the system tooltip says the same.
         if center == nil || systemHelp {
-            content.help(detail.map { $0.isEmpty ? title : "\(title)\n\($0)" } ?? title)
+            if hover { content.help(detail.map { $0.isEmpty ? title : "\(title)\n\($0)" } ?? title) } else { content }
         } else {
             styled(content)
         }
@@ -292,6 +298,7 @@ private struct Tip: ViewModifier {
                 }
             }
             .onHover { inside in
+                guard hover else { return }
                 inside ? schedule(after: Theme.Timing.tooltip) : hide()
             }
             .onChange(of: focused) { _, focused in
@@ -317,7 +324,24 @@ private struct Tip: ViewModifier {
     }
 
     private func show() {
-        center?.current = TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor)
+        center?.current = TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor, beside: beside)
+    }
+}
+
+/// Where a tip's bubble goes (tests read it too).
+enum TipPlacement {
+    /// Centered over the anchor, clamped inside the panel; flips below when there's no room above. `beside`: level with the
+    /// anchor's centre and wholly off to one side of it, so a bar's tip never covers the cells next to the one it names.
+    static func origin(anchor a: CGRect, size: CGSize, bounds: CGSize, beside: HorizontalEdge?) -> CGPoint {
+        let margin: CGFloat = 8
+        if let beside {
+            let x = beside == .leading ? a.minX - size.width - 6 : a.maxX + 6
+            let y = min(max(a.midY - size.height / 2, margin), max(margin, bounds.height - margin - size.height))
+            return CGPoint(x: max(x, margin), y: y)
+        }
+        let x = min(max(a.midX - size.width / 2, margin), max(margin, bounds.width - margin - size.width))
+        let y = a.minY - size.height - 6 >= margin ? a.minY - size.height - 6 : a.maxY + 6
+        return CGPoint(x: x, y: y)
     }
 }
 
@@ -364,13 +388,9 @@ private struct TipBubble: View {
         .allowsHitTesting(false)
     }
 
-    /// Centered over the anchor, clamped inside the panel; flips below when there's no room above.
     private var placement: CGSize {
-        let a = request.anchor
-        let margin: CGFloat = 8
-        let x = min(max(a.midX - size.width / 2, margin), max(margin, bounds.width - margin - size.width))
-        let y = a.minY - size.height - 6 >= margin ? a.minY - size.height - 6 : a.maxY + 6
-        return CGSize(width: x, height: y)
+        let origin = TipPlacement.origin(anchor: request.anchor, size: size, bounds: bounds, beside: request.beside)
+        return CGSize(width: origin.x, height: origin.y)
     }
 
     /// Natural width of the widest line, capped so long details wrap instead of stretching the bubble.
@@ -387,6 +407,9 @@ enum TipSpace {
 
 extension EnvironmentValues {
     @Entry var systemHelp = false
+    /// Where the tips of the bar's cells go: to the left (the bar on the right edge) or right (on the left) of the cell. Nil
+    /// along the top and bottom, where over or under the cell leaves the bar's other cells alone.
+    @Entry var tipBeside: HorizontalEdge? = nil
     @Entry var tipCenter: TipCenter? = nil
 }
 
@@ -414,7 +437,7 @@ extension View {
 
     /// A tooltip for an icon-only control: `detail` is its key, or a short sentence. `focused` (the control's own
     /// focus) shows it after a second for keyboard users.
-    func tip(_ title: String, _ detail: String? = nil, focused: Bool = false) -> some View {
-        modifier(Tip(title: title, detail: detail, focused: focused))
+    func tip(_ title: String, _ detail: String? = nil, focused: Bool = false, hover: Bool = true, beside: HorizontalEdge? = nil) -> some View {
+        modifier(Tip(title: title, detail: detail, focused: focused, hover: hover, beside: beside))
     }
 }

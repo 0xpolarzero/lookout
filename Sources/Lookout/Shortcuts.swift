@@ -307,7 +307,7 @@ struct ShortcutRecorder: View {
         var body: some View {
             Text(recording ? "Press keys…" : shortcut.display)
                 .font(Theme.Typography.control)
-                .foregroundStyle(recording ? AnyShapeStyle(Theme.accentText) : shortcut.isUnassigned ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(Theme.text))
+                .foregroundStyle(recording ? AnyShapeStyle(Theme.text) : shortcut.isUnassigned ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(Theme.text))
                 .padding(.horizontal, Theme.Space.lg)
                 .frame(minWidth: 76, minHeight: Theme.Metrics.button)
                 .overlay(Theme.Radius.shape(Theme.Radius.tile)

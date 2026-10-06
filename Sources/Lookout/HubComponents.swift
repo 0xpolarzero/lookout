@@ -220,7 +220,7 @@ struct CappedScroll<Content: View>: View {
                         .coordinateSpace(.named(CappedScrollSpace.name))
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
                             // The first measure lands as is (the hub's own spring reveals it); later ones glide.
-                            if height == 0 { height = h } else { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { height = h } }
+                            if height == 0 { height = h } else { withAnimation(spatial(Theme.Motion.fade)) { height = h } }
                             settle()
                         }
                         .background(alignment: .top) { marks }
@@ -247,11 +247,11 @@ struct CappedScroll<Content: View>: View {
                 .scrollDisabled(!cut)
                 .frame(height: max(shown, 1))
                 .onChange(of: hub?.keyboardSelection) { _, request in
-                    if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
+                    if let id = request?.id { withAnimation(spatial(Theme.Motion.hover)) { proxy.scrollTo(id) } }
                 }
                 if band > 0, let cue {
                     ScrollCue(cue: cue, track: track, edges: edges, viewport: max(shown, 1)) { edge in
-                        withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
+                        withAnimation(spatial(Theme.Motion.fade)) {
                             if let edge { proxy.scrollTo(ScrollMark(edge: edge), anchor: .bottom) } else { proxy.scrollTo(ScrollMark(edge: 0), anchor: .top) }
                         }
                     }
@@ -285,6 +285,9 @@ private struct ScrollMark: Hashable {
 }
 
 extension CappedScroll {
+    /// Scrolling and resizing move things: with Reduce Motion they are instant (the shortened fade is for opacity).
+    fileprivate func spatial(_ animation: Animation) -> Animation? { reduce ? nil : animation }
+
     fileprivate func reach() { onReach?(track.offset + viewport) }
 
     /// Lazy: trusts the content's height only when it was measured in a viewport as tall as the cap.

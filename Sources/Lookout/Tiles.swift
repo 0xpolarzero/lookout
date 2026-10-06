@@ -157,6 +157,8 @@ struct BarCell<Face: View>: View {
     /// The keyboard or the pointer picked it (a session's tile): ringed like a focused one.
     var picked = false
     var show: (() -> Void)? = nil
+    /// What VoiceOver's press does where it should differ from a click (a click has its panel under the pointer already).
+    var press: (() -> Void)? = nil
     var actions: [BarAction] = []
     let action: () -> Void
     @ViewBuilder let face: (_ hovering: Bool) -> Face
@@ -188,6 +190,7 @@ struct BarCell<Face: View>: View {
         .accessibilityLabel(name)
         .accessibilityValue(value)
         .accessibilityHint(hint)
+        .modifier(BarCellPress(press: press))
         .accessibilityActions {
             if let show { Button("Show", action: show) }
             ForEach(actions) { Button($0.name, action: $0.run) }
@@ -195,11 +198,20 @@ struct BarCell<Face: View>: View {
     }
 }
 
-private struct BarCellHelp: ViewModifier {
-    let help: BarHelp?
+private struct BarCellPress: ViewModifier {
+    let press: (() -> Void)?
 
     @ViewBuilder func body(content: Content) -> some View {
-        if let help { content.tip(help.title, help.detail) } else { content }
+        if let press { content.accessibilityAction(.default, press) } else { content }
+    }
+}
+
+private struct BarCellHelp: ViewModifier {
+    let help: BarHelp?
+    @Environment(\.tipBeside) private var beside
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let help { content.tip(help.title, help.detail, beside: beside) } else { content }
     }
 }
 

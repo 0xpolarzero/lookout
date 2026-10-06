@@ -520,3 +520,27 @@ private extension NSView {
     /// A scroll view anywhere below this one.
     var hasScrollView: Bool { self is NSScrollView || subviews.contains { $0.hasScrollView } }
 }
+
+@Suite struct TipPlacements {
+    @Test func aBarsTipGoesBesideItsCellLevelWithItAndOffTheRail() {
+        let size = CGSize(width: 150, height: 44)
+        let bounds = CGSize(width: 1000, height: 700)
+        // The right edge: the rail is the last 46 points, and its cells are one pitch apart.
+        let rail = CGRect(x: 954, y: 0, width: 46, height: 700)
+        let cell = CGRect(x: 954, y: 100, width: 46, height: Theme.Metrics.pitch)
+        let right = CGRect(origin: TipPlacement.origin(anchor: cell, size: size, bounds: bounds, beside: .leading), size: size)
+        #expect(!right.intersects(rail) && abs(right.midY - cell.midY) < 0.5)
+        // The left edge, the other way round.
+        let leftRail = CGRect(x: 0, y: 0, width: 46, height: 700)
+        let leftCell = CGRect(x: 0, y: 100, width: 46, height: Theme.Metrics.pitch)
+        let left = CGRect(origin: TipPlacement.origin(anchor: leftCell, size: size, bounds: bounds, beside: .trailing), size: size)
+        #expect(!left.intersects(leftRail) && abs(left.midY - leftCell.midY) < 0.5)
+        // Over the cell, as along the top and bottom, it would cover the rail's neighbours.
+        let over = CGRect(origin: TipPlacement.origin(anchor: cell, size: size, bounds: bounds, beside: nil), size: size)
+        #expect(over.intersects(rail))
+        // Near the screen's end it stays inside.
+        let low = CGRect(x: 954, y: 690, width: 46, height: Theme.Metrics.pitch)
+        let kept = CGRect(origin: TipPlacement.origin(anchor: low, size: size, bounds: bounds, beside: .leading), size: size)
+        #expect(kept.maxY <= bounds.height)
+    }
+}
