@@ -197,6 +197,23 @@ struct AgentRow: Identifiable, Hashable {
     }
 }
 
+// MARK: - Cap
+
+/// How many sessions show before the rest go behind a "+N" (DESIGN.md 10.4): the one rule the bar's tiles and the
+/// lists' rows share, so the numbers agree. The sessions are counted in the list's order; a session waiting for you is
+/// never left out for want of a slot (waiting ones come first, so they take the visible slots), and the others share
+/// what is left of them in that order.
+enum SessionCap {
+    static let visible = 8
+
+    /// How many of `total` sessions, `waiting` of them waiting, are shown. One over would be a "+1" in the place of its
+    /// own row, so it shows instead.
+    static func shown(total: Int, waiting: Int) -> Int {
+        let limit = max(visible, waiting)
+        return total - limit <= 1 ? total : limit
+    }
+}
+
 // MARK: - Groups
 
 /// A run of rows under one header in the sessions list.
@@ -237,9 +254,6 @@ struct SessionGroup: Identifiable {
         case .newActivity: "New activity"
         }
     }
-
-    /// How many New activity rows show before "+N more".
-    static let newActivityCap = 8
 
     /// The list's order, which the bar's tiles follow: Waiting for you (most recent first), the projects in your
     /// order (the order their first kept session is listed in, so a group doesn't move when one of its sessions starts
@@ -430,14 +444,20 @@ extension Store {
     /// The sessions list in its order: every group, whole (see `SessionGroup.build`).
     var sessionGroups: [SessionGroup] { cache.groups }
 
-    /// The groups as the hub lists them: New activity cut to its cap unless `expanded`, and how many that hid.
+    /// The groups as the hub lists them: cut to `SessionCap` (from the end, so New activity goes first) unless
+    /// `expanded`, and how many that hid.
     func listedGroups(expanded: Bool) -> (groups: [SessionGroup], hidden: Int) {
-        var groups = cache.groups, hidden = 0
-        if !expanded, let i = groups.firstIndex(where: { $0.kind == .newActivity }), groups[i].rows.count > SessionGroup.newActivityCap {
-            hidden = groups[i].rows.count - SessionGroup.newActivityCap
-            groups[i].rows = Array(groups[i].rows.prefix(SessionGroup.newActivityCap))
+        var groups = cache.groups
+        guard !expanded else { return (groups, 0) }
+        let total = groups.reduce(0) { $0 + $1.rows.count }
+        let waiting = groups.first { $0.kind == .waiting }?.rows.count ?? 0
+        var room = SessionCap.shown(total: total, waiting: waiting)
+        for i in groups.indices {
+            groups[i].rows = Array(groups[i].rows.prefix(room))
+            room -= groups[i].rows.count
         }
-        return (groups, hidden)
+        groups.removeAll { $0.rows.isEmpty }
+        return (groups, total - groups.reduce(0) { $0 + $1.rows.count })
     }
 
     func setProjectColor(_ folder: String, _ index: Int) {

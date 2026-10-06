@@ -377,8 +377,8 @@ struct NewSessionBarCell: View {
 }
 
 /// Which sessions the bar shows and in what order (DESIGN.md 5.1): the sessions list's, waiting first, then the
-/// projects, then new activity; eight tiles and a "+N", except that a session waiting for you never goes into the "+N" for want of a
-/// slot. Only the edge's room can put one there, and then the "+N" says so. While the pointer is over the hub the
+/// projects, then new activity; as many tiles as `SessionCap` allows and a "+N", the lists' own rule, so a session
+/// waiting for you never goes into the "+N" for want of a slot. Only the edge's room can put one there, and then the "+N" says so. While the pointer is over the hub the
 /// order and the project boundaries stay as they were, so nothing under it moves; the sessions' side panel lays its
 /// rows out from the same `arrange`, so each stays level with its tile.
 enum BarSessions {
@@ -390,7 +390,6 @@ enum BarSessions {
         let waiting: Bool
     }
 
-    static let visible = 8
     /// A project boundary: this much more than the cells' own pitch.
     static let groupGap: CGFloat = 8
 
@@ -403,12 +402,11 @@ enum BarSessions {
     }
 
     /// `slots` in the frozen order, each in the group it had (those still there, then any new ones as they are),
-    /// cut to `visible` plus every waiting one (whether it waits is as it is now; when frozen, one that began to wait
-    /// past the tiles shown takes the last other tile's place), then to `room` points along the bar,
+    /// cut to `SessionCap`'s (whether a session waits is as it is now; when frozen, one that began to wait past the
+    /// tiles shown takes the last other tile's place), then to `room` points along the bar,
     /// the "+N" cell included: what goes is the last of the others, and only when they are gone, the last waiting one.
     /// One session over would be a "+1" in the place of its own tile: it shows instead, room allowing.
-    static func arrange(_ slots: [Slot], frozen: [Slot]?, visible: Int = visible,
-                        room: CGFloat = .infinity) -> (shown: [Slot], hidden: [Slot]) {
+    static func arrange(_ slots: [Slot], frozen: [Slot]?, room: CGFloat = .infinity) -> (shown: [Slot], hidden: [Slot]) {
         var ordered = slots
         if let frozen {
             let now = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -416,12 +414,13 @@ enum BarSessions {
             ordered = frozen.compactMap { old in now[old.id].map { Slot(id: old.id, group: old.group, waiting: $0.waiting) } }
                 + slots.filter { !known.contains($0.id) }
         }
-        var shown = ordered.enumerated().filter { $0.offset < visible || $0.element.waiting }.map(\.element)
+        let limit = SessionCap.shown(total: ordered.count, waiting: ordered.filter(\.waiting).count)
+        var shown = ordered.enumerated().filter { $0.offset < limit || $0.element.waiting }.map(\.element)
         if let frozen {
             // A session that starts waiting past the tiles the pointer found takes the place of the last tile that
             // doesn't, in that tile's group: the run keeps its length, so the "+N" and what follows don't move.
             let waited = Set(frozen.filter(\.waiting).map(\.id))
-            for (offset, late) in ordered.enumerated() where offset >= visible && late.waiting && !waited.contains(late.id) {
+            for (offset, late) in ordered.enumerated() where offset >= limit && late.waiting && !waited.contains(late.id) {
                 guard let from = shown.firstIndex(where: { $0.id == late.id }),
                       let into = shown.lastIndex(where: { !$0.waiting }), into < from else { continue }
                 shown[into] = Slot(id: late.id, group: shown[into].group, waiting: true)

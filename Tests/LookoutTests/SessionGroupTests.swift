@@ -85,6 +85,51 @@ import Testing
         #expect(capped.groups.first?.rows.map(\.id) == (0..<8).map { "n\($0)" })
     }
 
+    @Test func theCapShowsEightWaitingOnesAlwaysAndNeverAPlusOne() {
+        #expect(SessionCap.shown(total: 5, waiting: 0) == 5)
+        #expect(SessionCap.shown(total: 8, waiting: 3) == 8)
+        // One over shows in the place of its own "+1".
+        #expect(SessionCap.shown(total: 9, waiting: 0) == 9)
+        #expect(SessionCap.shown(total: 10, waiting: 0) == 8)
+        // Ten waiting take ten slots, and one more of the others would be a "+1" again.
+        #expect(SessionCap.shown(total: 12, waiting: 10) == 10)
+        #expect(SessionCap.shown(total: 11, waiting: 10) == 11)
+        #expect(SessionCap.shown(total: 20, waiting: 20) == 20)
+    }
+
+    @Test func theBarsPlusAndTheListsMoreAreTheSameNumber() {
+        for (waiting, kept, new) in [(0, 0, 12), (1, 0, 11), (3, 4, 9), (10, 0, 2), (0, 11, 0), (2, 5, 2)] {
+            let asking = (0..<waiting).map { session("w\($0)", folder: "/code/y", minutesAgo: Double($0 + 1), blocked: true) }
+            let keeping = (0..<kept).map { session("k\($0)", folder: "/code/x") }
+            let fresh = (0..<new).map { session("n\($0)", minutesAgo: Double($0 + 30)) }
+            let s = store(asking + keeping + fresh, kept: keeping.map(\.id) + asking.map(\.id), unread: Set(asking.map(\.id)))
+            let bar = BarSessions.arrange(s.barSlots, frozen: nil)
+            let list = s.listedGroups(expanded: false)
+            #expect(bar.hidden.count == list.hidden, "\(waiting) waiting, \(kept) kept, \(new) new")
+            #expect(bar.shown.map(\.id) == list.groups.flatMap(\.rows).map(\.id))
+        }
+    }
+
+    @Test func theCapIsSharedInPanelOrderAndKeepsWaitingSessionsWhole() {
+        // Four waiting, one kept and eleven new: eight show, the waiting ones first, then the others in panel order.
+        let waiting = (0..<4).map { session("w\($0)", folder: "/code/y", minutesAgo: Double($0 + 1), blocked: true) }
+        let sessions = waiting + [session("k", folder: "/code/x")] + (0..<11).map { session("n\($0)", minutesAgo: Double($0 + 20)) }
+        let s = store(sessions, kept: ["k"], unread: Set(waiting.map(\.id)))
+        let listed = s.listedGroups(expanded: false)
+        #expect(listed.groups.flatMap(\.rows).map(\.id) == ["w0", "w1", "w2", "w3", "k", "n0", "n1", "n2"])
+        #expect(listed.hidden == 8)
+        #expect(listed.groups.map(\.id) == ["waiting", "project:/code/x", "new"])
+        // The groups keep their full counts, whatever is listed.
+        #expect(listed.groups.map(\.total) == [4, 1, 11])
+        // A cut that takes a whole group away takes its header too.
+        let more = store((0..<2).map { session("k\($0)", folder: "/code/x") } + (0..<8).map { session("n\($0)", minutesAgo: Double($0 + 1)) }, kept: ["k0", "k1"])
+        #expect(more.listedGroups(expanded: false).groups.map(\.id) == ["project:/code/x", "new"])
+        let plenty = store((0..<9).map { session("k\($0)", folder: "/code/x") } + (0..<3).map { session("n\($0)", minutesAgo: Double($0 + 1)) },
+                           kept: (0..<9).map { "k\($0)" })
+        #expect(plenty.listedGroups(expanded: false).groups.map(\.id) == ["project:/code/x"])
+        #expect(plenty.listedGroups(expanded: false).hidden == 4)
+    }
+
     @Test func aPeekListsWholeRowsAndEndsWithTheCountOfTheRest() {
         let sessions = (1...3).map { session("x\($0)", folder: "/code/x") } + (0..<10).map { session("n\($0)", minutesAgo: Double($0 + 1)) }
         let s = store(sessions, kept: ["x1", "x2", "x3"])
@@ -99,6 +144,13 @@ import Testing
         // Exactly full is not cut either.
         let few = SessionGroup.peek(Array(s.sessionGroups.prefix(1)), cap: 160)
         #expect(few.hidden == 0 && few.groups.first?.rows.count == 3)
+        // The sessions the shared cap left out are in the count, and keep the line even when every listed row fits.
+        let capped = s.listedGroups(expanded: false)
+        #expect(capped.hidden == 5)
+        let tall = SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: 1000)
+        #expect(tall.hidden == 5 && tall.groups.map(\.rows.count) == [3, 5])
+        let tight = SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: SessionGroup.height(capped.groups) + Theme.Metrics.pitch - 1)
+        #expect(tight.hidden == 6 && tight.groups.map(\.rows.count) == [3, 4])
         // A group's header never stands alone: no room for its first row, no header.
         #expect(SessionGroup.peek(s.sessionGroups, cap: 200).groups.map(\.id) == ["project:/code/x"])
         // A row with a task line is 60 tall.
@@ -137,11 +189,11 @@ import Testing
     }
 
     @Test func keepAllLeavesTheWaitingGroupAlone() {
-        // Eleven in New activity (three behind "+N more"), and a pending one waiting on you: not under New activity.
+        // Eleven in New activity, and a pending one waiting on you: not under New activity. Of the twelve, four are behind "+N more".
         let sessions = [session("ask", minutesAgo: 30, blocked: true)] + (0..<11).map { session("n\($0)", minutesAgo: Double($0 + 1)) }
         let s = store(sessions, unread: ["ask"])
         #expect(ids(s)["waiting"] == ["ask"] && ids(s)["new"]?.count == 11)
-        #expect(s.listedGroups(expanded: false).hidden == 3)
+        #expect(s.listedGroups(expanded: false).hidden == 4)
         s.keepAllAgents()
         #expect(s.agentRows.pending.map(\.id) == ["ask"])
         #expect(s.agentRows.kept.count == 11)
@@ -194,9 +246,9 @@ import Testing
         let s = store(sessions, kept: ["x1", "ask"], unread: ["ask"])
         let hub = HubState()
         let shown = s.hubSessions(hub).map(\.id)
-        // Waiting for you, the project, then eight of New activity; the rest behind "+N more", then New session.
+        // Waiting for you, the project, then New activity, eight sessions in all; the rest behind "+N more", then New session.
         #expect(Array(shown.prefix(2)) == ["ask", "x1"])
-        #expect(shown.count == 2 + SessionGroup.newActivityCap)
+        #expect(shown.count == SessionCap.visible)
         #expect(s.sessionExtraTargets(hub) == ["s:more", "s:new"])
         hub.sessionsExpanded = true
         #expect(s.hubSessions(hub).count == 10 + 2)

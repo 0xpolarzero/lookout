@@ -79,7 +79,8 @@ struct SessionsList: View {
 
     var body: some View {
         let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
-        let listed = peekCap.map { SessionGroup.peek(store.sessionGroups, cap: $0) } ?? store.listedGroups(expanded: hub.sessionsExpanded)
+        let capped = store.listedGroups(expanded: hub.sessionsExpanded)
+        let listed = peekCap.map { SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: $0) } ?? capped
         AdaptiveStack(count: store.hubSessions(hub).count, alignment: .leading, spacing: 0) {
             if searching {
                 ForEach(store.hubSessions(hub)) { row($0, .search) }
@@ -100,7 +101,7 @@ struct SessionsList: View {
         .motion(Theme.Motion.fade, value: store.agentsRevision)
     }
 
-    /// Kept open, "+N more" shows the rest of New activity; a peek has no room for them, so it keeps the hub open on
+    /// Kept open, "+N more" shows the rest of the sessions; a peek has no room for them, so it keeps the hub open on
     /// Sessions, which gets all the room.
     private func moreAction() {
         if peekCap == nil { hub.expandSessions(in: store, ui: ui) } else { LookoutHub.animate(LookoutHub.refocus) { hub.pinned = true; hub.focus = .agents } }
@@ -115,7 +116,7 @@ struct SessionsList: View {
 }
 
 /// The groups in a scroll view that stops on a whole row, lazy once the list is long. Cut short, it ends with a line
-/// saying so (the system's scrollers are overlay-style, so nothing else does): "Show all 12" while Sessions isn't
+/// saying so (the system's scrollers are overlay-style, so nothing else does): "+4 more" while Sessions isn't
 /// focused, which gives it the room; focused, "+4 below", which scrolls to the end, and "Back to top" once there.
 struct SessionsScroll: View {
     let store: Store
@@ -129,7 +130,6 @@ struct SessionsScroll: View {
     var body: some View {
         // Read here, not in the hub's body: the list changing length doesn't redraw the hub.
         let listed = store.listedGroups(expanded: hub.sessionsExpanded)
-        let count = listed.groups.reduce(0) { $0 + $1.rows.count } + listed.hidden
         let focused = hub.focus == .agents
         let cut = hub.query.trimmingCharacters(in: .whitespaces).isEmpty
             && SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0) > cap + 0.5
@@ -142,8 +142,8 @@ struct SessionsScroll: View {
                 SessionsCue(groups: listed.groups, hidden: listed.hidden, viewport: cap - Theme.Metrics.pitch, reach: reach, hub: hub, rail: rail)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             } else if cut {
-                MoreSessionsRow(label: "Show all \(count)", spoken: "All " + plural(count, "session"), hint: "Shows them", hub: hub, rail: rail,
-                                pickable: false, action: showAll)
+                let more = SessionGroup.below(listed.groups, hidden: listed.hidden, reach: cap - Theme.Metrics.pitch)
+                MoreSessionsRow(hidden: more, hub: hub, rail: rail, pickable: false, action: showAll)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             }
         }
@@ -199,7 +199,7 @@ extension SessionGroup {
         }
     }
 
-    /// The least the list shows kept open: three sessions under two headers, with the gap between, and the "Show all"
+    /// The least the list shows kept open: three sessions under two headers, with the gap between, and the "+N more"
     /// row that ends a list cut short (a list with fewer sessions is only as tall as it is).
     static let leastHeight = 3 * Theme.Metrics.twoLineRow + 2 * headerHeight + gap + Theme.Metrics.pitch
 
@@ -212,9 +212,10 @@ extension SessionGroup {
         min(max(leastHeight, free * 0.45), max(free - inboxLeast, 0))
     }
 
-    /// What a peek of `cap` points lists: the groups in order, whole rows only (a header never stands alone), and
-    /// how many sessions are left out. With any left out the last line is the "+N more" row, which is in the cap.
-    static func peek(_ groups: [SessionGroup], cap: CGFloat) -> (groups: [SessionGroup], hidden: Int) {
+    /// What a peek of `cap` points lists of `groups` (which `hidden` sessions were already left out of, by
+    /// `SessionCap`): in order, whole rows only (a header never stands alone), and how many sessions are left out. With
+    /// any left out the last line is the "+N more" row, which is in the cap.
+    static func peek(_ groups: [SessionGroup], hidden: Int = 0, cap: CGFloat) -> (groups: [SessionGroup], hidden: Int) {
         let total = groups.reduce(0) { $0 + $1.rows.count }
         var shown: [SessionGroup] = []
         outer: for group in groups {
@@ -232,12 +233,12 @@ extension SessionGroup {
         shown.removeAll { $0.rows.isEmpty }
         var count = shown.reduce(0) { $0 + $1.rows.count }
         // Room for "+N more": give up whole rows until it fits.
-        while count < total, height(shown) + Theme.Metrics.pitch > cap, count > 0 {
+        while count < total + hidden, height(shown) + Theme.Metrics.pitch > cap, count > 0 {
             shown[shown.count - 1].rows.removeLast()
             shown.removeAll { $0.rows.isEmpty }
             count -= 1
         }
-        return (shown, total - count)
+        return (shown, total + hidden - count)
     }
 
     /// How many sessions a list scrolled to `reach` (the content's y at the viewport's bottom edge) has not shown whole
@@ -328,8 +329,9 @@ struct MoreSessionsRow: View {
     let action: () -> Void
     @State private var hovering = false
 
-    init(hidden: Int, hub: HubState, rail: HorizontalEdge, action: @escaping () -> Void) {
-        self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hint: "Shows them", hub: hub, rail: rail, action: action)
+    init(hidden: Int, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
+        self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hint: "Shows them", hub: hub, rail: rail,
+                  pickable: pickable, action: action)
     }
 
     init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
@@ -712,12 +714,12 @@ extension Store {
         return listedGroups(expanded: hub.sessionsExpanded).groups.flatMap(\.rows)
     }
 
-    /// The first New activity session "+N more" is hiding.
+    /// The first session "+N more" is hiding.
     var firstHiddenSession: String? {
-        sessionGroups.first { $0.kind == .newActivity }?.rows.dropFirst(SessionGroup.newActivityCap).first?.id
+        sessionGroups.flatMap(\.rows).dropFirst(listedGroups(expanded: false).groups.reduce(0) { $0 + $1.rows.count }).first?.id
     }
 
-    /// What the keys can pick after the session rows: "+N more" while New activity is cut, then New session.
+    /// What the keys can pick after the session rows: "+N more" while the list is cut, then New session.
     func sessionExtraTargets(_ hub: HubState) -> [String] {
         guard agents.enabled, hub.query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
         return (listedGroups(expanded: hub.sessionsExpanded).hidden > 0 ? ["s:more"] : []) + ["s:new"]

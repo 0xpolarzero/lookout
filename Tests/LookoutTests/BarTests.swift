@@ -212,19 +212,22 @@ import Testing
         let (shown, hidden) = BarSessions.arrange(s.barSlots, frozen: nil)
         #expect(shown.count == 8)
         #expect(hidden.count == 4)
-        // The hub, left alone, lists the waiting one and New activity's first eight (the rest are behind "+3 more"), and
-        // the keys walk through those and the list's own rows.
-        #expect(s.hubSessions(hub).count == 9)
+        // The hub, left alone, lists the same eight (the rest are behind "+4 more", the bar's "+4"), and the keys walk
+        // through those and the list's own rows.
+        #expect(s.hubSessions(hub).count == 8)
+        #expect(s.hubSessions(hub).map(\.id) == shown.map(\.id))
+        #expect(s.listedGroups(expanded: false).hidden == hidden.count)
         #expect(keys.targets() == s.hubSessions(hub).map { "a:" + $0.id } + ["s:more", "s:new"])
         let unlisted = try #require(hidden.last)
         #expect(!keys.targets().contains("a:" + unlisted.id))
 
-        // The "+4" stands for the first of these: it is listed already, so nothing more opens.
+        // The "+4" stands for the first of these, which the list leaves out too: showing it lists them all, and the keys
+        // reach it.
         let first = try #require(hidden.first)
         hub.showSession(first.id, store: s, ui: ui)
-        #expect(!hub.sessionsExpanded)
+        #expect(hub.sessionsExpanded)
         #expect(hub.selection == "a:" + first.id)
-        // One the list leaves out lists them all, and the keys reach it.
+        hub.sessionsExpanded = false
         hub.showSession(unlisted.id, store: s, ui: ui)
         #expect(hub.sessionsExpanded)
         #expect(s.hubSessions(hub).count == 12)
@@ -237,7 +240,7 @@ import Testing
         // Closing puts the hub's list back to what it lists unasked.
         hub.pinned = true
         hub.pinned = false
-        #expect(s.hubSessions(hub).count == 9)
+        #expect(s.hubSessions(hub).count == 8)
     }
 
     @Test func aTilePastTheListsCutoffIsShownByItsOwnRoute() throws {
@@ -249,7 +252,7 @@ import Testing
         hub.showSession(new[1].id, store: s, ui: ui)
         #expect(!hub.sessionsExpanded)
         #expect(hub.selection == "a:" + new[1].id)
-        // The oldest is behind "+3 more": its Show lists all.
+        // The oldest is behind "+4 more": its Show lists all.
         let oldest = try #require(new.last)
         #expect(!s.hubSessions(hub).contains { $0.id == oldest.id })
         hub.showSession(oldest.id, store: s, ui: ui)
