@@ -168,22 +168,29 @@ struct SecretField: View {
 /// because it takes Esc before any field sees it). Whatever has something open to cancel registers while it has
 /// it; the newest registration answers, and with none Esc navigates.
 @MainActor
-enum EscapeRoute {
-    private static var handlers: [(id: UUID, run: () -> Void)] = []
+final class EscapeRoute {
+    /// The one every window shares; a test makes its own.
+    static let shared = EscapeRoute()
 
-    static func register(_ id: UUID, _ run: @escaping () -> Void) {
-        unregister(id)
+    private var handlers: [(id: UUID, run: () -> Void)] = []
+
+    func add(_ id: UUID, _ run: @escaping () -> Void) {
+        remove(id)
         handlers.append((id, run))
     }
 
-    static func unregister(_ id: UUID) { handlers.removeAll { $0.id == id } }
+    func remove(_ id: UUID) { handlers.removeAll { $0.id == id } }
 
     /// Runs the newest handler; false when there is none.
-    static func run() -> Bool {
+    func answer() -> Bool {
         guard let last = handlers.last else { return false }
         last.run()
         return true
     }
+
+    static func register(_ id: UUID, _ run: @escaping () -> Void) { shared.add(id, run) }
+    static func unregister(_ id: UUID) { shared.remove(id) }
+    static func run() -> Bool { shared.answer() }
 }
 
 private struct EscapeCancel: ViewModifier {

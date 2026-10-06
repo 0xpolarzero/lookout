@@ -549,13 +549,14 @@ private extension NSView {
 @Suite(.serialized) struct TipBubbles {
     /// Hosts a control with a tip of `title` shown at once in a window `width` wide, and where its bubble and the way to it end up.
     private func region(title: String, detail: String? = nil, anchor: CGPoint, width: CGFloat = 500,
-                        thenEscape: Bool = false, focusedAtStart: Bool = false) async throws -> CGRect {
+                        route: EscapeRoute? = nil, thenEscape: Bool = false, focusedAtStart: Bool = false) async throws -> CGRect {
         var seen = CGRect.zero
+        let route = route ?? EscapeRoute()
         let control = Color.red.frame(width: 36, height: 36).tip(title, detail, focused: focusedAtStart, beside: anchor.x > width / 2 ? .leading : .trailing)
             .position(anchor)
             .frame(width: width, height: 400, alignment: .topLeading)
             .environment(\.previewTip, focusedAtStart ? nil : title)
-            .tipSpace { seen = $0 }
+            .tipSpace(region: { seen = $0 }, escape: route)
         let hosting = NSHostingView(rootView: control)
         hosting.frame = CGRect(x: 0, y: 0, width: width, height: 400)
         let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -569,7 +570,7 @@ private extension NSView {
             hosting.layoutSubtreeIfNeeded()
         }
         if thenEscape {
-            #expect(seen != .zero && EscapeRoute.run())
+            #expect(seen != .zero && route.answer())
             for _ in 0..<40 where seen != .zero { try await Task.sleep(for: .milliseconds(50)) }
         }
         return seen

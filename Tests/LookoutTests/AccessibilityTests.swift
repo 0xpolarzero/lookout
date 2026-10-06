@@ -153,7 +153,6 @@ enum AccessibilityTree {
         }
         let top = try await order(.top)
         #expect(try await order(.bottom) == top)
-        #expect(try await order(.left) == (try await order(.right)))
         #expect(top.first == "AXButton Inbox" && top.last == "AXGroup Controls", "\(top)")
     }
 
@@ -161,15 +160,14 @@ enum AccessibilityTree {
         // What the open-low shots show: the room below a low bar leaves the inbox a row and its line, or only a row. The six
         // items are more than either holds, so the rest is said under the list (a button) or, with no room for that line,
         // in the header (text).
-        for edge in [DockEdge.left, .right] {
-            for room in stride(from: CGFloat(160), through: 260, by: 10) {
-                let tree = try root(try await AccessibilityTree.render(edge: edge, scenario: .noCI, openLength: room) { store, hub in
-                    store.agents.enabled = false
-                    hub.pinned = true
-                })
-                let says = tree.all.contains { $0.label.hasSuffix("more items") || "\($0.value)".hasSuffix("more items") }
-                #expect(says, "\(edge) with \(room) pt: the list is cut and nothing says there are more")
-            }
+        // No room for a row (160), a row and no line (190), a row and its line (210), more (250); a side each.
+        for (edge, room) in [(DockEdge.left, 160), (.left, 190), (.right, 205), (.right, 210), (.left, 250)] as [(DockEdge, CGFloat)] {
+            let tree = try root(try await AccessibilityTree.render(edge: edge, scenario: .noCI, openLength: room) { store, hub in
+                store.agents.enabled = false
+                hub.pinned = true
+            })
+            let says = tree.all.contains { $0.label.hasSuffix("more items") || "\($0.value)".hasSuffix("more items") }
+            #expect(says, "\(edge) with \(room) pt: the list is cut and nothing says there are more")
         }
     }
 

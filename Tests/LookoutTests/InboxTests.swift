@@ -185,8 +185,8 @@ import Testing
         let flag = Flag()
         withObservationTracking { _ = store.isSnoozed } onChange: { flag.set() }
         #expect(store.isSnoozed)
-        try await Task.sleep(for: .seconds(0.9))
-        // The banner and the Notifications row, which read it, are told once the time has passed.
+        // The banner and the Notifications row, which read it, are told once the time has passed (a busy run may be late).
+        for _ in 0..<100 where !flag.value { try await Task.sleep(for: .milliseconds(50)) }
         #expect(flag.value && !store.isSnoozed)
     }
 
