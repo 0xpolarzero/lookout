@@ -76,4 +76,39 @@ import Testing
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
         #expect(settings.shortcuts == nil)
     }
+
+    @Test func aClearedShortcutMatchesNothingAndComesBackWithReset() {
+        let store = Store()
+        store.persists = false
+        store.setShortcut(.unassigned, for: .markAllRead)
+        #expect(store.shortcut(.markAllRead).isUnassigned)
+        #expect(store.shortcut(.markAllRead).display == "None")
+        #expect(!store.shortcut(.markAllRead).isModifierTap && store.shortcut(.markAllRead).mouseButton == nil)
+        // Whatever key is pressed, none is the cleared one.
+        for code in [kVK_Space, kVK_Delete, kVK_Return, kVK_ANSI_Z] {
+            #expect(Shortcut(key(code, [.option])) != store.shortcut(.markAllRead))
+        }
+        store.setShortcut(nil, for: .markAllRead)
+        #expect(store.shortcut(.markAllRead) == ShortcutAction.markAllRead.defaultShortcut)
+    }
+
+    @Test func restoreDefaultsResetsEveryShortcutAndRegistersTheGlobalOnesAgain() {
+        let store = Store()
+        store.persists = false
+        var registered: [ShortcutAction] = []
+        store.onGlobalShortcutChange = { action, _ in registered.append(action) }
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
+        store.setShortcut(.unassigned, for: .discard)
+        #expect(store.hasCustomShortcuts)
+        registered = []
+        store.restoreDefaultShortcuts()
+        #expect(!store.hasCustomShortcuts)
+        for action in ShortcutAction.allCases { #expect(store.shortcut(action) == action.defaultShortcut) }
+        #expect(Set(registered) == [.togglePanel, .sessionSwitcher])
+    }
+
+    @Test func globalDefaultsAreUnchanged() {
+        #expect(ShortcutAction.togglePanel.defaultShortcut == Shortcut(keyCode: UInt16(kVK_ANSI_L), modifiers: [.control, .option]))
+        #expect(ShortcutAction.sessionSwitcher.defaultShortcut == Shortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.control, .option]))
+    }
 }
