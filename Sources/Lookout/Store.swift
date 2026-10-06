@@ -154,6 +154,8 @@ final class Store {
     @ObservationIgnored var iconTask: Task<Void, Never>?
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     @ObservationIgnored var typesafeKeyCache: String?
+    /// What keeps a key in the Keychain (tests answer for it).
+    @ObservationIgnored var keychainWrite: ((String, String) -> Bool)?
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?
     @ObservationIgnored private var dotsWatcher: FolderWatcher?

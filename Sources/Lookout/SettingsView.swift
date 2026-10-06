@@ -636,13 +636,15 @@ struct SettingsView: View {
             if let error = store.iconError {
                 Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.red)
                     .fixedSize(horizontal: false, vertical: true).padding(.bottom, Theme.Space.md)
+                    .onChange(of: error, initial: true) { _, now in Announce.say(now) }
             }
         }
     }
 
+    /// Saved and said only once the Keychain has it; a refusal keeps what was typed (the error is announced where it shows).
     private func saveTypesafeKey() {
-        guard !typesafeKey.isEmpty else { return }
-        store.setTypesafeKey(typesafeKey)
+        let key = typesafeKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, store.setTypesafeKey(key) else { return }
         typesafeKey = ""
         Announce.say("TypeSafe key saved")
     }

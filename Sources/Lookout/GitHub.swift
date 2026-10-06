@@ -296,11 +296,15 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func write(_ token: String, _ account: String = github) {
-        delete(account)
+    /// Whether it was kept. An item already there is updated in place, so a failed save leaves the old one.
+    @discardableResult
+    static func write(_ token: String, _ account: String = github) -> Bool {
+        let data = Data(token.utf8)
+        let status = SecItemUpdate(base(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        guard status == errSecItemNotFound else { return status == errSecSuccess }
         var q = base(account)
-        q[kSecValueData as String] = Data(token.utf8)
-        SecItemAdd(q as CFDictionary, nil)
+        q[kSecValueData as String] = data
+        return SecItemAdd(q as CFDictionary, nil) == errSecSuccess
     }
 
     static func delete(_ account: String = github) {
