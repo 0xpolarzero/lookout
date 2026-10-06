@@ -122,11 +122,6 @@ struct CIRow: View {
     private var failing: [String] { entry.state == .failure ? entry.status?.failing ?? [] : [] }
 
     var body: some View {
-        // The age and what VoiceOver says of it come from the same minute, so they never part.
-        Ticking(coarse: true) { now in row(now) }
-    }
-
-    private func row(_ now: Date) -> some View {
         Button { store.openChecks(entry.repo) } label: {
             HStack(alignment: .top, spacing: Theme.Space.md) {
                 Image(systemName: entry.state.symbol)
@@ -138,7 +133,7 @@ struct CIRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
                         Text(title).font(Theme.Typography.body).foregroundStyle(Theme.text).lineLimit(1)
                         Spacer(minLength: 0)
-                        if let changed = entry.changedAt { CIAge(date: changed, now: now) }
+                        if let changed = entry.changedAt { CIAge(date: changed) }
                     }
                     detail
                 }
@@ -150,7 +145,8 @@ struct CIRow: View {
         .buttonStyle(.plain)
         .focusable(false)
         .accessibilityLabel(title)
-        .accessibilityValue(CISpeech.value(entry, now: now))
+        // The age said and the age shown come from the same minute, each from the clock in a view of its own.
+        .spokenTime { content, now in content.accessibilityValue(CISpeech.value(entry, now: now)) }
         .accessibilityHint([headline, "Opens its checks. More actions available."].filter { !$0.isEmpty }.joined(separator: ". "))
         .help(tooltip)
         // The keyboard's pick shows what a tooltip would (the failing checks and the headline are cut to one line).
@@ -187,15 +183,16 @@ struct CIRow: View {
     }
 }
 
-/// How long ago a repo's runs changed, as of the minute clock's `now`.
+/// How long ago a repo's runs changed, from the minute clock: the one view of its row that reads it.
 private struct CIAge: View {
     let date: Date
-    let now: Date
 
     var body: some View {
-        Text(shortAgo(date, now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
-            .frame(minWidth: Theme.Metrics.ageColumn, alignment: .trailing)
-            .accessibilityHidden(true)
+        Ticking(coarse: true) { now in
+            Text(shortAgo(date, now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+                .frame(minWidth: Theme.Metrics.ageColumn, alignment: .trailing)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -260,10 +257,6 @@ private struct CINameRow: View {
     private var note: String? { entry.muted ? "\(entry.state.label), muted" : !entry.checked ? "not checked" : entry.state == .none ? "no runs" : nil }
 
     var body: some View {
-        Ticking(coarse: true) { now in row(now) }
-    }
-
-    private func row(_ now: Date) -> some View {
         Button { store.openChecks(entry.repo) } label: {
             HStack(spacing: Theme.Space.md) {
                 Group {
@@ -287,7 +280,7 @@ private struct CINameRow: View {
         .buttonStyle(.plain)
         .focusable(false)
         .accessibilityLabel(title)
-        .accessibilityValue(CISpeech.value(entry, now: now))
+        .spokenTime { content, now in content.accessibilityValue(CISpeech.value(entry, now: now)) }
         .accessibilityHint("Opens its checks. More actions available.")
         .ciActions(entry, store: store)
         .rowMenuTarget("c:" + entry.id, hub: hub)

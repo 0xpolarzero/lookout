@@ -71,14 +71,9 @@ struct InboxRow: View {
     private var ageDate: Date { isOpen ? item.createdAt : item.clearedAt ?? item.createdAt }
 
     var body: some View {
-        // The age and what VoiceOver says of it come from the same minute, so they never part.
-        Ticking(coarse: true) { now in row(now) }
-    }
-
-    func row(_ now: Date) -> some View {
         let showsAction = hover || selected || spoken
         return ZStack(alignment: wide ? .trailing : .bottomTrailing) {
-            Button { store.open(item) } label: { label(now) }
+            Button { store.open(item) } label: { label }
                 .buttonStyle(.plain)
                 .focusable(false)
                 .help(tooltip)
@@ -98,7 +93,9 @@ struct InboxRow: View {
         .rowMenuTarget(key, hub: hub)
         // One element: the visible action is reached through the actions below.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spokenLabel(now))
+        // The age said and the age shown come from the same minute, each from the clock in a view of its own: a tick redraws
+        // the age and what is said, not the row.
+        .spokenTime { content, now in content.accessibilityLabel(spokenLabel(now)) }
         .accessibilityValue(isOpen ? (unread ? "Unread" : "") : item.state.doneLabel)
         .accessibilityHint("Opens on GitHub. More actions available.")
         .accessibilityAddTraits(.isButton)
@@ -114,19 +111,19 @@ struct InboxRow: View {
         .modifier(RotorEntry(id: item.id, namespace: rotor))
     }
 
-    private func label(_ now: Date) -> some View {
+    private var label: some View {
         Group {
             if wide {
                 // The request is what the row is for: the title keeps its whole text while anything of the meta can give
                 // (its kind's word, then everything but the stack's own cut), and a title that still doesn't fit with the
                 // meta on its line goes back to the two lines, where the author is what is cut.
                 ViewThatFits(in: .horizontal) {
-                    line(now, .wide(kind: true))
-                    line(now, .wide(kind: false))
-                    line(now, .stacked)
+                    line(.wide(kind: true))
+                    line(.wide(kind: false))
+                    line(.stacked)
                 }
             } else {
-                line(now, .stacked)
+                line(.stacked)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,7 +136,7 @@ struct InboxRow: View {
         case wide(kind: Bool)
     }
 
-    private func line(_ now: Date, _ layout: Layout) -> some View {
+    private func line(_ layout: Layout) -> some View {
         HStack(alignment: .top, spacing: 0) {
             dot.padding(.top, layout == .stacked ? 0 : 8)
             Avatar(url: item.avatar, name: item.author)
@@ -149,11 +146,11 @@ struct InboxRow: View {
                 switch layout {
                 case .stacked:
                     VStack(alignment: .leading, spacing: Theme.Space.hair) {
-                        firstLine(now)
+                        firstLine
                         secondLine
                     }
                 case .wide(let kind):
-                    wideLine(now, kind: kind)
+                    wideLine(kind: kind)
                 }
             }
             .padding(.leading, Theme.Space.md)
@@ -170,11 +167,11 @@ struct InboxRow: View {
             .accessibilityHidden(true)
     }
 
-    private func firstLine(_ now: Date) -> some View {
+    private var firstLine: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
             title
             Spacer(minLength: 0)
-            age(now)
+            age
             // A wide list keeps its ages in one column: a row that fell back to two lines leaves the action's room as the
             // rows on one line do.
             if wide { Color.clear.frame(width: Theme.Metrics.iconButton - Theme.Space.sm, height: 1) }
@@ -188,17 +185,19 @@ struct InboxRow: View {
             .lineLimit(1)
     }
 
-    /// In Done, when it was cleared; elsewhere, when it arrived.
-    private func age(_ now: Date) -> some View {
-        Text(shortAgo(ageDate, now: now))
-            .font(Theme.Typography.numeral)
-            .foregroundStyle(Theme.secondary)
-            .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
+    /// In Done, when it was cleared; elsewhere, when it arrived. The one view of the row that reads the clock.
+    private var age: some View {
+        Ticking(coarse: true) { now in
+            Text(shortAgo(ageDate, now: now))
+                .font(Theme.Typography.numeral)
+                .foregroundStyle(Theme.secondary)
+                .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
+        }
     }
 
     /// The wide row: everything on the title's baseline, the meta after it, then the age and the action's room (always
     /// kept). The title keeps its whole text.
-    private func wideLine(_ now: Date, kind: Bool) -> some View {
+    private func wideLine(kind: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
             title.fixedSize()
             HStack(spacing: Theme.Space.xs) {
@@ -208,7 +207,7 @@ struct InboxRow: View {
             .foregroundStyle(Theme.tertiary)
             .layoutPriority(1)
             Spacer(minLength: 0)
-            age(now)
+            age
             // The same room after the age as the stacked row leaves (its spacing and 18 pt), so the ages share a column.
             Color.clear.frame(width: Theme.Metrics.iconButton - Theme.Space.md, height: 1)
         }

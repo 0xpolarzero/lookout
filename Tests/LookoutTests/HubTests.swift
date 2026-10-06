@@ -1044,11 +1044,11 @@ private final class Redrawn: @unchecked Sendable {
         func track(_ redrawn: @escaping (String) -> Void) {
             for item in items {
                 let view = InboxRow(item: item, store: store, ui: ui, hub: hub)
-                withObservationTracking { _ = view.row(Date()) } onChange: { redrawn("i:" + item.id) }
+                withObservationTracking { _ = view.body } onChange: { redrawn("i:" + item.id) }
             }
             for row in sessions {
                 let view = SessionRow(row: row, store: store, ui: ui, hub: hub, rail: .trailing, placement: .project)
-                withObservationTracking { _ = view.content(now: Date()) } onChange: { redrawn("a:" + row.id) }
+                withObservationTracking { _ = view.body } onChange: { redrawn("a:" + row.id) }
             }
         }
         let flags = Redrawn()
@@ -1076,7 +1076,7 @@ private final class Redrawn: @unchecked Sendable {
         var redrawn = 0
         for row in rows {
             let view = SessionRow(row: row, store: store, ui: ui, hub: hub, rail: .trailing, placement: .project)
-            withObservationTracking { _ = view.content(now: Date()) } onChange: { redrawn += 1 }
+            withObservationTracking { _ = view.body } onChange: { redrawn += 1 }
         }
         store.claudeActivity[id] = ClaudeActivity(text: "Running swift test", since: Date())
         store.claudeTasks[id] = [ClaudeTask(id: "t1", kind: .command, title: "swift test", since: Date())]

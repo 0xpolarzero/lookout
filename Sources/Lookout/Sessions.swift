@@ -498,20 +498,18 @@ struct SessionRow: View {
     /// Line 2's centre, where the action sits.
     private static let actionTop: CGFloat = 31
 
-    /// The row's ages (the status it shows, and the one it speaks) come from one clock: a working session under a minute old
-    /// counts seconds, everything else the minute clock, and only while the row is on screen.
-    var body: some View {
-        Ticking(since: row.session.running && !row.isWaiting ? row.workingSince : nil) { now in content(now: now) }
-    }
+    /// What the row counts seconds from: a working session under a minute old counts seconds, everything else the minute
+    /// clock.
+    private var countsFrom: Date? { row.session.running && !row.isWaiting ? row.workingSince : nil }
 
-    @ViewBuilder func content(now: Date) -> some View {
+    var body: some View {
         let id = "a:" + row.id
         let picked = hub.keyboardPicked(id)
         let hot = ui.hot(row.id)
         let showsAction = hot || picked || voiceOverFocused
         Button { store.openAgent(row.id) } label: {
             RailRow(rail: rail, height: SessionGroup.height(of: row), fill: picked ? Theme.Fill.selected : hot ? Theme.Fill.hover : Theme.Fill.rest,
-                    picked: picked, tile: { AgentTile(row: row) }, content: { lines(now: now) })
+                    picked: picked, tile: { AgentTile(row: row) }, content: { lines })
         }
         .buttonStyle(.plain)
         .focusable(false)
@@ -536,7 +534,8 @@ struct SessionRow: View {
         .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.spokenValue(now: now))
+        // The status shown and the value said come from one clock, each in a view of its own: a tick redraws them, not the row.
+        .spokenTime(since: countsFrom) { content, now in content.accessibilityValue(row.spokenValue(now: now)) }
         .accessibilityHint(row.spokenHint.isEmpty ? "Opens it in Claude" : row.spokenHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityFocused($voiceOverFocused)
@@ -551,7 +550,7 @@ struct SessionRow: View {
         }
     }
 
-    private func lines(now: Date) -> some View {
+    private var lines: some View {
         VStack(alignment: .leading, spacing: Theme.Space.hair) {
             HStack(spacing: Theme.Space.md) {
                 Text(row.session.title)
@@ -559,7 +558,7 @@ struct SessionRow: View {
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                status(now: now).fixedSize()
+                status.fixedSize()
             }
             HStack(spacing: Theme.Space.md) {
                 headline.font(Theme.Typography.meta).lineLimit(1)
@@ -572,11 +571,14 @@ struct SessionRow: View {
     }
 
     /// "Waiting" in amber, "Working 2m", "Finished 4m".
-    @ViewBuilder private func status(now: Date) -> some View {
+    @ViewBuilder private var status: some View {
         if row.isWaiting {
             Text("Waiting").font(Theme.Typography.numeral).foregroundStyle(Theme.amber)
         } else {
-            Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+            // The one view of the row that reads the clock.
+            Ticking(since: countsFrom) { now in
+                Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+            }
         }
     }
 
