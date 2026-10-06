@@ -5,8 +5,14 @@ import SwiftUI
 @Observable
 @MainActor
 final class UIState {
-    /// Session row hovered anywhere in the hub (or picked with the keys).
-    var drawerSelection: String?
+    /// Session row hovered anywhere in the hub (or picked with the keys). A row asks `hot(_:)`, not this.
+    var drawerSelection: String? {
+        didSet { drawerLights.current = drawerSelection }
+    }
+    @ObservationIgnored let drawerLights = Lights()
+
+    /// Whether this session's row is the one hovered or picked anywhere: read by the row alone.
+    func hot(_ id: String) -> Bool { drawerLights.isOn(id) }
     var edge: DockEdge = DockEdge(rawValue: UserDefaults.standard.string(forKey: "pill.edge") ?? "")
         ?? (UserDefaults.standard.bool(forKey: "pill.onLeft") ? .left : .right) {
         didSet { if persists { UserDefaults.standard.set(edge.rawValue, forKey: "pill.edge") } }

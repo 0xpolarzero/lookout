@@ -241,7 +241,7 @@ struct BarTile: View {
 
     private func cell(now: Date) -> some View {
         BarCell(axis: axis, name: row.session.title, value: row.tileValue(now: now), hint: row.tileHint,
-                picked: hub.selection == "a:" + row.id, show: show, action: { store.openAgent(row.id) }) { hovering in
+                picked: hub.selected("a:" + row.id), show: show, action: { store.openAgent(row.id) }) { hovering in
             StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size, hovering: hovering, onRail: onRail)
         }
         .sessionMenu(row, store)

@@ -118,7 +118,7 @@ struct CIRow: View {
     @Environment(\.resolved) private var resolved
 
     /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
-    private var selected: Bool { hub.selection == "c:" + entry.id }
+    private var selected: Bool { hub.selected("c:" + entry.id) }
     private var failing: [String] { entry.state == .failure ? entry.status?.failing ?? [] : [] }
 
     var body: some View {
@@ -154,7 +154,7 @@ struct CIRow: View {
         .accessibilityHint([headline, "Opens its checks. More actions available."].filter { !$0.isEmpty }.joined(separator: ". "))
         .help(tooltip)
         // The keyboard's pick shows what a tooltip would (the failing checks and the headline are cut to one line).
-        .tip(title, tipDetail, focused: selected && hub.keyboardSelection?.id == "c:" + entry.id, hover: false)
+        .tip(title, tipDetail, focused: hub.keyboardPicked("c:" + entry.id), hover: false)
         .ciActions(entry, store: store)
         .rowMenuTarget("c:" + entry.id, hub: hub)
         .voiceOverTarget("c:" + entry.id, hub: hub)
@@ -209,7 +209,7 @@ private struct CIQuietRow: View {
     let toggle: () -> Void
     @State private var hover = false
 
-    private var selected: Bool { hub.selection == "c:passing" }
+    private var selected: Bool { hub.selected("c:passing") }
 
     /// The glyph of what the row mostly holds: a check only when something really passes.
     private var symbol: String {
@@ -256,7 +256,7 @@ private struct CINameRow: View {
     let hub: HubState
     @State private var hover = false
 
-    private var selected: Bool { hub.selection == "c:" + entry.id }
+    private var selected: Bool { hub.selected("c:" + entry.id) }
     private var note: String? { entry.muted ? "\(entry.state.label), muted" : !entry.checked ? "not checked" : entry.state == .none ? "no runs" : nil }
 
     var body: some View {

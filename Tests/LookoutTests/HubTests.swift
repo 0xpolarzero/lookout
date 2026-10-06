@@ -945,6 +945,12 @@ import Testing
     }
 }
 
+/// What the observation of a set of rows reported, in order.
+private final class Redrawn: @unchecked Sendable {
+    var ids: [String] = []
+    func add(_ id: String) { ids.append(id) }
+}
+
 /// DESIGN.md 8: a poll flips `isSyncing` and sets `lastSync` every time, and must not redraw the hub's body (only the
 /// views that show the sync state, which read it in scopes of their own).
 @MainActor
@@ -1028,6 +1034,38 @@ import Testing
         // The rows still hear of it: they are rebuilt for the new state, not served from the memo.
         let row = store.hubSessions(hub).first { $0.id == id }
         #expect(row?.activity?.text == "Editing Sessions.swift")
+    }
+
+    @Test func movingThePickRedrawsOnlyTheRowsWhoseLightChanged() {
+        // The pick and the pointer move over every row of every list: each row reads its own light, not the shared selection.
+        let items = Array(store.list(.needsYou))
+        let sessions = store.allAgentRows
+        #expect(items.count > 3 && sessions.count > 3)
+        func track(_ redrawn: @escaping (String) -> Void) {
+            for item in items {
+                let view = InboxRow(item: item, store: store, ui: ui, hub: hub)
+                withObservationTracking { _ = view.row(Date()) } onChange: { redrawn("i:" + item.id) }
+            }
+            for row in sessions {
+                let view = SessionRow(row: row, store: store, ui: ui, hub: hub, rail: .trailing, placement: .project)
+                withObservationTracking { _ = view.content(now: Date()) } onChange: { redrawn("a:" + row.id) }
+            }
+        }
+        let flags = Redrawn()
+        track(flags.add)
+        hub.selection = "i:" + items[0].id
+        #expect(Set(flags.ids) == ["i:" + items[0].id], "\(flags.ids)")
+        // From one row to another: the one let go and the one picked, and no more.
+        flags.ids = []
+        track(flags.add)
+        hub.selection = "a:" + sessions[1].id
+        hub.keyboardSelection = ScrollRequest(id: "a:" + sessions[1].id, seq: 1)
+        #expect(Set(flags.ids) == ["i:" + items[0].id, "a:" + sessions[1].id], "\(flags.ids)")
+        // A pointer over a session row is the drawer's light.
+        flags.ids = []
+        track(flags.add)
+        ui.drawerSelection = sessions[2].id
+        #expect(Set(flags.ids) == ["a:" + sessions[2].id], "\(flags.ids)")
     }
 
     @Test func aSessionRowDoesNotReadTheWholeSessionsCache() throws {

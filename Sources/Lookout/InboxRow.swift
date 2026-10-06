@@ -57,8 +57,8 @@ struct InboxRow: View {
     /// How wide a row is before its meta moves up beside the title (the focused inbox, 560 with its insets).
     static let wideFrom: CGFloat = 520
 
-    /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
-    private var selected: Bool { hub.selection == key }
+    /// Its own light, read here: hovering or picking another row redraws neither the hub nor this row.
+    private var selected: Bool { hub.selected(key) }
     private var key: String { "i:" + item.id }
     /// The content's height: the row is `twoLineRow` whatever line 2 holds (the highlight pads 6 above and below).
     private static let contentHeight = Theme.Metrics.twoLineRow - 12
@@ -66,7 +66,7 @@ struct InboxRow: View {
     private var isOpen: Bool { item.state.isOpen }
     private var low: Bool { store.isLowPriority(item) }
     /// What the keyboard picked (not the pointer): its detail shows as a tip, which `.help` can't do for a key.
-    private var keyboardPicked: Bool { selected && hub.keyboardSelection?.id == key }
+    private var keyboardPicked: Bool { hub.keyboardPicked(key) }
     /// The one date the row's age is counted from, shown and spoken: when it arrived, or in Done when it was cleared.
     private var ageDate: Date { isOpen ? item.createdAt : item.clearedAt ?? item.createdAt }
 
@@ -75,7 +75,7 @@ struct InboxRow: View {
         Ticking(coarse: true) { now in row(now) }
     }
 
-    private func row(_ now: Date) -> some View {
+    func row(_ now: Date) -> some View {
         let showsAction = hover || selected || spoken
         return ZStack(alignment: wide ? .trailing : .bottomTrailing) {
             Button { store.open(item) } label: { label(now) }

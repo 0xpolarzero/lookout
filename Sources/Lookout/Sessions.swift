@@ -441,7 +441,7 @@ struct MoreSessionsRow: View {
     }
 
     var body: some View {
-        let picked = pickable && hub.selection == "s:more"
+        let picked = pickable && hub.selected("s:more")
         Button(action: action) {
             RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
                     picked: picked, tile: { Color.clear }) {
@@ -506,8 +506,8 @@ struct SessionRow: View {
 
     @ViewBuilder func content(now: Date) -> some View {
         let id = "a:" + row.id
-        let picked = hub.selection == id && hub.keyboardSelection?.id == id
-        let hot = ui.drawerSelection == row.id
+        let picked = hub.keyboardPicked(id)
+        let hot = ui.hot(row.id)
         let showsAction = hot || picked || voiceOverFocused
         Button { store.openAgent(row.id) } label: {
             RailRow(rail: rail, height: SessionGroup.height(of: row), fill: picked ? Theme.Fill.selected : hot ? Theme.Fill.hover : Theme.Fill.rest,
@@ -706,7 +706,7 @@ struct NewSessionRow: View {
     @State private var anchor = MenuAnchor()
 
     var body: some View {
-        let picked = hub.selection == "s:new"
+        let picked = hub.selected("s:new")
         let lit = hovering || picked
         Button { store.startScratchSession() } label: {
             RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,

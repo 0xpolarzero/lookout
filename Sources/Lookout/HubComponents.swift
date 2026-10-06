@@ -341,6 +341,37 @@ extension AnyTransition {
     }
 }
 
+/// Which one row is lit (picked, hovered), observed row by row: a row reads only its own light, so moving the pick redraws
+/// the two rows that changed and not every row of every list (DESIGN.md 8). A comparison made in a row's body, against one
+/// shared property, makes the row depend on the property.
+@MainActor
+final class Lights {
+    @Observable final class Light {
+        fileprivate(set) var on: Bool
+        fileprivate init(on: Bool) { self.on = on }
+    }
+
+    @ObservationIgnored private var lights: [String: Light] = [:]
+    /// The key that is lit; setting it puts out the one before and lights the new one, and nothing else is touched.
+    var current: String? {
+        didSet {
+            guard current != oldValue else { return }
+            if let oldValue { lights[oldValue]?.on = false }
+            if let current { lights[current]?.on = true }
+        }
+    }
+
+    /// The light of `key`: read its `on`.
+    func light(_ key: String) -> Light {
+        if let light = lights[key] { return light }
+        let light = Light(on: current == key)
+        lights[key] = light
+        return light
+    }
+
+    func isOn(_ key: String) -> Bool { light(key).on }
+}
+
 /// A request to scroll the lists to a row; `seq` makes asking for the same row again a new request.
 struct ScrollRequest: Equatable {
     let id: String

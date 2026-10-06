@@ -28,11 +28,23 @@ final class HubState {
     var page: HubPage = .main
     /// The Settings pane that is open: the page header's tabs set it, the form shows it.
     var settingsPane: SettingsPane = .general
-    /// "i:<item id>", "c:<repo>" or "a:<session id>": the row the keys act on.
-    var selection: String?
+    /// "i:<item id>", "c:<repo>" or "a:<session id>": the row the keys act on. A row asks `selected(_:)`, not this.
+    var selection: String? {
+        didSet { selectionLights.current = selection }
+    }
     /// The last row the keyboard (or a click on the inbox) picked: the lists scroll to it. Never set by hovering, so
-    /// the pointer moving over a row doesn't move the list.
-    var keyboardSelection: ScrollRequest?
+    /// the pointer moving over a row doesn't move the list. A row asks `keyboardPicked(_:)`, not this.
+    var keyboardSelection: ScrollRequest? {
+        didSet { keyboardLights.current = keyboardSelection?.id }
+    }
+    @ObservationIgnored let selectionLights = Lights()
+    @ObservationIgnored let keyboardLights = Lights()
+
+    /// Whether the keys act on this row ("i:…", "c:…", "a:…", "s:…"): read by the row alone, so another row being picked
+    /// doesn't redraw it.
+    func selected(_ key: String) -> Bool { selectionLights.isOn(key) }
+    /// Whether the keyboard (not the pointer) is what picked this row.
+    func keyboardPicked(_ key: String) -> Bool { selectionLights.isOn(key) && keyboardLights.isOn(key) }
     /// CI's Passing row is open in place (it also is while CI is the focused section).
     var ciPassingOpen = false
     /// CI is folded to its header because the screen leaves no room for its rows (`LookoutHub.foldsCI`): they aren't
