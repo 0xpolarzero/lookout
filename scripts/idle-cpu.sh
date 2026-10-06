@@ -12,6 +12,9 @@
 # WindowServer's share over the same window is printed apart and is not part of the verdict: it draws the rings. To say
 # what they cost it is measured once more on `--demo busy`, which has no working session, and the difference is printed.
 #
+# A sample that is missing or malformed (ps failed, the process went), a window that is not positive or a CPU time that goes
+# backwards is a failure, never a 0%.
+#
 # It needs the bar on screen: with the screen locked or asleep, or the bar covered, the ring's animation is removed and
 # any number would be about 0%. So the script checks that the bar's window is on screen and fails when it is not;
 # ALLOW_HIDDEN=1 turns that into a warning.
@@ -34,16 +37,25 @@ window=${WINDOW:-30}    # seconds between the two samples
 edges=${EDGES:-"right top"}
 bin=.build/release/Lookout
 
+number() { [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; }
+for value in "$limit" "$settle" "$window"; do
+    number "$value" || { echo "idle-cpu: LIMIT, SETTLE and WINDOW are numbers ('$value' is not)"; exit 2; }
+done
+awk -v limit="$limit" -v window="$window" 'BEGIN { exit !(limit > 0 && window > 0) }' || { echo "idle-cpu: LIMIT and WINDOW must be above 0"; exit 2; }
+
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
     swift build -c release >/dev/null || { echo "idle-cpu: release build failed"; exit 2; }
 fi
 [ -x "$bin" ] || { echo "idle-cpu: $bin not found"; exit 2; }
 
-# cpu_seconds <pid>: cumulative CPU time, from ps's [[H:]M:]S.cc.
+# cpu_seconds <pid>: cumulative CPU time, from ps's [[H:]M:]S.cc. Prints nothing, and fails, when there is none to read.
 cpu_seconds() {
-    ps -o cputime= -p "$1" 2>/dev/null | awk '{
-        n = split($1, t, ":"); s = 0
-        for (i = 1; i <= n; i++) s = s * 60 + t[i]
+    local text
+    text=$(ps -o cputime= -p "$1" 2>/dev/null | tr -d ' ') || return 1
+    [[ "$text" =~ ^[0-9]+(:[0-9]+){0,2}(\.[0-9]+)?$ ]] || return 1
+    awk -v t="$text" 'BEGIN {
+        n = split(t, p, ":"); s = 0
+        for (i = 1; i <= n; i++) s = s * 60 + p[i]
         printf "%.2f\n", s
     }'
 }
@@ -97,19 +109,29 @@ measure() {
     fi
     local ws; ws=$(pgrep -x WindowServer | head -1)
     local app0 app1 ws0 ws1
-    app0=$(cpu_seconds "$pid"); ws0=$(cpu_seconds "${ws:-0}")
+    app0=$(cpu_seconds "$pid") || { echo "idle-cpu: $label $edge: no CPU sample of Lookout at the start"; failed=1; return; }
+    ws0=$(cpu_seconds "${ws:-0}") || ws0=
     sleep "$window"
     if ! kill -0 "$pid" 2>/dev/null; then
         echo "idle-cpu: $label $edge: Lookout exited while it was measured"
         failed=1
         return
     fi
-    app1=$(cpu_seconds "$pid"); ws1=$(cpu_seconds "${ws:-0}")
-    last_ws=$(awk -v w0="${ws0:-0}" -v w1="${ws1:-0}" -v window="$window" 'BEGIN { printf "%.2f", (w1 - w0) / window * 100 }')
-    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v w0="${ws0:-0}" -v w1="${ws1:-0}" 'BEGIN {
-        app = (a1 - a0) / window * 100; server = (w1 - w0) / window * 100
+    app1=$(cpu_seconds "$pid") || { echo "idle-cpu: $label $edge: no CPU sample of Lookout at the end"; failed=1; return; }
+    ws1=$(cpu_seconds "${ws:-0}") || ws1=
+    if [ -n "$ws0" ] && [ -n "$ws1" ]; then
+        last_ws=$(awk -v w0="$ws0" -v w1="$ws1" -v window="$window" 'BEGIN { printf "%.2f", (w1 - w0) / window * 100 }')
+    else
+        last_ws="n/a"
+    fi
+    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v ws="$last_ws" 'BEGIN {
+        if (!(window > 0) || a1 < a0) {
+            printf "%-12s FAIL: a window of %s s and CPU time going from %s to %s are no measurement\n", label, window, a0, a1
+            exit 1
+        }
+        app = (a1 - a0) / window * 100
         verdict = app < limit ? "ok" : "FAIL"
-        printf "%-12s Lookout %.3f%% (limit %s%%)  WindowServer %.2f%% (all clients)  %s\n", label, app, limit, server, verdict
+        printf "%-12s Lookout %.3f%% (limit %s%%)  WindowServer %s%% (all clients)  %s\n", label, app, limit, ws, verdict
         exit app < limit ? 0 : 1
     }' || failed=1
     kill "$pid" 2>/dev/null
@@ -130,6 +152,9 @@ done
 scenario=busy
 first_edge=${edges%% *}
 measure "no ring" "$first_edge"
-awk -v ring="$ring_ws" -v none="$last_ws" 'BEGIN { printf "rings: WindowServer %.2f%% with working sessions, %.2f%% without (all clients; %+.2f%%)\n", ring, none, ring - none }'
+awk -v ring="$ring_ws" -v none="$last_ws" 'BEGIN {
+    if (ring == "n/a" || none == "n/a") { print "rings: WindowServer not sampled"; exit }
+    printf "rings: WindowServer %.2f%% with working sessions, %.2f%% without (all clients; %+.2f%%)\n", ring, none, ring - none
+}'
 
 exit $failed
