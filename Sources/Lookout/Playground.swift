@@ -462,6 +462,8 @@ enum PlaygroundShots {
         },
         Shot.edges("repos-add-error", on: [.right]) {
             $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addError = "Not Found"
+            // The suggestion that was picked, not the text it was found with.
+            $0.preview.addSubmitted = "apple/swift-nio"
         },
         Shot.edges("repos-undo", on: [.right]) {
             $0.pinned = true; $0.page = .repos

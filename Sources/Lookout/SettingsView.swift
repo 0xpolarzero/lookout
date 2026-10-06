@@ -50,6 +50,8 @@ struct PagePreview: Equatable {
     var addHighlight: Int?
     /// Repositories: what the last Add said went wrong (the suggestions stay hidden while it shows).
     var addError: String?
+    /// What that Add was for when it was not the text in the field (a suggestion that was picked).
+    var addSubmitted: String?
     /// Repositories: the repository a drag is over, and the one whose Retry has the keyboard focus.
     var dropTarget: String?
     var retryFocused: String?

@@ -120,9 +120,16 @@ enum RepoFailure: Equatable {
         RepoFailure(reason: reason)?.sync(of: repo) ?? "Couldn't sync \(repo)"
     }
 
-    /// The add field's line for a reason: Store's own sentences ("Already watching …") are already one.
+    /// Store's own sentences about what was typed: they are already a sentence about it.
+    static let badFormat = "Use the owner/repo format"
+    static func alreadyWatching(_ name: String) -> String { "Already watching \(name)" }
+
+    /// The add field's line for a reason about `input`, which is what was submitted (a suggestion's name or what was
+    /// typed): Store's own sentences are kept, and GitHub's or the system's wording is never shown as it is.
     static func add(_ reason: String, input: String) -> String {
-        RepoFailure(reason: reason)?.add(repoName(from: input)) ?? reason
+        let name = repoName(from: input)
+        if reason == badFormat || reason == alreadyWatching(name) { return reason }
+        return RepoFailure(reason: reason)?.add(name) ?? "Couldn't add \(name)."
     }
 
     /// `owner/repo` out of what was typed (a GitHub URL too), as `Store.addRepo` reads it.
@@ -211,7 +218,8 @@ extension Store {
 struct ReposView: View {
     let store: Store
     @State private var input = ""
-    @State private var error: String?
+    /// What the last Add said went wrong, with the repository it was for: the field may have changed since.
+    @State private var failure: (name: String, reason: String)?
     @State private var adding = false
     /// The suggestion ↑↓ has picked.
     @State private var highlight: Int?
@@ -235,7 +243,7 @@ struct ReposView: View {
     /// Whether the overlay is up. Not while an error is showing: the overlay starts right under the field, where the
     /// error is, and the error is what the last Return was about.
     private var showsSuggestions: Bool {
-        error == nil && (fieldFocused || overList || preview.addQuery != nil) && (!matches.isEmpty || !input.isEmpty)
+        failure == nil && (fieldFocused || overList || preview.addQuery != nil) && (!matches.isEmpty || !input.isEmpty)
     }
 
     var body: some View {
@@ -276,7 +284,7 @@ struct ReposView: View {
                 // After the typing above has been seen: a change of the input clears an error.
                 DispatchQueue.main.async {
                     highlight = preview.addHighlight
-                    error = preview.addError
+                    failure = preview.addError.map { (preview.addSubmitted ?? query, $0) }
                 }
             }
             if let name = preview.expandedRepo { customOpen.insert(name) }
@@ -285,7 +293,7 @@ struct ReposView: View {
         }
         .onChange(of: input) {
             highlight = nil
-            error = nil
+            failure = nil
         }
         // A highlight that moves is read out: the field keeps VoiceOver's focus, but Return now adds that repository.
         .onChange(of: highlight) { _, now in
@@ -315,14 +323,14 @@ struct ReposView: View {
                 BorderedButton("Add") { add(input) }
                     .disabled(input.isEmpty || adding)
             }
-            if let error {
-                let sentence = RepoFailure.add(error, input: input)
+            if let failure {
+                let sentence = RepoFailure.add(failure.reason, input: failure.name)
                 Label(sentence, systemImage: "exclamationmark.circle.fill")
                     .font(Theme.Typography.meta).foregroundStyle(Theme.red)
                     .padding(.horizontal, Theme.Space.xs)
                     // What GitHub said, for whoever wants it.
-                    .help(sentence == error ? "" : error)
-                    .accessibilityValue(sentence == error ? "" : error)
+                    .help(sentence == failure.reason ? "" : failure.reason)
+                    .accessibilityValue(sentence == failure.reason ? "" : failure.reason)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -373,12 +381,12 @@ struct ReposView: View {
     private func add(_ name: String) {
         guard !name.isEmpty, !adding else { return }
         adding = true
-        error = nil
+        failure = nil
         Task {
-            let err = await store.addRepo(name)
+            let reason = await store.addRepo(name)
             adding = false
-            error = err
-            if err == nil {
+            failure = reason.map { (name, $0) }
+            if reason == nil {
                 input = ""
                 fieldFocused = false
                 overList = false

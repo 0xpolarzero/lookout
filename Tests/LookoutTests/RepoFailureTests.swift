@@ -18,12 +18,23 @@ import Testing
         #expect(RepoFailure.sync("GitHub error 502", of: "ziglang/zig") == "Couldn't sync ziglang/zig")
     }
 
-    @Test func theAddFieldNamesWhatWasTyped() {
+    @Test func theAddFieldNamesWhatWasSubmitted() {
         #expect(RepoFailure.add("Not Found", input: "swift") == "Couldn't find swift on GitHub. Check the owner/repo.")
         #expect(RepoFailure.add("Not Found", input: " https://github.com/apple/swift-format/issues ") == "Couldn't find apple/swift-format on GitHub. Check the owner/repo.")
         #expect(RepoFailure.add("Forbidden", input: "e2b-dev/runtime") == "No access to e2b-dev/runtime")
         // Store's own sentences are left alone.
         #expect(RepoFailure.add("Already watching apple/swift", input: "apple/swift") == "Already watching apple/swift")
         #expect(RepoFailure.add("Use the owner/repo format", input: "swift") == "Use the owner/repo format")
+    }
+
+    @Test func aSuggestionIsNamedNotWhatWasTypedToFindIt() {
+        // "swift" typed, apple/swift-nio picked: the sentence is about the one that was sent.
+        #expect(RepoFailure.add("Not Found", input: "apple/swift-nio") == "Couldn't find apple/swift-nio on GitHub. Check the owner/repo.")
+    }
+
+    @Test func aReasonThatIsNotRecognisedIsNotShownAsItIs() {
+        #expect(RepoFailure.add("GitHub error 500", input: "apple/swift") == "Couldn't add apple/swift.")
+        #expect(RepoFailure.add("The data couldn't be read because it isn't in the correct format.", input: "https://github.com/apple/swift/pulls")
+                == "Couldn't add apple/swift.")
     }
 }
