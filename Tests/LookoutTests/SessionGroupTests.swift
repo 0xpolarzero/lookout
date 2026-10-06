@@ -237,6 +237,24 @@ import Testing
         #expect(s.neighbour(of: "a6", 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions) == "a7")
     }
 
+    @Test func aNewSessionThatBeganToWaitUnderTheFreezeIsNoNeighbourForAMove() throws {
+        // Eight kept sessions in a project and two new ones of it, hidden behind the cut. One of the new ones starts to wait
+        // while the pointer holds the list: it takes the eighth row's place, but only kept sessions have an order to trade.
+        let kept = (0..<8).map { session("a\($0)", folder: "/code/x") }
+        let s = store(kept + [session("n0", folder: "/code/x"), session("n1", folder: "/code/x")], kept: kept.map(\.id))
+        let hub = HubState()
+        hub.frozenSessions = s.barSlots
+        s.claudeActivity = ["n0": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["n0"]?.running = true
+        let shown = try #require(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" })
+        #expect(shown.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "n0"])
+        #expect(!hub.canMoveSession("a6", by: 1, store: s) && !hub.canMoveSession("n0", by: -1, store: s))
+        #expect(shown.moves(of: shown.rows[6]) == .init(up: "a5", down: nil) && shown.moves(of: shown.rows[7]) == .init())
+        let before = s.agents.entries.map(\.id)
+        hub.moveSession("a6", by: 1, store: s)
+        #expect(s.agents.entries.map(\.id) == before)
+    }
+
     @Test func aPeeksMoveActionsTradeWithTheRowsItDrewNotTheOnesItsCutLeftOut() throws {
         let s = store((0..<8).map { session("a\($0)", folder: "/code/x") }, kept: (0..<8).map { "a\($0)" })
         let hub = HubState()

@@ -793,9 +793,12 @@ extension Store {
     /// one a late waiter took the place of, and the neighbour is only ever a row on screen.
     func neighbour(of id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> String? {
         let slots = listedSlots(frozen: frozen, expanded: expanded)
-        guard let at = slots.first(where: { $0.id == id }), let folder = claudeSessions[id]?.folderKey,
+        // Only kept sessions have an order to trade (`moveAgent`): a new session that began to wait under the freeze may be
+        // listed in a project's group, with no place of its own to give or take.
+        let kept = Set(agents.entries.filter(\.kept).map(\.id))
+        guard kept.contains(id), let at = slots.first(where: { $0.id == id }), let folder = claudeSessions[id]?.folderKey,
               at.group == "project:" + folder else { return nil }
-        let own = slots.filter { $0.group == at.group && claudeSessions[$0.id]?.folderKey == folder }
+        let own = slots.filter { $0.group == at.group && kept.contains($0.id) && claudeSessions[$0.id]?.folderKey == folder }
         guard let i = own.firstIndex(where: { $0.id == id }), own.indices.contains(i + step) else { return nil }
         return own[i + step].id
     }

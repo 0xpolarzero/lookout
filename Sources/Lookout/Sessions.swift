@@ -326,8 +326,8 @@ extension SessionGroup {
         }
     }
 
-    /// The rows a row can trade places with, above and below it in its project: rows the group draws (what a cut or a peek
-    /// leaves out is no neighbour, as for `Store.neighbour`); a row held here from another project (a frozen group's) has none.
+    /// The rows a row can trade places with, above and below it in its project: kept rows the group draws (what a cut or a peek
+    /// leaves out, or a new session that began to wait, is no neighbour, as for `Store.neighbour`); a row held here from another project (a frozen group's) has none.
     struct Moves: Equatable {
         var up: String?
         var down: String?
@@ -335,7 +335,7 @@ extension SessionGroup {
 
     func moves(of row: AgentRow) -> Moves {
         guard case .project = kind else { return Moves() }
-        let own = rows.filter { placement(of: $0) == .project }
+        let own = rows.filter { placement(of: $0) == .project && !$0.pending }
         guard let i = own.firstIndex(where: { $0.id == row.id }) else { return Moves() }
         return Moves(up: i > 0 ? own[i - 1].id : nil, down: i + 1 < own.count ? own[i + 1].id : nil)
     }
