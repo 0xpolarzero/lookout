@@ -30,14 +30,11 @@ final class Sleeper {
 @Suite struct Undo {
     private func item(_ id: String, _ state: ItemState = .unread, at: Double = 1000, author: String = "x",
                       kind: EventKind = .issueComment) -> InboxItem {
-        InboxItem(id: id, repo: "a/b", kind: kind, number: 1, title: id, snippet: "", author: author, avatar: nil,
-                  authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(timeIntervalSince1970: at),
-                  state: state)
+        inboxItem(id, kind: kind, title: id, author: author, at: Date(timeIntervalSince1970: at), state: state)
     }
 
     private func store(_ items: [InboxItem]) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.undoStack.announce = { _ in }
         s.repos = [RepoConfig(fullName: "a/b")]
         s.items = items

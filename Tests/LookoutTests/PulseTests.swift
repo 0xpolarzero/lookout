@@ -33,7 +33,7 @@ import Testing
     /// A short cycle (0.1 s), so a test can let several go by.
     private let spec = PulseView.Spec(from: 1, to: 0.55, duration: 0.05)
 
-    private final class Window {
+    @MainActor private final class Window {
         var showing = true
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 40), styleMask: .borderless, backing: .buffered, defer: false)
 
@@ -124,8 +124,7 @@ import Testing
     }
 
     @Test func theLifecycleReportIsTheLineTheIdleScriptReads() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         let line = store.lifecycleLine()
         let pattern = #"^lifecycle: sessions=\d+ working=\d+ rings=\d+ showing=[01] reduceMotion=[01]\n$"#
         #expect(line.range(of: pattern, options: .regularExpression) != nil, "\(line)")

@@ -6,12 +6,7 @@ import Testing
 
 @MainActor
 @Suite struct Bar {
-    private let now = Date(timeIntervalSince1970: 2_000_000_000)
-
-    private func status(_ state: CIState, sha: String = "a1", minutesAgo: Double = 10) -> CIStatus {
-        CIStatus(state: state, branch: "main", sha: sha, failing: state == .failure ? ["build"] : [],
-                 checkedAt: now, updatedAt: now.addingTimeInterval(-minutesAgo * 60))
-    }
+    private let now = sessionsNow
 
     // MARK: CI cell
 
@@ -46,8 +41,8 @@ import Testing
     }
 
     /// The quietest states are the quietest marks on the bar (DESIGN.md 5.1): passing and no runs draw `tertiary`,
-    /// running `secondary`, and none reaches the white of a tile's letters. (Measured in the shot, where the two outline
-    /// symbols once drew pure white whatever their style said.)
+    /// running `secondary`, and none reaches the white of a tile's letters. Measured in the shot: a symbol drawn with its
+    /// own style can come out white whatever the style says.
     @Test func ciGlyphsDrawTheirOwnTokenNotWhite() async throws {
         let passing = try #require(await ciGlyphBrightness(.allPassing))
         let noRuns = try #require(await ciGlyphBrightness(.ciNoRuns))
@@ -76,8 +71,7 @@ import Testing
     // MARK: Gear
 
     @Test func syncFaultsRankSignInFirstAndHealthyHasNone() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         #expect(s.syncFault(stale: false) == nil)
         #expect(s.syncFault(stale: true) == .stale)
         s.rateRemaining = 0
@@ -92,17 +86,8 @@ import Testing
 
     // MARK: Sessions
 
-    private func session(_ id: String, folder: String? = "/code/app", blocked: Bool = false, running: Bool = false,
-                         minutesAgo: Double = 5) -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: folder, completedTurns: 3,
-                      lastActivity: now.addingTimeInterval(-minutesAgo * 60), lastFocused: now.addingTimeInterval(-3600),
-                      lastUserMessage: now.addingTimeInterval(-(minutesAgo + 1) * 60),
-                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
-    }
-
     private func store(_ sessions: [ClaudeSession], seeded: Bool = false) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         s.agents.seeded = seeded
@@ -120,7 +105,7 @@ import Testing
     }
 
     @Test func voiceOverValueIsStateProjectAndAge() {
-        let s = store([session("blocked", folder: "/code/lcu", blocked: true, minutesAgo: 4)])
+        let s = store([session("blocked", folder: "/code/lcu", minutesAgo: 4, blocked: true)])
         s.agents.entries[0].unread = true
         let row = s.allAgentRows[0]
         #expect(row.tileValue(now: now) == "waiting for you, lcu, 4 minutes")
@@ -196,7 +181,7 @@ import Testing
 
     /// Twelve sessions nobody kept, one project; the oldest is the one that waits.
     private func pendingStore() -> Store {
-        let s = store((0..<12).map { session("p\($0)", blocked: $0 == 11, minutesAgo: Double($0 + 1)) }, seeded: true)
+        let s = store((0..<12).map { session("p\($0)", minutesAgo: Double($0 + 1), blocked: $0 == 11) }, seeded: true)
         s.agents.entries.indices.forEach { s.agents.entries[$0].unread = true }
         return s
     }

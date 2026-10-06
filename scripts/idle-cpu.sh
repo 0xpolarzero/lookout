@@ -6,22 +6,17 @@
 # process's cumulative CPU time at the start and end of a window and asserts the average stays under the limit, at rest
 # and kept open (`--open`), on the right edge and along the top (the full-width strip is where the window grew).
 #
-# What is measured has to have a ring that is looping: the app says on stdout how many sessions it has, how many work, how
+# What is measured has to have a ring that is looping. The app says on stdout how many sessions it has, how many work, how
 # many rings have their animation attached, whether one of its windows is showing and whether Reduce Motion is on
 # (`lifecycle: sessions=S working=W rings=R showing=0|1 reduceMotion=0|1`, once after a few seconds and again whenever
 # that changes). The script fails when no ring loops, or Reduce Motion is on, at the start or at any moment of the window:
-# a verdict from a bar with no moving ring, or one nobody can see, proves nothing. Nothing is inferred from the sessions
-# or from the window list, which lists covered windows too.
+# a verdict from a bar with no moving ring, or one nobody can see, proves nothing (a locked or asleep screen, or a covered
+# bar, removes the animation, and the window list, which lists covered windows too, cannot say so). ALLOW_HIDDEN=1 turns
+# that failure into a warning. A sample that is missing or malformed, a window that is not positive or a CPU time that goes
+# backwards is a failure, never a 0%.
 #
 # WindowServer's share over the same window is printed apart and is not part of the verdict: it draws the rings. To say
 # what they cost it is measured once more on `--demo busy`, which has no working session, and the difference is printed.
-#
-# It needs the bar on screen: with the screen locked or asleep, or the bar covered, the ring's animation is removed and
-# any number would be about 0%. The app reports that as its rings leaving (`rings=0`, `showing=0`), which the script
-# reads at the start and after the window; ALLOW_HIDDEN=1 turns the failure into a warning.
-#
-# A sample that is missing or malformed (ps failed, the process went), a window that is not positive or a CPU time that goes
-# backwards is a failure, never a 0%.
 #
 # Polling is measured once more with GitHub's answers served from memory (`--canned`: a quiet account's, sized as GitHub sizes
 # them, each with an ETag, and a 304 for every request that has it; the first poll is the full answers, the rest the 304s the

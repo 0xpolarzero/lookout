@@ -4,8 +4,7 @@ import Testing
 @MainActor
 @Suite struct Reorder {
     private func store(_ names: [String]) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = names.map { RepoConfig(fullName: $0) }
         return s
     }

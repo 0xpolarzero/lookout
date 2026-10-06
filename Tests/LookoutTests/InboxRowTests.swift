@@ -4,34 +4,29 @@ import SwiftUI
 import Testing
 @testable import Lookout
 
+/// Eighteen items, a minute apart, the newest first.
+private func eighteenItems() -> [InboxItem] {
+    (0..<18).map { i in inboxItem("\(i)", kind: .issueOpened, number: i, title: "Item \(i)", at: Date().addingTimeInterval(-Double(i) * 60)) }
+}
+
 @MainActor
 @Suite struct InboxRowHeight {
     private func item(_ state: ItemState, kind: EventKind = .issueComment, author: String = "someone", title: String = "A title") -> InboxItem {
-        InboxItem(id: "1", repo: "apple/swift-format", kind: kind, number: 1042, title: title, snippet: "", author: author, avatar: nil,
-                  authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(), state: state)
+        inboxItem(repo: "apple/swift-format", kind: kind, number: 1042, title: title, author: author, state: state)
     }
 
     /// The height a row settles at in a column `width` wide.
     private func height(of item: InboxItem, filter: InboxFilter = .needsYou, query: String = "", width: CGFloat = 400) -> CGFloat {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         let hub = HubState()
         hub.filter = filter
         hub.query = query
         let row = InboxRow(item: item, store: store, ui: UIState(), hub: hub).frame(width: width)
         let hosting = NSHostingView(rootView: row)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<4 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.03))
-            hosting.layoutSubtreeIfNeeded()
-        }
-        let h = hosting.fittingSize.height
-        window.contentView = nil
-        window.orderOut(nil)
-        return h
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 400))
+        defer { window.dismiss() }
+        hosting.settle(turns: 4, interval: 0.03)
+        return hosting.fittingSize.height
     }
 
     @Test func everyKindOfRowIsExactlyTheSameHeight() {
@@ -55,31 +50,20 @@ import Testing
 @Suite struct InboxRowAges {
     /// Where, in points from the row's leading edge, the rightmost thing a row at rest draws ends: its age.
     private func ageEnd(title: String, width: CGFloat = 560) -> CGFloat {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         let hub = HubState()
-        let item = InboxItem(id: "1", repo: "apple/swift-format", kind: .issueComment, number: 1042, title: title, snippet: "", author: "someone",
-                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
-                             createdAt: Date().addingTimeInterval(-18 * 60), state: .unread)
+        let item = inboxItem(repo: "apple/swift-format", number: 1042, title: title, author: "someone", at: Date().addingTimeInterval(-18 * 60))
         let hosting = NSHostingView(rootView: InboxRow(item: item, store: store, ui: UIState(), hub: hub).frame(width: width))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 100), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<6 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.03))
-            hosting.layoutSubtreeIfNeeded()
-        }
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 100))
+        defer { window.dismiss() }
+        hosting.settle(turns: 6, interval: 0.03)
         hosting.frame.size = hosting.fittingSize
-        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
-        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let rep = PlaygroundShots.bitmap(of: window)!
         var edge = 0
         for x in stride(from: rep.pixelsWide - 1, through: 0, by: -1) where (0..<rep.pixelsHigh).contains(where: { (rep.colorAt(x: x, y: $0)?.alphaComponent ?? 0) > 0.3 }) {
             edge = x
             break
         }
-        window.contentView = nil
-        window.orderOut(nil)
         return CGFloat(edge) * hosting.bounds.width / CGFloat(rep.pixelsWide)
     }
 
@@ -121,31 +105,21 @@ import Testing
 @MainActor
 @Suite struct InboxListHosted {
     @Test func aListCutShortCountsTheRowsBelow() {
-        let store = Store()
-        store.persists = false
-        store.items = (0..<18).map { i in
-            InboxItem(id: "\(i)", repo: "a/b", kind: .issueOpened, number: i, title: "Item \(i)", snippet: "", author: "x", avatar: nil,
-                      authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
-                      createdAt: Date().addingTimeInterval(-Double(i) * 60), state: .unread)
-        }
+        let store = Store.unsaved()
+        store.items = eighteenItems()
         let hub = HubState()
         let items = store.list(.needsYou)
         let list = InboxList(items: items, cap: 224, listKey: .init(revision: 0, filter: .needsYou, query: ""), scopeID: "needsYou",
                              store: store, ui: UIState(), hub: hub)
             .frame(width: 400)
         let hosting = NSHostingView(rootView: list)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        func settle() { for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() } }
-        settle()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 400, height: 400))
+        defer { window.dismiss() }
+        hosting.settle(turns: 10, display: true)
         // 224 less the line is 4 rows: 14 below (as the list scrolls the count follows: see `theCountBelowFollowsTheScroll`).
         #expect(hub.inbox.hiddenBelow == 14)
         // Four whole rows and the line, never past the cap.
         #expect(abs(hosting.fittingSize.height - (4 * InboxList.pitch - 1 + InboxList.moreHeight)) < 1)
-        window.contentView = nil
-        window.orderOut(nil)
     }
 }
 
@@ -153,30 +127,20 @@ import Testing
 @Suite struct InboxBodyBudget {
     /// The body of an inbox with many rows, a banner and an undo line, in a column 400 wide given `cap` to stay within.
     private func height(cap: CGFloat, banner: Bool, undo: Bool) -> CGFloat {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.undoStack.announce = { _ in }
         store.repos = [RepoConfig(fullName: "a/b")]
         store.lastSync = Date()
-        store.items = (0..<18).map { i in
-            InboxItem(id: "\(i)", repo: "a/b", kind: .issueOpened, number: i, title: "Item \(i)", snippet: "", author: "x", avatar: nil,
-                      authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
-                      createdAt: Date().addingTimeInterval(-Double(i) * 60), state: .unread)
-        }
+        store.items = eighteenItems()
         if banner { store.repoErrors = ["a/b": "Forbidden"] }
         if undo { store.done(store.items[0]) }
         let hub = HubState()
         let view = LookoutHub(store: store, ui: UIState(), hub: hub, maxLength: 700).inboxBody(cap: cap).frame(width: 400)
         let hosting = NSHostingView(rootView: view)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
-        let h = hosting.fittingSize.height
-        window.contentView = nil
-        window.orderOut(nil)
-        return h
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 400, height: 900))
+        defer { window.dismiss() }
+        hosting.settle(turns: 10, display: true)
+        return hosting.fittingSize.height
     }
 
     @Test func theBannerAndTheUndoLineComeOutOfTheListsRoom() {
@@ -193,29 +157,22 @@ import Testing
 @MainActor
 @Suite struct InboxRowActionRoom {
     private func item() -> InboxItem {
-        InboxItem(id: "1", repo: "apple/swift-format", kind: .reviewComment, number: 1042, title: "Respect trailing comma", snippet: "",
-                  author: "coderabbitai[bot]", avatar: nil, authorIsApp: true, url: URL(string: "https://github.com/a/b")!,
-                  createdAt: Date(), state: .resolved)
+        inboxItem(repo: "apple/swift-format", kind: .reviewComment, number: 1042, title: "Respect trailing comma",
+                  author: "coderabbitai[bot]", authorIsApp: true, state: .resolved)
     }
 
     /// How far right line 2's text reaches (in points), with the row at rest or picked (its action showing).
     private func reach(picked: Bool, width: CGFloat) -> CGFloat {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         let hub = HubState()
         hub.filter = .done
         if picked { hub.selection = "i:1" }
         let hosting = NSHostingView(rootView: InboxRow(item: item(), store: store, ui: UIState(), hub: hub).frame(width: width, height: 44)
             .background(Theme.bg).environment(\.colorScheme, .dark))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 44), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<6 { RunLoop.current.run(until: Date().addingTimeInterval(0.04)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
-        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
-        hosting.cacheDisplay(in: hosting.bounds, to: rep)
-        window.contentView = nil
-        window.orderOut(nil)
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 44))
+        defer { window.dismiss() }
+        hosting.settle(turns: 6, interval: 0.04, display: true)
+        let rep = PlaygroundShots.bitmap(of: window)!
         let scale = CGFloat(rep.pixelsWide) / width
         var right = 0
         // Line 2 is the lower half's text; the pick's accent bar is on the left, the action (when shown) on the right.

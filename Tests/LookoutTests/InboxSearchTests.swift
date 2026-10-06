@@ -7,14 +7,12 @@ import Testing
 @MainActor
 @Suite struct InboxSearch {
     private func item(_ id: String, title: String) -> InboxItem {
-        InboxItem(id: id, repo: "a/b", kind: .issueComment, number: 1, title: title, snippet: "", author: "x", avatar: nil,
-                  authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(), state: .unread)
+        inboxItem(id, title: title)
     }
 
     /// A store with two items, a hub that is open on the search, and the keys, with opening reported not done.
     private func rig() -> (store: Store, hub: HubState, keys: HubKeys, opened: Opened) {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.items = [item("1", title: "Format ranges"), item("2", title: "Crash on wake")]
         let opened = Opened()
         store.interceptOpen = { opened.titles.append($0) }
@@ -31,9 +29,7 @@ import Testing
     /// A key press with no modifiers; its characters are the ones the key types.
     static func keyEvent(_ code: Int, in window: NSWindow? = nil) -> NSEvent {
         let typed = code == kVK_Space ? " " : code == kVK_Delete ? "\u{7f}" : "\r"
-        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: typed,
-                                charactersIgnoringModifiers: typed, isARepeat: false, keyCode: UInt16(code))!
+        return keyDown(code, [], typed, in: window)
     }
 
     // MARK: Results and the pick
@@ -77,18 +73,11 @@ import Testing
 
     /// A window whose field editor has the keyboard, as it does while the search field is focused.
     private func editing() -> (window: NSWindow, text: NSTextView) {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: .borderless, backing: .buffered, defer: false)
-        let text = NSTextView(frame: window.contentView!.bounds)
+        let text = NSTextView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
+        let window = NSWindow.offscreen(NSView(frame: text.frame), size: text.frame.size)
         window.contentView!.addSubview(text)
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
         window.makeFirstResponder(text)
         return (window, text)
-    }
-
-    private func press(_ code: Int, _ typed: String, _ flags: NSEvent.ModifierFlags, in window: NSWindow) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber,
-                         context: nil, characters: typed, charactersIgnoringModifiers: typed, isARepeat: false, keyCode: UInt16(code))!
     }
 
     @Test func aReboundOpenShortcutOpensTheResultFromTheField() {
@@ -98,12 +87,12 @@ import Testing
         r.hub.query = "format"
         r.hub.selection = "i:1"
         r.store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_O), modifiers: .command), for: .openItem)
-        #expect(r.keys.key(press(kVK_ANSI_O, "o", .command, in: window)))
+        #expect(r.keys.key(keyDown(kVK_ANSI_O, [.command], "o", in: window)))
         #expect(r.opened.titles == ["Open on GitHub · Format ranges"])
         // Return still opens it, and another combination is the field's.
-        #expect(r.keys.key(press(kVK_Return, "\r", [], in: window)))
+        #expect(r.keys.key(keyDown(kVK_Return, [], "\r", in: window)))
         #expect(r.opened.titles.count == 2)
-        #expect(!r.keys.key(press(kVK_ANSI_P, "p", .command, in: window)))
+        #expect(!r.keys.key(keyDown(kVK_ANSI_P, [.command], "p", in: window)))
         #expect(r.opened.titles.count == 2)
     }
 
@@ -114,7 +103,7 @@ import Testing
         r.hub.query = "format"
         r.hub.selection = "i:1"
         r.store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_O)), for: .openItem)
-        #expect(!r.keys.key(press(kVK_ANSI_O, "o", [], in: window)))
+        #expect(!r.keys.key(keyDown(kVK_ANSI_O, [], "o", in: window)))
         #expect(r.opened.titles.isEmpty)
     }
 
@@ -125,7 +114,7 @@ import Testing
         r.hub.query = "no match"
         r.hub.selection = "i:1"
         r.store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_O), modifiers: .command), for: .openItem)
-        #expect(!r.keys.key(press(kVK_ANSI_O, "o", .command, in: window)))
+        #expect(!r.keys.key(keyDown(kVK_ANSI_O, [.command], "o", in: window)))
         #expect(r.opened.titles.isEmpty)
     }
 
@@ -161,8 +150,7 @@ import Testing
         #expect(r.opened.titles.isEmpty)
         #expect(r.store.items[0].state == .unread)
         // Other keys are still the hub's: typing goes on searching.
-        let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                                     characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: UInt16(kVK_ANSI_X))!
+        let typed = keyDown(kVK_ANSI_X, [], "x")
         #expect(r.keys.key(typed))
         #expect(r.hub.query == "swiftx")
         // Focus gone: Space is the search's again, Return opens the pick.
@@ -185,12 +173,7 @@ import Testing
         let r = rig()
         r.hub.query = "format"
         r.hub.selection = "i:1"
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: .borderless, backing: .buffered, defer: false)
-        let text = NSTextView(frame: window.contentView!.bounds)
-        window.contentView!.addSubview(text)
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        window.makeFirstResponder(text)
+        let (window, text) = editing()
         text.setMarkedText("に", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         #expect(text.hasMarkedText())
         for code in [kVK_Return, kVK_Escape, kVK_DownArrow, kVK_UpArrow] {
@@ -209,8 +192,7 @@ import Testing
     @Test func onlyTypingMovesTheCaretAfterItsFirstCharacter() {
         let r = rig()
         r.hub.inbox.searchFocused = false
-        let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                                     characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: UInt16(kVK_ANSI_X))!
+        let typed = keyDown(kVK_ANSI_X, [], "x")
         #expect(r.keys.key(typed))
         #expect(r.hub.inbox.caretAtEnd)
         // The field took it (or the search ended): a later focus, from a click in the query, is its own.
@@ -262,13 +244,10 @@ import Testing
 @MainActor
 @Suite struct InboxSignedOut {
     @Test func aSignInProblemReplacesTheListEvenWithRowsRetained() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/b")]
         s.lastSync = Date()
-        s.items = [InboxItem(id: "1", repo: "a/b", kind: .issueComment, number: 1, title: "Cached", snippet: "", author: "x",
-                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(),
-                             state: .unread)]
+        s.items = [inboxItem(title: "Cached")]
         #expect(s.inboxReplacement == nil)
         s.authError = "Bad credentials"
         #expect(s.list(.needsYou).count == 1)
@@ -279,16 +258,13 @@ import Testing
     }
 
     @Test func rowsThatAreNotDrawnAreNeitherTargetsNorResults() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         // No CI: its rows are targets too, and this is about the inbox's.
         var repo = RepoConfig(fullName: "a/b")
         repo.events.remove(.ciMain)
         s.repos = [repo]
         s.lastSync = Date()
-        s.items = [InboxItem(id: "1", repo: "a/b", kind: .issueComment, number: 1, title: "Cached", snippet: "", author: "x",
-                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(),
-                             state: .unread)]
+        s.items = [inboxItem(title: "Cached")]
         let hub = HubState()
         hub.pinned = true
         #expect(s.hubTargets(hub) == ["i:1"])

@@ -1,6 +1,7 @@
 import Testing
 @testable import Lookout
 
+@MainActor
 @Suite struct Updates {
     @Test func versionsCompareNumerically() throws {
         #expect(try #require(Version("0.10.0")) > #require(Version("0.9.3")))
@@ -12,12 +13,12 @@ import Testing
         #expect(Version("") == nil)
     }
 
-    @MainActor @Test func devBuildsNeverUpdate() {
+    @Test func devBuildsNeverUpdate() {
         // Tests don't run from a release bundle.
         #expect(!Updater().isRelease)
     }
 
-    @MainActor @Test func aFailedDownloadIsTheErrorTheHubSaysAndAnIdleOneHasNone() {
+    @Test func aFailedDownloadIsTheErrorTheHubSaysAndAnIdleOneHasNone() {
         let updater = Updater()
         updater.preview(.idle)
         #expect(updater.shownError == nil)

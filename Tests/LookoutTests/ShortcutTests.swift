@@ -6,18 +6,12 @@ import Testing
 
 @MainActor
 @Suite struct Shortcuts {
-    private func key(_ code: Int, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
-                         context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
-                         keyCode: UInt16(code))!
-    }
-
     @Test func eventMatchesByKeyPositionAndModifiers() {
-        #expect(Shortcut(key(kVK_Space)) == ShortcutAction.toggleRead.defaultShortcut)
-        #expect(Shortcut(key(kVK_Space, [.option])) == ShortcutAction.markAllRead.defaultShortcut)
-        #expect(Shortcut(key(kVK_Space, [.option])) != ShortcutAction.toggleRead.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_Space)) == ShortcutAction.toggleRead.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_Space, [.option])) == ShortcutAction.markAllRead.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_Space, [.option])) != ShortcutAction.toggleRead.defaultShortcut)
         // Caps lock / fn don't change what was pressed.
-        #expect(Shortcut(key(kVK_ANSI_R, [.command, .capsLock, .function])) == ShortcutAction.refresh.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_ANSI_R, [.command, .capsLock, .function])) == ShortcutAction.refresh.defaultShortcut)
     }
 
     @Test func displayUsesSymbols() {
@@ -60,8 +54,7 @@ import Testing
     }
 
     @Test func customizeAndReset() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         var registered: Shortcut?
         store.onGlobalShortcutChange = { _, shortcut in registered = shortcut; return true }
         let custom = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
@@ -80,23 +73,21 @@ import Testing
     }
 
     @Test func aClearedShortcutMatchesNothingAndComesBackWithReset() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.setShortcut(.unassigned, for: .markAllRead)
         #expect(store.shortcut(.markAllRead).isUnassigned)
         #expect(store.shortcut(.markAllRead).display == "None")
         #expect(!store.shortcut(.markAllRead).isModifierTap && store.shortcut(.markAllRead).mouseButton == nil)
         // Whatever key is pressed, none is the cleared one.
         for code in [kVK_Space, kVK_Delete, kVK_Return, kVK_ANSI_Z] {
-            #expect(Shortcut(key(code, [.option])) != store.shortcut(.markAllRead))
+            #expect(Shortcut(keyDown(code, [.option])) != store.shortcut(.markAllRead))
         }
         store.setShortcut(nil, for: .markAllRead)
         #expect(store.shortcut(.markAllRead) == ShortcutAction.markAllRead.defaultShortcut)
     }
 
     @Test func restoreDefaultsResetsEveryShortcutAndRegistersTheGlobalOnesAgain() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         var registered: [ShortcutAction] = []
         store.onGlobalShortcutChange = { action, _ in registered.append(action); return true }
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
@@ -114,7 +105,7 @@ import Testing
         #expect(ShortcutAction.sessionSwitcher.defaultShortcut == Shortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.control, .option]))
     }
 
-    @MainActor private func connected(_ store: Store, _ registrar: FakeRegistrar) -> GlobalShortcuts {
+    private func connected(_ store: Store, _ registrar: FakeRegistrar) -> GlobalShortcuts {
         store.persists = false
         store.agents.enabled = true
         let globals = GlobalShortcuts(store: store, registrar: registrar) { _ in }
@@ -122,7 +113,7 @@ import Testing
         return globals
     }
 
-    @MainActor @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {
+    @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -140,7 +131,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func restoreDefaultsRefusedByAnotherAppChangesNothing() {
+    @Test func restoreDefaultsRefusedByAnotherAppChangesNothing() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -164,7 +155,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
+    @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -188,7 +179,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func aKeyAnotherAppHoldsIsRefusedAndTheWorkingOneStays() {
+    @Test func aKeyAnotherAppHoldsIsRefusedAndTheWorkingOneStays() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -210,7 +201,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
+    @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -224,7 +215,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
+    @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)

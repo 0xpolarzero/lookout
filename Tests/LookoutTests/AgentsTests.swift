@@ -5,22 +5,11 @@ import Testing
 
 @MainActor
 @Suite struct Agents {
-    private let now = Date(timeIntervalSince1970: 2_000_000_000)
-
-    private func session(_ id: String, turns: Int = 3, minutesAgo: Double = 5, messageMinutesAgo: Double? = nil,
-                         focusedMinutesAgo: Double? = 60, folder: String? = "/code/app", blocked: Bool = false,
-                         running: Bool = false, archived: Bool = false) -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: folder, isArchived: archived, completedTurns: turns,
-                      lastActivity: now.addingTimeInterval(-minutesAgo * 60),
-                      lastFocused: focusedMinutesAgo.map { now.addingTimeInterval(-$0 * 60) },
-                      lastUserMessage: now.addingTimeInterval(-(messageMinutesAgo ?? minutesAgo + 1) * 60),
-                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
-    }
+    private let now = sessionsNow
 
     /// A store that has already seen `sessions` once (seeded), so later reads are "new activity".
     private func store(_ sessions: [ClaudeSession], dots: Set<String> = []) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         s.ingest(sessions, appUnread: dots, claudeFrontmost: false, now: now)
@@ -121,7 +110,7 @@ import Testing
     @Test func newSessionsAfterSeedingArePendingUnlessMuted() {
         let s = store([session("a")])
         s.setFolderMuted("", true)  // scratch chats
-        s.ingest([session("a"), session("new", minutesAgo: 0), session("chat", minutesAgo: 0, folder: nil)],
+        s.ingest([session("a"), session("new", minutesAgo: 0), session("chat", folder: nil, minutesAgo: 0)],
                  appUnread: [], claudeFrontmost: false, now: now)
         #expect(Set(s.agentRows.pending.map(\.id)) == ["a", "new"])
         #expect(entry(s, "new")?.unread == true)
@@ -143,7 +132,7 @@ import Testing
     }
 
     @Test func searchAndKeepAnySession() {
-        var old = session("old", minutesAgo: 3 * 24 * 60, folder: "/code/lookout")
+        var old = session("old", folder: "/code/lookout", minutesAgo: 3 * 24 * 60)
         old.title = "Agent completion notifications"
         let s = store([session("a"), old])
         #expect(entry(s, "old") == nil)  // too old to be offered as pending
@@ -166,7 +155,7 @@ import Testing
     }
 
     @Test func searchFindsAnySessionKeptFirst() {
-        var other = session("other", minutesAgo: 1, folder: "/code/sandbox")
+        var other = session("other", folder: "/code/sandbox", minutesAgo: 1)
         other.title = "Storage directory"
         var mine = session("mine", minutesAgo: 50)
         mine.title = "Sandbox on Linux"
@@ -440,8 +429,7 @@ import Testing
 @MainActor
 @Suite struct TokenSaving {
     @Test func aGitHubTokenTheKeychainRefusedIsNotSavedAndIsNotSignedInWith() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         var written: [(String, String)] = []
         s.keychainWrite = { key, account in written.append((key, account)); return false }
         s.lastSync = nil
@@ -452,8 +440,7 @@ import Testing
     }
 
     @Test func aTokenGitHubRejectsIsAnnouncedOnceForTheAttemptThatSavedIt() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.keychainWrite = { _, _ in true }
         s.interceptRefresh = {}
         var said: [String] = []
@@ -473,8 +460,7 @@ import Testing
 @MainActor
 @Suite struct TypesafeKeySaving {
     @Test func aKeyTheKeychainRefusedIsNotSavedAndSaysSo() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         var written: [String] = []
         s.keychainWrite = { key, _ in written.append(key); return false }
         #expect(!s.setTypesafeKey("  sk-test \n"))
@@ -484,8 +470,7 @@ import Testing
     }
 
     @Test func aKeyTheKeychainKeptIsSavedTrimmed() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.keychainWrite = { _, _ in true }
         #expect(s.setTypesafeKey(" sk-test "))
         #expect(s.hasTypesafeKey && s.typesafeKey == "sk-test" && s.iconError == nil)
@@ -522,8 +507,7 @@ import Testing
     }
 
     @MainActor @Test func theNamesAreOnlyWorkedOutAgainWhenTheFoldersChange() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         func session(_ id: String, _ folder: String) -> ClaudeSession {
             ClaudeSession(id: id, title: id, folder: folder, lastActivity: Date())
         }

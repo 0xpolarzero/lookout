@@ -6,9 +6,7 @@ private let me = "0xpolarzero"
 private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
 private func comment(_ kind: EventKind, at offset: TimeInterval, root: Int? = nil) -> InboxItem {
-    InboxItem(id: UUID().uuidString, repo: "o/r", kind: kind, number: 1, title: "t", snippet: "", author: "someone",
-              avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/o/r/issues/1")!,
-              createdAt: t0.addingTimeInterval(offset), state: .unread, threadRoot: root)
+    inboxItem(UUID().uuidString, repo: "o/r", kind: kind, author: "someone", at: t0.addingTimeInterval(offset), threadRoot: root)
 }
 
 @Suite struct Relevance {

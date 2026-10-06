@@ -6,21 +6,12 @@ import Testing
 
 @MainActor
 @Suite struct SessionGroups {
-    private let now = Date(timeIntervalSince1970: 2_000_000_000)
-
-    private func session(_ id: String, folder: String? = "/code/app", minutesAgo: Double = 5, blocked: Bool = false,
-                         running: Bool = false) -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: folder, completedTurns: 3,
-                      lastActivity: now.addingTimeInterval(-minutesAgo * 60), lastFocused: now.addingTimeInterval(-3600),
-                      lastUserMessage: now.addingTimeInterval(-(minutesAgo + 1) * 60),
-                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
-    }
+    private let now = sessionsNow
 
     /// A store that lists `sessions`: the ids in `kept` kept (in that order), the rest new activity, `unread` unread.
     private func store(_ sessions: [ClaudeSession], kept: [String] = [], unread: Set<String> = [],
                        asking: Set<String> = []) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         // Seeded already (a first read offers only eight), so every session below is new activity.
@@ -345,9 +336,7 @@ import Testing
     private func key(_ code: Int, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
         let arrow = [kVK_UpArrow: NSUpArrowFunctionKey, kVK_DownArrow: NSDownArrowFunctionKey, kVK_RightArrow: NSRightArrowFunctionKey][code]
             .flatMap { Unicode.Scalar($0) }.map(String.init) ?? ""
-        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags.union([.numericPad, .function]), timestamp: 0,
-                                windowNumber: 0, context: nil, characters: arrow, charactersIgnoringModifiers: arrow,
-                                isARepeat: false, keyCode: UInt16(code))!
+        return keyDown(code, flags.union([.numericPad, .function]), arrow)
     }
 
     private func hubKeys(_ s: Store) -> (HubKeys, HubState) {
@@ -522,7 +511,7 @@ import Testing
         #expect(AgentLabel.isEmoji("🐧") && !AgentLabel.isEmoji("AB") && !AgentLabel.isEmoji("7") && !AgentLabel.isEmoji(""))
     }
 
-    // MARK: Review round 1
+    // MARK: Project order and frozen lists
 
     @Test func projectsMoveAsBlocksAndScratchStaysLast() {
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y"), session("x2", folder: "/code/x"),
@@ -611,7 +600,7 @@ import Testing
         #expect(listed.groups.flatMap(\.rows).map(\.id).contains("n9"))
     }
 
-    // MARK: Review round 2
+    // MARK: Search, frozen counts and the spoken age
 
     @Test func aSearchListsEverySessionThatMatches() {
         let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })

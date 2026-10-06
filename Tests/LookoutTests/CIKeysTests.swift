@@ -57,13 +57,9 @@ import Testing
     }
 
     @Test func showKeepsTheHubOpenOnCIWithItsFirstRowPicked() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = [RepoConfig(fullName: "a/ok"), RepoConfig(fullName: "b/bad")]
-        let now = Date()
-        store.ci = ["a/ok": CIStatus(state: .success, branch: "main", sha: "a1", url: nil, failing: [], checkedAt: now, title: nil, updatedAt: now),
-                    "b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
-                                      updatedAt: now)]
+        store.ci = ["a/ok": ciStatus(.success), "b/bad": ciStatus(.failure, sha: "b1")]
         let (hub, ui) = state(selecting: "i:1", keyboard: false)
         // From a search, with another section filling the view: CI's rows have to come back first.
         hub.query = "zig"
@@ -78,12 +74,9 @@ import Testing
     }
 
     @Test func showOnCIWhereTheRoomFoldsItsRowsFocusesCIInsteadOfPickingNothing() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = [RepoConfig(fullName: "b/bad")]
-        let now = Date()
-        store.ci = ["b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
-                                      updatedAt: now)]
+        store.ci = ["b/bad": ciStatus(.failure, sha: "b1")]
         let (hub, ui) = state(selecting: "i:1", keyboard: false)
         // A low bar on the side: CI is only its header, and has no rows to pick.
         hub.ciFolded = true
@@ -93,19 +86,11 @@ import Testing
 
     // MARK: A focused control
 
-    private func press(_ code: Int, _ characters: String = "") -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                         characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: UInt16(code))!
-    }
-
     /// A pinned hub with one failing repo, its row picked, and what the store was asked to open.
     private func pickedHub() -> (HubKeys, HubState, () -> [String]) {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = [RepoConfig(fullName: "b/bad")]
-        let now = Date()
-        store.ci = ["b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
-                                      updatedAt: now)]
+        store.ci = ["b/bad": ciStatus(.failure, sha: "b1")]
         var opened: [String] = []
         store.interceptOpen = { opened.append($0) }
         let hub = HubState()
@@ -117,7 +102,7 @@ import Testing
 
     @Test func returnOpensThePickedRowWhenNoControlHasFocus() {
         let (keys, _, opened) = pickedHub()
-        #expect(keys.key(press(kVK_Return)))
+        #expect(keys.key(keyDown(kVK_Return)))
         #expect(opened() == ["Open checks · b/bad"])
     }
 
@@ -125,20 +110,20 @@ import Testing
         let (keys, hub, opened) = pickedHub()
         let control = UUID()
         hub.controls.set(control, focused: true)
-        #expect(!keys.key(press(kVK_Return)))
-        #expect(!keys.key(press(kVK_ANSI_KeypadEnter)))
-        #expect(!keys.key(press(kVK_Space, " ")))
+        #expect(!keys.key(keyDown(kVK_Return)))
+        #expect(!keys.key(keyDown(kVK_ANSI_KeypadEnter)))
+        #expect(!keys.key(keyDown(kVK_Space, [], " ")))
         #expect(opened().isEmpty)
         // Once focus leaves the control, Return is the row's again.
         hub.controls.set(control, focused: false)
-        #expect(keys.key(press(kVK_Return)))
+        #expect(keys.key(keyDown(kVK_Return)))
         #expect(opened() == ["Open checks · b/bad"])
     }
 
     @Test func anArrowBoundToOpenOpensTheChecksInsteadOfMeaningPassing() {
         let (keys, hub, opened) = pickedHub()
         keys.store.setShortcut(Shortcut(keyCode: UInt16(kVK_RightArrow)), for: .openItem)
-        #expect(keys.key(press(kVK_RightArrow)))
+        #expect(keys.key(keyDown(kVK_RightArrow)))
         #expect(opened() == ["Open checks · b/bad"])
         #expect(hub.selection == "c:b/bad")
     }
