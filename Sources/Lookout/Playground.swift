@@ -387,11 +387,13 @@ enum PlaygroundShots {
             $0.pinned = true; $0.scenario = .sessionsWorking; $0.selection = .session("k2"); $0.hoveredSession = "k1"
             $0.setup = { _, _, hub in hub.requestScroll("a:k2") }
         }
-        // Scrolled to the end: the cue is the way back up.
+        // Scrolled to the end: the cue is the way back up. The last session of a focused list (it lists every one) is asked
+        // for before the list exists, and the list answers it as it mounts; a test reads the cue off the hosted hub.
         shots += Shot.edges("focus-agents-sessions-end", on: .rightAndTop) {
             $0.pinned = true; $0.scenario = .sessionsManyNew; $0.focus = .agents
-            // Once the list is on screen: the lists scroll for a request made after they appear.
-            $0.setup = { _, _, hub in DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { hub.requestScroll("s:more") } }
+            $0.setup = { store, _, hub in
+                if let last = store.listedGroups(expanded: true).groups.flatMap(\.rows).last { hub.requestScroll("a:" + last.id) }
+            }
         }
         // A short screen (a 560pt hub on the sides): the inbox keeps a row beside the sessions' share.
         shots += Shot.edges("open-sessions-12-short", on: [.right]) { $0.pinned = true; $0.scenario = .sessions12; $0.size = CGSize(width: 1280, height: 650) }

@@ -193,6 +193,19 @@ enum AccessibilityTree {
         }
     }
 
+    @Test func aFocusedSessionsListScrolledToItsLastRowEndsWithBackToTheTop() async throws {
+        // What the focus-agents-sessions-end shots show: the request for the last session is made before the list mounts.
+        for edge in [DockEdge.right, .top] {
+            let lookout = try root(try await AccessibilityTree.render(edge: edge, scenario: .sessionsManyNew) { store, hub in
+                hub.pinned = true
+                hub.focus = .agents
+                if let last = store.listedGroups(expanded: true).groups.flatMap(\.rows).last { hub.requestScroll("a:" + last.id) }
+            })
+            // At the end the cue is the way back up; had the list stayed at its first page, it would say how many are below.
+            #expect(lookout.first("AXButton", "Back to the top") != nil, "\(edge)")
+        }
+    }
+
     @Test func settingsAndRepositoriesAreNamedPagesWithTheirTabsAndHeadings() async throws {
         let settings = try root(try await AccessibilityTree.render { _, hub in hub.go(.settings) })
         let page = try #require(settings.children.first { $0.label == "Settings" })
