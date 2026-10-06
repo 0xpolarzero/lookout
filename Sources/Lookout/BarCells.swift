@@ -377,6 +377,8 @@ struct NewSessionBarCell: View {
     let show: () -> Void
     @State private var hovering = false
     @FocusState private var focused: Bool
+    /// Beside the cell on a side edge, so the tip never covers the rail's neighbours.
+    @Environment(\.tipBeside) private var beside
 
     var body: some View {
         Menu {
@@ -400,7 +402,7 @@ struct NewSessionBarCell: View {
         .reportsControlFocus(focused)
         .onHover { hovering = $0 }
         .motion(Theme.Motion.hover, value: hovering)
-        .tip("New session", "Scratch chat, or pick a project")
+        .tip("New session", "Scratch chat, or pick a project", beside: beside)
         .accessibilityLabel("New session")
         .accessibilityHint("Scratch chat, or pick a project")
         .accessibilityActions { Button("Show", action: show) }
