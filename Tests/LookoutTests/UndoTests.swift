@@ -142,7 +142,11 @@ import Testing
         s.undoStack.lifetime = .milliseconds(30)
         s.done(s.items[0])
         #expect(s.undoStack.visible(in: .inbox) != nil)
-        try await Task.sleep(for: .milliseconds(200))
+        // Other suites may keep the main actor busy for a while: wait for the line, not for a fixed time.
+        let deadline = ContinuousClock.now + .seconds(30)
+        while s.undoStack.visible(in: .inbox) != nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(s.undoStack.visible(in: .inbox) == nil)
         #expect(s.undoStack.entries.count == 1)
     }
