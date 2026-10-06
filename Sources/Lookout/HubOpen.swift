@@ -140,7 +140,7 @@ extension LookoutHub {
     }
 
     var openUpdateCell: some View {
-        UpdateBarCell(axis: barAxis, updater: store.updater) { hub.go(.settings) }
+        UpdateBarCell(axis: barAxis, updater: store.updater) { hub.showUpdate() }
     }
 
     // MARK: Sides

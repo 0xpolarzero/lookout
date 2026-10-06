@@ -156,6 +156,12 @@ final class HubState {
     /// Whether a section exists to be focused: the app says (Sessions is the extension's), a bare state offers them all.
     @ObservationIgnored var offers: (HubSection) -> Bool = { _ in true }
 
+    /// Settings on General, where the update's row is, whichever pane was shown last.
+    func showUpdate() {
+        settingsPane = .general
+        go(.settings)
+    }
+
     /// A section went away while it was focused: the others get their room back.
     func reconcileFocus() {
         guard let focus, !offers(focus) else { return }
@@ -355,8 +361,7 @@ struct LookoutHub: View {
         if store.updater.isRelease {
             // Settings' update row says what the check finds (checking, up to date, a failure); the bar has no room to.
             Button {
-                hub.settingsPane = .general
-                hub.go(.settings)
+                hub.showUpdate()
                 Task { await store.updater.update(manual: true) }
             } label: {
                 Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")

@@ -844,6 +844,16 @@ import Testing
         #expect(hub.focus == .ci)
     }
 
+    @Test func showingTheUpdateOpensSettingsOnGeneralWhateverPaneWasShownLast() {
+        hub.settingsPane = .claude
+        hub.showUpdate()
+        #expect(hub.page == .settings && hub.settingsPane == .general)
+        // Already on Settings, on another pane: it turns to General.
+        hub.settingsPane = .notifications
+        hub.showUpdate()
+        #expect(hub.page == .settings && hub.settingsPane == .general)
+    }
+
     @Test func endingTheSearchEndsTheFieldAsWellAsTheQuery() {
         hub.query = "swift"
         hub.beginSearch()

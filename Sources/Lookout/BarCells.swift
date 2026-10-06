@@ -115,8 +115,10 @@ struct UpdateBarCell: View {
 
     var body: some View {
         let version = updater.release?.version ?? ""
+        // Return and Space do what the label says (download, retry, restart), as a click does: the cell keeps no `show` of its own,
+        // and VoiceOver's Show (the update row in Settings) is an action beside the others.
         BarCell(axis: axis, name: Self.name(updater.phase, version: version), value: value, hint: help.title, help: help,
-                show: show, actions: menuActions(version), action: { updater.advance() }) { hovering in
+                actions: [BarAction(name: "Show", run: show)] + menuActions(version), action: { updater.advance() }) { hovering in
             Face(updater: updater, hovering: hovering)
         }
         .contextMenu {

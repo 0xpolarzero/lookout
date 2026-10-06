@@ -69,7 +69,7 @@ extension LookoutHub {
             barDivider
         }
         if store.updater.showsInPill {
-            UpdateBarCell(axis: axis, updater: store.updater) { hub.go(.settings) }
+            UpdateBarCell(axis: axis, updater: store.updater) { hub.showUpdate() }
         }
         GearBarCell(axis: axis, store: store, hub: hub) { show(.controls) }
             .modifier(probe(.controls))
