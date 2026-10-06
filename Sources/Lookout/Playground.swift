@@ -594,6 +594,7 @@ enum PlaygroundShots {
         // Settings, one pane each (General is `right-settings`), and Repositories in each of its states.
         page("settings-token", .settings) { $0.preview.revealsToken = true },
         page("settings-notifications", .settings) { $0.preview.pane = .notifications },
+        page("settings-notifications-blocked", .settings) { $0.preview.pane = .notifications; $0.preview.notificationsBlocked = true },
         page("settings-notifications-snoozed", .settings) { $0.preview.pane = .notifications; $0.scenario = .snoozed },
         page("settings-shortcuts", .settings) { $0.preview.pane = .shortcuts },
         page("settings-shortcuts-notice", .settings) {

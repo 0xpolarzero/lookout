@@ -36,6 +36,8 @@ struct PagePreview: Equatable {
     var revealsToken = false
     /// Shortcuts: whether Accessibility is granted, instead of asking the system.
     var accessibilityTrusted: Bool?
+    /// Notifications: whether macOS blocks the banners, instead of asking it.
+    var notificationsBlocked: Bool?
     /// General: the Launch at login row after the system refused, with its message.
     var launchError: String?
     /// Claude: whether the Claude app is installed, instead of looking for it.
@@ -131,6 +133,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
     @State private var restoreError: String?
+    @State private var notificationsBlocked = false
     @FocusState private var botFocused: Bool
 
     private var current: Binding<SettingsPane> { pane ?? $ownPane }
@@ -454,7 +457,19 @@ struct SettingsView: View {
     // MARK: Notifications
 
     private var notifications: some View {
-        paneStack("Notifications") {
+        let blocked = store.settings.notifications && (preview.notificationsBlocked ?? notificationsBlocked)
+        return paneStack("Notifications") {
+            if blocked {
+                StatusBanner(symbol: "exclamationmark.circle.fill", tint: AnyShapeStyle(Theme.amber),
+                             message: "Notifications are blocked in System Settings") {
+                    BorderedButton("Open Settings") {
+                        let id = Bundle.main.bundleIdentifier.map { "?id=\($0)" } ?? ""
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension\(id)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
             FormGroup {
                 FormToggle(label: "Desktop notifications", isOn: $store.settings.notifications)
                 FormDivider()
@@ -469,6 +484,13 @@ struct SettingsView: View {
                 bots
             }
         }
+        // What the system says is read when the pane opens and when the app comes back from System Settings, where it changes.
+        .task { notificationsBlocked = await Notifier.isBlocked() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { notificationsBlocked = await Notifier.isBlocked() }
+        }
+        // The notice that appears is said, once.
+        .onChange(of: blocked, initial: true) { _, now in if now { Announce.say("Notifications are blocked in System Settings") } }
     }
 
     private var snooze: some View {
