@@ -1,0 +1,106 @@
+import AppKit
+import SwiftUI
+
+// A session's tile, as the bar draws it.
+
+/// A session's tile: its two letters (or emoji) on its status colour. Working agents get a pulsing dot in the
+/// corner; pending sessions are a size smaller and dimmer.
+struct AgentTile: View {
+    let row: AgentRow
+    var size: CGFloat = 26
+    var selected = false
+
+    var body: some View {
+        // Busy (Claude answering, or a subagent or command still running after it): the tile fades and pulses,
+        // quieter than the sessions waiting on you. The face is rendered to an image that Core Animation fades.
+        let busy = (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty
+        Group {
+            if busy {
+                Pulse(from: 0.6, to: 0.28, duration: 1.1, id: AgentTileFace.Key(row: row, size: size)) {
+                    AgentTileFace(row: row, size: size)
+                }
+            } else {
+                AgentTileFace(row: row, size: size)
+            }
+        }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(row.session.title)
+            .accessibilityValue(row.stateName)
+            .focusRing(size * Tile.ratio, isFocused: selected)
+            // The project's colour, as an underline.
+            .overlay(alignment: .bottom) {
+                if let color = row.color {
+                    Capsule().fill(color.opacity(row.pending ? 0.6 : 1))
+                        .frame(width: size * 0.62, height: max(2.5, size * 0.12))
+                        .offset(y: size * 0.12 + 2.5)
+                }
+            }
+    }
+}
+
+/// The tile itself, without its busy pulse (what `Pulse` renders to an image).
+private struct AgentTileFace: View {
+    let row: AgentRow
+    var size: CGFloat
+
+    /// What the face depends on.
+    struct Key: Hashable {
+        let label: String
+        let icon: String?
+        let tint: Color?
+        let pending: Bool
+        let size: CGFloat
+        init(row: AgentRow, size: CGFloat) {
+            label = row.label; icon = row.icon; tint = row.tint; pending = row.pending; self.size = size
+        }
+    }
+
+    var body: some View {
+        let shape = Tile.shape(size)
+        let emoji = row.label.unicodeScalars.first.map { $0.properties.isEmoji && $0.value > 0xFF } ?? false
+        Group {
+            if let icon = row.icon {
+                Image(systemName: icon)
+                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
+            } else {
+                Text(row.label)
+                    .font(.system(size: emoji ? size * 0.55 : size * 0.4, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            }
+        }
+            .foregroundStyle(row.tint == nil ? Theme.text.opacity(0.88) : Theme.onTint)
+            .frame(width: size, height: size)
+            .background(shape.fill(row.tint ?? Theme.Fill.tile))
+            .opacity(row.pending ? 0.55 : 1)
+    }
+}
+
+/// A session's tile in the bar; opens it in Claude. Its highlight is compared here, in its own body, so hovering a
+/// tile doesn't rebuild the whole hub. No tooltip: hovering opens the sessions' panel, a row beside each tile.
+struct BarTile: View {
+    let row: AgentRow
+    let size: CGFloat
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+
+    var body: some View {
+        Button { store.openAgent(row.id) } label: {
+            AgentTile(row: row, size: size, selected: hub.selection == "a:" + row.id)
+        }
+        .buttonStyle(.plain)
+        .frame(height: Theme.Metrics.pitch)
+        .accessibilityLabel(row.session.title)
+        .accessibilityValue(row.stateName)
+        .accessibilityHint("Opens it in Claude")
+        .sessionMenu(row, store)
+        .onHover {
+            if $0 {
+                hub.selection = "a:" + row.id
+                ui.drawerSelection = row.id
+            }
+        }
+    }
+}
