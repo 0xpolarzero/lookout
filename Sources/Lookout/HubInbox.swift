@@ -172,11 +172,13 @@ extension LookoutHub {
     /// Neither group has a result: one "No match" says so, in place of the groups' own lines.
     var searchFoundNothing: Bool { searching && items.isEmpty && store.hubSessions(hub).isEmpty }
 
-    /// Sessions found nothing while the inbox did: said under the Sessions header, so an empty group is not a
-    /// broken one.
-    var noSessionsMatch: Bool { searching && store.agents.enabled && !searchFoundNothing && store.hubSessions(hub).isEmpty }
+    /// One of the two groups found nothing: it is a line saying so ("Inbox 0 · No items match") and the other has the whole
+    /// body, which a column of its own would waste half of on a line. Both empty is `searchFoundNothing`'s one "No match".
+    var searchSpansBody: Bool { searchGroups && !searchFoundNothing && (items.isEmpty || store.hubSessions(hub).isEmpty) }
 
-    var noSessionsLine: some View { quietLine("No sessions match") }
+    /// Whether the sessions' section is in the layout: the extension is on, and a search that found nothing in either group
+    /// has no half-empty Sessions under its "No match".
+    var showsSessions: Bool { store.agents.enabled && !searchFoundNothing }
 
     /// The extension is on and Claude has no sessions to list (a peek leaves this out: its header and New session say it).
     var noClaudeSessions: Bool { store.agents.enabled && !searching && store.sessionGroups.isEmpty }
@@ -275,7 +277,7 @@ extension LookoutHub {
                     }
                 }
             }
-            if groupLabel { SearchGroupLabel(title: "Inbox", count: items.count) }
+            if groupLabel { SearchGroupLabel(title: "Inbox", count: items.count, message: items.isEmpty ? "No items match" : nil) }
             if store.inboxReplacement != nil || items.isEmpty {
                 emptyInbox
             } else {
@@ -296,8 +298,8 @@ extension LookoutHub {
     /// found nothing either (they are listed beside the inbox's results).
     @ViewBuilder var emptyInbox: some View {
         if searching && store.inboxReplacement == nil {
+            // (A group that found nothing says so in its own label, the other having found something.)
             if searchFoundNothing { EmptyBlock("No match") }
-            else if searchGroups { quietLine("No items match") }
         } else {
             // Its own observation scope, on the minute clock: the cause is judged by the time it is drawn at, so "All caught
             // up" goes when the sync gets stale, and a poll only redraws this block, not the hub.
@@ -566,18 +568,22 @@ struct InboxSearchField: View {
 struct SearchGroupLabel: View {
     let title: String
     let count: Int
+    /// What a group with no results says after its count.
+    var message: String?
     static let height = Theme.Metrics.iconButton
 
     var body: some View {
         HStack(spacing: Theme.Space.sm) {
             Text(title).font(Theme.Typography.label)
             Text("\(count)").font(Theme.Typography.numeral)
+            if let message { Text("· \(message)").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary) }
         }
         .foregroundStyle(Theme.secondary)
         .padding(.horizontal, Theme.Metrics.rowPadding)
         .frame(maxWidth: .infinity, minHeight: Self.height, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title), \(plural(count, "result"))")
+        .accessibilityValue(message ?? "")
         .accessibilityAddTraits(.isHeader)
     }
 }

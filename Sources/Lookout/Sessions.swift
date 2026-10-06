@@ -915,7 +915,11 @@ extension LookoutHub {
     /// while something needs you, "1 waiting" (a button: it picks the first one). Open, the Waiting for you group says it
     /// (DESIGN.md 10.5).
     var agentsStatus: (text: String, color: AnyShapeStyle)? {
-        if searching { return searchFoundNothing ? nil : ("\(store.hubSessions(hub).count)", AnyShapeStyle(Theme.secondary)) }
+        if searching {
+            let found = store.hubSessions(hub).count
+            if searchFoundNothing { return nil }
+            return found == 0 ? ("0 · No sessions match", AnyShapeStyle(Theme.tertiary)) : ("\(found)", AnyShapeStyle(Theme.secondary))
+        }
         let waiting = store.agentCounts.blocked
         return waiting > 0 && shrunk(.agents) ? ("\(waiting) waiting", AnyShapeStyle(Theme.amber)) : nil
     }

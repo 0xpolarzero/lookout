@@ -219,13 +219,15 @@ import Testing
         r.store.agents.enabled = true
         #expect(view.searchCount == "1 item · 0 sessions")
         #expect(view.searchGroups)
-        // The inbox found something, the sessions nothing: the Sessions group says so.
-        #expect(view.noSessionsMatch)
+        // The inbox found something, the sessions nothing: the Sessions header says so on its own line, and the inbox has the
+        // whole body.
+        #expect(view.agentsStatus?.text == "0 · No sessions match")
+        #expect(view.searchSpansBody && view.showsSessions)
         r.hub.query = "no match at all"
         #expect(view.searchCount == "No match")
-        // Both empty: one "No match", not a line in each group.
-        #expect(view.searchFoundNothing)
-        #expect(!view.noSessionsMatch)
+        // Both empty: one "No match" and no Sessions section under it, not a line in each group.
+        #expect(view.searchFoundNothing && !view.searchSpansBody && !view.showsSessions)
+        #expect(view.agentsStatus == nil)
     }
 
     // MARK: Starting

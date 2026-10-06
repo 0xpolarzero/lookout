@@ -50,7 +50,7 @@ extension LookoutHub {
     func fixedLength(ciBody: CGFloat) -> CGFloat {
         let pitch = Theme.Metrics.pitch
         let divider = 2 * Theme.Space.xs + 1
-        let agents = store.agents.enabled
+        let agents = showsSessions
         let sessions = agents && !shrunk(.agents)
         // The inbox's header, the footer and its divider, and the padding at both ends.
         var fixed = 2 * HubGeometry.lead + 2 * pitch + divider
@@ -87,7 +87,7 @@ extension LookoutHub {
     /// whole row, so the sessions take whatever the inbox's rows leave, and the inbox what the sessions' don't need.
     /// The length is the whole budget: with less than a row left a list is a short scroll, never a taller hub.
     var caps: (inbox: CGFloat, agents: CGFloat) {
-        let agents = store.agents.enabled
+        let agents = showsSessions
         let inbox = !shrunk(.inbox)
         let sessions = agents && !shrunk(.agents)
         let row = Theme.Metrics.twoLineRow
@@ -197,7 +197,7 @@ extension LookoutHub {
                 }
                 .section("CI")
             }
-            if store.agents.enabled {
+            if showsSessions {
                 openDivider
                 VStack(alignment: .leading, spacing: 0) {
                     railRow(cell: { Color.clear.frame(height: Theme.Metrics.pitch) }, detail: { headerSlot(.agents, owns: true) { agentsHeader } })
@@ -255,7 +255,6 @@ extension LookoutHub {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: agentsContent)) }
                 .onDisappear { record(.agents, nil) }
         }
-        if noSessionsMatch { railRow(cell: { Color.clear }, detail: { noSessionsLine }) }
         newSessionRow().frame(width: Self.cell + Self.detail)
     }
 
@@ -265,7 +264,7 @@ extension LookoutHub {
     private var stripCell: CGFloat { Theme.Metrics.pitch }
 
     var openStripHub: some View {
-        let columns = hub.focus == nil && store.agents.enabled
+        let columns = hub.focus == nil && store.agents.enabled && !searchSpansBody && !searchFoundNothing
         let width = HubGeometry.stripWidth(focus: hub.focus, sessions: store.agents.enabled, room: maxWidth)
         let strip = openStripRow(columns: columns, width: width)
         let body = openStripBody(columns: columns, width: width)
@@ -374,13 +373,15 @@ extension LookoutHub {
     /// Focused: the section has the whole column, the others are their headers. With
     /// the sessions off the inbox and CI's lines share it: the inbox gets what CI's block leaves.
     func singleColumn(room: CGFloat) -> some View {
-        let agents = store.agents.enabled
+        let agents = showsSessions
         let pitch = Theme.Metrics.pitch
+        // An inbox that found nothing is only its label, which the sessions' room leaves out.
+        let emptyInbox = searchSpansBody && items.isEmpty ? SearchGroupLabel.height + Theme.Space.xs : 0
         // CI's header, and its lines unless another section is focused.
         let ci = searching ? 0 : pitch + (shrunk(.ci) ? 0 : store.ciRepos.isEmpty ? ciUndoRoom : max(ciHeight, pitch))
         let sessionsHeader = agents ? pitch : 0
         let inboxCap = max(room - ci - sessionsHeader, 120)
-        let agentsCap = max(room - ci - sessionsHeader - pitch - ClaudeNotice.room(store), 120)
+        let agentsCap = max(room - ci - sessionsHeader - pitch - ClaudeNotice.room(store) - emptyInbox, 120)
         return VStack(alignment: .leading, spacing: 0) {
             let inbox = VStack(spacing: 0) { if !shrunk(.inbox) { stripInbox(cap: inboxCap) } }.section("Inbox")
             let ci = VStack(spacing: 0) { if !searching { ciBlock } }
@@ -428,7 +429,6 @@ extension LookoutHub {
     /// under the notice (when Claude's files are not there).
     @ViewBuilder func stripAgents(cap: CGFloat) -> some View {
         ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
-        if noSessionsMatch { noSessionsLine }
         if noClaudeSessions {
             noClaudeSessionsLine
         } else {

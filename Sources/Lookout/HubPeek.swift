@@ -299,7 +299,6 @@ extension LookoutHub {
         let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store),
                           least: SessionGroup.headerHeight + Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
         sessionsPeekHeader
-        if noSessionsMatch { noSessionsLine }
         sessionsPeek(cap: cap)
         newSessionRow(inset: 0, tile: false)
     }
