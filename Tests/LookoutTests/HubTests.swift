@@ -651,6 +651,17 @@ import Testing
         #expect(store.sessionGroups.first { $0.id == group.id }!.rows[1].id == second)
     }
 
+    @Test func sessionsDoNotMoveAmongSearchResultsWhichShowOnlySomeOfThem() {
+        let group = store.sessionGroups.first { $0.rows.count > 2 && $0.kind != .newActivity }!
+        let id = group.rows[1].id
+        #expect(hub.canMoveSession(id, by: -1, store: store))
+        hub.query = group.rows[1].session.title
+        #expect(!hub.canMoveSession(id, by: -1, store: store))
+        pick("a:" + id)
+        press(kVK_UpArrow, .option, "\u{F700}")
+        #expect(store.sessionGroups.first { $0.id == group.id }!.rows[1].id == id)
+    }
+
     // MARK: Chords
 
     @Test func commandRChecksNowAndCommandCommaOpensSettings() {
