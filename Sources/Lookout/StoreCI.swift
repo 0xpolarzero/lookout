@@ -267,8 +267,8 @@ extension Store {
         var changedAt: Date?
     }
 
-    /// Folds Actions runs (the latest of each workflow, on `sha`), external check runs and legacy statuses into one
-    /// state, the names that failed and when it last changed. Any of the three can be all a repo has.
+    /// Folds Actions runs (the latest of each workflow, on `sha`) and their jobs, external check runs and legacy
+    /// statuses into one state, the names that failed and when it last changed. Any of the three can be all a repo has.
     nonisolated static func readCI(runs: [GHWorkflowRuns.Run], sha: String?, checks: [GHCheckRuns.Run],
                                    combined: GHCombinedStatus) -> CIReading {
         var latest: [Int: GHWorkflowRuns.Run] = [:]
@@ -276,7 +276,14 @@ extension Store {
         let external = checks.filter { $0.app?.slug != "github-actions" }
 
         let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
-        var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()
+        // A failed workflow is named by the jobs that failed in it (each is a check run in the run's own suite); its own
+        // name stands in only when none is found. Jobs of runs not chosen above (another trigger) never count.
+        let jobs = checks.filter { $0.app?.slug == "github-actions" && bad.contains($0.conclusion ?? "") }
+        var failing: [String] = []
+        for run in latest.values.filter({ bad.contains($0.conclusion ?? "") }).sorted(by: { $0.name < $1.name }) {
+            let failed = jobs.filter { run.checkSuiteId != nil && $0.checkSuite?.id == run.checkSuiteId }.map(\.name)
+            failing += failed.isEmpty ? [run.name] : failed
+        }
         failing += external.filter { bad.contains($0.conclusion ?? "") }.map(\.name)
         failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
         let pending = latest.values.contains { $0.status != "completed" }

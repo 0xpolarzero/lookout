@@ -56,14 +56,19 @@ struct GHWorkflowRuns: Decodable {
         let updatedAt: Date?
         let status: String
         let conclusion: String?
+        /// The check suite its jobs' check runs belong to.
+        let checkSuiteId: Int?
     }
     let workflowRuns: [Run]
 }
 
 struct GHCheckRuns: Decodable {
     struct App: Decodable { let slug: String? }
+    struct Suite: Decodable { let id: Int }
     struct Run: Decodable {
         let app: App?
+        /// An Actions job's suite is its workflow run's `checkSuiteId`.
+        let checkSuite: Suite?
         let name: String
         let status: String
         let conclusion: String?
