@@ -53,6 +53,9 @@ import Testing
         let (side, height) = EdgeSnap.snap(pill(1490, 472), in: screen)
         #expect(side == .right)
         #expect(abs(height - 0.5) < 0.001)
+        // Along a side the position counts from the top: dropped in the upper quarter, it docks in the upper quarter.
+        let (upper, fromTop) = EdgeSnap.snap(pill(30, 944 * 0.75), in: screen)
+        #expect(upper == .left && abs(fromTop - 0.25) < 0.001)
     }
 }
 
@@ -68,8 +71,8 @@ import Testing
             let screen = NSRect(x: 0, y: 0, width: 1000, height: 800)
             let at: (Double) -> NSRect = { p in
                 switch edge {
-                case .left: NSRect(x: 0, y: 800 * p - 20, width: 40, height: 40)
-                case .right: NSRect(x: 960, y: 800 * p - 20, width: 40, height: 40)
+                case .left: NSRect(x: 0, y: 800 * (1 - p) - 20, width: 40, height: 40)
+                case .right: NSRect(x: 960, y: 800 * (1 - p) - 20, width: 40, height: 40)
                 case .top: NSRect(x: 1000 * p - 20, y: 760, width: 40, height: 40)
                 case .bottom: NSRect(x: 1000 * p - 20, y: 0, width: 40, height: 40)
                 }

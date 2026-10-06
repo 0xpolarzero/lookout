@@ -172,13 +172,14 @@ enum EdgeSnap {
         return zip(titles, [range.lowerBound, 0.25, 0.5, 0.75, range.upperBound]).map { ($0, $1) }
     }
 
-    /// Closest screen edge to the dropped window, and where along that edge it sits (0…1).
+    /// Closest screen edge to the dropped window, and where along that edge it sits (0…1, from the left or from the top, as
+    /// the bar rests).
     nonisolated static func snap(_ f: NSRect, in vf: NSRect) -> (DockEdge, Double) {
         let distances: [(DockEdge, CGFloat)] = [
             (.left, f.midX - vf.minX), (.right, vf.maxX - f.midX), (.top, vf.maxY - f.midY), (.bottom, f.midY - vf.minY),
         ]
         let edge = distances.min { $0.1 < $1.1 }!.0
-        let along = edge.isHorizontal ? (f.midX - vf.minX) / vf.width : (f.midY - vf.minY) / vf.height
+        let along = edge.isHorizontal ? (f.midX - vf.minX) / vf.width : (vf.maxY - f.midY) / vf.height
         let limits = positions(edge)
         return (edge, min(max(along, limits.lowerBound), limits.upperBound))
     }
