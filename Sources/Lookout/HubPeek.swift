@@ -355,8 +355,7 @@ extension LookoutHub {
         }
         MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,", picked: picked == .settings) { hub.perform(.settings, store: store) }
         Hairline().padding(.vertical, Theme.Space.xs)
-        Ticking(coarse: true) { now in
-            let line = syncLine(now: now)
+        syncLine { line in
             HStack(spacing: Theme.Space.md) {
                 Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
                 Spacer(minLength: 0)

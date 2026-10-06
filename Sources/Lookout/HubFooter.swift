@@ -64,8 +64,7 @@ extension LookoutHub {
 
     /// "Checked 2m ago", or the fault in its place: a button that checks now (or opens Settings to sign in).
     var syncButton: some View {
-        Ticking(coarse: true) { now in
-            let line = syncLine(now: now)
+        syncLine { line in
             Button {
                 if line.opensSettings { hub.go(.settings) } else { store.refreshNow() }
             } label: {
@@ -82,6 +81,21 @@ extension LookoutHub {
             .help(line.help)
             .accessibilityLabel(line.text)
             .accessibilityHint(line.opensSettings ? "Opens Settings" : "Checks GitHub now")
+        }
+    }
+
+    /// Whether the sync line says how long ago it checked, and so has to follow the clock. A fault, "Checking…" and "Not
+    /// checked yet" name no time: they are drawn once, with nothing subscribed to the clock.
+    private var syncNamesTime: Bool {
+        store.authError == nil && store.repoErrors.isEmpty && !store.isSyncing && store.lastSync != nil
+    }
+
+    /// The sync line for `content`, redrawn on the minute clock only while it counts minutes.
+    @ViewBuilder func syncLine<Content: View>(@ViewBuilder _ content: @escaping (SyncLine) -> Content) -> some View {
+        if syncNamesTime {
+            Ticking(coarse: true) { content(syncLine(now: $0)) }
+        } else {
+            content(syncLine(now: Date()))
         }
     }
 
