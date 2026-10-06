@@ -33,6 +33,11 @@ import SwiftUI
 //   .focusRing(radius)     The one focus ring: 1.5pt accent, offset 2 (inset for rows), from @FocusState.
 //   .reportsControlFocus(focused)  Tells the key monitor a control has focus (so it keeps Space and Return); `focusRing`
 //                          does it for you unless the control keeps its own @FocusState.
+//   Focus     Controls are native Buttons (or Menus, Toggles) whose `@FocusState` draws the ring: they are on the Tab ring
+//             with Full Keyboard Access and never take focus from a click, so no `.focusable()` on a control that is
+//             already one (it would add click focus: a stray ring). List rows are `.focusable(false)`: ↑↓ pick them, Tab
+//             walks the chrome (tabs, header actions, footer). `HubController.dropClickFocus` lets go of any focus a click
+//             did leave.
 //   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, CheckboxStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
 //   EmptyBlock, UndoLine (presentation only), Hairline, Avatar, FlowLayout, `.tip(_:_:)` (icon-only controls only).
 //   .tile(size) / Tile.shape(size)   A rounded square filled like a tile, radius 27% of its size.

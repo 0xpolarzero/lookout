@@ -251,9 +251,23 @@ final class HubController {
     private func watchMouse() {
         let events: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseUp]
         if let local = NSEvent.addLocalMonitorForEvents(matching: events, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.mouseMoved() }
+            let released = event.type == .leftMouseUp
+            MainActor.assumeIsolated {
+                self?.mouseMoved()
+                if released { self?.dropClickFocus() }
+            }
             return event
         }) { monitors.append(local) }
+    }
+
+    /// A click leaves no focus ring behind: the Tab ring is the keyboard's, so once the click is through (the bar's own
+    /// clicks are forwarded on release) a control that took the focus lets go of it. A text field being edited keeps it.
+    private func dropClickFocus() {
+        guard hub.controls.isActive else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.hub.controls.isActive, !(self.window.firstResponder is NSText) else { return }
+            self.window.makeFirstResponder(nil)
+        }
     }
 
     /// Whether the window takes the mouse (the pointer is on the hub). A window-server call, so only on change.
