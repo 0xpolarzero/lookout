@@ -128,7 +128,7 @@ import Testing
         #expect(hidden == 2)
         // Even when the frozen order has it far down the list.
         let late = (0..<12).map { slot("s\($0)", waiting: $0 == 11) }
-        let frozen = (0..<12).map { "s\($0)" }
+        let frozen = (0..<12).map { slot("s\($0)") }
         let arranged = BarSessions.arrange(late, frozen: frozen)
         #expect(arranged.shown.contains { $0.id == "s11" })
         #expect(arranged.shown.count == 9)
@@ -146,7 +146,20 @@ import Testing
 
     @Test func frozenOrderHoldsWhileSessionsReorderAndNewOnesJoinTheEnd() {
         let now = [slot("c"), slot("a"), slot("b"), slot("d")]
-        let (shown, _) = BarSessions.arrange(now, frozen: ["a", "b", "c", "gone"])
+        let (shown, _) = BarSessions.arrange(now, frozen: [slot("a"), slot("b"), slot("c"), slot("gone")])
         #expect(shown.map(\.id) == ["a", "b", "c", "d"])
+    }
+
+    @Test func frozenGroupsHoldWhileAMarkChanges() {
+        // The second of one project's two sessions starts waiting: it keeps its place and its gap while frozen.
+        let frozen = [slot("a", "p:x"), slot("b", "p:x"), slot("c", "p:y")]
+        let now = [slot("b", "waiting", waiting: true), slot("a", "p:x"), slot("c", "p:y")]
+        let (shown, _) = BarSessions.arrange(now, frozen: frozen)
+        #expect(shown.map(\.id) == ["a", "b", "c"])
+        #expect(shown.indices.map { BarSessions.gap(shown, before: $0) } == [0, 0, BarSessions.groupGap])
+        // Thawed, it moves up into its own group.
+        let (thawed, _) = BarSessions.arrange(now, frozen: nil)
+        #expect(thawed.map(\.id) == ["b", "a", "c"])
+        #expect(thawed.indices.map { BarSessions.gap(thawed, before: $0) } == [0, BarSessions.groupGap, BarSessions.groupGap])
     }
 }

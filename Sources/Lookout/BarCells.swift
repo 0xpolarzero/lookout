@@ -415,7 +415,8 @@ struct NewSessionBarCell: View {
 
 /// Which sessions the bar shows and in what order (DESIGN.md 5.1): waiting first, then the projects, then new
 /// activity; eight tiles and a "+N", except that a session waiting for you never goes into the "+N". While the
-/// pointer is over the hub the order stays as it was, so nothing under it moves.
+/// pointer is over the hub the order and the project boundaries stay as they were, so nothing under it moves; the
+/// sessions' side panel lays its rows out from the same slots, so each stays level with its tile.
 enum BarSessions {
     /// A session as the layout sees it.
     struct Slot: Equatable {
@@ -426,6 +427,8 @@ enum BarSessions {
     }
 
     static let visible = 8
+    /// A project boundary: this much more than the cells' own pitch.
+    static let groupGap: CGFloat = 8
 
     /// Waiting sessions, then the kept ones by project in their order, then the new activity.
     static func slots(kept: [AgentRow], pending: [AgentRow]) -> [Slot] {
@@ -437,17 +440,24 @@ enum BarSessions {
         return all.filter(\.waiting) + all.filter { !$0.waiting }
     }
 
-    /// `slots` in the frozen order (those still there, then any new ones in their own order), cut to `visible`
-    /// plus every waiting one. One session over would be a "+1" in the place of its own tile: it shows instead.
-    static func arrange(_ slots: [Slot], frozen: [String]?, visible: Int = visible) -> (shown: [Slot], hidden: Int) {
+    /// `slots` in the frozen order, each in the group it had (those still there, then any new ones as they are),
+    /// cut to `visible` plus every waiting one: whether it waits is as it is now, so none is ever hidden. One session
+    /// over would be a "+1" in the place of its own tile: it shows instead.
+    static func arrange(_ slots: [Slot], frozen: [Slot]?, visible: Int = visible) -> (shown: [Slot], hidden: Int) {
         var ordered = slots
         if let frozen {
-            let byID = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let known = Set(frozen)
-            ordered = frozen.compactMap { byID[$0] } + slots.filter { !known.contains($0.id) }
+            let now = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let known = Set(frozen.map(\.id))
+            ordered = frozen.compactMap { old in now[old.id].map { Slot(id: old.id, group: old.group, waiting: $0.waiting) } }
+                + slots.filter { !known.contains($0.id) }
         }
         let shown = ordered.enumerated().filter { $0.offset < visible || $0.element.waiting }.map(\.element)
         let hidden = ordered.count - shown.count
         return hidden == 1 ? (ordered, 0) : (shown, hidden)
+    }
+
+    /// The room before the cell at `index` beyond the pitch: a project boundary.
+    static func gap(_ shown: [Slot], before index: Int) -> CGFloat {
+        index > 0 && shown[index - 1].group != shown[index].group ? groupGap : 0
     }
 }

@@ -86,7 +86,7 @@ extension LookoutHub {
         } else {
             // Its lines stay level with their cells, so it only moves at the ends: it grows to meet the bar's
             // bottom if it ends close to it.
-            start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - Self.peekPad, 0)
+            start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - Self.peekPad - Self.peekLead(section), 0)
             let short = bar - (start + length)
             if short >= 0, short < Self.peekSnap { length = bar - start }
         }
@@ -213,6 +213,8 @@ extension LookoutHub {
     static let peekPad: CGFloat = Theme.Space.md
     /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
     static let peekLine: CGFloat = Theme.Metrics.line
+    /// What a side panel has above its first cell's row: the sessions' header, which the bar has no cell for.
+    static func peekLead(_ section: HubSection) -> CGFloat { section == .agents ? peekLine : 0 }
 
     /// A panel's width: the controls' is a small menu; along the top and bottom, CI's is its column's.
     func panelWidth(_ section: HubSection) -> CGFloat {
@@ -243,25 +245,10 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                let rows = agentRows
-                agentsHeader.frame(height: Self.peekLine)
+                // The one thing before the first tile: the rows under it line up with the bar's cells.
+                agentsHeader.frame(height: Self.peekLead(.agents))
+                PeekSessionRows(store: store, ui: ui, hub: hub)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                // By project and draggable, like the full view's.
-                let starts = projectStarts(rows.kept)
-                ForEach(rows.kept) { r in
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
-                        .sessionMenu(r, store)
-                        .modifier(GroupRule(on: starts.contains(r.id)))
-                        .modifier(AgentReorder(row: r, store: store))
-                }
-                if !rows.pending.isEmpty {
-                    pendingLabel(twoLines: false).frame(height: 14)
-                    ForEach(rows.pending) { r in
-                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
-                            .sessionMenu(r, store)
-                    }
-                }
-                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
             default:
                 // (The controls have their own panel.)
                 EmptyView()

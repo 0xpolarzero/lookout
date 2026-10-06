@@ -9,6 +9,8 @@ enum HubPage { case main, settings, repos }
 @MainActor
 final class HubState {
     var hovering = false
+    /// The bar's session cells as the pointer found them, held while it is over the hub (see `BarSessions`).
+    var frozenSessions: [BarSessions.Slot]?
     var pinned = false {
         didSet {
             // Pinned or unpinned by hand on a page: that's what you want once back, not what it was before.

@@ -392,8 +392,9 @@ extension LookoutHub {
     }
 }
 
-/// The session cells of the bar at rest: their tiles by group, the "+N", the "+". The order they show is frozen
-/// while the pointer is over the hub and applied, with a fade, once it leaves.
+/// The session cells of the bar at rest: their tiles by group, the "+N", the "+". The order and the groups they
+/// show are frozen while the pointer is over the hub (a session's marks still update) and applied, with a fade,
+/// once it leaves.
 struct RestSessionCells: View {
     let store: Store
     let ui: UIState
@@ -402,16 +403,12 @@ struct RestSessionCells: View {
     let onRail: Bool
     /// Show the sessions' section, picking this session (or the first).
     let show: (String?) -> Void
-    @State private var frozen: [String]?
     @Environment(\.accessibilityReduceMotion) private var reduce
-
-    /// A project boundary: this much more than the cells' own pitch.
-    static let groupGap: CGFloat = 8
 
     var body: some View {
         let rows = store.agentRows
         let slots = BarSessions.slots(kept: rows.kept, pending: rows.pending)
-        let (shown, hidden) = BarSessions.arrange(slots, frozen: frozen)
+        let (shown, hidden) = BarSessions.arrange(slots, frozen: hub.frozenSessions)
         let byID = Dictionary(uniqueKeysWithValues: (rows.kept + rows.pending).map { ($0.id, $0) })
         let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
         layout {
@@ -419,23 +416,56 @@ struct RestSessionCells: View {
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, slot in
                 if let row = byID[slot.id] {
                     BarTile(row: row, axis: axis, onRail: onRail, store: store, ui: ui, hub: hub) { show(row.id) }
-                        .padding(axis == .vertical ? .top : .leading, index > 0 && shown[index - 1].group != slot.group ? Self.groupGap : 0)
+                        .padding(axis == .vertical ? .top : .leading, BarSessions.gap(shown, before: index))
                         .transition(.opacity)
                 }
             }
             if hidden > 0 { MoreSessionsCell(axis: axis, count: hidden) { show(nil) } }
             NewSessionBarCell(axis: axis, store: store) { show(nil) }
         }
-        .animation(reduce ? nil : Theme.Motion.fade, value: shown.map(\.id))
+        .animation(reduce ? nil : Theme.Motion.fade, value: shown.map { $0.id + $0.group })
         .onAppear { if hub.hovering { freeze() } }
+        .onDisappear { hub.frozenSessions = nil }
         .onChange(of: hub.hovering) { _, over in
-            if over { freeze() } else { frozen = nil }
+            if over { freeze() } else { hub.frozenSessions = nil }
         }
     }
 
-    /// Keeps the order as it is now, whatever the sessions do until the pointer leaves.
+    /// Keeps the order and the groups as they are now, whatever the sessions do until the pointer leaves.
     private func freeze() {
         let rows = store.agentRows
-        frozen = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending), frozen: nil, visible: .max).shown.map(\.id)
+        hub.frozenSessions = BarSessions.slots(kept: rows.kept, pending: rows.pending)
+    }
+}
+
+/// The sessions' side panel under its header: one 36pt row beside each of the bar's tiles, in the bar's order,
+/// with the bar's gap (and a line in it) between groups and the new session row beside the "+", so every row
+/// stays level with its tile.
+struct PeekSessionRows: View {
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+
+    var body: some View {
+        let rows = store.agentRows
+        let shown = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending),
+                                        frozen: hub.frozenSessions, visible: .max).shown
+        let byID = Dictionary(uniqueKeysWithValues: (rows.kept + rows.pending).map { ($0.id, $0) })
+        let pending = Set(rows.pending.map(\.id))
+        VStack(alignment: .leading, spacing: 0) {
+            // (The bar's asterisk stands here until there is a session.)
+            if shown.isEmpty { Color.clear.frame(height: Theme.Metrics.pitch) }
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, slot in
+                if let row = byID[slot.id] {
+                    let gap = BarSessions.gap(shown, before: index)
+                    if gap > 0 { Hairline(inset: 8).frame(height: gap) }
+                    DrawerRow(row: row, store: store, ui: ui, number: 0, inHub: true)
+                        .frame(height: Theme.Metrics.pitch)
+                        .sessionMenu(row, store)
+                        .modifier(ReorderIf(enabled: !pending.contains(row.id), row: row, store: store))
+                }
+            }
+            NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
+        }
     }
 }
