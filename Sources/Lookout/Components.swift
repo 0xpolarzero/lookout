@@ -457,8 +457,15 @@ struct MenuRow: View {
 
 // MARK: - Forms
 
+/// A button that draws its label as it is, disabled or not: `.plain` fades a disabled label, and what a switch or
+/// checkbox row says stays readable (it draws its own unavailable look).
+private struct UnfadedButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
+}
+
 /// A drawn switch, 32 x 20: accent when on, whatever the window's key state (the system one greys out in a panel
-/// that isn't key). The whole label row is the target; VoiceOver gets a toggle that says On or Off.
+/// that isn't key). The whole label row is the target; VoiceOver gets a toggle that says On or Off. Disabled changes
+/// the switch only (never fades the label).
 struct SwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         SwitchRow(configuration: configuration)
@@ -482,20 +489,21 @@ struct SwitchStyle: ToggleStyle {
                 .frame(minHeight: Theme.Metrics.formRow)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(UnfadedButtonStyle())
             .focusRing(10)
-            .opacity(enabled ? 1 : 0.6)
             .onHover { hovering = $0 }
             .accessibilityAddTraits(.isToggle)
             .accessibilityValue(on ? "On" : "Off")
         }
 
+        /// Unavailable is drawn on the switch alone, as a quiet outline and a grey knob: the label stays as it is, as it
+        /// is what the reason beside it explains.
         private func track(on: Bool) -> some View {
             Capsule()
-                .fill(on ? Theme.accent : resolved.fill(Theme.switchOff))
-                .overlay(Capsule().strokeBorder(on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
+                .fill(!enabled ? resolved.fill(Theme.Fill.field) : on ? Theme.accent : resolved.fill(Theme.switchOff))
+                .overlay(Capsule().strokeBorder(!enabled ? resolved.divider : on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
                 .overlay(alignment: on ? .trailing : .leading) {
-                    Circle().fill(.white).frame(width: 16, height: 16).padding(2)
+                    Circle().fill(enabled ? AnyShapeStyle(.white) : AnyShapeStyle(resolved.tertiary)).frame(width: 16, height: 16).padding(2)
                 }
                 .brightness(hovering && enabled ? 0.06 : 0)
                 .frame(width: 32, height: 20)
@@ -531,7 +539,7 @@ struct CheckboxStyle: ToggleStyle {
                 .frame(minHeight: Theme.Metrics.menuRow)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(UnfadedButtonStyle())
             .focusRing(Theme.Radius.small + Theme.Space.xs)
             .onHover { hovering = $0 }
             .accessibilityAddTraits(.isToggle)

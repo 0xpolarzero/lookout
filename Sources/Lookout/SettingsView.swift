@@ -468,42 +468,32 @@ struct SettingsView: View {
         let on = store.agents.enabled
         return paneStack("Claude") {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            // Without the Claude app the switch is off and says why, outside the switch: a disabled one is drawn
-            // dimmer, and the reason is what has to stay readable.
-            let blocked = !installed && !on
-            Toggle(isOn: Binding(get: { on }, set: { store.setAgentsEnabled($0) })) {
-                HStack(spacing: Theme.Space.md) {
-                    Image(systemName: "asterisk").font(Theme.Typography.glyph(14, .bold)).foregroundStyle(Theme.claude)
-                        .frame(width: 22).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: Theme.Space.hair) {
-                        Text("Claude sessions").font(Theme.Typography.title).foregroundStyle(Theme.text)
-                        if !blocked {
-                            Text("Shows your Claude Code sessions on the bar")
+                // Without the Claude app the switch is off and unavailable, and the reason is the row's detail line.
+                let blocked = !installed && !on
+                Toggle(isOn: Binding(get: { on }, set: { store.setAgentsEnabled($0) })) {
+                    HStack(spacing: Theme.Space.md) {
+                        Image(systemName: "asterisk").font(Theme.Typography.glyph(14, .bold)).foregroundStyle(Theme.claude)
+                            .frame(width: 22).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: Theme.Space.hair) {
+                            Text("Claude sessions").font(Theme.Typography.title).foregroundStyle(Theme.text)
+                            Text(blocked ? "Needs the Claude desktop app, with Claude Code sessions" : "Shows your Claude Code sessions on the bar")
                                 .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                                 .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                         }
+                        .padding(.vertical, Theme.Space.sm)
                     }
-                    .padding(.vertical, Theme.Space.sm)
                 }
-            }
-            .toggleStyle(SwitchStyle())
-            .disabled(blocked)
-            .padding(.horizontal, Theme.Metrics.contentEdge)
-            if blocked {
-                Text("Needs the Claude desktop app, with Claude Code sessions")
-                    .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, Theme.Metrics.contentEdge + 22 + Theme.Space.md)
-                    .padding(.trailing, Theme.Metrics.contentEdge)
-            }
-            if on {
-                FormGroup {
-                    mutedFolders
-                    FormDivider()
-                    sessionIcons
+                .toggleStyle(SwitchStyle())
+                .disabled(blocked)
+                .padding(.horizontal, Theme.Metrics.contentEdge)
+                if on {
+                    FormGroup {
+                        mutedFolders
+                        FormDivider()
+                        sessionIcons
+                    }
+                    .padding(.leading, Theme.Metrics.rowPadding)
                 }
-                .padding(.leading, Theme.Metrics.rowPadding)
-            }
             }
         }
     }
