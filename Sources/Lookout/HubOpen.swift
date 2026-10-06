@@ -63,30 +63,16 @@ extension LookoutHub {
 
     // MARK: Cells
 
-    /// The inbox's cell as the full view draws it: amber with the count when something needs you.
-    var openInboxCell: some View {
-        let needs = store.unreadCount(.needsYou)
-        return Button {
-            hub.query = ""
-            hub.filter = .needsYou
-        } label: {
-            Group {
-                if needs > 0 {
-                    Text(needs > 99 ? "99+" : "\(needs)")
-                        .font(.system(size: needs > 99 ? 11 : 13, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(Theme.onTint)
-                } else {
-                    Image(systemName: "tray").font(Theme.Typography.glyph(13)).foregroundStyle(Theme.secondary)
-                }
-            }
-            .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
-            .background(Tile.shape(Theme.Metrics.tile).fill(needs > 0 ? Theme.amber : Theme.Fill.tile))
-            .frame(width: Theme.Metrics.pitch, height: Theme.Metrics.pitch)
-            .contentShape(Rectangle())
+    /// The inbox's cell in its slot of the full view: the bar's own cell, so it keeps its look and its action (which
+    /// picks the newest item that needs you), one pitch tall with its tile where it is at rest. The cell hangs its tile
+    /// 21pt below its top (it has its count beneath); the slot's middle is 18pt down. A cell that is one pitch tall
+    /// by itself needs no shift.
+    @ViewBuilder var openInboxCell: some View {
+        if edge.isHorizontal {
+            inboxIcon.frame(height: Theme.Metrics.pitch)
+        } else {
+            inboxIcon.frame(height: Theme.Metrics.pitch, alignment: .top).offset(y: Theme.Metrics.pitch / 2 - 21)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Inbox")
-        .accessibilityValue(needs > 0 ? "\(needs) need you" : "Nothing needs you")
     }
 
     // MARK: Sides

@@ -216,8 +216,9 @@ extension LookoutHub {
     // MARK: Inbox
 
     var inboxIcon: some View {
+        // On the sides the same cell at rest and kept open, so it doesn't move (the tabs repeat its count).
         InboxCell(needsYou: store.unreadCount(.needsYou), bots: store.unreadCount(.bots), vertical: !edge.isHorizontal,
-                  showsCount: !(showsDetail && !shrunk(.inbox))) {
+                  showsCount: !(showsDetail && !shrunk(.inbox) && edge.isHorizontal)) {
             // Straight to what needs you, its newest item picked so the keys act on it at once.
             withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
                 hub.go(.main)
