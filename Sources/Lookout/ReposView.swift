@@ -230,7 +230,6 @@ struct ReposView: View {
     /// stays as it was.
     @State private var customOpen: Set<String> = []
     @Environment(\.pagePreview) private var preview
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var matches: [String] {
         let q = input.lowercased().trimmingCharacters(in: .whitespaces)
@@ -399,13 +398,12 @@ struct ReposView: View {
             failure = reason.map { (name, $0) }
             // The sentence appears in the list; it is said too, once, as the other notices are (WCAG 4.1.3).
             if let reason { Announce.say(RepoFailure.add(reason, input: name)) }
+            // The suggestions are gone, and the pointer that was over them is not any more.
+            overList = false
             if reason == nil {
                 input = ""
                 fieldFocused = false
-                overList = false
             } else {
-                // The overlay is gone with the error showing; the pointer that was over it is not any more.
-                overList = false
                 highlight = nil
             }
         }
