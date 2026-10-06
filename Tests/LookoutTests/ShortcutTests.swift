@@ -140,6 +140,30 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
+    @MainActor @Test func restoreDefaultsRefusedByAnotherAppChangesNothing() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keep = ShortcutAction.togglePanel.defaultShortcut
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])
+        store.setShortcut(moved, for: .togglePanel)
+        store.setShortcut(.unassigned, for: .discard)
+        let before = store.settings.shortcuts
+        // Another app took Keep open's default after it was let go of.
+        registrar.taken = [keep]
+        let refusal = store.restoreDefaultShortcuts()
+        #expect(refusal == .defaultUnavailable(keep))
+        #expect(refusal?.message == "\(keep.display) is used by another app. Lookout keeps your shortcuts")
+        // What worked still does, and so does what was cleared: stored, registered, shown.
+        #expect(store.settings.shortcuts == before && store.shortcut(.togglePanel) == moved && store.shortcut(.discard).isUnassigned)
+        #expect(registrar.registered == [1: moved, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        // Once the other app lets go, the restore goes through.
+        registrar.taken = []
+        #expect(store.restoreDefaultShortcuts() == nil && !store.hasCustomShortcuts)
+        #expect(registrar.registered == [1: keep, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        withExtendedLifetime(globals) {}
+    }
+
     @MainActor @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
         let store = Store()
         let registrar = FakeRegistrar()

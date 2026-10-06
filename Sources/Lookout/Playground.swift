@@ -344,7 +344,7 @@ struct Shot {
 ///   repos-add, repos-add-error, repos-add-none, repos-undo, repos-empty, repos-contrast, repos-retry-focus, repos-drop
 /// Settings states the dev build and a healthy account never show, right edge
 ///   settings-signed-out, settings-launch-error, settings-update-{idle,available,downloading,ready,failed},
-///   settings-notifications-off, settings-shortcuts-{recording,conflict}, settings-claude-{missing,key-saved}
+///   settings-notifications-off, settings-shortcuts-{recording,conflict,restore-refused}, settings-claude-{missing,key-saved}
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -672,6 +672,13 @@ enum PlaygroundShots {
         Shot.edges("settings-shortcuts-conflict", on: [.right]) {
             $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
             $0.preview.recording = .openItem; $0.preview.recorderError = "Already used by Mark read / unread"
+        },
+        Shot.edges("settings-shortcuts-restore-refused", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+            $0.preview.restoreError = "⌃⌥L is used by another app. Lookout keeps your shortcuts"
+            $0.setup = { store, _, _ in
+                store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])]
+            }
         },
         Shot.edges("settings-claude-missing", on: [.right]) {
             $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy; $0.preview.claudeInstalled = false
