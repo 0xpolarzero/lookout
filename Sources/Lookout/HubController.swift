@@ -176,6 +176,7 @@ final class HubController {
             else { return }
             _ = self.keys.key(esc)
         }
+        ui.onPlace = { [weak self] in self?.moveBar($0) }
         trigger.onHover = { [weak self] in self?.mouseMoved() }
         layout.onFrame = { [weak self] in self?.syncTrigger() }
         window.canDrag = { [weak self] p in self?.isOnBar(p) ?? false }
@@ -213,6 +214,7 @@ final class HubController {
     }
 
     private func dock() {
+        ui.display = screen.localizedName
         layout.floating = false
         host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout)
         window.setFrame(dockFrame(), display: true)
@@ -495,6 +497,23 @@ final class HubController {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 self.window.animator().setFrame(target, display: true)
             }, completionHandler: { MainActor.assumeIsolated { self.dropped() } })
+        }
+    }
+
+    /// Settings' way to what dragging does: another edge, a place along it, another display. Each lands where a drop
+    /// would. A bar that turns (its other axis) is measured again at rest before a page that was open comes back.
+    private func moveBar(_ placement: BarPlacement) {
+        let turns = placement.edge.map { $0.isHorizontal != ui.edge.isHorizontal } ?? false
+        let page = hub.page
+        if turns, page != .main { hub.go(.main) }
+        if let name = placement.display, let target = NSScreen.screens.first(where: { $0.localizedName == name }) { screen = target }
+        if let edge = placement.edge { ui.edge = edge }
+        if let position = placement.position { ui.position = position }
+        dock()
+        afterBarLayout(turns) { [weak self] in
+            guard let self else { return }
+            if turns, page != .main { self.hub.go(page) }
+            self.mouseMoved()
         }
     }
 

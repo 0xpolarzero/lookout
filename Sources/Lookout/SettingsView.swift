@@ -115,6 +115,8 @@ struct SettingsView: View {
     @Bindable var store: Store
     /// The open pane, when the page header owns it.
     var pane: Binding<SettingsPane>? = nil
+    /// Where the bar rests, for the controls that place it as dragging does.
+    var ui: UIState? = nil
     /// The Repositories row.
     var openRepos: () -> Void = {}
     @Environment(\.pagePreview) private var preview
@@ -223,12 +225,8 @@ struct SettingsView: View {
                     .accessibilityLabel(title)
                     .accessibilityValue(launchError)
                 }
-                FormDivider()
-                FormToggle(label: "Keep the bar centred", isOn: Binding(
-                    get: { store.settings.centerPill ?? false },
-                    set: { store.settings.centerPill = $0 }
-                ))
             }
+            if let ui { FormGroup(title: "Bar") { placement(ui) } }
             FormGroup(title: "Updates") { updates }
             FormGroup {
                 FormButtonRow(action: { NSApp.terminate(nil) }) {
@@ -290,6 +288,50 @@ struct SettingsView: View {
     private func cancelToken() {
         token = ""
         revealToken = false
+    }
+
+    /// Where the bar rests, without dragging it (WCAG 2.5.7): its display, its edge, and where along the edge, which
+    /// centring takes over.
+    @ViewBuilder private func placement(_ ui: UIState) -> some View {
+        let screens = NSScreen.screens.map(\.localizedName)
+        let centred = store.settings.centerPill == true
+        if screens.count > 1 {
+            FormRow("Display") {
+                PopUp(label: "Display", value: ui.display, room: screens) {
+                    Picker("Display", selection: Binding(get: { ui.display }, set: { ui.place(BarPlacement(display: $0)) })) {
+                        ForEach(screens, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+            }
+            FormDivider()
+        }
+        FormRow("Edge") {
+            PopUp(label: "Edge", value: ui.edge.title, room: DockEdge.allCases.map(\.title)) {
+                Picker("Edge", selection: Binding(get: { ui.edge }, set: { ui.place(BarPlacement(edge: $0)) })) {
+                    ForEach(DockEdge.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            }
+        }
+        FormDivider()
+        FormRow("Position", detail: centred ? "Centred, as set below" : nil) {
+            let spots = EdgeSnap.spots(ui.edge)
+            let nearest = spots.min { abs($0.position - ui.position) < abs($1.position - ui.position) }
+            PopUp(label: "Position along the \(ui.edge.rawValue) edge", value: nearest?.title ?? "", room: spots.map(\.title)) {
+                ForEach(spots, id: \.title) { spot in
+                    Button(spot.title) { ui.place(BarPlacement(position: spot.position)) }
+                }
+            }
+            .disabled(centred)
+        }
+        FormDivider()
+        FormToggle(label: "Keep the bar centred", isOn: Binding(
+            get: { store.settings.centerPill ?? false },
+            set: { store.settings.centerPill = $0 }
+        ))
     }
 
     private var checkEvery: some View {

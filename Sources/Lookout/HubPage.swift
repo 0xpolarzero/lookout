@@ -13,7 +13,7 @@ extension LookoutHub {
             pageHeader
             Hairline()
             Group {
-                if hub.page == .repos { ReposView(store: store) } else { SettingsView(store: store, pane: paneBinding, openRepos: { hub.go(.repos) }) }
+                if hub.page == .repos { ReposView(store: store) } else { SettingsView(store: store, pane: paneBinding, ui: ui, openRepos: { hub.go(.repos) }) }
             }
             .id(hub.page)
             .transition(.opacity.animation(Theme.Motion.fade.resolved(reduce: reduce)))

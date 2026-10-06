@@ -15,8 +15,19 @@ final class UIState {
     var position: Double = UserDefaults.standard.object(forKey: "pill.y") as? Double ?? 0.5 {
         didSet { if persists { UserDefaults.standard.set(position, forKey: "pill.y") } }
     }
+    /// The name of the display the bar is on, for Settings' placement controls.
+    var display = NSScreen.main?.localizedName ?? ""
     /// Off for screenshots, so rendering never moves the real hub.
     @ObservationIgnored var persists = true
+    /// Moves the bar for real (its window, its screen): set by the controller. Without one, only what is remembered changes.
+    @ObservationIgnored var onPlace: ((BarPlacement) -> Void)?
+
+    /// Where Settings puts the bar, what dragging it does with the mouse: another edge, a place along it, another display.
+    func place(_ placement: BarPlacement) {
+        if let onPlace { return onPlace(placement) }
+        if let edge = placement.edge { self.edge = edge }
+        if let position = placement.position { self.position = position }
+    }
 
     init() {}
 
@@ -26,10 +37,34 @@ final class UIState {
     }
 }
 
-enum DockEdge: String {
+/// A change of where the bar rests: any of the three, the others as they are.
+struct BarPlacement {
+    var edge: DockEdge?
+    var position: Double?
+    /// A display's `localizedName`.
+    var display: String?
+}
+
+enum DockEdge: String, CaseIterable {
     case left, right, top, bottom
 
     var isHorizontal: Bool { self == .top || self == .bottom }
+
+    var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
+
+extension EdgeSnap {
+    /// How far along its edge the bar may rest (a fraction of it): the drag's own limits.
+    nonisolated static func positions(_ edge: DockEdge) -> ClosedRange<Double> { edge.isHorizontal ? 0.03...0.97 : 0.05...0.95 }
+
+    /// The places Settings offers along an edge, named for the way it runs: the two ends (the drag's own limits), the middle,
+    /// and between.
+    nonisolated static func spots(_ edge: DockEdge) -> [(title: String, position: Double)] {
+        let range = positions(edge)
+        let titles = edge.isHorizontal ? ["Left", "Left of centre", "Centre", "Right of centre", "Right"]
+            : ["Top", "Upper", "Centre", "Lower", "Bottom"]
+        return zip(titles, [range.lowerBound, 0.25, 0.5, 0.75, range.upperBound]).map { ($0, $1) }
+    }
 }
 
 class FloatingPanel: NSPanel {

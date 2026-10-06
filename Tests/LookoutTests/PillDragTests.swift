@@ -55,3 +55,43 @@ import Testing
         #expect(abs(height - 0.5) < 0.001)
     }
 }
+
+/// Settings places the bar as a drop would (WCAG 2.5.7): the same limits along an edge, and the same place for it to rest.
+@MainActor
+@Suite struct Placing {
+    @Test func theSpotsRunBetweenTheDropsOwnLimitsAndNameTheWayTheEdgeRuns() {
+        for edge in DockEdge.allCases {
+            let spots = EdgeSnap.spots(edge)
+            let range = EdgeSnap.positions(edge)
+            #expect(spots.map(\.position) == [range.lowerBound, 0.25, 0.5, 0.75, range.upperBound])
+            // Dropping the bar on a spot's place snaps to that edge and that place.
+            let screen = NSRect(x: 0, y: 0, width: 1000, height: 800)
+            let at: (Double) -> NSRect = { p in
+                switch edge {
+                case .left: NSRect(x: 0, y: 800 * p - 20, width: 40, height: 40)
+                case .right: NSRect(x: 960, y: 800 * p - 20, width: 40, height: 40)
+                case .top: NSRect(x: 1000 * p - 20, y: 760, width: 40, height: 40)
+                case .bottom: NSRect(x: 1000 * p - 20, y: 0, width: 40, height: 40)
+                }
+            }
+            for spot in spots {
+                let (snapped, position) = EdgeSnap.snap(at(spot.position), in: screen)
+                #expect(snapped == edge && abs(position - spot.position) < 0.001, "\(edge) \(spot.title)")
+            }
+        }
+        #expect(EdgeSnap.spots(.right).map(\.title) == ["Top", "Upper", "Centre", "Lower", "Bottom"])
+        #expect(EdgeSnap.spots(.top).map(\.title).first == "Left")
+    }
+
+    @Test func withoutAWindowPlacingRemembersTheEdgeAndThePosition() {
+        let ui = UIState(persists: false, edge: .right)
+        ui.place(BarPlacement(edge: .top))
+        ui.place(BarPlacement(position: 0.25))
+        #expect(ui.edge == .top && ui.position == 0.25)
+        var placed: [BarPlacement] = []
+        ui.onPlace = { placed.append($0) }
+        ui.place(BarPlacement(edge: .left, display: "Studio"))
+        // The controller does the moving: what is remembered is its to set.
+        #expect(placed.count == 1 && placed[0].edge == .left && placed[0].display == "Studio" && ui.edge == .top)
+    }
+}
