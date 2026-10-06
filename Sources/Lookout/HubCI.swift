@@ -83,7 +83,8 @@ enum CISpeech {
 
     /// A row's value, after its name: "failing, Linux build and Windows test, 45 minutes ago".
     static func value(_ entry: CIEntry, now: Date = Date()) -> String {
-        var parts = [entry.state.voice]
+        // A repository nobody has answered for isn't "no runs": that is for a successful answer that found none.
+        var parts = [entry.checked ? entry.state.voice : "not checked"]
         if entry.muted { parts.append("muted") }
         if entry.state == .failure, let failing = entry.status?.failing, !failing.isEmpty { parts.append(list(failing)) }
         if let changed = entry.changedAt { parts.append(age(changed, now: now)) }
@@ -150,10 +151,21 @@ struct CIRow: View {
         .focusable(false)
         .accessibilityLabel(title)
         .accessibilityValue(CISpeech.value(entry, now: now))
-        .accessibilityHint("Opens its checks. More actions available.")
+        .accessibilityHint([headline, "Opens its checks. More actions available."].filter { !$0.isEmpty }.joined(separator: ". "))
         .help(tooltip)
+        // The keyboard's pick shows what a tooltip would (the failing checks and the headline are cut to one line).
+        .tip(title, tipDetail, focused: selected && hub.keyboardSelection?.id == "c:" + entry.id, hover: false)
         .ciActions(entry, store: store)
         .onHover { hover = $0; hub.pointer($0, over: "c:" + entry.id, ui: ui) }
+    }
+
+    /// The commit's headline, for VoiceOver: the row shows it cut to a line, or not at all when the failed checks take it.
+    private var headline: String { entry.status?.title ?? "" }
+
+    /// What the tooltip says under the repository.
+    private var tipDetail: String? {
+        let lines = tooltip.split(separator: "\n", omittingEmptySubsequences: true).dropFirst().map(String.init)
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     /// Line 2: the checks that failed, in red, or the commit's headline.

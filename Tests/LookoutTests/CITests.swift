@@ -176,6 +176,14 @@ import Testing
         #expect(CISpeech.list(["a", "b", "c"]) == "a, b and c")
     }
 
+    @Test func aRepositoryNobodyAnsweredForIsSpokenAsNotChecked() {
+        let unchecked = CIEntry(repo: RepoConfig(fullName: "apple/swift-format"), status: nil, state: .none, muted: false)
+        #expect(CISpeech.value(unchecked, now: now) == "not checked")
+        // A successful answer that found no runs still says so.
+        let none = CIEntry(repo: unchecked.repo, status: status(.none, changed: 30), state: .none, muted: false)
+        #expect(CISpeech.value(none, now: now).hasPrefix("no runs"))
+    }
+
     @Test func theBarOpensARepoInTheStateItShowsNotAMutedFailure() {
         // An older passing repo and a newer failure that was muted: the bar says passing, so it opens the passing one.
         let store = store(["a/ok": status(.success, changed: 5000), "b/bad": status(.failure, sha: "b1", changed: 10)], ["a/ok", "b/bad"])
