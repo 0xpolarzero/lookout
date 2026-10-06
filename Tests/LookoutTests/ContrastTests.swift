@@ -48,6 +48,8 @@ import Testing
 
     private static let all = ["bg", "rail", "hover", "field", "tile", "selected", "pressed", "group", "popover"]
     private static let rows = ["bg", "rail", "hover", "field", "tile", "selected"]
+    /// A button's fills, pressed included: the chips' red check count lands on all of them.
+    private static let buttons = rows + ["pressed"]
 
     private func pairs(_ r: Theme.Resolved) -> [Pair] {
         [
@@ -57,11 +59,13 @@ import Testing
             Pair(name: "tertiary", color: r.tertiary, on: Self.all, minimum: 4.5),
             Pair(name: "accentText", color: Theme.accentText, on: Self.rows, minimum: 4.5),
             Pair(name: "amber text", color: Theme.amber, on: Self.all, minimum: 4.5),
-            Pair(name: "red text", color: r.red, on: Self.rows, minimum: 4.5),
+            // `resolved.red` on a chip (any fill it takes); `Theme.red` for the rest, on the page and its groups.
+            Pair(name: "red text on a chip", color: r.red, on: Self.buttons, minimum: 4.5),
+            Pair(name: "red text", color: Theme.red, on: ["bg", "rail", "group", "popover"], minimum: 4.5),
             // Glyphs, rings and borders.
             Pair(name: "accent", color: Theme.accent, on: Self.rows + ["popover"], minimum: 3),
             Pair(name: "amber glyph", color: Theme.amber, on: Self.all, minimum: 3),
-            Pair(name: "red glyph", color: r.red, on: Self.rows, minimum: 3),
+            Pair(name: "red glyph", color: Theme.red, on: Self.buttons, minimum: 3),
             Pair(name: "fieldBorder", color: Theme.fieldBorder, on: ["bg", "rail", "group"], minimum: 3),
         ]
     }
@@ -97,7 +101,7 @@ import Testing
         #expect(abs(value(Theme.secondary, "bg") - 9.34) < 0.02)
         #expect(abs(value(Theme.tertiary, "bg") - 6.73) < 0.02)
         #expect(abs(value(Theme.accent, "selected") - 4.53) < 0.02)
-        #expect(abs(value(Theme.red, "selected") - 4.96) < 0.02)
+        #expect(abs(value(Theme.red, "selected") - 5.12) < 0.02)
         #expect(abs(value(Theme.fieldBorder, "bg") - 3.11) < 0.02)
     }
 }

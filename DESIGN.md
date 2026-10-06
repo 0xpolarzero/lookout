@@ -80,7 +80,7 @@ Contrast computed against the surfaces actually used (sRGB, WCAG relative lumina
 | `accent` | rgb .40 .58 1.0 | unread-done dot, focus ring, selection bar, switch on, update glyph | 6.35 | 5.32 | 4.84 | 4.53 |
 | `accentText` | rgb .52 .68 1.0 | accent as text (links) | 8.28 | 6.94 | 6.32 | 5.91 |
 | `amber` | rgb .99 .74 .27 | needs you: inbox tile, waiting tile, unread dot, "Waiting", sync warning | 10.96 | 9.18 | 8.36 | 7.83 |
-| `red` | rgb 1.0 .45 .43 (was .97/.38/.38, 4.29 on selected) | failing glyph, failing check names, sign-in fault | 6.94 | 5.82 | 5.30 | 4.96 |
+| `red` | rgb 1.0 .47 .45 (was .97/.38/.38, 4.29 on selected) | failing glyph, failing check names, sign-in fault | 7.17 | 6.01 | 5.47 | 5.12 |
 | `green` | rgb .32 .82 .50 | update-ready tile fill only | 9.47 | | | |
 | `onTint` | black .85 (was .80) | text/glyph on amber and green fills | 9.95 on amber, 8.81 on green | | | |
 | `claude` | rgb .85 .47 .34 | Claude mark in the Claude settings pane only | | | | |
@@ -102,9 +102,9 @@ Neutral tiles (1.3:1 against `bg`) carry a label at 12:1; the tile boundary is n
 
 **Project palette** (group-header and menu dots only; 6 pt): violet .67/.52/1.0, pink .96/.42/.75, cyan .24/.82/.93, silver .86/.86/.90. Green and lime removed.
 
-**Increase Contrast** (`colorSchemeContrast == .increased`, resolved once into a `Theme.Resolved` environment value; never read per view): `stroke` .28 (2.5:1) and borders 1.5 pt; `divider` .20; `secondary` .86; `tertiary` .80; fills ×1.6; focus ring 2 pt; working arc 2.5 pt. **Differentiate Without Colour** (`accessibilityDifferentiateWithoutColor`): the waiting tile gets a 1.5 pt `onTint` inner stroke; the unread dot gets a 1 pt white ring. **Reduce Transparency**: no-op (3.1).
+**Increase Contrast** (`colorSchemeContrast == .increased`, resolved once into a `Theme.Resolved` environment value; never read per view): `stroke` .28 (2.5:1) and borders 1.5 pt; `divider` .20; `secondary` .86; `tertiary` .80; `red` as text on a chip rgb 1.0 .66 .64 (`Resolved.red`: `Theme.red` falls to 3.22:1 on a pressed ×1.6 fill, this holds 4.63:1); fills ×1.6; focus ring 2 pt; working arc 2.5 pt. **Differentiate Without Colour** (`accessibilityDifferentiateWithoutColor`): the waiting tile gets a 1.5 pt `onTint` inner stroke; the unread dot gets a 1 pt white ring. **Reduce Transparency**: no-op (3.1).
 
-**ContrastTests** (Tests/LookoutTests): composites every foreground token over every surface token it can land on (bg, rail, hover, field, tile, selected, pressed, popover; amber and green fills for `onTint`) in normal and Increase Contrast sets. Text pairs ≥ 4.5:1, glyph/ring/border pairs ≥ 3:1. The pair list lives in the test; keep it in step with the tokens.
+**ContrastTests** (Tests/LookoutTests): composites every foreground token, as the views use it, over every surface token it can land on (bg, rail, hover, field, tile, selected, pressed, popover; amber and green fills for `onTint`) in normal and Increase Contrast sets. Text pairs ≥ 4.5:1, glyph/ring/border pairs ≥ 3:1. The pair list lives in the test; keep it in step with the tokens.
 
 ### 3.3 Type
 
