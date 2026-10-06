@@ -150,8 +150,15 @@ struct SettingsView: View {
                 .padding(.horizontal, Theme.Metrics.inset)
                 .padding(.vertical, Theme.Space.md)
             }
+            // Muting a folder here offers its undo where it was done.
+            if current.wrappedValue == .claude, let undo = store.undoStack.visible(in: .agents) {
+                UndoLine(message: undo.message) { store.undoLast() }
+                    .padding(.horizontal, Theme.Metrics.inset)
+                    .padding(.bottom, Theme.Metrics.inset)
+            }
         }
         .motion(Theme.Motion.fade, value: current.wrappedValue)
+        .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
         .onAppear {
             if let pane = preview.pane { ownPane = pane }
             revealToken = preview.revealsToken
@@ -539,7 +546,7 @@ struct SettingsView: View {
             PopUp(label: "Muted folders", value: muted.isEmpty ? "None" : plural(muted.count, "folder")) {
                 Section("Mute a folder") {
                     ForEach(unmuted, id: \.self) { folder in
-                        Button(folderName(folder)) { store.setFolderMuted(folder, true) }
+                        Button(folderName(folder)) { store.muteFolder(folder) }
                     }
                 }
             }

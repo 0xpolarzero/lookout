@@ -887,8 +887,10 @@ extension Store {
         if muted { agents.mutedFolders.append(folder) }
     }
 
-    /// Mutes a project from its menu: its sessions stop arriving as new activity. Offers an undo.
+    /// Mutes a project (from its menu, or Settings): its sessions stop arriving as new activity. Offers an undo, unless it
+    /// was muted already: undoing that would unmute what you had muted before.
     func muteFolder(_ folder: String) {
+        guard !agents.mutedFolders.contains(folder) else { return }
         setFolderMuted(folder, true)
         let name = folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent
         registerUndo("Muted \(name)", in: .agents) { [weak self] in self?.setFolderMuted(folder, false) }

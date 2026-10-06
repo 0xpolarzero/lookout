@@ -561,6 +561,17 @@ import Testing
         #expect(held.map(\.id) == ["project:/code/x"] && SessionGroup.waiting(held) == 1)
     }
 
+    @Test func mutingAMutedFolderAgainOffersNoUndoThatWouldUnmuteIt() {
+        let s = store([session("a")], kept: ["a"])
+        s.muteFolder("/code/app")
+        #expect(s.agents.mutedFolders == ["/code/app"])
+        s.undoLast()
+        #expect(s.agents.mutedFolders.isEmpty)
+        s.setFolderMuted("/code/app", true)
+        s.muteFolder("/code/app")
+        #expect(!s.undoLast() && s.agents.mutedFolders == ["/code/app"])
+    }
+
     @Test func theAgeSpokenIsTheAgeShownForAWorkingSessionToo() {
         // No message of yours to count from: both fall back to the same date.
         let working = ClaudeSession(id: "r", title: "R", folder: "/code/app", lastActivity: now.addingTimeInterval(-300), running: true)
