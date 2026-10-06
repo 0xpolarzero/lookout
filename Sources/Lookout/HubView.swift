@@ -44,6 +44,8 @@ final class HubState {
     var toast: String?
     /// Typed while the hub has the keyboard: narrows the inbox and finds sessions, kept or not.
     var query = ""
+    /// The inbox header's search field and scroll state (see HubInbox.swift).
+    let inbox = InboxState()
     /// Which way the last page change went, so pages slide in from the side you're heading to.
     var forward = true
     /// The page you came from, so going back retraces your steps (Repositories opened from Settings goes back
@@ -143,6 +145,9 @@ struct LookoutHub: View {
     @State var ciHeight: CGFloat = 0
     static let ciUsual: CGFloat = 150
     var ciExtra: CGFloat { max(0, ciHeight - Self.ciUsual) }
+    /// What CI's lines take beyond the usual; while searching they are gone (the header stays), so their room is the
+    /// results'.
+    var ciSpace: CGFloat { searching ? -(Self.ciUsual - Theme.Metrics.pitch) : ciExtra }
     @State var peekSizes: [HubSection: CGSize] = [:]
     /// The strip's trailing group (controls, update button) as laid out, for the sessions' segment to leave room
     /// for; a first guess until it's measured.
@@ -276,7 +281,7 @@ struct LookoutHub: View {
 
     /// No section focused: what's left once the fixed parts are laid out, inbox first.
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
-        let free = max(160, maxLength - 360 - ciExtra)
+        let free = max(160, maxLength - 360 - ciSpace)
         guard store.agents.enabled else { return (free, 0) }
         // Whole 36pt session rows, so the last one showing is never cut through its tile.
         let agents = max(2, (free * 0.45 / 36).rounded(.down)) * 36
@@ -354,6 +359,7 @@ struct LookoutHub: View {
         return VStack(alignment: .leading, spacing: 0) {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
+            if noSessionsMatch { noSessionsLine.padding(.horizontal, Self.inset).padding(.top, 8) }
             CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count)) {
                 // Your sessions by project, a line between projects; then the pending ones, labelled.
                 AdaptiveStack(count: rows.kept.count + rows.pending.count, alignment: .leading, spacing: 0) {
@@ -419,19 +425,11 @@ struct LookoutHub: View {
     /// Along the top and bottom, the lists scroll past this, so the view stays compact.
     static let listCap: CGFloat = 300
 
-    /// Along the top and bottom, a focused section across the whole width: the inbox in two columns.
+    /// Along the top and bottom, a focused section across the whole width: the inbox in one column.
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
-                          alignment: .leading, spacing: 1) {
-                    ForEach(items) { itemRow($0).id("i:" + $0.id) }
-                }
-                .padding(.horizontal, Self.inset)
-                .padding(.vertical, 8)
-            }
-            .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
+            focusedInbox(cap: maxLength - Self.cell - 16 - 2 * 8)
         case .ci:
             ciColumn
         default:

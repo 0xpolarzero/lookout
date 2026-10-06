@@ -2,6 +2,30 @@ import Foundation
 import Testing
 @testable import Lookout
 
+/// A stand-in for `Task.sleep` that waits until it is woken, and says when it has started waiting.
+@MainActor
+final class Sleeper {
+    private(set) var durations: [Duration] = []
+    private var sleeping: CheckedContinuation<Void, Never>?
+    private var started: CheckedContinuation<Void, Never>?
+
+    func sleep(_ duration: Duration) async {
+        durations.append(duration)
+        started?.resume()
+        started = nil
+        await withCheckedContinuation { sleeping = $0 }
+    }
+
+    func waitUntilSleeping() async {
+        if durations.isEmpty { await withCheckedContinuation { started = $0 } }
+    }
+
+    func wake() {
+        sleeping?.resume()
+        sleeping = nil
+    }
+}
+
 @MainActor
 @Suite struct Undo {
     private func item(_ id: String, _ state: ItemState = .unread, at: Double = 1000, author: String = "x",
@@ -15,6 +39,7 @@ import Testing
         let s = Store()
         s.persists = false
         s.undoStack.announce = { _ in }
+        s.repos = [RepoConfig(fullName: "a/b")]
         s.items = items
         return s
     }
@@ -92,13 +117,180 @@ import Testing
         #expect(s.list(.done).count == 2)
     }
 
-    @Test func clearDoneKeepsAnAnsweredForNothingReviewRequest() {
-        // GitHub's search would hand a dropped, still-pending request back as new.
-        let s = store([item("rr", .discarded, kind: .reviewRequested), item("2", .discarded)])
+    @Test func clearDoneClearsReviewRequestsToo() {
+        // Remembered by id apart from the rows, so GitHub's search, still listing it, doesn't bring it back as new.
+        let s = store([item("rr#1", .discarded, kind: .reviewRequested), item("2", .discarded)])
         #expect(s.hasClearableDone)
         s.clearDone()
-        #expect(ids(s.items) == ["rr"])
+        #expect(s.items.isEmpty)
+        #expect(s.droppedRequests == ["rr#1"])
         #expect(!s.hasClearableDone)
+        #expect(s.undoLast())
+        #expect(Set(ids(s.items)) == ["rr#1", "2"])
+        #expect(s.droppedRequests.isEmpty)
+    }
+
+    @Test func onlyReviewRequestsNobodyAnsweredAreRemembered() {
+        let s = store([item("rr#1", .addressed, kind: .reviewRequested)])
+        s.clearDone()
+        #expect(s.items.isEmpty)
+        #expect(s.droppedRequests.isEmpty)
+    }
+
+    @Test func droppedRequestsSurviveARestart() throws {
+        var state = PersistedState(repos: [], items: [], ci: [:], settings: AppSettings(), agents: nil, mutedCI: nil,
+                                   droppedRequests: ["rr#1"])
+        let data = try JSONEncoder().encode(state)
+        state = try JSONDecoder().decode(PersistedState.self, from: data)
+        #expect(state.droppedRequests == ["rr#1"])
+    }
+
+    // MARK: Review requests beyond the first page
+
+    private func request(_ id: Int) -> GHIssue {
+        let json = """
+        {"id": \(id), "number": \(id), "title": "PR \(id)", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
+         "html_url": "https://github.com/a/b/pull/\(id)", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+         "pull_request": null, "repository_url": "https://api.github.com/repos/a/b"}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
+        return try! decoder.decode(GHIssue.self, from: Data(json.utf8))
+    }
+
+    @Test func aClearedRequestKeepsItsSuppressionWhileOffThePageFetched() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        s.discard(s.items[0])
+        s.clearDone()
+        #expect(s.droppedRequests == ["rr#1"])
+        // It slides off the page that was fetched, then back on: still cleared, not unread again.
+        s.applyReviewRequests([request(2)], complete: false)
+        #expect(s.droppedRequests == ["rr#1"])
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        #expect(s.droppedRequests == ["rr#1"])
+        #expect(!s.items.contains { $0.id == "rr#1" })
+    }
+
+    @Test func aRequestOffThePageFetchedIsNotMarkedAddressed() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        s.applyReviewRequests([request(2)], complete: false)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
+        s.applyReviewRequests([request(2)], complete: true)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .addressed)
+    }
+
+    @Test func aSuppressionEndsOnceTheSearchListedEverythingWithoutIt() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1)], complete: true)
+        s.discard(s.items[0])
+        s.clearDone()
+        #expect(s.droppedRequests == ["rr#1"])
+        s.applyReviewRequests([], complete: true)
+        #expect(s.droppedRequests.isEmpty)
+        // The same PR asks for a review again.
+        s.applyReviewRequests([request(1)], complete: true)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
+    }
+
+    // MARK: Undo after the configuration changed
+
+    private func configured() -> Store {
+        store([item("1", .discarded), item("2", .discarded, kind: .reviewComment), item("rr#1", .discarded, kind: .reviewRequested)])
+    }
+
+    @Test func undoingClearDoneDoesNotBringBackAWatchedRepoRemoved() {
+        let s = configured()
+        s.clearDone()
+        s.removeRepo(s.repos[0])
+        #expect(s.undoLast())
+        // The repository's items stay gone; the review request, which belongs to no repository, comes back.
+        #expect(ids(s.items) == ["rr#1"])
+    }
+
+    @Test func undoingClearDoneDoesNotBringBackAnEventTurnedOff() {
+        let s = configured()
+        s.clearDone()
+        s.toggle(.reviewComment, on: s.repos[0])
+        #expect(s.undoLast())
+        #expect(ids(s.items).sorted() == ["1", "rr#1"])
+    }
+
+    @Test func undoingClearDoneDoesNotBringBackWhatAllCommentsOffDrops() {
+        var other = item("3", .discarded)
+        other.forYou = false
+        let s = store([item("1", .discarded), other])
+        s.repos = [RepoConfig(fullName: "a/b", allComments: true)]
+        s.clearDone()
+        s.toggleAllComments(s.repos[0])
+        #expect(s.undoLast())
+        #expect(ids(s.items) == ["1"])
+    }
+
+    @Test func undoingClearDoneDoesNotBringBackReviewRequestsTurnedOff() {
+        let s = configured()
+        s.clearDone()
+        s.settings.reviewRequests = false
+        #expect(s.undoLast())
+        #expect(!ids(s.items).contains("rr#1"))
+        #expect(s.droppedRequests.isEmpty)
+    }
+
+    // MARK: Polling
+
+    @Test func pollingKeepsAnItemThroughItsUndoWindow() {
+        // Closed items go 14 days after they arrived: one marked Done today, 15 days on, must still be undoable.
+        let old = Date().addingTimeInterval(-15 * 86400).timeIntervalSince1970
+        let s = store([item("1", at: old)])
+        s.done(s.items[0])
+        s.prune()
+        #expect(ids(s.items) == ["1"])
+        #expect(s.undoLast())
+        #expect(s.items[0].state == .unread)
+    }
+
+    @Test func pollingPrunesItOnceTheWindowHasPassed() {
+        let old = Date().addingTimeInterval(-15 * 86400).timeIntervalSince1970
+        let s = store([item("1", at: old)])
+        s.done(s.items[0])
+        s.prune(now: Date().addingTimeInterval(UndoStack.validFor + 1))
+        #expect(s.items.isEmpty)
+    }
+
+    @Test func theItemCapKeepsWhatUndoCouldStillRestore() {
+        // The oldest of a full inbox marked Done, then one new item: the cap would drop exactly the cleared row.
+        let now = Date()
+        let base = now.addingTimeInterval(-3600).timeIntervalSince1970
+        let s = store((0..<Store.itemCap).map { item("\($0)", at: base + Double($0)) })
+        s.done(s.items[0])
+        s.items.append(item("new", at: now.timeIntervalSince1970))
+        s.prune(now: now)
+        #expect(s.items.contains { $0.id == "0" })
+        #expect(s.items.contains { $0.id == "new" })
+        #expect(s.undoLast())
+        #expect(s.items.first { $0.id == "0" }?.state == .unread)
+        // Once the window has passed, the cap applies to it like any other row.
+        s.done(s.items.first { $0.id == "0" }!)
+        s.prune(now: now.addingTimeInterval(UndoStack.validFor + 1))
+        #expect(s.items.count == Store.itemCap)
+        #expect(!s.items.contains { $0.id == "0" })
+    }
+
+    @Test func aWholeInboxMarkedDoneStaysUndoableAndStillTakesNewItems() {
+        let now = Date()
+        let base = now.addingTimeInterval(-3600).timeIntervalSince1970
+        let s = store((0..<Store.itemCap).map { item("\($0)", .read, at: base + Double($0)) })
+        s.doneAllRead(.needsYou)
+        s.items.append(item("new", at: now.timeIntervalSince1970))
+        s.prune(now: now)
+        #expect(s.items.count == Store.itemCap + 1)
+        #expect(s.undoLast())
+        #expect(s.items.filter { $0.state == .read }.count == Store.itemCap)
     }
 
     @Test func undoSkipsAnItemSomethingElseHasChanged() {
@@ -137,18 +329,39 @@ import Testing
         #expect(s.items[0].state == .unread)
     }
 
-    @Test func theLineGoesAwayOnItsOwnTimer() async throws {
+    @Test func theLineGoesAwayOnItsOwnTimer() async {
         let s = store([item("1")])
-        s.undoStack.lifetime = .milliseconds(30)
+        let sleeper = Sleeper()
+        s.undoStack.sleep = { await sleeper.sleep($0) }
         s.done(s.items[0])
         #expect(s.undoStack.visible(in: .inbox) != nil)
-        // Other suites may keep the main actor busy for a while: wait for the line, not for a fixed time.
-        let deadline = ContinuousClock.now + .seconds(30)
-        while s.undoStack.visible(in: .inbox) != nil, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        // Once the timer is waiting, let it finish and wait for it to act: no wall-clock time involved.
+        await sleeper.waitUntilSleeping()
+        #expect(sleeper.durations == [UndoStack.lineLifetime])
+        #expect(s.undoStack.visible(in: .inbox) != nil)
+        sleeper.wake()
+        await s.undoStack.timer?.value
         #expect(s.undoStack.visible(in: .inbox) == nil)
         #expect(s.undoStack.entries.count == 1)
+    }
+
+    @Test func aNewerLineIsNotDismissedByTheOlderTimer() async {
+        let s = store([item("1"), item("2")])
+        let first = Sleeper(), second = Sleeper()
+        s.undoStack.sleep = { await first.sleep($0) }
+        s.done(s.items[0])
+        let older = s.undoStack.timer
+        await first.waitUntilSleeping()
+        s.undoStack.sleep = { await second.sleep($0) }
+        s.done(s.items[1])
+        await second.waitUntilSleeping()
+        // The first timer is cancelled by the second line; waking it must leave the second showing.
+        first.wake()
+        await older?.value
+        #expect(s.undoStack.visible(in: .inbox) != nil)
+        second.wake()
+        await s.undoStack.timer?.value
+        #expect(s.undoStack.visible(in: .inbox) == nil)
     }
 
     @Test func theStackKeepsTheLastTen() {

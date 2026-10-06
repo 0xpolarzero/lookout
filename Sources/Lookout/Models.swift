@@ -213,6 +213,8 @@ struct PersistedState: Codable {
     var agents: AgentsState?
     /// Muted CI by repo full name: the commit sha it was muted at (see `Store.mutedCI`).
     var mutedCI: [String: String]?
+    /// Review request ids cleared from Done while still pending (see `Store.droppedRequests`).
+    var droppedRequests: [String]?
 }
 
 enum InboxFilter: String, CaseIterable {

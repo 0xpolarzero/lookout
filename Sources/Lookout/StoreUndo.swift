@@ -22,19 +22,20 @@ final class UndoStack {
 
     /// How long the line stays, and how long ⌘Z keeps working after the action.
     static let lineLifetime: Duration = .seconds(6)
-    static let validFor: TimeInterval = 30
+    nonisolated static let validFor: TimeInterval = 30
     static let depth = 10
 
     private(set) var entries: [Entry] = []
     /// The entry whose line is showing.
     private(set) var visibleID: Entry.ID?
-    @ObservationIgnored private var timer: Task<Void, Never>?
+    @ObservationIgnored private(set) var timer: Task<Void, Never>?
     /// What a screen reader is told; the tests replace it (there is no app to post to).
     @ObservationIgnored var announce: (String) -> Void = { text in
         guard NSApp != nil else { return }
         AccessibilityNotification.Announcement(text).post()
     }
-    @ObservationIgnored var lifetime = UndoStack.lineLifetime
+    /// Waits out the line's lifetime; the tests swap in one they release by hand.
+    @ObservationIgnored var sleep: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
 
     /// The entry to show in this section's undo line.
     func visible(in section: HubSection) -> Entry? {
@@ -73,9 +74,8 @@ final class UndoStack {
     private func show(_ entry: Entry) {
         timer?.cancel()
         visibleID = entry.id
-        let lifetime = lifetime
         timer = Task { [weak self] in
-            try? await Task.sleep(for: lifetime)
+            await self?.sleep(Self.lineLifetime)
             guard !Task.isCancelled, let self, visibleID == entry.id else { return }
             visibleID = nil
         }
@@ -119,23 +119,33 @@ extension Store {
     }
 
     /// Whether the Done tab has anything Clear Done would drop.
-    var hasClearableDone: Bool { items.contains(where: Self.isClearable) }
+    var hasClearableDone: Bool { items.contains { !$0.state.isOpen } }
 
-    /// A review request nobody has answered comes back from GitHub's search as soon as it is dropped: it stays.
-    private static func isClearable(_ item: InboxItem) -> Bool {
-        !item.state.isOpen && !(item.kind == .reviewRequested && item.state == .discarded)
-    }
-
-    /// Empties Done for good (with an undo line for the next 30 s).
+    /// Empties Done for good (with an undo line for the next 30 s). A review request nobody has answered would come
+    /// back from GitHub's search as new, so its id is remembered apart from the rows (`droppedRequests`).
     func clearDone() {
-        let gone = items.filter(Self.isClearable)
+        let gone = items.filter { !$0.state.isOpen }
         guard !gone.isEmpty else { return }
-        removeItems { Self.isClearable($0) }
+        let requests = Set(gone.filter { $0.kind == .reviewRequested && $0.state == .discarded }.map(\.id))
+        droppedRequests.formUnion(requests)
+        removeItems { !$0.state.isOpen }
         registerUndo("Cleared \(gone.count) from Done", announcement: "Cleared \(plural(gone.count, "item")) from Done. Undo available") { [self] in
+            // Only what the repositories and events watched now still allow: what was removed since stays removed.
             let known = Set(items.map(\.id))
-            items.append(contentsOf: gone.filter { !known.contains($0.id) })
+            let back = gone.filter { !known.contains($0.id) && isWanted($0) }
+            droppedRequests.subtract(requests)
+            items.append(contentsOf: back)
             save()
         }
+    }
+
+    /// Whether the current configuration would keep this item: its repository is watched and follows its event (and
+    /// All comments, or it is for me), or it is a review request and those are on. The inverse of what the
+    /// removals (Stop watching, an event off, All comments off, review requests off) drop.
+    func isWanted(_ item: InboxItem) -> Bool {
+        if item.kind == .reviewRequested { return settings.reviewRequests }
+        guard let repo = repos.first(where: { $0.fullName == item.repo }) else { return false }
+        return repo.events.contains(item.kind) && (repo.allComments || item.forYou != false)
     }
 
     /// Puts an item back as it was before Done, unless something else has happened to it since.
@@ -143,5 +153,12 @@ extension Store {
         guard let i = items.firstIndex(where: { $0.id == id }), items[i].state == .discarded else { return }
         items[i].state = state
         save()
+    }
+}
+
+extension InboxItem {
+    /// Cleared so recently that ⌘Z may still bring it back: pruning leaves it alone until the window has passed.
+    func isInUndoWindow(now: Date) -> Bool {
+        clearedAt.map { now.timeIntervalSince($0) <= UndoStack.validFor } ?? false
     }
 }

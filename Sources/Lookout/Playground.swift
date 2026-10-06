@@ -322,6 +322,13 @@ struct Shot {
 /// shows the waiting tile's outline, the one cue drawn so far)
 ///   rest-contrast, rest-reduce-motion, rest-differentiate, rest-a11y on every edge;
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
+/// Inbox, right and top
+///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
+///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
+///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none, inbox-search-sessions, inbox-search-sessions-only,
+///   inbox-search-from-focus, inbox-many, inbox-peek-many,
+///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
+///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// Working arc
@@ -335,7 +342,13 @@ enum PlaygroundShots {
         ("signed-out", .signedOut), ("repos-failed", .reposFailed), ("rate-limited", .rateLimited), ("snoozed", .snoozed),
         ("error", .error), ("needs-you-empty", .needsYouEmpty), ("first-sync", .firstSync), ("sync-fault", .syncFault),
     ]
-    private static let ci: [(String, Demo.Scenario)] = [("all-passing", .allPassing), ("many-ci", .manyCI)]
+    /// Why the inbox is empty or has a banner, as `(name, scenario, tab)`.
+    private static let inboxCauses: [(String, Demo.Scenario, InboxFilter?)] = [
+        ("signed-out", .signedOut, nil), ("no-repos", .empty, nil), ("repos-failed", .reposFailed, nil),
+        ("review-requests-failed", .reviewRequestsFailed, nil), ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
+        ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil),
+    ]
+    private static let ci: [(String, Demo.Scenario)] = [("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI)]
     private static let sessions: [(String, Demo.Scenario)] = [
         ("sessions-waiting", .sessionsWaiting), ("sessions-working", .sessionsWorking), ("sessions-unread", .sessionsUnread),
         ("sessions-new-activity", .sessionsNewActivity), ("sessions-scratch", .sessionsScratch),
@@ -456,6 +469,81 @@ enum PlaygroundShots {
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
         Shot.edges("repos-720") { $0.pinned = true; $0.page = .repos; $0.size = Shot.hd },
         Shot.edges("rest-sessions-12-720") { $0.scenario = .sessions12; $0.size = Shot.hd },
+        // The inbox: each tab, why it is empty, search, the undo line, a picked row.
+        Shot.edges("inbox-needs-you", on: .rightAndTop) { $0.pinned = true },
+        Shot.edges("inbox-bots", on: .rightAndTop) { $0.pinned = true; $0.filter = .bots },
+        Shot.edges("inbox-done", on: .rightAndTop) { $0.pinned = true; $0.filter = .done },
+        inboxCauses.flatMap { slug, scenario, filter in
+            Shot.edges("inbox-\(slug)", on: .rightAndTop) { $0.pinned = true; $0.scenario = scenario; $0.filter = filter }
+        },
+        Shot.edges("inbox-search-open", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.inbox.startSearch() } },
+        Shot.edges("inbox-search", on: .rightAndTop) { $0.pinned = true; $0.query = "format" },
+        Shot.edges("inbox-search-none", on: .rightAndTop) { $0.pinned = true; $0.query = "zzzz" },
+        // Both groups with results: Inbox and Sessions each under their count, CI out of the layout.
+        Shot.edges("inbox-search-sessions", on: .rightAndTop) { $0.pinned = true; $0.query = "notifications" },
+        // Only sessions match: the Inbox group says so, instead of leaving a blank.
+        Shot.edges("inbox-search-sessions-only", on: .rightAndTop) { $0.pinned = true; $0.query = "ci" },
+        // Search started from a focused CI section: the focus is given up so the field and both result groups show.
+        Shot.edges("inbox-search-from-focus", on: .rightAndTop) {
+            $0.pinned = true
+            $0.focus = .ci
+            $0.query = "format"
+            $0.setup = { _, _, hub in hub.beginSearch() }
+        },
+        Shot.edges("inbox-undo", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in if let first = store.list(.needsYou).first { store.done(first) } }
+        },
+        Shot.edges("inbox-undo-all", on: .rightAndTop) { $0.pinned = true; $0.setup = { store, _, _ in store.doneAllRead(.needsYou) } },
+        Shot.edges("inbox-picked", on: .rightAndTop) { $0.pinned = true; $0.selection = .firstNeedsYou },
+        Shot.edges("inbox-picked-done", on: .rightAndTop) {
+            $0.pinned = true
+            $0.filter = .done
+            $0.setup = { store, _, hub in hub.selection = store.list(.done).first.map { "i:" + $0.id } }
+        },
+        // The longest meta lines on the Done tab, the first picked: the action has its own room, nothing under it is cut.
+        Shot.edges("inbox-picked-done-long", on: .rightAndTop) {
+            $0.pinned = true
+            $0.filter = .done
+            $0.setup = { store, _, hub in
+                func row(_ id: String, _ author: String, _ state: ItemState, minutes: Double) -> InboxItem {
+                    var item = InboxItem(id: id, repo: "apple/swift-format", kind: .reviewComment, number: 1042,
+                                         title: "Respect trailing comma config in collection literals", snippet: "", author: author,
+                                         avatar: nil, authorIsApp: author.hasSuffix("[bot]"), url: URL(string: "https://github.com/apple/swift-format/pull/1042")!,
+                                         createdAt: Date().addingTimeInterval(-3600), state: state)
+                    item.clearedAt = Date().addingTimeInterval(-minutes * 60)
+                    return item
+                }
+                store.items += [row("long-1", "coderabbitai[bot]", .resolved, minutes: 1), row("long-2", "coderabbitai[bot]", .discarded, minutes: 2),
+                                row("long-3", "jessesquires-the-long-named", .addressed, minutes: 3)]
+                hub.selection = "i:long-1"
+            }
+        },
+        // More rows than fit: the last whole row, then "+N more".
+        Shot.edges("inbox-many", on: .rightAndTop) { $0.pinned = true; $0.scenario = .inboxMany },
+        Shot.edges("inbox-peek-many", on: .rightAndTop) { $0.section = .inbox; $0.scenario = .inboxMany },
+        Shot.edges("inbox-peek", on: .rightAndTop) { $0.section = .inbox },
+        Shot.edges("inbox-peek-done", on: .rightAndTop) { $0.section = .inbox; $0.filter = .done },
+        Shot.edges("inbox-focus", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },
+        // The one column along the top, on a wide screen and with a banner and an undo line taking height from the list.
+        Shot.edges("inbox-focus-wide", on: [.top]) {
+            $0.pinned = true; $0.focus = .inbox; $0.scenario = .inboxMany; $0.size = CGSize(width: 2400, height: 820)
+        },
+        Shot.edges("inbox-focus-banner-undo", on: [.top]) {
+            $0.pinned = true; $0.focus = .inbox; $0.scenario = .inboxMany
+            $0.setup = { store, _, _ in
+                store.repoErrors = ["ziglang/zig": "Not found (or no access)"]
+                if let first = store.list(.needsYou).first { store.done(first) }
+            }
+        },
+        Shot.edges("inbox-contrast", on: .rightAndTop) {
+            $0.pinned = true; $0.selection = .firstNeedsYou; $0.environment = .contrast
+        },
+        Shot.edges("inbox-differentiate", on: .rightAndTop) { $0.pinned = true; $0.environment = .differentiate },
+        Shot.edges("inbox-done-contrast", on: .rightAndTop) { $0.pinned = true; $0.filter = .done; $0.environment = .contrast },
+        Shot.edges("inbox-caught-up-contrast", on: .rightAndTop) {
+            $0.pinned = true; $0.scenario = .needsYouEmpty; $0.environment = .contrast
+        },
     ].flatMap { $0 }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.

@@ -590,39 +590,6 @@ struct SessionMenu: View {
     }
 }
 
-/// An inbox item's context menu: open, copy link, read state, done, treat as a bot.
-struct InboxItemMenu: View {
-    let item: InboxItem
-    let store: Store
-    /// Items already in the low-priority list offer "Stop treating as a bot" instead.
-    let low: Bool
-
-    var body: some View {
-        Button("Open on GitHub") { store.open(item) }
-        Button("Copy link") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.url.absoluteString, forType: .string)
-        }
-        Divider()
-        if item.state.isOpen {
-            Button(item.state == .unread ? "Mark as read" : "Mark as unread") {
-                item.state == .unread ? store.markRead(item) : store.markUnread(item)
-            }
-            Button("Done") { store.discard(item) }
-        } else {
-            Button("Back to inbox") { store.restore(item) }
-        }
-        Divider()
-        if !low {
-            Button("Treat @\(item.author) as a bot") { store.addBot(item.author) }
-        } else if store.settings.botHandles.contains(where: { $0.caseInsensitiveCompare(item.author) == .orderedSame }) {
-            Button("Stop treating @\(item.author) as a bot") {
-                store.settings.botHandles.removeAll { $0.caseInsensitiveCompare(item.author) == .orderedSame }
-            }
-        }
-    }
-}
-
 /// The Claude link's state as a dot and a line ("Synced with Claude", "Claude's sessions not found"…).
 struct ClaudeLinkStatus: View {
     let store: Store

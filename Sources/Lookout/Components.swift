@@ -31,6 +31,8 @@ import SwiftUI
 //   HoverFillButtonStyle   Hover/active/pressed fill for any button and shape; disabled shows no fill.
 //   .rowHighlight(hover:picked:)  A hub row's padding and fill; picked (keyboard) adds the accent bar.
 //   .focusRing(radius)     The one focus ring: 1.5pt accent, offset 2 (inset for rows), from @FocusState.
+//   .controlFocus(focused) Tells the key monitor a control has focus (so it keeps Space and Return); `focusRing` does
+//                          it for you unless the control keeps its own @FocusState.
 //   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
 //   EmptyBlock, UndoLine (presentation only), Hairline, Avatar, FlowLayout, `.tip(_:_:)` (icon-only controls only).
 //   .tile(size) / Tile.shape(size)   A rounded square filled like a tile, radius 27% of its size.

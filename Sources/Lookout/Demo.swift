@@ -10,7 +10,9 @@ enum Demo {
     enum Scenario: String, CaseIterable {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
         // Inbox and sync causes.
-        case signedOut, reposFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        case signedOut, reposFailed, reviewRequestsFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        // An inbox longer than any list shows: the rest is "+N more".
+        case inboxMany
         // CI.
         case noCI, allPassing, manyCI
         // Sessions, replacing the `agents` ones: a handful of each state, and a long list.
@@ -79,14 +81,32 @@ enum Demo {
             store.lastSync = nil
             store.rateRemaining = nil
             store.authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
-            store.items = []
+            // The rows it had stay cached; the message replaces them.
             store.ci = [:]
+        case .inboxMany:
+            agents(store, now)
+            let titles = ["Cache the avatar lookups", "Dark mode for the Settings window", "Snooze until Monday", "Open the right repo on click",
+                          "Hide read items after a day", "Keyboard shortcut for Mark all read", "Tab order in the footer", "Menu bar icon option",
+                          "Group by repository", "Notifications repeat after wake", "Sort Done by repository", "Search inside snippets"]
+            store.items += titles.enumerated().map { index, title in
+                InboxItem(id: "many-\(index)", repo: "0xpolarzero/lookout", kind: .issueOpened, number: 30 + index, title: title,
+                          snippet: "", author: ["kylef", "mattt", "allevato"][index % 3], avatar: nil, authorIsApp: false,
+                          url: URL(string: "https://github.com/0xpolarzero/lookout/issues/\(30 + index)")!,
+                          createdAt: now.addingTimeInterval(-Double(130 + index * 40) * 60), state: .unread)
+            }
         case .reposFailed:
             agents(store, now)
             store.repoErrors = ["ziglang/zig": "Not found (or no access)", "e2b-dev/runtime": "Forbidden"]
+        case .reviewRequestsFailed:
+            // The repositories synced and nothing is for you, but the search for review requests failed: no claim.
+            agents(store, now)
+            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            passing(store)
+            store.reviewRequestsError = "API rate limit exceeded"
         case .rateLimited:
             agents(store, now)
             store.rateRemaining = 0
+            store.rateResetsAt = now.addingTimeInterval(17 * 60)
         case .needsYouEmpty:
             // Nothing for you, CI healthy, bot items still unread: "All caught up" with a way to the Bots tab.
             agents(store, now)

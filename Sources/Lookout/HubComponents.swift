@@ -214,8 +214,10 @@ struct SearchMemo {
 
 extension Store {
     /// The inbox as the hub shows it: the picked filter, or every item matching the search (memoized on the query and
-    /// the items' revision).
+    /// the items' revision). Nothing while something replaces the list (a sign-in problem): rows that are not drawn are
+    /// not targets or results either.
     func hubItems(_ hub: HubState) -> [InboxItem] {
+        guard inboxReplacement == nil else { return [] }
         let words = hub.query.lowercased().split(separator: " ")
         guard !words.isEmpty else { return list(hub.filter) }
         var memo = hub.searchMemo

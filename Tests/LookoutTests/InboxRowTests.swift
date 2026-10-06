@@ -1,0 +1,200 @@
+import AppKit
+import Foundation
+import SwiftUI
+import Testing
+@testable import Lookout
+
+@MainActor
+@Suite struct InboxRowHeight {
+    private func item(_ state: ItemState, kind: EventKind = .issueComment, author: String = "someone", title: String = "A title") -> InboxItem {
+        InboxItem(id: "1", repo: "apple/swift-format", kind: kind, number: 1042, title: title, snippet: "", author: author, avatar: nil,
+                  authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(), state: state)
+    }
+
+    /// The height a row settles at in a column `width` wide.
+    private func height(of item: InboxItem, filter: InboxFilter = .needsYou, query: String = "", width: CGFloat = 400) -> CGFloat {
+        let store = Store()
+        store.persists = false
+        let hub = HubState()
+        hub.filter = filter
+        hub.query = query
+        let row = InboxRow(item: item, store: store, ui: UIState(), hub: hub).frame(width: width)
+        let hosting = NSHostingView(rootView: row)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        for _ in 0..<4 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+            hosting.layoutSubtreeIfNeeded()
+        }
+        let h = hosting.fittingSize.height
+        window.contentView = nil
+        window.orderOut(nil)
+        return h
+    }
+
+    @Test func everyKindOfRowIsExactlyTheSameHeight() {
+        let rows: [(String, CGFloat)] = [
+            ("unread", height(of: item(.unread))),
+            ("read", height(of: item(.read))),
+            ("bot", height(of: item(.unread, author: "coderabbitai[bot]"))),
+            ("done", height(of: item(.discarded), filter: .done)),
+            ("addressed", height(of: item(.addressed), filter: .done)),
+            ("resolved", height(of: item(.resolved, kind: .reviewComment), filter: .done)),
+            ("done in search", height(of: item(.discarded), filter: .done, query: "a")),
+            ("addressed in needs you", height(of: item(.addressed, kind: .reviewRequested))),
+            ("long title", height(of: item(.unread, title: String(repeating: "Respect trailing comma ", count: 8)))),
+            ("narrow", height(of: item(.addressed, author: "jessesquires"), filter: .done, width: 240)),
+        ]
+        for (name, h) in rows { #expect(abs(h - Theme.Metrics.twoLineRow) < 0.5, "\(name): \(h)") }
+    }
+}
+
+@MainActor
+@Suite struct InboxListWindow {
+    private let pitch = InboxList.pitch
+
+    @Test func rowsFitWholeAndTheListIsCutOnlyPastThem() {
+        #expect(pitch == 45)
+        // Five rows are 224 pt (a point between each).
+        #expect(InboxList.rowsFitting(224) == 5)
+        #expect(InboxList.rowsFitting(223) == 4)
+        #expect(InboxList.rowsFitting(10) == 1)
+        #expect(!InboxList.isCut(count: 5, cap: 224))
+        #expect(InboxList.isCut(count: 6, cap: 224))
+    }
+
+    @Test func theCountBelowFollowsTheScroll() {
+        // 18 rows, 4 showing: 14 below at the top, fewer as the list scrolls, none at the end.
+        #expect(InboxList.hiddenBelow(count: 18, offset: 0, rows: 4) == 14)
+        #expect(InboxList.hiddenBelow(count: 18, offset: pitch, rows: 4) == 13)
+        // Part way through a row: it is not wholly shown yet.
+        #expect(InboxList.hiddenBelow(count: 18, offset: pitch + 20, rows: 4) == 13)
+        let end = 18 * pitch - 1 - (4 * pitch - 1)
+        #expect(InboxList.hiddenBelow(count: 18, offset: end, rows: 4) == 0)
+        #expect(InboxList.hiddenBelow(count: 18, offset: -30, rows: 4) == 14)
+    }
+}
+
+@MainActor
+@Suite struct InboxListHosted {
+    @Test func aListCutShortCountsTheRowsBelow() {
+        let store = Store()
+        store.persists = false
+        store.items = (0..<18).map { i in
+            InboxItem(id: "\(i)", repo: "a/b", kind: .issueOpened, number: i, title: "Item \(i)", snippet: "", author: "x", avatar: nil,
+                      authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
+                      createdAt: Date().addingTimeInterval(-Double(i) * 60), state: .unread)
+        }
+        let hub = HubState()
+        let items = store.list(.needsYou)
+        let list = InboxList(items: items, cap: 224, listKey: .init(revision: 0, filter: .needsYou, query: ""), scopeID: "needsYou",
+                             store: store, ui: UIState(), hub: hub)
+            .frame(width: 400)
+        let hosting = NSHostingView(rootView: list)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        func settle() { for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() } }
+        settle()
+        // 224 less the line is 4 rows: 14 below (as the list scrolls the count follows: see `theCountBelowFollowsTheScroll`).
+        #expect(hub.inbox.hiddenBelow == 14)
+        // Four whole rows and the line, never past the cap.
+        #expect(abs(hosting.fittingSize.height - (4 * InboxList.pitch - 1 + InboxList.moreHeight)) < 1)
+        window.contentView = nil
+        window.orderOut(nil)
+    }
+}
+
+@MainActor
+@Suite struct InboxBodyBudget {
+    /// The body of an inbox with many rows, a banner and an undo line, in a column 400 wide given `cap` to stay within.
+    private func height(cap: CGFloat, banner: Bool, undo: Bool) -> CGFloat {
+        let store = Store()
+        store.persists = false
+        store.undoStack.announce = { _ in }
+        store.repos = [RepoConfig(fullName: "a/b")]
+        store.lastSync = Date()
+        store.items = (0..<18).map { i in
+            InboxItem(id: "\(i)", repo: "a/b", kind: .issueOpened, number: i, title: "Item \(i)", snippet: "", author: "x", avatar: nil,
+                      authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
+                      createdAt: Date().addingTimeInterval(-Double(i) * 60), state: .unread)
+        }
+        if banner { store.repoErrors = ["a/b": "Forbidden"] }
+        if undo { store.done(store.items[0]) }
+        let hub = HubState()
+        let view = LookoutHub(store: store, ui: UIState(), hub: hub, maxLength: 700).inboxBody(cap: cap).frame(width: 400)
+        let hosting = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
+        let h = hosting.fittingSize.height
+        window.contentView = nil
+        window.orderOut(nil)
+        return h
+    }
+
+    @Test func theBannerAndTheUndoLineComeOutOfTheListsRoom() {
+        let cap: CGFloat = 330
+        for (banner, undo) in [(false, false), (true, false), (false, true), (true, true)] {
+            let h = height(cap: cap, banner: banner, undo: undo)
+            #expect(h <= cap + 0.5, "banner \(banner), undo \(undo): \(h)")
+        }
+        // The list is not shrunk past what the extras take: it still fills whole rows of what is left.
+        #expect(height(cap: cap, banner: true, undo: true) > cap - InboxList.pitch)
+    }
+}
+
+@MainActor
+@Suite struct InboxRowActionRoom {
+    private func item() -> InboxItem {
+        InboxItem(id: "1", repo: "apple/swift-format", kind: .reviewComment, number: 1042, title: "Respect trailing comma", snippet: "",
+                  author: "coderabbitai[bot]", avatar: nil, authorIsApp: true, url: URL(string: "https://github.com/a/b")!,
+                  createdAt: Date(), state: .resolved)
+    }
+
+    /// How far right line 2's text reaches (in points), with the row at rest or picked (its action showing).
+    private func reach(picked: Bool, width: CGFloat) -> CGFloat {
+        let store = Store()
+        store.persists = false
+        let hub = HubState()
+        hub.filter = .done
+        if picked { hub.selection = "i:1" }
+        let hosting = NSHostingView(rootView: InboxRow(item: item(), store: store, ui: UIState(), hub: hub).frame(width: width, height: 44)
+            .background(Theme.bg).environment(\.colorScheme, .dark))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 44), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        for _ in 0..<6 { RunLoop.current.run(until: Date().addingTimeInterval(0.04)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
+        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        window.contentView = nil
+        window.orderOut(nil)
+        let scale = CGFloat(rep.pixelsWide) / width
+        var right = 0
+        // Line 2 is the lower half's text; the pick's accent bar is on the left, the action (when shown) on the right.
+        for y in Int(26 * scale)..<Int(36 * scale) {
+            for x in Int(16 * scale)..<Int((width - Theme.Metrics.rowPadding - (picked ? Theme.Metrics.iconButton : 0)) * scale)
+            where (rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)?.brightnessComponent ?? 0) > 0.5 { right = max(right, x) }
+        }
+        return CGFloat(right) / scale
+    }
+
+    @Test func theMetaLineStopsBeforeTheActionsRoomAndReadsTheSameWithOrWithoutIt() {
+        // Narrow enough that the line is cut: what it keeps must not depend on the action appearing. Picked,
+        // only what lies left of the action's own 24 pt is measured.
+        for width in [260, 300, 400] as [CGFloat] {
+            let rest = reach(picked: false, width: width)
+            let picked = reach(picked: true, width: width)
+            #expect(rest > 100, "width \(width): nothing drawn")
+            #expect(abs(rest - picked) < 1, "width \(width): \(rest) at rest, \(picked) picked")
+            // At rest too, nothing is drawn where the action will be.
+            #expect(rest <= width - Theme.Metrics.rowPadding - Theme.Metrics.iconButton, "width \(width): \(rest)")
+        }
+    }
+}
