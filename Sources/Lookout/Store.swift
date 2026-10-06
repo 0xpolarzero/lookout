@@ -651,10 +651,18 @@ final class Store {
         }
     }
 
-    func setToken(_ token: String?) {
-        if let token, !token.isEmpty { Keychain.write(token) } else { Keychain.delete() }
+    /// Keeps `token` in the Keychain, or removes it with nothing, and signs in again with what is there. False when the
+    /// Keychain refused it: nothing changes then, and the token that was saved before still signs in.
+    @discardableResult
+    func setToken(_ token: String?) -> Bool {
+        if let token, !token.isEmpty {
+            guard (keychainWrite ?? Keychain.write)(token, Keychain.github) else { return false }
+        } else {
+            Keychain.delete()
+        }
         me = nil
         refreshNow()
+        return true
     }
 
     // MARK: Repos

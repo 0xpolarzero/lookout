@@ -123,6 +123,7 @@ struct SettingsView: View {
     @State private var ownPane = SettingsPane.general
     @State private var token = ""
     @State private var revealToken = false
+    @State private var tokenError: String?
     @State private var botInput = ""
     @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -275,18 +276,28 @@ struct SettingsView: View {
             SecretField(prompt: "Paste a personal access token", text: $token, autofocus: true, cancel: cancelToken, save: saveToken)
             Text("Return saves it in the Keychain, Esc cancels. Private repositories need the repo scope.")
                 .font(Theme.Typography.meta).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+            // A refusal keeps the field and what was typed; it is said where it shows.
+            if let tokenError {
+                Text(tokenError).font(Theme.Typography.meta).foregroundStyle(Theme.red).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, Theme.Space.md)
     }
 
     private func saveToken() {
         guard !token.isEmpty else { return }
-        store.setToken(token)
+        guard store.setToken(token) else {
+            let refusal = "Couldn't save the token in the Keychain"
+            tokenError = refusal
+            Announce.say(refusal)
+            return
+        }
         cancelToken()
     }
 
     private func cancelToken() {
         token = ""
+        tokenError = nil
         revealToken = false
     }
 

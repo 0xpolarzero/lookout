@@ -427,6 +427,21 @@ import Testing
 }
 
 @MainActor
+@Suite struct TokenSaving {
+    @Test func aGitHubTokenTheKeychainRefusedIsNotSavedAndIsNotSignedInWith() {
+        let s = Store()
+        s.persists = false
+        var written: [(String, String)] = []
+        s.keychainWrite = { key, account in written.append((key, account)); return false }
+        s.lastSync = nil
+        #expect(!s.setToken("ghp_test"))
+        #expect(written.count == 1 && written[0].0 == "ghp_test" && written[0].1 == Keychain.github)
+        // Nothing was refreshed with the token that was not kept.
+        #expect(s.lastSync == nil && !s.isSyncing)
+    }
+}
+
+@MainActor
 @Suite struct TypesafeKeySaving {
     @Test func aKeyTheKeychainRefusedIsNotSavedAndSaysSo() {
         let s = Store()
