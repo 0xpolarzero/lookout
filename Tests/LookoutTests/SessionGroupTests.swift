@@ -227,7 +227,7 @@ import Testing
         #expect(hub.canMoveSession("a6", by: 1, store: s) && !hub.canMoveSession("a7", by: -1, store: s))
         // The accessibility actions come from the group's own rows: the last one shown has nothing to move down to, as in the menu.
         let shown = try #require(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" })
-        #expect(shown.moves(of: shown.rows[6]) == .init(up: true, down: true) && shown.moves(of: shown.rows[7]) == .init(up: true, down: false))
+        #expect(shown.moves(of: shown.rows[6]) == .init(up: "a5", down: "a11") && shown.moves(of: shown.rows[7]) == .init(up: "a6", down: nil))
         // Move down trades a6 with a11 as the list shows them, and both stay on the screen.
         hub.moveSession("a6", by: 1, store: s)
         #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a11", "a6"])
@@ -235,6 +235,19 @@ import Testing
         // The list that shows everything has a7 beside a6.
         hub.sessionsExpanded = true
         #expect(s.neighbour(of: "a6", 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions) == "a7")
+    }
+
+    @Test func aPeeksMoveActionsTradeWithTheRowsItDrewNotTheOnesItsCutLeftOut() throws {
+        let s = store((0..<8).map { session("a\($0)", folder: "/code/x") }, kept: (0..<8).map { "a\($0)" })
+        let hub = HubState()
+        let listed = s.listedGroups(hub)
+        // A peek with room for five rows and its "+3 more" line: the fifth row has no neighbour below it, though the list does.
+        let cap = SessionGroup.headerHeight + 5 * SessionGroup.height(of: try #require(listed.groups.first?.rows.first)) + Theme.Metrics.pitch
+        let peek = SessionGroup.peek(listed.groups, hidden: listed.hidden, cap: cap)
+        let group = try #require(peek.groups.first)
+        #expect(group.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4"] && peek.hidden == 3)
+        #expect(group.moves(of: group.rows[4]) == .init(up: "a3", down: nil))
+        #expect(s.neighbour(of: "a4", 1, frozen: hub.frozenSessions, expanded: false) == "a5")
     }
 
     @Test func dropsOnAnotherProjectAreIgnored() {

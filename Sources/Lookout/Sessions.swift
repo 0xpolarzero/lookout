@@ -326,18 +326,18 @@ extension SessionGroup {
         }
     }
 
-    /// Whether a row can trade places with the one above or below it in its project: a row the group draws (a cut's hidden
-    /// ones are no neighbour, as for `Store.neighbour`), a row held here from another project (a frozen group's) has none.
+    /// The rows a row can trade places with, above and below it in its project: rows the group draws (what a cut or a peek
+    /// leaves out is no neighbour, as for `Store.neighbour`); a row held here from another project (a frozen group's) has none.
     struct Moves: Equatable {
-        var up = false
-        var down = false
+        var up: String?
+        var down: String?
     }
 
     func moves(of row: AgentRow) -> Moves {
         guard case .project = kind else { return Moves() }
         let own = rows.filter { placement(of: $0) == .project }
         guard let i = own.firstIndex(where: { $0.id == row.id }) else { return Moves() }
-        return Moves(up: i > 0, down: i + 1 < own.count)
+        return Moves(up: i > 0 ? own[i - 1].id : nil, down: i + 1 < own.count ? own[i + 1].id : nil)
     }
 
     /// What `row` is listed under here: a project's own rows say nothing of their project, but a row held in a frozen group
@@ -550,7 +550,7 @@ struct SessionRow: View {
         }
         .help(help)
         .tip(row.session.title, Self.tipDetail(row), focused: picked, hover: false)
-        .sessionMenu(row, store, hub)
+        .sessionMenu(row, store, hub, moves: moves)
         .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
@@ -565,8 +565,8 @@ struct SessionRow: View {
             Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
             if row.pending { Button("Keep") { store.keepAgent(row.id) } }
             Button("Hide") { store.dismissAgent(row.id) }
-            if moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, store: store) } }
-            if moves.down { Button("Move down") { hub.moveSession(row.id, by: 1, store: store) } }
+            if let up = moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, with: up, store: store) } }
+            if let down = moves.down { Button("Move down") { hub.moveSession(row.id, by: 1, with: down, store: store) } }
         }
     }
 
@@ -663,6 +663,11 @@ extension HubState {
     func moveSession(_ id: String, by step: Int, store: Store) {
         guard let (mover, target) = store.trade(id, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
         moveSession(mover, onto: target, store: store)
+    }
+
+    /// Trades `id` with `neighbour`, the row the menu or action was offered beside it: what the list drew, a peek's cut included.
+    func moveSession(_ id: String, by step: Int, with neighbour: String, store: Store) {
+        if step > 0 { moveSession(neighbour, onto: id, store: store) } else { moveSession(id, onto: neighbour, store: store) }
     }
 
     func moveSession(_ id: String, onto target: String, store: Store) {
@@ -1062,6 +1067,9 @@ struct SessionMenu: View {
     let row: AgentRow
     let store: Store
     let hub: HubState
+    /// The neighbours the list draws beside the row, which Move up and down trade with; the bar's tiles have none and ask
+    /// the hub for the ones its list shows.
+    var moves: SessionGroup.Moves?
     /// Opens the label editor (`LabelEditor`) wherever the caller hosts it.
     var editLabel: () -> Void = {}
 
@@ -1071,8 +1079,10 @@ struct SessionMenu: View {
         Divider()
         if row.pending { Button("Keep") { store.keepAgent(row.id) } }
         Button("Hide") { store.dismissAgent(row.id) }
-        if hub.canMoveSession(row.id, by: -1, store: store) { Button("Move up") { hub.moveSession(row.id, by: -1, store: store) } }
-        if hub.canMoveSession(row.id, by: 1, store: store) { Button("Move down") { hub.moveSession(row.id, by: 1, store: store) } }
+        let moves = moves ?? SessionGroup.Moves(up: store.neighbour(of: row.id, -1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions),
+                                                down: store.neighbour(of: row.id, 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions))
+        if let up = moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, with: up, store: store) } }
+        if let down = moves.down { Button("Move down") { hub.moveSession(row.id, by: 1, with: down, store: store) } }
         Divider()
         ProjectMenu(folder: row.session.folderKey, store: store, hub: hub)
         Divider()
@@ -1108,18 +1118,21 @@ private struct SessionContextMenu: ViewModifier {
     let row: AgentRow
     let store: Store
     let hub: HubState
+    var moves: SessionGroup.Moves?
     @State private var editing = false
 
     func body(content: Content) -> some View {
         content
-            .contextMenu { SessionMenu(row: row, store: store, hub: hub, editLabel: { editing = true }) }
+            .contextMenu { SessionMenu(row: row, store: store, hub: hub, moves: moves, editLabel: { editing = true }) }
             .popover(isPresented: $editing, arrowEdge: .bottom) { LabelEditor(row: row, store: store) }
     }
 }
 
 extension View {
     /// A session's context menu, and the popover its label editor opens in.
-    func sessionMenu(_ row: AgentRow, _ store: Store, _ hub: HubState) -> some View { modifier(SessionContextMenu(row: row, store: store, hub: hub)) }
+    func sessionMenu(_ row: AgentRow, _ store: Store, _ hub: HubState, moves: SessionGroup.Moves? = nil) -> some View {
+        modifier(SessionContextMenu(row: row, store: store, hub: hub, moves: moves))
+    }
 }
 
 /// A session's label: letters (two, or the title's own), an emoji, or the icon picked for it.
