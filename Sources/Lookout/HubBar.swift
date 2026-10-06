@@ -100,7 +100,8 @@ extension LookoutHub {
 
     /// The inbox cell's click: straight to what needs you, its newest item picked so the keys act on it at once.
     func openInbox() {
-        withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
+        // Instant under Reduce Motion: ending a search brings CI's rows back above the sessions, which a fade would slide down.
+        withAnimation(Theme.Motion.resolveList(Theme.Motion.fade, reduce: reduce)) {
             hub.go(.main)
             hub.endSearch()
             hub.filter = .needsYou

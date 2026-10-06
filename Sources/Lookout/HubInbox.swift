@@ -211,7 +211,7 @@ extension LookoutHub {
 
     var tabs: some View {
         Tabs(label: "Inbox filter", tabs: InboxFilter.allCases.map(tab), selection: hub.filter) { f in
-            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = f }
+            withAnimation(Theme.Motion.resolveList(Theme.Motion.fade, reduce: reduce)) { hub.filter = f }
         }
         .voiceOverTarget("h:inbox", hub: hub)
     }
@@ -302,7 +302,7 @@ extension LookoutHub {
         case .caughtUp:
             let bots = store.unreadCount(.bots)
             EmptyBlock(title: "All caught up", detail: store.lastSync.map { "Checked \(agoPhrase($0, now: now))" }, symbol: "checkmark.circle") {
-                if bots > 0 { InboxLink("\(bots) in Bots") { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = .bots } } }
+                if bots > 0 { InboxLink("\(bots) in Bots") { withAnimation(Theme.Motion.resolveList(Theme.Motion.fade, reduce: reduce)) { hub.filter = .bots } } }
             }
         case .nothingNew:
             EmptyBlock("Nothing new")
