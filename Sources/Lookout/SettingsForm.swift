@@ -9,6 +9,7 @@ import SwiftUI
 //   FormToggle  A row whose whole width is the drawn switch (`SwitchStyle`).
 //   PopUp       A bordered pop-up button with plain words, for a choice of a few.
 //   SecretField A `SecureField` that Return saves and Esc leaves, for a token or a key.
+//   .cancelsOnEscape(active)  Esc undoes what the field or overlay has open, before the hub reads it as "go back".
 //   RemovableTag  A capsule with a 24pt remove button (bot handles, muted folders).
 
 struct FormGroup<Content: View>: View {
@@ -108,6 +109,8 @@ struct PopUp<Content: View>: View {
     /// What VoiceOver calls it.
     let label: String
     let value: String
+    /// Every title the pop-up can show: it is as wide as the longest, so a column of them lines up.
+    var room: [String] = []
     @ViewBuilder var content: Content
     @Environment(\.isEnabled) private var enabled
     @Environment(\.resolved) private var resolved
@@ -116,8 +119,11 @@ struct PopUp<Content: View>: View {
     var body: some View {
         Menu { content } label: {
             HStack(spacing: Theme.Space.sm) {
-                Text(value).font(Theme.Typography.control)
-                    .foregroundStyle(enabled ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
+                ZStack(alignment: .leading) {
+                    ForEach(room, id: \.self) { Text($0).font(Theme.Typography.control).hidden() }
+                    Text(value).font(Theme.Typography.control)
+                        .foregroundStyle(enabled ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
+                }
                 Image(systemName: "chevron.up.chevron.down").font(Theme.Typography.glyph(9, .bold)).foregroundStyle(Theme.secondary)
             }
             .padding(.horizontal, Theme.Space.md)
@@ -152,12 +158,51 @@ struct SecretField: View {
             .fieldStyle(focused: focused)
             .focused($focused)
             .onSubmit(save)
-            .onKeyPress(.escape) {
-                guard let cancel else { return .ignored }
-                cancel()
-                return .handled
-            }
+            .cancelsOnEscape(focused && cancel != nil) { cancel?() }
             .onAppear { if autofocus { focused = true } }
+    }
+}
+
+/// Esc inside a field or an overlay, before the hub reads it as "go back" (HubKeys asks `EscapeRoute.run()` first,
+/// because it takes Esc before any field sees it). Whatever has something open to cancel registers while it has
+/// it; the newest registration answers, and with none Esc navigates.
+@MainActor
+enum EscapeRoute {
+    private static var handlers: [(id: UUID, run: () -> Void)] = []
+
+    static func register(_ id: UUID, _ run: @escaping () -> Void) {
+        unregister(id)
+        handlers.append((id, run))
+    }
+
+    static func unregister(_ id: UUID) { handlers.removeAll { $0.id == id } }
+
+    /// Runs the newest handler; false when there is none.
+    static func run() -> Bool {
+        guard let last = handlers.last else { return false }
+        last.run()
+        return true
+    }
+}
+
+private struct EscapeCancel: ViewModifier {
+    let active: Bool
+    let action: () -> Void
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: active, initial: true) { _, on in
+                if on { EscapeRoute.register(id, action) } else { EscapeRoute.unregister(id) }
+            }
+            .onDisappear { EscapeRoute.unregister(id) }
+    }
+}
+
+extension View {
+    /// While `active`, Esc runs `action` instead of leaving the page. `action` should end whatever made it active.
+    func cancelsOnEscape(_ active: Bool, perform action: @escaping () -> Void) -> some View {
+        modifier(EscapeCancel(active: active, action: action))
     }
 }
 

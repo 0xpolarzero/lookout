@@ -327,7 +327,7 @@ struct Shot {
 /// Settings and Repositories, right edge
 ///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
 ///   settings-shortcuts-notice, settings-claude, settings-claude-off; repos (collapsed), repos-custom, repos-failure,
-///   repos-add, repos-add-none, repos-empty, repos-contrast
+///   repos-add, repos-add-error, repos-add-none, repos-undo, repos-empty, repos-contrast
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -420,6 +420,25 @@ enum PlaygroundShots {
         Shot.edges("repos-failure", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed },
         Shot.edges("repos-add", on: [.right]) {
             $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addHighlight = 1
+        },
+        Shot.edges("repos-add-error", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addError = "Not Found"
+        },
+        Shot.edges("repos-undo", on: [.right]) {
+            $0.pinned = true; $0.page = .repos
+            // Moved to Only what's for me: the comments that were not for you are gone, and the line says so.
+            $0.setup = { store, _, _ in
+                store.repoUndo.announce = { _ in }
+                if let repo = store.repos.first(where: { $0.fullName == "0xpolarzero/lookout" }) {
+                    store.items.append(contentsOf: (0..<3).map { n in
+                        var item = InboxItem(id: "not-for-me-\(n)", repo: repo.fullName, kind: .issueComment, number: 40 + n, title: "Idea", snippet: "",
+                                             author: "someone", avatar: nil, authorIsApp: false, url: repo.url, createdAt: Date(), state: .unread)
+                        item.forYou = false
+                        return item
+                    })
+                    store.changePreset(.forMe, on: repo)
+                }
+            }
         },
         Shot.edges("repos-add-none", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "zzzz" },
         Shot.edges("repos-empty", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .empty },

@@ -40,6 +40,8 @@ final class HubKeys {
         let flags = event.modifierFlags.intersection(Shortcut.relevant)
         let shortcut = Shortcut(event)
         if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
+            // A field or overlay with something open to cancel (a token, suggestions) takes Esc before the page does.
+            if EscapeRoute.run() { return true }
             if editing { event.window?.makeFirstResponder(nil) }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
@@ -52,6 +54,7 @@ final class HubKeys {
             return true
         }
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
+        if flags == .command, event.charactersIgnoringModifiers == "z" { return store.repoUndo.undo() }
         guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {

@@ -41,6 +41,11 @@ struct PagePreview: Equatable {
     /// Repositories: text typed in the add field, with its suggestions showing and the row `addHighlight` picked.
     var addQuery: String?
     var addHighlight: Int?
+    /// Repositories: what the last Add said went wrong (the suggestions stay hidden while it shows).
+    var addError: String?
+    /// Repositories: the repository a drag is over, and the one whose Retry has the keyboard focus.
+    var dropTarget: String?
+    var retryFocused: String?
 }
 
 extension EnvironmentValues {

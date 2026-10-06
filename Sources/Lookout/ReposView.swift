@@ -5,6 +5,13 @@ import SwiftUI
 /// What a repository tells you about, in three words. A preset is a state of the flags the repository already has
 /// (its five event kinds and `allComments`), not a new setting: `init(_:)` names the state, `Store.setPreset` makes
 /// it. Anything else is Custom, which shows the flags as checkboxes.
+///
+///   Everything          new issues and PRs, and every comment
+///   Only what's for me  comments only, and only the ones for you (the rest of what is on your issues and PRs,
+///                       mentions and threads you joined is judged by `Store.isRelevant`)
+///
+/// A repository that follows new issues and PRs but only the comments for you, which is how Lookout always started
+/// them, is Custom: it is neither of the two.
 enum RepoPreset: CaseIterable {
     case everything, forMe, custom
 
@@ -16,15 +23,30 @@ enum RepoPreset: CaseIterable {
         }
     }
 
+    /// The kinds that are comments: the only ones "for me" can judge.
+    static let comments: Set<EventKind> = [.issueComment, .prComment, .reviewComment]
+    /// The kinds that are somebody opening something, which is never "for me" until it is commented on.
+    static let opened: Set<EventKind> = [.issueOpened, .prOpened]
     /// The kinds a preset is about; CI has its own switch on the row.
-    static let kinds = Set(EventKind.repoToggles).subtracting([.ciMain])
+    static let kinds = comments.union(opened)
 
     init(_ repo: RepoConfig) {
-        guard repo.events.isSuperset(of: Self.kinds) else { self = .custom; return }
-        self = repo.allComments ? .everything : .forMe
+        let events = repo.events.intersection(Self.kinds)
+        if events == Self.kinds, repo.allComments { self = .everything }
+        else if events == Self.comments, !repo.allComments { self = .forMe }
+        else { self = .custom }
     }
 
-    /// Whether the preset turns All comments on; nil for Custom, which keeps the flags as they are.
+    /// The kinds the preset leaves on (and the rest off); nil for Custom, which keeps the flags as they are.
+    var events: Set<EventKind>? {
+        switch self {
+        case .everything: Self.kinds
+        case .forMe: Self.comments
+        case .custom: nil
+        }
+    }
+
+    /// Whether the preset turns All comments on; nil for Custom.
     var allComments: Bool? {
         switch self {
         case .everything: true
@@ -32,15 +54,52 @@ enum RepoPreset: CaseIterable {
         case .custom: nil
         }
     }
+
+    /// What a repository's flags amount to, in a sentence: "New PRs and PR comments for you".
+    static func summary(_ repo: RepoConfig) -> String {
+        var parts: [String] = []
+        if repo.events.contains(.issueOpened) { parts.append("new issues") }
+        if repo.events.contains(.prOpened) { parts.append("new PRs") }
+        let kinds = [(EventKind.issueComment, "issue"), (.prComment, "PR"), (.reviewComment, "review")].filter { repo.events.contains($0.0) }
+        if !kinds.isEmpty {
+            let which = kinds.count == comments.count ? "" : kinds.map(\.1).joined(separator: kinds.count == 2 ? " and " : ", ") + " "
+            parts.append((repo.allComments ? "all " : "") + which + "comments" + (repo.allComments ? "" : " for you"))
+        }
+        guard !parts.isEmpty else { return "Nothing" }
+        let sentence = parts.count > 1 ? parts.dropLast().joined(separator: ", ") + " and " + parts.last! : parts[0]
+        return sentence.prefix(1).uppercased() + sentence.dropFirst()
+    }
 }
 
 extension Store {
-    /// Turns on every kind the preset covers and sets All comments to match, through the same calls the checkboxes
-    /// make (so turning All comments off prunes what wasn't for you).
+    /// Turns the preset's kinds on and the others off, and sets All comments to match, through the same calls the
+    /// checkboxes make. What those calls remove from the inbox (issues and PRs that were opened, comments that
+    /// weren't for you) does not come back by choosing the other preset: only `changePreset`'s undo restores it.
     func setPreset(_ preset: RepoPreset, on repo: RepoConfig) {
-        guard let allComments = preset.allComments else { return }
-        for kind in RepoPreset.kinds where !repo.events.contains(kind) { toggle(kind, on: repo) }
+        guard let events = preset.events, let allComments = preset.allComments else { return }
+        for kind in RepoPreset.kinds where repo.events.contains(kind) != events.contains(kind) { toggle(kind, on: repo) }
         if repo.allComments != allComments { toggleAllComments(repo) }
+    }
+
+    /// `setPreset` from the pop-up: when it changed anything, an undo line (and ⌘Z) puts the flags and the removed
+    /// items back.
+    func changePreset(_ preset: RepoPreset, on repo: RepoConfig) {
+        guard let before = repos.first(where: { $0.id == repo.id }), preset.events != nil else { return }
+        let itemsBefore = items.filter { $0.repo == repo.fullName }
+        setPreset(preset, on: before)
+        guard let after = repos.first(where: { $0.id == repo.id }),
+              after.events != before.events || after.allComments != before.allComments else { return }
+        let now = Set(items.map(\.id))
+        let removed = itemsBefore.filter { !now.contains($0.id) }
+        let message = "\(repo.name): \(preset.title)" + (removed.isEmpty ? "" : ", \(plural(removed.count, "item")) removed")
+        repoUndo.push(message, announcement: "\(repo.fullName) set to \(preset.title). Undo available") { [self] in
+            guard let i = repos.firstIndex(where: { $0.id == before.id }) else { return }
+            repos[i].events = before.events
+            repos[i].allComments = before.allComments
+            let known = Set(items.map(\.id))
+            items.append(contentsOf: removed.filter { !known.contains($0.id) })
+            save()
+        }
     }
 
     /// What it takes to bring a repository back after Stop watching: its row, its place in the list, and what
@@ -53,12 +112,15 @@ extension Store {
         let mutedCI: String?
     }
 
+    /// Stops watching, with an undo line and ⌘Z for 30 s that bring it all back.
+    @discardableResult
     func stopWatching(_ repo: RepoConfig) -> StoppedRepo? {
         guard let index = repos.firstIndex(where: { $0.id == repo.id }) else { return nil }
         let stopped = StoppedRepo(repo: repos[index], index: index,
                                   items: items.filter { $0.repo == repo.fullName && $0.kind != .reviewRequested },
                                   ci: ci[repo.fullName], mutedCI: mutedCI[repo.fullName])
         removeRepo(repo)
+        repoUndo.push("Stopped watching \(repo.fullName)") { [self] in resumeWatching(stopped) }
         return stopped
     }
 
@@ -86,10 +148,12 @@ struct ReposView: View {
     @State private var adding = false
     /// The suggestion ↑↓ has picked.
     @State private var highlight: Int?
-    @State private var stopped: Store.StoppedRepo?
     @FocusState private var fieldFocused: Bool
     /// Keeps the suggestions up while the pointer is on them: clicking one ends the editing before the click lands.
     @State private var overList = false
+    /// The repositories whose Custom checkboxes are open. Kept here, not in each row, so a row that is rebuilt
+    /// stays as it was.
+    @State private var customOpen: Set<String> = []
     @Environment(\.pagePreview) private var preview
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -101,7 +165,11 @@ struct ReposView: View {
         return Array(open.filter { $0.lowercased().contains(q) }.prefix(5))
     }
 
-    private var showsSuggestions: Bool { fieldFocused || overList || preview.addQuery != nil }
+    /// Whether the overlay is up. Not while an error is showing: the overlay starts right under the field, where the
+    /// error is, and the error is what the last Return was about.
+    private var showsSuggestions: Bool {
+        error == nil && (fieldFocused || overList || preview.addQuery != nil) && (!matches.isEmpty || !input.isEmpty)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -119,35 +187,44 @@ struct ReposView: View {
                         ForEach(Array(store.repos.enumerated()), id: \.element.id) { index, repo in
                             if index > 0 { FormDivider() }
                             RepoRow(repo: repo, store: store, isFirst: index == 0, isLast: index == store.repos.count - 1,
-                                    stop: stopWatching)
+                                    customOpen: Binding(get: { customOpen.contains(repo.id) },
+                                                        set: { if $0 { customOpen.insert(repo.id) } else { customOpen.remove(repo.id) } }))
                         }
                     }
                     .padding(.horizontal, Theme.Metrics.inset)
                     .padding(.bottom, Theme.Space.md)
                 }
             }
-            if let stopped {
-                UndoLine(message: "Stopped watching \(stopped.repo.fullName)", undo: undoStop)
+            if let undo = store.repoUndo.visible {
+                UndoLine(message: undo.message) { store.repoUndo.undo() }
                     .padding(.horizontal, Theme.Metrics.inset)
                     .padding(.bottom, Theme.Metrics.inset)
-                    // ⌘Z while the line is up.
-                    .background(Button("Undo", action: undoStop).keyboardShortcut("z", modifiers: .command).hidden())
-                    .task(id: stopped.repo.id) {
-                        try? await Task.sleep(for: .seconds(6))
-                        if !Task.isCancelled { withAnimation(Theme.Motion.fade.resolved(reduce: reduceMotion)) { self.stopped = nil } }
-                    }
             }
         }
+        .motion(Theme.Motion.fade, value: store.repoUndo.visibleID)
         .task { await store.loadSuggestions() }
         .onAppear {
             if let query = preview.addQuery {
                 input = query
-                DispatchQueue.main.async { highlight = preview.addHighlight }
+                // After the typing above has been seen: a change of the input clears an error.
+                DispatchQueue.main.async {
+                    highlight = preview.addHighlight
+                    error = preview.addError
+                }
             }
+            if let name = preview.expandedRepo { customOpen.insert(name) }
             // Nothing watched yet: the field is the one thing to do.
             if store.repos.isEmpty { DispatchQueue.main.async { fieldFocused = true } }
         }
-        .onChange(of: input) { highlight = nil }
+        .onChange(of: input) {
+            highlight = nil
+            error = nil
+        }
+        // A highlight that moves is read out: the field keeps VoiceOver's focus, but Return now adds that repository.
+        .onChange(of: highlight) { _, now in
+            guard let now, matches.indices.contains(now) else { return }
+            AccessibilityNotification.Announcement("\(matches[now]), \(now + 1) of \(matches.count)").post()
+        }
     }
 
     // MARK: Add
@@ -164,7 +241,6 @@ struct ReposView: View {
                         .onSubmit(submit)
                         .onKeyPress(.downArrow) { move(1) }
                         .onKeyPress(.upArrow) { move(-1) }
-                        .onKeyPress(.escape) { closeSuggestions() }
                         .accessibilityLabel("Repository to watch")
                     if adding { ProgressView().controlSize(.mini) }
                 }
@@ -179,10 +255,10 @@ struct ReposView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            if showsSuggestions && (!matches.isEmpty || !input.isEmpty) {
-                suggestions.padding(.top, Theme.Metrics.field + Theme.Space.xs)
-            }
+            if showsSuggestions { suggestions.padding(.top, Theme.Metrics.field + Theme.Space.xs) }
         }
+        // Esc closes the suggestions before it goes back a page: the hub's key handler asks first.
+        .cancelsOnEscape(showsSuggestions, perform: closeSuggestions)
     }
 
     private var suggestions: some View {
@@ -217,12 +293,10 @@ struct ReposView: View {
         return .handled
     }
 
-    private func closeSuggestions() -> KeyPress.Result {
-        guard showsSuggestions else { return .ignored }
+    private func closeSuggestions() {
         highlight = nil
         overList = false
         fieldFocused = false
-        return .handled
     }
 
     private func add(_ name: String) {
@@ -237,22 +311,12 @@ struct ReposView: View {
                 input = ""
                 fieldFocused = false
                 overList = false
+            } else {
+                // The overlay is gone with the error showing; the pointer that was over it is not any more.
+                overList = false
+                highlight = nil
             }
         }
-    }
-
-    // MARK: Stop watching
-
-    private func stopWatching(_ repo: RepoConfig) {
-        guard let result = store.stopWatching(repo) else { return }
-        withAnimation(Theme.Motion.fade.resolved(reduce: reduceMotion)) { stopped = result }
-        AccessibilityNotification.Announcement("Stopped watching \(repo.fullName). Undo available").post()
-    }
-
-    private func undoStop() {
-        guard let stopped else { return }
-        store.resumeWatching(stopped)
-        withAnimation(Theme.Motion.fade.resolved(reduce: reduceMotion)) { self.stopped = nil }
     }
 }
 
@@ -283,21 +347,26 @@ private struct SuggestionRow: View {
     }
 }
 
-/// A watched repository: its name, what it tells you about, and CI. 36pt; 44 with a failure line under it.
+/// A watched repository: its name, what it tells you about, and CI. 36pt; 44 with a second line under the name (a
+/// failure, or what Custom amounts to).
 struct RepoRow: View {
     let repo: RepoConfig
     let store: Store
     let isFirst: Bool
     let isLast: Bool
-    let stop: (RepoConfig) -> Void
-    @State private var customOpen = false
+    /// Whether the Custom checkboxes are showing.
+    @Binding var customOpen: Bool
     @State private var dropTarget = false
+    @FocusState private var retryFocused: Bool
     @Environment(\.pagePreview) private var preview
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var failure: String? { store.repoErrors[repo.fullName] }
+    /// What the pop-up says: Custom while its checkboxes are open, whatever the flags amount to.
+    private var shown: RepoPreset { customOpen ? .custom : RepoPreset(repo) }
 
     var body: some View {
+        let twoLines = failure != nil || shown == .custom
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Theme.Space.md) {
                 name
@@ -308,12 +377,15 @@ struct RepoRow: View {
                     .fixedSize()
                     .accessibilityLabel("CI")
             }
-            .frame(minHeight: Theme.Metrics.formRow)
+            .frame(minHeight: twoLines ? Self.firstLine : Theme.Metrics.formRow)
             if let failure { failureLine(failure) }
+            if shown == .custom { summaryLine.padding(.top, failure == nil ? 0 : Theme.Space.hair) }
             if customOpen { custom }
         }
+        // A second line sits close to the next divider otherwise.
+        .padding(.bottom, twoLines && !customOpen ? Theme.Space.xs : 0)
         .overlay(alignment: .top) {
-            if dropTarget { Capsule().fill(Theme.accent).frame(height: 2).offset(y: -1) }
+            if dropTarget || preview.dropTarget == repo.fullName { Capsule().fill(Theme.accent).frame(height: 2).offset(y: -1) }
         }
         .focusable()
         .focusRing(Theme.Radius.row, inset: true)
@@ -343,9 +415,11 @@ struct RepoRow: View {
         .accessibilityAction(named: "Toggle CI") { store.toggle(.ciMain, on: repo) }
         .accessibilityAction(named: "Move up") { move(-1) }
         .accessibilityAction(named: "Move down") { move(1) }
-        .accessibilityAction(named: "Stop watching") { stop(repo) }
-        .onAppear { customOpen = preview.expandedRepo == repo.fullName }
+        .accessibilityAction(named: "Stop watching") { store.stopWatching(repo) }
     }
+
+    /// The first line of a row with a second one: a pop-up's height and a hairline of margin.
+    private static let firstLine: CGFloat = Theme.Metrics.button + 2
 
     /// `owner/` quiet, the name in bold; the middle gives way first.
     private var name: some View {
@@ -357,9 +431,10 @@ struct RepoRow: View {
 
     // MARK: Preset
 
+    /// Every row's pop-up is as wide as the longest title, so the pop-ups, the CI switches and the names line up as
+    /// columns, and a name has the same room whichever preset its row is on.
     private var preset: some View {
-        let shown: RepoPreset = customOpen ? .custom : RepoPreset(repo)
-        return PopUp(label: "Notify me about, \(repo.fullName)", value: shown.title) {
+        PopUp(label: "Notify me about, \(repo.fullName)", value: shown.title, room: RepoPreset.allCases.map(\.title)) {
             ForEach(RepoPreset.allCases, id: \.self) { choice in
                 Toggle(choice.title, isOn: Binding(get: { shown == choice }, set: { _ in choose(choice) }))
             }
@@ -368,19 +443,41 @@ struct RepoRow: View {
 
     private func choose(_ choice: RepoPreset) {
         withAnimation(Theme.Motion.move.resolved(reduce: reduceMotion)) {
+            // Custom only picks Custom (it shows its checkboxes); closing them is the disclosure's job.
             if choice == .custom {
-                customOpen.toggle()
+                customOpen = true
             } else {
                 customOpen = false
-                store.setPreset(choice, on: repo)
+                store.changePreset(choice, on: repo)
             }
         }
     }
 
     // MARK: Custom
 
+    /// What Custom amounts to, which is also the disclosure: it opens and closes the checkboxes under it.
+    private var summaryLine: some View {
+        Button { withAnimation(Theme.Motion.move.resolved(reduce: reduceMotion)) { customOpen.toggle() } } label: {
+            HStack(spacing: Theme.Space.xs) {
+                Text(RepoPreset.summary(repo)).font(Theme.Typography.meta).foregroundStyle(Theme.secondary).lineLimit(1)
+                Image(systemName: customOpen ? "chevron.down" : "chevron.right").font(Theme.Typography.glyph(9, .bold))
+                    .foregroundStyle(Theme.tertiary).accessibilityHidden(true)
+            }
+            .frame(height: Self.line)
+            // 24pt to hit, without taking the room.
+            .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconButton - Self.line) / 2))
+        }
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.small)
+        .accessibilityLabel(RepoPreset.summary(repo))
+        .accessibilityValue(customOpen ? "Expanded" : "Collapsed")
+        .accessibilityHint("Shows what Custom follows")
+    }
+
+    private static let line: CGFloat = 14
+
     private var custom: some View {
-        let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
+        let hasComments = !repo.events.isDisjoint(with: RepoPreset.comments)
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Self.checkboxes, id: \.kind) { box in
                 Toggle(box.title, isOn: binding(box.kind)).toggleStyle(.checkbox).frame(minHeight: Theme.Metrics.menuRow)
@@ -389,13 +486,17 @@ struct RepoRow: View {
                 .toggleStyle(.checkbox)
                 .frame(minHeight: Theme.Metrics.menuRow)
                 .disabled(!hasComments)
-            Text("Otherwise only comments on your issues and pull requests, mentioning you, or after you joined the conversation.")
+            Text(hasComments
+                 ? "Otherwise only comments on your issues and pull requests, mentioning you, or after you joined the conversation."
+                 : "Turn on a kind of comment above first.")
                 .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 20)
         }
         .font(Theme.Typography.body)
         .foregroundStyle(Theme.text)
+        .padding(.leading, Theme.Metrics.contentEdge)
+        .padding(.top, Theme.Space.xs)
         .padding(.bottom, Theme.Space.md)
         .transition(.opacity)
     }
@@ -417,8 +518,7 @@ struct RepoRow: View {
 
     // MARK: Failure
 
-    /// A line of its own under the name: the sentence truncates, Retry keeps its place at the end. It overlaps the
-    /// 36pt row's empty margin, which makes the row 44.
+    /// A line of its own under the name: the sentence truncates, Retry keeps its place at the end.
     private func failureLine(_ message: String) -> some View {
         HStack(spacing: Theme.Space.sm) {
             Image(systemName: "exclamationmark.circle.fill").font(Theme.Typography.glyph(11, .regular)).foregroundStyle(Theme.red)
@@ -432,11 +532,10 @@ struct RepoRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .focusRing(Theme.Radius.small)
+            .focused($retryFocused)
+            .focusRing(Theme.Radius.small, isFocused: retryFocused || preview.retryFocused == repo.fullName)
         }
-        .frame(height: 14)
-        .padding(.top, -6)
-        .padding(.bottom, Theme.Space.sm)
+        .frame(height: Self.line)
         .accessibilityElement(children: .contain)
     }
 
@@ -452,7 +551,7 @@ struct RepoRow: View {
         Button("Move up", systemImage: "arrow.up") { move(-1) }.disabled(isFirst)
         Button("Move down", systemImage: "arrow.down") { move(1) }.disabled(isLast)
         Divider()
-        Button("Stop watching", systemImage: "eye.slash", role: .destructive) { stop(repo) }
+        Button("Stop watching", systemImage: "eye.slash", role: .destructive) { store.stopWatching(repo) }
     }
 
     private func move(_ step: Int) {

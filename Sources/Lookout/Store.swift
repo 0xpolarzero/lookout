@@ -96,6 +96,8 @@ final class Store {
 
     @ObservationIgnored let gh = GitHubClient()
     @ObservationIgnored let notifier = Notifier()
+    /// What ⌘Z and the Repositories page's undo line take back (see RepoUndo.swift).
+    let repoUndo = RepoUndo()
     @ObservationIgnored let updater = Updater()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false

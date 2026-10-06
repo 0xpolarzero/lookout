@@ -18,42 +18,68 @@ import Testing
         return item
     }
 
-    @Test func aFreshRepositoryIsOnlyWhatsForMe() {
-        #expect(RepoPreset(RepoConfig(fullName: "a/one")) == .forMe)
+    /// A repository's flags as the presets define them: every kind but CI, and All comments.
+    private func repo(_ kinds: Set<EventKind>, all: Bool = false) -> RepoConfig {
+        RepoConfig(fullName: "a/one", events: kinds.union([.ciMain]), allComments: all)
+    }
+
+    @Test func onlyWhatsForMeIsRelevantCommentsAlone() {
+        #expect(RepoPreset(repo(RepoPreset.comments)) == .forMe)
+        #expect(RepoPreset.forMe.events == RepoPreset.comments)
+        #expect(RepoPreset.forMe.allComments == false)
+        #expect(RepoPreset.opened.isDisjoint(with: RepoPreset.forMe.events ?? []))
+    }
+
+    @Test func theLegacyDefaultIsCustomNotOnlyWhatsForMe() {
+        // New issues and PRs on, All comments off: how every repository was started before presets.
+        let legacy = RepoConfig(fullName: "a/one")
+        #expect(legacy.events.isSuperset(of: RepoPreset.kinds) && !legacy.allComments)
+        #expect(RepoPreset(legacy) == .custom)
+        #expect(RepoPreset(repo(RepoPreset.kinds, all: true)) == .everything)
     }
 
     @Test func everyCombinationOfFlagsNamesOnePreset() {
         let kinds = Array(RepoPreset.kinds)
         for mask in 0..<(1 << kinds.count) {
             for all in [false, true] {
-                var repo = RepoConfig(fullName: "a/one", events: [.ciMain], allComments: all)
-                for (i, kind) in kinds.enumerated() where mask & (1 << i) != 0 { repo.events.insert(kind) }
-                let full = repo.events.isSuperset(of: RepoPreset.kinds)
-                #expect(RepoPreset(repo) == (full ? (all ? .everything : .forMe) : .custom))
+                var chosen: Set<EventKind> = []
+                for (i, kind) in kinds.enumerated() where mask & (1 << i) != 0 { chosen.insert(kind) }
+                let expected: RepoPreset = chosen == RepoPreset.kinds && all ? .everything
+                    : chosen == RepoPreset.comments && !all ? .forMe : .custom
+                #expect(RepoPreset(repo(chosen, all: all)) == expected)
             }
         }
     }
 
     @Test func ciDoesNotDecideThePreset() {
         for ci in [true, false] {
-            var repo = RepoConfig(fullName: "a/one", allComments: true)
+            var repo = repo(RepoPreset.kinds, all: true)
             if !ci { repo.events.remove(.ciMain) }
             #expect(RepoPreset(repo) == .everything)
         }
     }
 
     @Test func choosingAPresetNamesItAndLeavesCIAlone() {
-        var repo = RepoConfig(fullName: "a/one", events: [.prComment, .reviewComment])
-        repo.allComments = false
-        let s = store(repo)
+        let s = store(RepoConfig(fullName: "a/one", events: [.prComment, .reviewComment]))
         s.setPreset(.everything, on: s.repos[0])
         #expect(RepoPreset(s.repos[0]) == .everything)
         #expect(!s.repos[0].events.contains(.ciMain))
         s.setPreset(.forMe, on: s.repos[0])
         #expect(RepoPreset(s.repos[0]) == .forMe)
-        #expect(s.repos[0].events == RepoPreset.kinds)
+        #expect(s.repos[0].events == RepoPreset.comments)
         s.setPreset(.everything, on: s.repos[0])
         #expect(RepoPreset(s.repos[0]) == .everything)
+    }
+
+    @Test func onlyWhatsForMeTurnsBothOpenedFlagsOff() {
+        let s = store(RepoConfig(fullName: "a/one", allComments: true))
+        s.setPreset(.forMe, on: s.repos[0])
+        #expect(!s.repos[0].events.contains(.issueOpened))
+        #expect(!s.repos[0].events.contains(.prOpened))
+        #expect(RepoPreset.comments.isSubset(of: s.repos[0].events))
+        #expect(!s.repos[0].allComments)
+        // CI keeps whatever the row's own switch says.
+        #expect(s.repos[0].events.contains(.ciMain))
     }
 
     @Test func roundTripFromEveryPresetAndBack() {
@@ -70,15 +96,53 @@ import Testing
         let repo = RepoConfig(fullName: "a/one", events: [.issueComment, .ciMain])
         let s = store(repo)
         s.setPreset(.custom, on: s.repos[0])
+        s.changePreset(.custom, on: s.repos[0])
         #expect(s.repos[0] == repo)
         #expect(RepoPreset(s.repos[0]) == .custom)
+        #expect(s.repoUndo.entries.isEmpty)
     }
 
-    @Test func onlyWhatsForMePrunesWhatWasNot() {
+    @Test func summariesSayWhatIsOnInPlainWords() {
+        #expect(RepoPreset.summary(RepoConfig(fullName: "a/one")) == "New issues, new PRs and comments for you")
+        #expect(RepoPreset.summary(repo([.prOpened, .reviewComment])) == "New PRs and review comments for you")
+        #expect(RepoPreset.summary(repo([.prComment, .reviewComment], all: true)) == "All PR and review comments")
+        #expect(RepoPreset.summary(repo([.issueComment, .prComment, .reviewComment], all: true)) == "All comments")
+        #expect(RepoPreset.summary(repo([.issueOpened])) == "New issues")
+        #expect(RepoPreset.summary(repo([])) == "Nothing")
+    }
+
+    @Test func onlyWhatsForMePrunesWhatWasNotAndOnlyUndoBringsItBack() {
         let s = store(RepoConfig(fullName: "a/one", allComments: true))
+        s.repoUndo.announce = { _ in }
         s.items = [comment("mine", forYou: true), comment("other", forYou: false), comment("unknown", forYou: nil)]
         s.setPreset(.forMe, on: s.repos[0])
         #expect(Set(s.items.map(\.id)) == ["mine", "unknown"])
+        // Choosing the other preset turns the flags back on but cannot bring back what was removed.
+        s.setPreset(.everything, on: s.repos[0])
+        #expect(RepoPreset(s.repos[0]) == .everything)
+        #expect(Set(s.items.map(\.id)) == ["mine", "unknown"])
+    }
+
+    @Test func aPresetChangeCanBeUndoneWithItsItems() {
+        var repo = RepoConfig(fullName: "a/one", allComments: true)
+        repo.events.insert(.ciMain)
+        let s = store(repo)
+        s.repoUndo.announce = { _ in }
+        s.items = [comment("mine", forYou: true), comment("other", forYou: false)]
+        s.changePreset(.forMe, on: s.repos[0])
+        #expect(s.repoUndo.visible?.message == "one: Only what's for me, 1 item removed")
+        #expect(Set(s.items.map(\.id)) == ["mine"])
+        #expect(s.repoUndo.undo())
+        #expect(s.repos[0] == repo)
+        #expect(RepoPreset(s.repos[0]) == .everything)
+        #expect(Set(s.items.map(\.id)) == ["mine", "other"])
+    }
+
+    @Test func choosingThePresetAlreadyOnRegistersNoUndo() {
+        let s = store(repo(RepoPreset.comments))
+        s.repoUndo.announce = { _ in }
+        s.changePreset(.forMe, on: s.repos[0])
+        #expect(s.repoUndo.entries.isEmpty)
     }
 
     @Test func stoppingAndResumingBringsEverythingBackInPlace() {
@@ -89,6 +153,7 @@ import Testing
         let status = CIStatus(state: .failure, branch: "main", sha: "abc", failing: ["build"], checkedAt: Date())
         s.ci["a/one"] = status
         s.mutedCI["a/one"] = "abc"
+        s.repoUndo.announce = { _ in }
         let stopped = s.stopWatching(s.repos[0])!
         #expect(s.repos.map(\.fullName) == ["a/two", "a/three"])
         #expect(s.items.isEmpty && s.ci["a/one"] == nil && s.mutedCI["a/one"] == nil)
