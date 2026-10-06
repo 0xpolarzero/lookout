@@ -106,12 +106,20 @@ struct InboxItem: Codable, Identifiable, Hashable {
     var authorIsApp: Bool
     var url: URL
     var createdAt: Date
-    var state: ItemState
+    var state: ItemState {
+        // Whatever takes an item out of the inbox (Done, addressed, resolved) stamps when; back in, the stamp goes.
+        didSet {
+            if state.isOpen { clearedAt = nil } else if oldValue.isOpen { clearedAt = Date() }
+        }
+    }
     /// Review comments: id of the first comment in the thread.
     var threadRoot: Int?
     var path: String?
     /// Comments: whether the "for you" rule matched (kept even with All comments on, so turning it off can prune).
     var forYou: Bool?
+    /// When it left the inbox (nil while open, and for items cleared before this was kept): Done sorts by it, then
+    /// by `createdAt`.
+    var clearedAt: Date?
 }
 
 enum CIState: String, Codable {
@@ -190,6 +198,8 @@ struct PersistedState: Codable {
     var ci: [String: CIStatus]
     var settings: AppSettings
     var agents: AgentsState?
+    /// Muted CI by repo full name: the commit sha it was muted at (see `Store.mutedCI`).
+    var mutedCI: [String: String]?
 }
 
 enum InboxFilter: String, CaseIterable {

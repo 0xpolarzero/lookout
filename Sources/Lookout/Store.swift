@@ -29,6 +29,13 @@ final class Store {
             persistedRevision &+= 1
         }
     }
+    /// CI the user muted, by repo full name: the sha it was muted at. A repo stays muted until its sha or state changes.
+    var mutedCI: [String: String] = [:] {
+        didSet {
+            memo = Memo()
+            persistedRevision &+= 1
+        }
+    }
     var settings = AppSettings() {
         didSet {
             memo = Memo()
@@ -358,6 +365,7 @@ final class Store {
         ci = state.ci
         settings = state.settings
         agents = state.agents ?? AgentsState()
+        mutedCI = state.mutedCI ?? [:]
         savedRevision = persistedRevision
     }
 
@@ -388,7 +396,8 @@ final class Store {
             return
         }
         saveDirty = false
-        let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents))
+        let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents,
+                                                        mutedCI: mutedCI.isEmpty ? nil : mutedCI))
         let url = Self.fileURL
         let write: @Sendable () -> Void = {
             let enc = JSONEncoder()
@@ -622,6 +631,7 @@ final class Store {
         repos.removeAll { $0.id == repo.id }
         items.removeAll { $0.repo == repo.fullName && $0.kind != .reviewRequested }
         ci[repo.fullName] = nil
+        mutedCI[repo.fullName] = nil
         save()
     }
 

@@ -42,9 +42,22 @@ struct AgentsState: Codable {
     var folderColors: [String: Int] = [:]
     /// Icons picked by Jev (TypeSafe) for each session; needs a TypeSafe API key (kept in the Keychain).
     var iconsEnabled = false
-    /// Bumped when the palette changes, so colours picked from an older one are picked again.
+    /// Bumped when the palette changes: colours picked from an older one are mapped onto the new one (see `remapped`).
     var paletteVersion = AgentsState.palette
-    static let palette = 2
+    static let palette = 3
+    /// Palette 2 (green, violet, pink, cyan, lime, silver) onto 3 (violet, pink, cyan, silver): the nearest colour
+    /// that's left, the two removed ones going to different neighbours so projects that differed still do.
+    static let paletteRemap2 = [0: 2, 1: 0, 2: 1, 3: 2, 4: 3, 5: 3]
+
+    /// A stored colour index from a palette of `version`, as an index into the current one; nil when the old
+    /// palette isn't known (the colours are picked again).
+    static func remapped(_ index: Int, from version: Int) -> Int? {
+        switch version {
+        case palette: index
+        case 2: paletteRemap2[index]
+        default: nil
+        }
+    }
     /// Bumped when the icon list changes, so icons picked from an older one are picked again.
     var iconsVersion = AgentsState.icons
     static let icons = 2
@@ -69,7 +82,8 @@ struct AgentsState: Codable {
         seeded = try c.decodeIfPresent(Bool.self, forKey: .seeded) ?? false
         iconsEnabled = try c.decodeIfPresent(Bool.self, forKey: .iconsEnabled) ?? false
         let version = try c.decodeIfPresent(Int.self, forKey: .paletteVersion) ?? 1
-        folderColors = version == Self.palette ? try c.decodeIfPresent([String: Int].self, forKey: .folderColors) ?? [:] : [:]
+        folderColors = (try c.decodeIfPresent([String: Int].self, forKey: .folderColors) ?? [:])
+            .compactMapValues { Self.remapped($0, from: version) }
         if try c.decodeIfPresent(Int.self, forKey: .iconsVersion) ?? 1 != Self.icons {
             for i in entries.indices {
                 entries[i].icon = nil
