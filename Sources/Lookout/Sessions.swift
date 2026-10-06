@@ -789,7 +789,8 @@ enum ProjectsMenu {
 
     /// Every project a session has been seen in, most recent first, with its palette colour.
     @MainActor static func entries(_ store: Store) -> [Entry] {
-        store.recentFolders.map { Entry(folder: $0, name: URL(fileURLWithPath: $0).lastPathComponent, color: store.projectColor($0)) }
+        let all = store.namedFolders
+        return store.recentFolders.map { Entry(folder: $0, name: store.folderName($0, among: all), color: store.projectColor($0)) }
     }
 
     @MainActor static func make(_ store: Store) -> NSMenu {
@@ -799,6 +800,7 @@ enum ProjectsMenu {
         for entry in entries(store) {
             let item = ActionItem(entry.name) { store.startAgent(in: entry.folder) }
             item.image = entry.color.map(Swatch.image)
+            item.toolTip = entry.folder
             menu.addItem(item)
         }
         return menu
@@ -832,6 +834,7 @@ struct ProjectsMenuItems: View {
             Button { store.startAgent(in: entry.folder) } label: {
                 Label { Text(entry.name) } icon: { Swatch(color: entry.color) }
             }
+            .help(entry.folder)
         }
     }
 }

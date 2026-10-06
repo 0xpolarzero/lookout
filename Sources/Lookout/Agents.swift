@@ -530,6 +530,15 @@ extension Store {
         return latest.keys.sorted { latest[$0]! != latest[$1]! ? latest[$0]! > latest[$1]! : $0 < $1 }
     }
 
+    /// Every folder a name can be asked for: the ones sessions are in and the ones muted.
+    var namedFolders: [String] { Array(Set(knownFolders + agents.mutedFolders).subtracting([""])) }
+
+    /// A project's name where menus choose between projects: its own, with as much of the path above it as it takes to tell it
+    /// from another project of the same name (`customer-a/app`), the same in every menu and tag.
+    func folderName(_ folder: String, among folders: [String]? = nil) -> String {
+        FolderNames.name(folder, among: folders ?? namedFolders)
+    }
+
     var knownFolders: [String] {
         Array(Set(claudeSessions.values.map(\.folderKey))).sorted { a, b in
             if a.isEmpty != b.isEmpty { return !a.isEmpty }
@@ -914,8 +923,7 @@ extension Store {
     func muteFolder(_ folder: String) {
         guard !agents.mutedFolders.contains(folder) else { return }
         setFolderMuted(folder, true)
-        let name = folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent
-        registerUndo("Muted \(name)", in: .agents) { [weak self] in self?.setFolderMuted(folder, false) }
+        registerUndo("Muted \(folderName(folder))", in: .agents) { [weak self] in self?.setFolderMuted(folder, false) }
     }
 
     func setAgentsEnabled(_ on: Bool) {
@@ -931,5 +939,21 @@ extension Store {
             claudeLink = .off
         }
         onAgentsEnabledChange?(on)
+    }
+}
+
+/// Names for folders: the last component, and the folders above it only where another project would have the same one.
+enum FolderNames {
+    static func name(_ folder: String, among folders: [String]) -> String {
+        guard !folder.isEmpty else { return "Scratch" }
+        let parts = components(folder)
+        let others = folders.filter { $0 != folder }.map(components)
+        var depth = 1
+        while depth < parts.count, others.contains(where: { $0.suffix(depth) == parts.suffix(depth) }) { depth += 1 }
+        return parts.suffix(depth).joined(separator: "/")
+    }
+
+    private static func components(_ folder: String) -> [String] {
+        URL(fileURLWithPath: folder).pathComponents.filter { $0 != "/" }
     }
 }

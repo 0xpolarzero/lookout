@@ -462,3 +462,16 @@ import Testing
         #expect(s.hasTypesafeKey && s.typesafeKey == "sk-test" && s.iconError == nil)
     }
 }
+
+@Suite struct FolderNaming {
+    @Test func aNameIsItsOwnUntilAnotherProjectHasTheSame() {
+        let all = ["/work/client/app", "/work/client/api", "/home/me/notes"]
+        #expect(all.map { FolderNames.name($0, among: all) } == ["app", "api", "notes"])
+        #expect(FolderNames.name("", among: all) == "Scratch")
+    }
+
+    @Test func identicalNamesTakeTheShortestPathThatTellsThemApart() {
+        let all = ["/work/customer-a/app", "/work/customer-b/app", "/play/app", "/play/other/app", "/solo/tool"]
+        #expect(all.map { FolderNames.name($0, among: all) } == ["customer-a/app", "customer-b/app", "play/app", "other/app", "tool"])
+    }
+}
