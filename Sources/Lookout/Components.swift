@@ -233,6 +233,42 @@ private struct RowHighlight: ViewModifier {
 
 // MARK: - Focus
 
+/// Which controls have keyboard focus (the Tab ring), so the hub's key monitor can leave Return and Space to them
+/// instead of the picked row (DESIGN.md 6.2). Every control with a ring reports here; the hub owns one (`HubState.controls`).
+@MainActor
+final class ControlFocus {
+    private var holders: Set<UUID> = []
+    /// A control has focus.
+    var isActive: Bool { !holders.isEmpty }
+
+    func set(_ holder: UUID, focused: Bool) {
+        if focused { holders.insert(holder) } else { holders.remove(holder) }
+    }
+}
+
+private struct ControlFocusReport: ViewModifier {
+    let focused: Bool
+    @Environment(\.controlFocus) private var controlFocus
+    @State private var holder = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: focused) { _, now in controlFocus?.set(holder, focused: now) }
+            .onDisappear { controlFocus?.set(holder, focused: false) }
+    }
+}
+
+extension View {
+    /// Reports that this control has keyboard focus (its own `@FocusState`, not a row's pick) to the hub's key
+    /// monitor. `.focusRing` does it for the controls whose focus it keeps; one that keeps its own calls this.
+    func reportsControlFocus(_ focused: Bool) -> some View { modifier(ControlFocusReport(focused: focused)) }
+}
+
+extension EnvironmentValues {
+    /// Nil outside the hub (a sheet of components, a settings pane in isolation): nobody is listening.
+    @Entry var controlFocus: ControlFocus? = nil
+}
+
 private struct FocusRingDrawing: ViewModifier {
     let radius: CGFloat
     let inset: Bool
@@ -264,6 +300,7 @@ private struct FocusRing: ViewModifier {
 
     func body(content: Content) -> some View {
         content.focused($focused).modifier(FocusRingDrawing(radius: radius, inset: inset, focused: focused))
+            .reportsControlFocus(focused)
     }
 }
 
@@ -357,6 +394,7 @@ struct IconButton: View {
             .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
             .focused($focused)
             .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
+            .reportsControlFocus(focused)
             .accessibilityLabel(label ?? help)
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
@@ -644,6 +682,7 @@ struct SectionHeader<Trailing: View>: View {
             .buttonStyle(.plain)
             .focused($keyboardFocus)
             .focusRing(Theme.Radius.row, inset: true, isFocused: keyboardFocus)
+            .reportsControlFocus(keyboardFocus)
             .tip(expandHelp, focused: keyboardFocus)
             .accessibilityLabel(expandHelp)
     }

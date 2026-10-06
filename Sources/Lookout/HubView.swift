@@ -29,6 +29,8 @@ final class HubState {
     var ciPassingOpen = false
     /// The bar's CI cell asked VoiceOver to move into CI's section (`showCI`); the section's header answers it.
     var ciFocusPending = false
+    /// Which controls have the Tab ring: the key monitor leaves them Return and Space (see `HubKeys.key`).
+    @ObservationIgnored let controls = ControlFocus()
     var filter: InboxFilter = .needsYou {
         didSet { selection = nil; keyboardSelection = nil }
     }
@@ -220,6 +222,7 @@ struct LookoutHub: View {
             Button("Quit Lookout") { NSApp.terminate(nil) }
         }
         .environment(\.colorScheme, .dark)
+        .environment(\.controlFocus, hub.controls)
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
     }

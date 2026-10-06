@@ -47,6 +47,10 @@ final class HubKeys {
             else { close() }
             return true
         }
+        // A control the Tab ring is on takes Return and Space itself; they don't act on the row that is picked.
+        if hub.controls.isActive, flags.isEmpty, [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) {
+            return false
+        }
         if flags == .command, event.charactersIgnoringModifiers == "," {
             hub.go(.settings)
             return true
