@@ -660,6 +660,8 @@ final class Store {
         items.removeAll { $0.repo == repo.fullName && $0.kind != .reviewRequested }
         ci[repo.fullName] = nil
         mutedCI[repo.fullName] = nil
+        // Polls never visit it again, so its fault would outlive it (the gear's badge, the banner, Settings).
+        repoErrors[repo.fullName] = nil
         endCIChecks(repo.fullName)
         save()
     }
@@ -753,6 +755,8 @@ final class Store {
         }
         // CI has endpoints of its own: conversations failing doesn't keep it from being checked.
         do { try await syncCI(name) } catch { failure = failure ?? error }
+        // A request that outlived the repository's removal has nobody to tell.
+        guard repos.contains(where: { $0.fullName == name }) else { return }
         if let failure {
             let message = failure.localizedDescription
             if repoErrors[name] != message { repoErrors[name] = message }
