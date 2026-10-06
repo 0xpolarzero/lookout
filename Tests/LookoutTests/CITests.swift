@@ -30,8 +30,11 @@ import Testing
         #expect(Store.ciWorst(repos: list, status: ci.filter { $0.value.state != .failure }, muted: [:])
                 == CIWorst(state: .pending, failing: 0))
         #expect(Store.ciWorst(repos: [], status: [:], muted: [:]) == CIWorst(state: .none, failing: 0))
-        // No status yet: no runs.
-        #expect(Store.ciWorst(repos: list, status: [:], muted: [:]) == CIWorst(state: .none, failing: 0))
+        // No status yet: nobody has answered, which is not "no runs".
+        #expect(Store.ciWorst(repos: list, status: [:], muted: [:]) == CIWorst(state: .none, failing: 0, unchecked: true))
+        // A successful answer that found none is no runs; one answered repository is enough to say something.
+        #expect(Store.ciWorst(repos: list, status: ["a/ok": status(.none)], muted: [:]) == CIWorst(state: .none, failing: 0))
+        #expect(Store.ciWorst(repos: list, status: ["a/ok": status(.success)], muted: [:]) == CIWorst(state: .success, failing: 0))
     }
 
     @Test func aMutedRepoIsLeftOutOfTheWorstStateAndTheCount() {
@@ -51,7 +54,7 @@ import Testing
         #expect(Store.ciWorst(repos: repos("b/bad"), status: ["b/bad": status(.failure, sha: "b1")], muted: ["b/bad": "b1"])
                 == CIWorst(state: .none, failing: 0))
         // A muted failure beside a repo that has no runs: the bar says no runs, not passing.
-        let ci = ["b/bad": status(.failure, sha: "b1")]
+        let ci = ["b/bad": status(.failure, sha: "b1"), "c/none": status(.none)]
         #expect(Store.ciWorst(repos: repos("b/bad", "c/none"), status: ci, muted: ["b/bad": "b1"]) == CIWorst(state: .none, failing: 0))
     }
 

@@ -146,6 +146,10 @@ enum CIState: String, Codable {
         }
     }
 
+    /// A repository nobody has answered for: not a state of its own, so it has no case, but it has a silhouette, the bar's and
+    /// the list's (`minus.circle` is a successful answer that found no runs).
+    static let uncheckedSymbol = "questionmark.circle"
+
     /// Names a group of repos in this state.
     var title: String {
         switch self {

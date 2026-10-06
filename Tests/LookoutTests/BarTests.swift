@@ -22,6 +22,7 @@ import Testing
             let face = CIBarCell.Face(worst: worst, failing: failing, hovering: false)
             #expect(NSHostingView(rootView: face).fittingSize == tile)
         }
+        #expect(NSHostingView(rootView: CIBarCell.Face(worst: .none, failing: 0, unchecked: true, hovering: false)).fittingSize == tile)
     }
 
     /// The brightest grey the bar's CI cell draws in a shot of this scenario (0...255): the real hub, on its edge, as the

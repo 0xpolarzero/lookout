@@ -74,7 +74,7 @@ struct CIBarCell: View {
         // VoiceOver's press keeps the hub open on CI, as the inbox's does; a click opens the checks (its panel is under the pointer).
         BarCell(axis: axis, name: "CI", value: CISpeech.summary(store.ciList), hint: opens, help: BarHelp(title: "CI", detail: opens),
                 show: show, press: show, action: { if store.ciWorstRepo != nil { store.openWorstChecks() } else { show() } }) { hovering in
-            Face(worst: worst.state, failing: worst.failing, hovering: hovering)
+            Face(worst: worst.state, failing: worst.failing, unchecked: worst.unchecked, hovering: hovering)
         }
         .motion(Theme.Motion.fade, value: worst)
     }
@@ -83,12 +83,13 @@ struct CIBarCell: View {
     struct Face: View {
         let worst: CIState
         let failing: Int
+        var unchecked = false
         let hovering: Bool
         @Environment(\.resolved) private var resolved
 
         var body: some View {
             VStack(spacing: -1) {
-                Image(systemName: worst.symbol)
+                Image(systemName: unchecked ? CIState.uncheckedSymbol : worst.symbol)
                     .font(Theme.Typography.glyph(14, worst == .failure ? .semibold : .regular))
                     // Palette, so every layer takes a colour: with one style the outline circles (passing, no runs) drew
                     // white in the bar. The failing octagon keeps its cross cut out.

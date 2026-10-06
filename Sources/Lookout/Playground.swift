@@ -301,7 +301,8 @@ struct Shot {
 ///   open-bots, open-done, search-none, search-sessions, focus-ci (also left)
 /// Causes, open on right and top; at rest on every edge (the bar's own state)
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
-///   first-sync, sync-fault, review-requests-cut (`rest-` for the others than bots-empty, done-empty and no-repos)
+///   first-sync, sync-fault, review-requests-cut (`rest-` for the others than bots-empty, done-empty and no-repos);
+///   at rest, signed-out and first-sync show the bar's CI cell as "not checked" (a question mark, never the no-runs minus)
 /// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
 ///   no-ci, all-passing, many-ci (15 repositories), ci-running, ci-no-runs; open-no-ci and open-all-passing also on the bottom edge
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus

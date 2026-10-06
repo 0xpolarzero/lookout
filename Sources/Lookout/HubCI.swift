@@ -211,7 +211,7 @@ private struct CIQuietRow: View {
     /// The glyph of what the row mostly holds: a check only when something really passes.
     private var symbol: String {
         let (passing, muted, noRuns, _) = list.quietCounts
-        return passing > 0 || list.allPassing ? CIState.success.symbol : muted > 0 ? "bell.slash" : noRuns > 0 ? CIState.none.symbol : "questionmark.circle"
+        return passing > 0 || list.allPassing ? CIState.success.symbol : muted > 0 ? "bell.slash" : noRuns > 0 ? CIState.none.symbol : CIState.uncheckedSymbol
     }
 
     var body: some View {

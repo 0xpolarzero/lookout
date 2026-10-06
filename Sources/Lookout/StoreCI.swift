@@ -7,6 +7,9 @@ import Foundation
 struct CIWorst: Equatable {
     var state: CIState
     var failing: Int
+    /// No repository that isn't muted has been answered for (signed out, the first sync): the state is unknown, which is not
+    /// "no runs", and the bar draws it as the list does.
+    var unchecked = false
 }
 
 /// A repo in CI's list with what the rows need of it.
@@ -125,9 +128,13 @@ extension Store {
         var failing = 0
         var running = false
         var passing = false
+        var answered = 0
+        var asked = 0
         for repo in repos {
             let state = status[repo.fullName]?.state ?? CIState.none
             if isMuted(repo.fullName, status: status, muted: muted) { continue }
+            asked += 1
+            if status[repo.fullName] != nil { answered += 1 }
             switch state {
             case .failure: failing += 1
             case .pending: running = true
@@ -135,7 +142,8 @@ extension Store {
             case .none: break
             }
         }
-        return CIWorst(state: failing > 0 ? .failure : running ? .pending : passing ? .success : .none, failing: failing)
+        return CIWorst(state: failing > 0 ? .failure : running ? .pending : passing ? .success : .none, failing: failing,
+                       unchecked: asked > 0 && answered == 0)
     }
 
     // MARK: The list
