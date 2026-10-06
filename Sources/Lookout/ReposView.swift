@@ -305,9 +305,9 @@ private struct BadgeButton: View {
         Button(action: action) { BadgeLabel(symbol: symbol, color: color, on: on) }
             .buttonStyle(HoverFillButtonStyle(
                 shape: Theme.Radius.shape(Theme.Radius.tile),
-                rest: on ? color.opacity(0.15) : Theme.Fill.rest,
-                hover: on ? color.opacity(0.24) : Theme.Fill.hover,
-                pressed: on ? color.opacity(0.32) : Theme.Fill.selected))
+                rest: on ? Theme.Fill.tint(color, .rest) : Theme.Fill.rest,
+                hover: on ? Theme.Fill.tint(color, .hover) : Theme.Fill.hover,
+                pressed: on ? Theme.Fill.tint(color, .pressed) : Theme.Fill.selected))
             .accessibilityLabel(label)
             .accessibilityValue(value ?? (on ? "On" : "Off"))
     }

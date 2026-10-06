@@ -93,6 +93,32 @@ import Testing
         }
     }
 
+    @Test(arguments: [false, true]) func badgeGlyphsOverTheirOwnFill(contrast: Bool) {
+        // An enabled repository badge draws accent over an accent fill, on its card (rest, or hovered) over the hub:
+        // the fill takes the glyph's contrast down, so every level of it is checked, pressed included. The card draws
+        // its fill as it is (Increase Contrast doesn't multiply it); the badge's own fill is `resolved.fill`.
+        let resolved = Theme.Resolved(contrast: contrast)
+        let bg = components(Theme.bg).rgb
+        var failures: [String] = []
+        for (name, card) in [("page", bg), ("card", over(Theme.Fill.group, bg)), ("hovered card", over(Theme.Fill.hover, bg))] {
+            for level in [Theme.Fill.Tint.rest, .hover, .pressed] {
+                let fill = over(resolved.fill(Theme.Fill.tint(Theme.accent, level)), card)
+                let value = ratio(over(Theme.accent, fill), fill)
+                if value < 3 { failures.append("accent on \(level) fill over \(name): \(String(format: "%.2f", value))") }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+    }
+
+    @Test func tintedFillsAreNotMultiplied() {
+        // Increase Contrast strengthens white fills only: a hue's fill stays what the glyph was checked against.
+        let increased = Theme.Resolved(contrast: true)
+        let tint = Theme.Fill.tint(Theme.accent, .pressed)
+        #expect(components(increased.fill(tint)).alpha == components(tint).alpha)
+        let white = Theme.Fill.hover
+        #expect(components(increased.fill(white)).alpha > components(white).alpha)
+    }
+
     @Test func tokensMatchTheDesignTable() {
         // A few of the figures printed in DESIGN.md 3.2, so a changed token can't pass unnoticed.
         let r = Theme.Resolved()

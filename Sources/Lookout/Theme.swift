@@ -79,10 +79,10 @@ enum Theme {
         var focusWidth: CGFloat { contrast ? 2 : 1.5 }
         var arcWidth: CGFloat { contrast ? 2.5 : 2 }
 
-        /// A white fill token, ×1.6 under Increase Contrast.
+        /// A white fill token, ×1.6 under Increase Contrast. A tinted fill is left alone: its glyph is the same hue, so
+        /// a stronger fill would take the glyph's contrast down, not up (`Theme.Fill.tint`).
         func fill(_ fill: Color) -> Color {
-            guard contrast else { return fill }
-            let c = NSColor(fill)
+            guard contrast, let c = NSColor(fill).usingColorSpace(.sRGB), c.saturationComponent < 0.01 else { return fill }
             return Color(nsColor: c.withAlphaComponent(min(1, c.alphaComponent * 1.6)))
         }
     }

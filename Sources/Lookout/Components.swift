@@ -63,6 +63,15 @@ extension Theme {
         static let selected = Color.white.opacity(0.12)
         static let pressed = Color.white.opacity(0.15)
         static let group = Color.white.opacity(0.045)
+
+        /// How far a tinted fill (a repository badge that is on) is pressed into.
+        enum Tint: Double {
+            case rest = 0.15, hover = 0.24, pressed = 0.32
+        }
+
+        /// A hue's own fill, for a glyph of the same hue to sit on. Not multiplied by Increase Contrast (see
+        /// `Theme.Resolved.fill`): the glyph must keep 3:1 on every level.
+        static func tint(_ color: Color, _ level: Tint) -> Color { color.opacity(level.rawValue) }
     }
 
     enum Typography {
