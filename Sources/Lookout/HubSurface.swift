@@ -46,19 +46,6 @@ struct SurfaceShape: Shape {
     }
 }
 
-extension DockEdge {
-    /// The hub's corners: rounded away from the screen edge it is flush with, square against it.
-    var hubRadii: RectangleCornerRadii {
-        let r = Theme.Radius.hub
-        return switch self {
-        case .right: RectangleCornerRadii(topLeading: r, bottomLeading: r)
-        case .left: RectangleCornerRadii(bottomTrailing: r, topTrailing: r)
-        case .top: RectangleCornerRadii(bottomLeading: r, bottomTrailing: r)
-        case .bottom: RectangleCornerRadii(topLeading: r, topTrailing: r)
-        }
-    }
-}
-
 /// What lies under the hub: a contact shadow always, an ambient one on top of it while a panel or the full view is out.
 /// Both are shapes drawn once (nothing here is a blurred composite of live content), and the ambient one only changes
 /// opacity: its radius and offset never animate.
