@@ -80,4 +80,27 @@ import Testing
         s.settings.reviewRequests = false
         #expect(s.syncFault(stale: false) == nil)
     }
+
+    @Test func aSyncThatLeftCIBehindIsNotHealthy() {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.repos = [RepoConfig(fullName: "a/b")]
+        let now = Date()
+        s.lastSync = now
+        s.ci = ["a/b": CIStatus(state: .success, branch: "main", sha: "s1", url: nil, failing: [], checkedAt: now.addingTimeInterval(-3 * 3600),
+                                title: nil, updatedAt: now.addingTimeInterval(-3 * 3600))]
+        // The inbox was checked a moment ago; CI's answer is three hours old. One health, on every surface.
+        #expect(!s.isStale(at: now) && s.isCIStale(at: now))
+        #expect(s.syncFault(stale: s.isStale(at: now), ciStale: s.isCIStale(at: now)) == .ciStale)
+        #expect(s.inboxEmpty(.needsYou, now: now) == .nothingNew)
+        let line = SyncLine(s, now: now)
+        #expect(line.text == SyncFault.ciStale.phrase && line.isFault)
+        // Checking CI again makes it healthy; the deadlines the gear waits on follow the answers and the interval.
+        s.ci["a/b"]?.checkedAt = now
+        #expect(s.syncFault(stale: false, ciStale: s.isCIStale(at: now)) == nil)
+        let before = s.staleDeadlines
+        s.settings.pollInterval = 300
+        #expect(s.staleDeadlines != before && s.staleDeadlines.allSatisfy { $0 > now.addingTimeInterval(800) })
+    }
 }

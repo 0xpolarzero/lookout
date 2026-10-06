@@ -85,8 +85,7 @@ private struct SyncStatusRow: View {
 
     var body: some View {
         Ticking(coarse: true) { now in
-            let stale = store.lastSync.map { now.timeIntervalSince($0) > store.settings.pollInterval * 3 } ?? false
-            if let fault = store.syncFault(stale: stale), fault != .signIn {
+            if let fault = store.syncFault(stale: store.isStale(at: now), ciStale: store.isCIStale(at: now)), fault != .signIn {
                 FormDivider()
                 FormRow(label: fault.phrase, control: {
                     BorderedButton("Check now") { store.refreshNow() }.disabled(store.isSyncing)
@@ -104,6 +103,7 @@ private struct SyncStatusRow: View {
         case .reviewRequests: store.reviewRequestsError ?? ""
         case .reviewRequestsCut: "GitHub cut the search for them short"
         case .rateLimited: store.rateResetsAt.map { "Checking again at \($0.formatted(date: .omitted, time: .shortened))." } ?? ""
+        case .ciStale: store.ciFreshness.map { "CI last checked at \($0.formatted(date: .omitted, time: .shortened))" } ?? ""
         default: ""
         }
         let last = store.lastSync.map { "Last checked at \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not checked yet"

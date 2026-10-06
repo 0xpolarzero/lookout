@@ -99,11 +99,6 @@ enum InboxNotice: Equatable {
 }
 
 extension Store {
-    /// Whether the last sync is too old to say "all caught up" (three poll intervals, as the footer says "Not syncing").
-    private func syncIsStale(now: Date) -> Bool {
-        lastSync.map { now.timeIntervalSince($0) > settings.pollInterval * 3 } ?? false
-    }
-
     /// What replaces the list whatever rows it has: a sign-in problem leaves the cached rows stale, so they aren't shown.
     var inboxReplacement: InboxEmpty? { authError != nil ? .signedOut : nil }
 
@@ -122,7 +117,7 @@ extension Store {
         case .needsYou:
             // Every source checked: the repositories (and the quota they need) and the review-request search.
             let healthy = repoErrors.isEmpty && !rateLimited && !reviewRequestsFailing && !reviewRequestsPartial
-                && !syncIsStale(now: now)
+                && !isStale(at: now) && !isCIStale(at: now)
             return healthy ? .caughtUp : .nothingNew
         case .bots: return .botsQuiet
         case .done: return .doneEmpty

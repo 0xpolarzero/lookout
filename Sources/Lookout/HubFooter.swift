@@ -117,10 +117,11 @@ extension SyncLine {
         }
         let interval = store.settings.pollInterval
         let last = store.lastSync
-        let stale = last.map { now.timeIntervalSince($0) > interval * 3 } ?? false
+        let stale = store.isStale(at: now)
+        let ciStale = store.isCIStale(at: now)
         // The faults are `Store.syncFault`'s, the one calculation the gear, the banner and Settings share; the rate limit has
         // its own notice beside this line, so it doesn't replace it.
-        switch store.syncFault(stale: stale) {
+        switch store.syncFault(stale: stale, ciStale: ciStale) {
         case .partial:
             let failed = store.repoErrors.keys.sorted()
             self.init(text: "\(plural(failed.count, "repository", "repositories")) didn't sync", color: AnyShapeStyle(Theme.secondary),
@@ -149,6 +150,11 @@ extension SyncLine {
             self.init(text: "Not syncing", color: AnyShapeStyle(Theme.secondary),
                       help: "Last checked at \(last.formatted(date: .omitted, time: .shortened)): check your connection or token\n" + refresh,
                       isFault: true)
+            return
+        }
+        if ciStale, let checked = store.ciFreshness {
+            self.init(text: SyncFault.ciStale.phrase, color: AnyShapeStyle(Theme.secondary),
+                      help: "CI last checked at \(checked.formatted(date: .omitted, time: .shortened))\n" + refresh, isFault: true)
             return
         }
         let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))

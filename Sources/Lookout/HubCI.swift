@@ -474,8 +474,7 @@ extension LookoutHub {
 
     /// When CI was last checked, if that is too long ago to call the rows fresh.
     private func staleChecked(_ now: Date) -> Date? {
-        guard let checked = store.ciFreshness, now.timeIntervalSince(checked) > store.settings.pollInterval * 3 else { return nil }
-        return checked
+        store.isCIStale(at: now) ? store.ciFreshness : nil
     }
 }
 

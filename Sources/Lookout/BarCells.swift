@@ -205,7 +205,7 @@ struct UpdateBarCell: View {
 
 /// What is wrong with syncing, worst first: the gear wears a badge for it. Healthy and snoozed are not faults.
 enum SyncFault: Equatable {
-    case signIn, partial, reviewRequests, reviewRequestsCut, rateLimited, stale
+    case signIn, partial, reviewRequests, reviewRequestsCut, rateLimited, stale, ciStale
 
     /// Red is broken; the rest need a look, not a fix.
     var tint: Color { self == .signIn ? Theme.red : Theme.amber }
@@ -218,24 +218,36 @@ enum SyncFault: Equatable {
         case .reviewRequestsCut: "Some review requests weren't checked"
         case .rateLimited: "GitHub is rate limiting"
         case .stale: "Not syncing"
+        case .ciStale: "CI isn't up to date"
         }
     }
 }
 
 extension Store {
-    /// `stale`: the last sync is older than three poll intervals (the caller owns the wait: see `staleAt`).
-    func syncFault(stale: Bool) -> SyncFault? {
+    /// `stale`: the last sync is older than three poll intervals; `ciStale`: so is the oldest check CI's rows show (the
+    /// caller owns the wait: see `staleDeadlines`).
+    func syncFault(stale: Bool, ciStale: Bool = false) -> SyncFault? {
         if authError != nil { return .signIn }
         if !repoErrors.isEmpty { return .partial }
         if reviewRequestsFailing { return .reviewRequests }
         // The search worked but GitHub cut it short: what it found is real, the rest is not known (DESIGN.md 10.8).
         if reviewRequestsPartial { return .reviewRequestsCut }
         if let rateRemaining, rateRemaining <= 0 { return .rateLimited }
-        return stale ? .stale : nil
+        if stale { return .stale }
+        return ciStale ? .ciStale : nil
     }
 
-    /// When the last sync turns stale (nil before the first one).
-    var staleAt: Date? { lastSync?.addingTimeInterval(settings.pollInterval * 3) }
+    /// How old an answer may be before it is not called fresh: three poll intervals.
+    var staleAfter: TimeInterval { settings.pollInterval * 3 }
+
+    /// Whether the last sync is too old to be called fresh.
+    func isStale(at now: Date) -> Bool { lastSync.map { now.timeIntervalSince($0) > staleAfter } ?? false }
+
+    /// Whether the oldest check the CI rows show is too old (a sync that refreshed the inbox can leave CI behind).
+    func isCIStale(at now: Date) -> Bool { ciFreshness.map { now.timeIntervalSince($0) > staleAfter } ?? false }
+
+    /// When the last sync, and CI's oldest check, turn stale: none before the first answer.
+    var staleDeadlines: [Date] { [lastSync, ciFreshness].compactMap { $0?.addingTimeInterval(staleAfter) } }
 }
 
 /// The gear: Settings by click, the controls by hover (the bar's peek) or by VoiceOver's actions.
@@ -244,11 +256,12 @@ struct GearBarCell: View {
     let store: Store
     let hub: HubState
     let showControls: () -> Void
-    /// Set once the last sync is older than three poll intervals.
+    /// Set once the last sync, or CI's oldest check, is older than three poll intervals.
     @State private var stale = false
+    @State private var ciStale = false
 
     var body: some View {
-        let fault = store.syncFault(stale: stale)
+        let fault = store.syncFault(stale: stale, ciStale: ciStale)
         let open = hub.page == .settings
         let title = open ? "Close Settings" : "Settings"
         BarCell(axis: axis, name: fault == nil ? title : "\(title), sync problem", value: fault?.phrase ?? "",
@@ -260,16 +273,23 @@ struct GearBarCell: View {
                 action: { hub.go(open ? .main : .settings) }) { hovering in
             Face(active: open, hovering: hovering, fault: fault)
         }
-        .task(id: store.lastSync) { await markStale() }
+        .task(id: store.staleDeadlines) { await markStale() }
     }
 
-    /// A one-shot wait for the moment the sync goes stale: no clock ticks while it is healthy.
+    /// One wait for each moment an answer goes stale, again whenever those moments change (a poll, the interval): no clock
+    /// ticks while everything is fresh.
     private func markStale() async {
-        stale = false
-        guard let at = store.staleAt else { return }
-        let wait = at.timeIntervalSinceNow
-        if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
-        if !Task.isCancelled { stale = true }
+        func update() {
+            let now = Date()
+            stale = store.isStale(at: now)
+            ciStale = store.isCIStale(at: now)
+        }
+        update()
+        for at in store.staleDeadlines.sorted() where at > Date() {
+            try? await Task.sleep(for: .seconds(at.timeIntervalSinceNow))
+            if Task.isCancelled { return }
+            update()
+        }
     }
 
     private struct Face: View {
