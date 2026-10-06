@@ -662,14 +662,22 @@ extension StatusBanner where Actions == EmptyView {
     }
 }
 
-/// A list with nothing in it, and why: two centred lines and at most one action.
+/// A list with nothing in it, and why: two centred lines and at most one action (and a glyph when it says why).
 struct EmptyBlock<Action: View>: View {
     let title: String
     var detail: String? = nil
+    /// Only when it carries the cause: the red icon of a sign-in problem, the hollow check of "All caught up".
+    var symbol: String? = nil
+    var symbolTint = AnyShapeStyle(Theme.tertiary)
     @ViewBuilder var action: Action
 
     var body: some View {
         VStack(spacing: Theme.Space.xs) {
+            if let symbol {
+                Image(systemName: symbol).font(Theme.Typography.glyph(22, .regular)).foregroundStyle(symbolTint)
+                    .padding(.bottom, Theme.Space.xs)
+                    .accessibilityHidden(true)
+            }
             Text(title).font(Theme.Typography.body.weight(.medium)).foregroundStyle(Theme.secondary)
             if let detail { Text(detail).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary) }
             action.padding(.top, Theme.Space.sm)
