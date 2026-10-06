@@ -659,8 +659,7 @@ extension HubState {
 
     /// One place up (-1) or down (+1) within its project.
     func moveSession(_ id: String, by step: Int, store: Store) {
-        guard let neighbour = store.neighbour(of: id, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
-        let (mover, target) = Store.swap(id, with: neighbour, step)
+        guard let (mover, target) = store.trade(id, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
         moveSession(mover, onto: target, store: store)
     }
 
@@ -677,9 +676,8 @@ extension HubState {
     }
 
     func moveProject(_ folder: String, by step: Int, store: Store) {
-        let order = store.listedProjects(frozen: frozenSessions)
-        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
-        moveProject(folder, onto: order[i + step], store: store)
+        guard let target = store.neighbouringProject(of: folder, step, frozen: frozenSessions) else { return }
+        moveProject(folder, onto: target, store: store)
     }
 
     /// The project's sessions go with it: its group's run of the held order trades places with the target's.

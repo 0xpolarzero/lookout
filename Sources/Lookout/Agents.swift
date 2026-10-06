@@ -779,17 +779,16 @@ extension Store {
     }
 
     /// One place up (-1) or down (+1) within its project: the two trade places as the list shows them.
-    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
-        guard let neighbour = neighbour(of: id, step, frozen: frozen, expanded: expanded) else { return }
-        let (mover, target) = Self.swap(id, with: neighbour, step)
-        moveAgent(mover, onto: target)
+    /// Which row lands on which one's place for `id` and its neighbour to trade places in the list. The later one takes the
+    /// earlier one's place: with rows between them in the order that the list doesn't show (a late waiter took the place of one
+    /// it had cut), the row shown behind goes ahead, and both stay on the screen, which the earlier one moved behind them would not.
+    func trade(_ id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> (mover: String, target: String)? {
+        neighbour(of: id, step, frozen: frozen, expanded: expanded).map { step > 0 ? ($0, id) : (id, $0) }
     }
 
-    /// Which of two rows lands on the other's place for them to trade places in the list. The later one takes the earlier one's
-    /// place: with rows between them in the order that the list doesn't show (a late waiter took the place of one it had cut),
-    /// the row shown behind goes ahead, and both stay on the screen, which the earlier one moved behind them would not.
-    static func swap(_ id: String, with neighbour: String, _ step: Int) -> (mover: String, target: String) {
-        step > 0 ? (neighbour, id) : (id, neighbour)
+    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
+        guard let (mover, target) = trade(id, step, frozen: frozen, expanded: expanded) else { return }
+        moveAgent(mover, onto: target)
     }
 
     // MARK: Project order
@@ -813,17 +812,21 @@ extension Store {
         return order
     }
 
-    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
+    /// The project `step` places up (-1) or down (+1) from `folder` among the listed ones, which it trades places with.
+    func neighbouringProject(of folder: String, _ step: Int, frozen: [BarSessions.Slot]? = nil) -> String? {
         let order = listedProjects(frozen: frozen)
-        guard let i = order.firstIndex(of: folder) else { return false }
-        return order.indices.contains(i + step)
+        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return nil }
+        return order[i + step]
+    }
+
+    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
+        neighbouringProject(of: folder, step, frozen: frozen) != nil
     }
 
     /// One place up (-1) or down (+1) among the projects.
     func moveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) {
-        let order = listedProjects(frozen: frozen)
-        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
-        moveProject(folder, onto: order[i + step])
+        guard let target = neighbouringProject(of: folder, step, frozen: frozen) else { return }
+        moveProject(folder, onto: target)
     }
 
     /// Puts a project where `target` is, its sessions together and in their own order: the projects' order is the order
