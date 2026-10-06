@@ -97,6 +97,9 @@ final class GitHubClient: @unchecked Sendable {
     /// Remaining calls in the core (REST) and GraphQL buckets.
     var rateRemaining: Int? { lock.withLock { coreRemaining } }
     var graphqlRemaining: Int? { lock.withLock { gqlRemaining } }
+    /// When the core bucket refills.
+    var rateResetsAt: Date? { lock.withLock { coreResetsAt } }
+    private var coreResetsAt: Date?
     private var coreRemaining: Int?
     private var gqlRemaining: Int?
     private var etags: [String: (etag: String, data: Data, used: Int)] = [:]
@@ -185,7 +188,12 @@ final class GitHubClient: @unchecked Sendable {
     private func trackRate(_ http: HTTPURLResponse) {
         guard let r = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) else { return }
         switch http.value(forHTTPHeaderField: "x-ratelimit-resource") {
-        case "core": lock.withLock { coreRemaining = r }
+        case "core":
+            let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset").flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) }
+            lock.withLock {
+                coreRemaining = r
+                coreResetsAt = reset
+            }
         case "graphql": lock.withLock { gqlRemaining = r }
         default: break
         }

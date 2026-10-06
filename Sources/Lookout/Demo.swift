@@ -87,6 +87,7 @@ enum Demo {
         case .rateLimited:
             agents(store, now)
             store.rateRemaining = 0
+            store.rateResetsAt = now.addingTimeInterval(17 * 60)
         case .needsYouEmpty:
             // Nothing for you, CI healthy, bot items still unread: "All caught up" with a way to the Bots tab.
             agents(store, now)

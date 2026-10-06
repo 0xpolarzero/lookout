@@ -90,6 +90,8 @@ final class Store {
     var isSyncing = false
     var lastSync: Date?
     var rateRemaining: Int?
+    /// When the GitHub rate limit resets, as of the last sync.
+    var rateResetsAt: Date?
     var suggestions: [String] = []
     /// Bumped whenever an important item arrives, so the pill can flash.
     var pulse = 0
@@ -695,6 +697,7 @@ final class Store {
             isSyncing = false
             lastSync = Date()
             if rateRemaining != gh.rateRemaining { rateRemaining = gh.rateRemaining }
+            if rateResetsAt != gh.rateResetsAt { rateResetsAt = gh.rateResetsAt }
             prune()
             if persistedRevision != savedRevision { save() }
         }
