@@ -1,3 +1,5 @@
+import AppKit
+import Carbon
 import Foundation
 import Testing
 @testable import Lookout
@@ -169,6 +171,65 @@ import Testing
         // A search lists matches flat and offers no New session row.
         hub.query = "session x1"
         #expect(s.sessionExtraTargets(hub).isEmpty)
+    }
+
+    /// A real key-down as the monitor sees it: arrows carry the function and numeric-pad flags, and their private-use character.
+    private func key(_ code: Int, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        let arrow = [kVK_UpArrow: NSUpArrowFunctionKey, kVK_DownArrow: NSDownArrowFunctionKey, kVK_RightArrow: NSRightArrowFunctionKey][code]
+            .flatMap { Unicode.Scalar($0) }.map(String.init) ?? ""
+        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags.union([.numericPad, .function]), timestamp: 0,
+                                windowNumber: 0, context: nil, characters: arrow, charactersIgnoringModifiers: arrow,
+                                isARepeat: false, keyCode: UInt16(code))!
+    }
+
+    private func hubKeys(_ s: Store) -> (HubKeys, HubState) {
+        let hub = HubState()
+        hub.pinned = true
+        return (HubKeys(store: s, ui: UIState(), hub: hub), hub)
+    }
+
+    @Test func optionArrowsMoveThePickedSessionAndKeepThePick() {
+        let s = store((1...3).map { session("x\($0)", folder: "/code/x") }, kept: ["x1", "x2", "x3"])
+        let (keys, hub) = hubKeys(s)
+        hub.selection = "a:x2"
+        #expect(keys.key(key(kVK_UpArrow, .option)))
+        #expect(ids(s)["project:/code/x"] == ["x2", "x1", "x3"])
+        // Still picked, and the list is asked to scroll to it.
+        #expect(hub.selection == "a:x2" && hub.keyboardSelection?.id == "a:x2")
+        // At the top it stays; one down puts it back, and another goes on.
+        #expect(keys.key(key(kVK_UpArrow, .option)))
+        #expect(ids(s)["project:/code/x"] == ["x2", "x1", "x3"])
+        #expect(keys.key(key(kVK_DownArrow, .option)))
+        #expect(keys.key(key(kVK_DownArrow, .option)))
+        #expect(ids(s)["project:/code/x"] == ["x1", "x3", "x2"])
+        #expect(hub.selection == "a:x2")
+        // Plain arrows still walk the rows.
+        #expect(keys.key(key(kVK_UpArrow)))
+        #expect(hub.selection == "a:x3")
+        // A session outside a project has nowhere to move: the key is handled and nothing changes.
+        let n = store([session("n1", minutesAgo: 1), session("n2", minutesAgo: 2)])
+        let (newKeys, newHub) = hubKeys(n)
+        newHub.selection = "a:n1"
+        #expect(newKeys.key(key(kVK_DownArrow, .option)))
+        #expect(ids(n)["new"] == ["n1", "n2"])
+    }
+
+    @Test func rightArrowOnNewSessionOpensItsMenu() {
+        let s = store([session("x1", folder: "/code/x")], kept: ["x1"])
+        let (keys, hub) = hubKeys(s)
+        hub.selection = "s:new"
+        #expect(hub.projectsMenuRequest == 0)
+        #expect(keys.key(key(kVK_RightArrow)))
+        #expect(hub.projectsMenuRequest == 1)
+        // Only on that row.
+        hub.selection = "a:x1"
+        #expect(!keys.key(key(kVK_RightArrow)))
+        #expect(hub.projectsMenuRequest == 1)
+    }
+
+    @Test func theProjectsMenuListsScratchThenTheProjectsMostRecentFirst() {
+        let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1)])
+        #expect(ProjectsMenu.make(s).items.map(\.title) == ["Scratch (no folder)", "", "new", "old"])
     }
 
     @Test func newSessionOffersTheMostRecentProjectFirst() {

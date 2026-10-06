@@ -90,6 +90,11 @@ final class HubKeys {
         }
         // The list's own rows ("+N more", New session).
         if selection.hasPrefix("s:") {
+            // → on New session opens its menu of projects.
+            if selection == "s:new", shortcut == Shortcut(keyCode: UInt16(kVK_RightArrow)) {
+                hub.openProjectsMenu()
+                return true
+            }
             guard shortcut == store.shortcut(.openItem) else { return false }
             hub.activateSessionTarget(selection, store: store)
             return true
@@ -99,7 +104,14 @@ final class HubKeys {
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
             else if shortcut == store.shortcut(.keepSession) { LookoutHub.animate { store.keepAgent(id) } }
             else if shortcut == store.shortcut(.removeSession) { LookoutHub.animate { store.dismissAgent(id) } }
-            else { return false }
+            else if shortcut == store.shortcut(.moveSessionUp) || shortcut == store.shortcut(.moveSessionDown) {
+                let step = shortcut == store.shortcut(.moveSessionUp) ? -1 : 1
+                // The row keeps the pick wherever it lands, and the list follows it.
+                if store.canMoveAgent(id, by: step) {
+                    LookoutHub.animate { store.moveAgent(id, by: step) }
+                    select(selection)
+                }
+            } else { return false }
             return true
         }
         return false

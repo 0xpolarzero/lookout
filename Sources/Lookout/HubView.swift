@@ -40,6 +40,9 @@ final class HubState {
     var query = ""
     /// New activity shows all its rows, not the first few and "+N more".
     var sessionsExpanded = false
+    /// Asks New session to open its menu of projects (→ on that row); a new request every time.
+    private(set) var projectsMenuRequest = 0
+    func openProjectsMenu() { projectsMenuRequest += 1 }
     /// Which way the last page change went, so pages slide in from the side you're heading to.
     var forward = true
     /// The page you came from, so going back retraces your steps (Repositories opened from Settings goes back

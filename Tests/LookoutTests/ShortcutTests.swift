@@ -25,6 +25,8 @@ import Testing
         #expect(ShortcutAction.discard.defaultShortcut.display == "⌫")
         #expect(ShortcutAction.removeSession.defaultShortcut.display == "⌘⌫")
         #expect(ShortcutAction.markAllRead.defaultShortcut.display == "⌥Space")
+        #expect(ShortcutAction.moveSessionUp.defaultShortcut.display == "⌥↑")
+        #expect(ShortcutAction.moveSessionDown.defaultShortcut.display == "⌥↓")
     }
 
     @Test func modifierTapRecognizesALoneSidedKey() {

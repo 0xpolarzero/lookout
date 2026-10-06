@@ -365,6 +365,7 @@ struct NewSessionRow: View {
     let rail: HorizontalEdge
     var inset: CGFloat = Theme.Metrics.inset
     @State private var hovering = false
+    @State private var anchor = MenuAnchor()
 
     var body: some View {
         let picked = hub.selection == "s:new"
@@ -386,31 +387,34 @@ struct NewSessionRow: View {
         .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail) - 6) }
         .onHover { hovering = $0 }
         .padding(rail == .leading ? .trailing : .leading, inset)
+        .onChange(of: hub.projectsMenuRequest) { _, _ in presentProjects() }
         .accessibilityLabel("New session")
         .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
     }
 
-    /// Scratch, then every project by name, the most recent first.
+    /// The chevron opens the menu of projects: an AppKit menu, so → on the row can open it too.
     private var projects: some View {
-        Menu {
-            Button("Scratch (no folder)") { store.startScratchSession() }
-            Divider()
-            ForEach(store.recentFolders, id: \.self) { folder in
-                Button { store.startAgent(in: folder) } label: {
-                    Label { Text(URL(fileURLWithPath: folder).lastPathComponent) } icon: { Swatch(color: store.projectColor(folder)) }
-                }
-            }
-        } label: {
+        Button(action: presentProjects) {
             Image(systemName: "chevron.down")
                 .font(Theme.Typography.glyph(11, .semibold))
                 .foregroundStyle(Theme.secondary)
                 .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
+                .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.small)
+        .background(MenuAnchorView(anchor: anchor))
         .help("Start a session in a project")
         .accessibilityLabel("New session in a project")
+        .accessibilityHint("Shows the projects")
+    }
+
+    /// Under the chevron, a moment later: not from inside the update or the key handler that asked.
+    private func presentProjects() {
+        Task { @MainActor in
+            guard let view = anchor.view else { return }
+            ProjectsMenu.make(store).popUp(positioning: nil, at: NSPoint(x: 0, y: view.isFlipped ? view.bounds.maxY : 0), in: view)
+        }
     }
 
     /// The app's new-session link with no folder opens its composer with none picked: a scratch session.
@@ -425,13 +429,62 @@ private struct Swatch: View {
     let color: Color?
 
     var body: some View {
-        if let color {
-            Image(nsImage: NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
-                NSColor(color).setFill()
-                NSBezierPath(ovalIn: rect).fill()
-                return true
-            })
+        if let color { Image(nsImage: Self.image(color)) }
+    }
+
+    static func image(_ color: Color) -> NSImage {
+        NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
+            NSColor(color).setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
         }
+    }
+}
+
+/// Where a menu pops up from: the view behind the control that opens it.
+@MainActor final class MenuAnchor {
+    weak var view: NSView?
+}
+
+private struct MenuAnchorView: NSViewRepresentable {
+    let anchor: MenuAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+}
+
+/// New session's menu of projects: Scratch, then every project by name, the most recent first.
+enum ProjectsMenu {
+    @MainActor static func make(_ store: Store) -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ActionItem("Scratch (no folder)") { store.startScratchSession() })
+        menu.addItem(.separator())
+        for folder in store.recentFolders {
+            let item = ActionItem(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
+            item.image = store.projectColor(folder).map(Swatch.image)
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// A menu item that runs a closure.
+    private final class ActionItem: NSMenuItem {
+        private let handler: () -> Void
+
+        init(_ title: String, handler: @escaping () -> Void) {
+            self.handler = handler
+            super.init(title: title, action: #selector(run), keyEquivalent: "")
+            target = self
+        }
+
+        required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        @objc private func run() { handler() }
     }
 }
 
