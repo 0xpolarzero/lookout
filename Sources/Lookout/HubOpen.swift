@@ -43,14 +43,14 @@ extension LookoutHub {
     /// What the sides' full view takes besides its lists: its header and footer, the dividers, the update row, the padding
     /// at both ends, and whatever each section keeps when it is not a list. `ciBody`: what the CI block takes under its
     /// header (none when it is folded, shrunk or searched away; its cell keeps its row while searching).
-    private func fixedLength(ciBody: CGFloat) -> CGFloat {
+    func fixedLength(ciBody: CGFloat) -> CGFloat {
         let pitch = Theme.Metrics.pitch
         let divider = 2 * Theme.Space.xs + 1
         let agents = store.agents.enabled
         let sessions = agents && !shrunk(.agents)
         // The inbox's header, the footer and its divider, and the padding at both ends.
         var fixed = 2 * HubGeometry.lead + 2 * pitch + divider
-        if showsCIRow { fixed += divider + pitch + (searching ? 0 : ciBody) }
+        if showsCIRow { fixed += divider + pitch + (searching ? 0 : ciBody + (store.ciRepos.isEmpty ? ciUndoRoom : 0)) }
         if agents { fixed += divider + pitch + (sessions ? pitch + ClaudeNotice.room(store) : 0) }
         if store.updater.showsInPill { fixed += pitch }
         return fixed
@@ -61,8 +61,10 @@ extension LookoutHub {
     /// CI is only its header (its counts in it) where the room below the bar can't give each list a row after it: a
     /// bar resting that low keeps the screen's end as the hub's, and the lists matter more than CI's lines.
     var foldsCI: Bool {
-        let lists: CGFloat = store.agents.enabled ? 2 : 1
-        return !searching && hub.focus == nil && fullLength - fixedLength(ciBody: ciBodyHeight) < lists * Theme.Metrics.twoLineRow
+        // The inbox keeps a row, and the sessions a group's header, a row and their "+N more": a waiting one is never
+        // folded into a count for want of room.
+        let lists = Theme.Metrics.twoLineRow + (store.agents.enabled ? SessionGroup.leastShown : 0)
+        return !searching && hub.focus == nil && fullLength - fixedLength(ciBody: ciBodyHeight) < lists
     }
 
     /// CI is only its header in the full view: another section is focused, or (on the sides) the room below a low bar
@@ -89,7 +91,8 @@ extension LookoutHub {
         switch (inbox, sessions) {
         case (true, true):
             let share = free * 0.45
-            let need = listHeights[.agents].map { min($0.content, share) } ?? share
+            let least = max(share, SessionGroup.leastShown)
+            let need = listHeights[.agents].map { min($0.content, least) } ?? least
             let inboxCap = max(free - max(need, row), min(row, free))
             // Until the inbox is measured, it is taken to use all it may.
             let taken = min(listHeights[.inbox]?.shown ?? inboxCap, inboxCap)
@@ -176,8 +179,9 @@ extension LookoutHub {
                 openDivider
                 VStack(alignment: .leading, spacing: 0) {
                     if store.ciRepos.isEmpty {
-                        // Nothing to say about CI but how to turn it on: one line, not a header over a line.
-                        railRow(cell: { Color.clear.frame(height: Theme.Metrics.pitch) }, detail: { noCI })
+                        // Nothing to say about CI but how to turn it on: one line, not a header over a line (and the undo line of
+                        // the repository just stopped, which CI's rows would have shown).
+                        railRow(cell: { Color.clear.frame(height: Theme.Metrics.pitch) }, detail: { ciRows() })
                     } else {
                         railRow(cell: { openCICell.frame(height: Theme.Metrics.pitch) },
                                 detail: {
@@ -225,7 +229,9 @@ extension LookoutHub {
 
     /// How tall the sessions' rows are altogether, as the list lays them out (its "+N more" row included).
     var agentsContent: CGFloat {
-        let listed = store.listedGroups(expanded: hub.sessionsExpanded)
+        // Searching, the sessions that match are listed flat, with no headers and no cap.
+        if searching { return store.hubSessions(hub).reduce(0) { $0 + SessionGroup.height(of: $1) } }
+        let listed = store.listedGroups(hub)
         return SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0)
     }
 
@@ -271,6 +277,8 @@ extension LookoutHub {
     /// far end the update cell and the gear.
     func openStripRow(columns: Bool, width: CGFloat) -> some View {
         let trailing = HStack(spacing: 0) {
+            // Searching, CI's block is out of the layout but its cell stays on the strip (DESIGN.md 10.6).
+            if searching, !store.ciRepos.isEmpty { openCICell.frame(width: stripCell, height: Self.cell) }
             if store.updater.showsInPill { openUpdateCell.frame(width: stripCell, height: Self.cell) }
             openGearCell
         }
@@ -318,47 +326,47 @@ extension LookoutHub {
     /// What CI takes of the left column under the inbox's list: its hairline, its header and its lines (none while
     /// searching).
     private var stripCIRoom: CGFloat {
-        searching ? 0 : HubGeometry.stripRule + Theme.Metrics.pitch + max(ciHeight, Theme.Metrics.pitch)
+        if searching { return 0 }
+        return HubGeometry.stripRule + Theme.Metrics.pitch + (store.ciRepos.isEmpty ? ciUndoRoom : max(ciHeight, Theme.Metrics.pitch))
     }
+
+    /// The undo line under a CI block with no rows (it is in the rows' own height otherwise).
+    var ciUndoRoom: CGFloat { store.undoStack.visible(in: .ci) == nil ? 0 : Theme.Metrics.undoLine + Theme.Space.xs }
 
     /// What the two columns' lists may take: the inbox what CI leaves, the sessions what the inbox column's height leaves
     /// them (`HubGeometry.stripCaps`).
     func stripCaps(room: CGFloat) -> (inbox: CGFloat, sessions: CGFloat) {
         HubGeometry.stripCaps(room: room, leftFixed: stripCIRoom, inbox: listHeights[.inbox],
-                              rightFixed: Theme.Metrics.pitch + ClaudeNotice.room(store), sessions: listHeights[.agents])
+                              rightFixed: Theme.Metrics.pitch + ClaudeNotice.room(store), sessions: listHeights[.agents],
+                              matchesAll: searching)
     }
 
-    /// Inbox, then CI directly under it with its own header; along the bottom, the other way up (the lists keep
-    /// their order, the header stays next to the strip it belongs to).
+    /// Inbox, then CI directly under it with its own header, on every edge: along the bottom only the strip is at the edge
+    /// and the content grows upward, so reading order and ↑↓ are the same as along the top.
     func leftColumn(inboxCap: CGFloat) -> some View {
-        let ci = ciBlock
-        return VStack(alignment: .leading, spacing: 0) {
-            if edge == .bottom {
-                if !searching { ci; Hairline().padding(.vertical, Theme.Space.xs) }
-                stripInbox(cap: inboxCap).section("Inbox")
-            } else {
-                stripInbox(cap: inboxCap).section("Inbox")
-                if !searching { Hairline().padding(.vertical, Theme.Space.xs); ci }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            stripInbox(cap: inboxCap).section("Inbox")
+            if !searching { Hairline().padding(.vertical, Theme.Space.xs); ciBlock }
         }
         .padding(.horizontal, Self.inset)
     }
 
     func rightColumn(cap: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if edge == .bottom { newSession; stripAgents(cap: cap) } else { stripAgents(cap: cap); newSession }
+            stripAgents(cap: cap)
+            newSession
         }
         .padding(.horizontal, Self.inset)
         .section("Sessions")
     }
 
-    /// Focused: the section has the whole column, the others are their headers; along the bottom the other way up. With
+    /// Focused: the section has the whole column, the others are their headers. With
     /// the sessions off the inbox and CI's lines share it: the inbox gets what CI's block leaves.
     func singleColumn(room: CGFloat) -> some View {
         let agents = store.agents.enabled
         let pitch = Theme.Metrics.pitch
         // CI's header, and its lines unless another section is focused.
-        let ci = searching ? 0 : pitch + (shrunk(.ci) ? 0 : max(ciHeight, pitch))
+        let ci = searching ? 0 : pitch + (shrunk(.ci) ? 0 : store.ciRepos.isEmpty ? ciUndoRoom : max(ciHeight, pitch))
         let sessionsHeader = agents ? pitch : 0
         let inboxCap = max(room - ci - sessionsHeader, 120)
         let agentsCap = max(room - ci - sessionsHeader - pitch - ClaudeNotice.room(store), 120)
@@ -367,12 +375,14 @@ extension LookoutHub {
             let ci = VStack(spacing: 0) { if !searching { ciBlock } }
             let sessions = VStack(alignment: .leading, spacing: 0) {
                 if agents {
-                    headerSlot(.agents) { agentsHeader }
+                    headerSlot(.agents, owns: true) { agentsHeader }
                     if !shrunk(.agents) { stripAgents(cap: agentsCap); newSession }
                 }
             }
             .section("Sessions")
-            if edge == .bottom { sessions; ci; inbox } else { inbox; ci; sessions }
+            inbox
+            ci
+            sessions
         }
         .padding(.horizontal, Self.inset)
     }
@@ -380,7 +390,7 @@ extension LookoutHub {
     var ciBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             if store.ciRepos.isEmpty {
-                noCI
+                ciRows()
             } else {
                 headerSlot(.ci, owns: true) { ciHeader }
                 if !shrunk(.ci) { ciColumn }
@@ -414,7 +424,8 @@ extension LookoutHub {
     }
 }
 
-/// A section header made into the control that focuses its section (see `LookoutHub.headerSlot`).
+/// A section header made into the control that focuses its section (see `LookoutHub.headerSlot`): a button behind it, so
+/// Tab reaches it (its chevron and tip show with the ring), as `SectionHeader`'s own does.
 struct HeaderSlot<Header: View>: View {
     let section: HubSection
     let focused: Bool
@@ -423,6 +434,7 @@ struct HeaderSlot<Header: View>: View {
     @ViewBuilder let header: Header
     @State private var hovering = false
     @State private var cursorPushed = false
+    @FocusState private var keyboardFocus: Bool
 
     var body: some View {
         if owns {
@@ -438,13 +450,11 @@ struct HeaderSlot<Header: View>: View {
                     .foregroundStyle(Theme.tertiary)
                     .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
                     .padding(.trailing, Theme.Space.hair)
-                    .opacity(hovering || focused ? 1 : 0)
-                    .tip(help)
+                    .opacity(hovering || focused || keyboardFocus ? 1 : 0)
                     .accessibilityHidden(true)
             }
             .frame(height: Theme.Metrics.pitch)
-            .contentShape(Rectangle())
-            .onTapGesture(perform: toggle)
+            .background { activation(help) }
             .onHover { inside in
                 hovering = inside
                 // The pointing hand, pushed and popped in pairs.
@@ -454,8 +464,20 @@ struct HeaderSlot<Header: View>: View {
             }
             .onDisappear { if cursorPushed { NSCursor.pop(); cursorPushed = false } }
             .motion(Theme.Motion.hover, value: hovering)
+            .motion(Theme.Motion.hover, value: keyboardFocus)
             .accessibilityElement(children: .contain)
             .accessibilityAction(named: focused ? "Back to all sections" : "Focus", toggle)
         }
+    }
+
+    /// The whole header's button: no fill (the chevron is its cue), the shared ring when Tab lands on it, its tip then too.
+    private func activation(_ help: String) -> some View {
+        Button(action: toggle) { Color.clear.contentShape(Rectangle()) }
+            .buttonStyle(.plain)
+            .focused($keyboardFocus)
+            .focusRing(Theme.Radius.row, inset: true, isFocused: keyboardFocus)
+            .reportsControlFocus(keyboardFocus)
+            .tip(help, focused: keyboardFocus)
+            .accessibilityLabel(help)
     }
 }

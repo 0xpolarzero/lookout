@@ -17,6 +17,8 @@ struct CIEntry: Identifiable {
     let muted: Bool
 
     var id: String { repo.fullName }
+    /// GitHub has answered for it: without an answer its state is unknown, which is not "no runs".
+    var checked: Bool { status != nil }
     /// When its runs last changed.
     var changedAt: Date? { status?.updatedAt }
 }
@@ -37,34 +39,36 @@ struct CIList {
     /// What a row calls a repo: its name, with `owner/` only where the name alone is ambiguous.
     func title(_ repo: RepoConfig) -> String { shared.contains(repo.name.lowercased()) ? repo.fullName : repo.name }
 
-    /// What the quiet group holds, by what each repo really is: a muted repo is not passing, whatever it shows.
-    var quietCounts: (passing: Int, muted: Int, noRuns: Int) {
+    /// What the quiet group holds, by what each repo really is: a muted repo is not passing, whatever it shows, and one
+    /// GitHub hasn't answered for yet is unchecked, not without runs.
+    var quietCounts: (passing: Int, muted: Int, noRuns: Int, unchecked: Int) {
         (quiet.filter { $0.state == .success && !$0.muted }.count, quiet.filter(\.muted).count,
-         quiet.filter { $0.state == .none && !$0.muted }.count)
+         quiet.filter { $0.state == .none && !$0.muted && $0.checked }.count, quiet.filter { !$0.checked && !$0.muted }.count)
     }
 
     /// The group's name, for the row and for VoiceOver's label: the biggest part of it.
     var quietName: String {
-        let (passing, muted, _) = quietCounts
+        let (passing, muted, noRuns, _) = quietCounts
         if allPassing { return "All passing" }
-        return passing > 0 ? CIState.success.title : muted > 0 ? "Muted" : CIState.none.title
+        return passing > 0 ? CIState.success.title : muted > 0 ? "Muted" : noRuns > 0 ? CIState.none.title : "Not checked"
     }
 
     /// "Passing · 11, 1 muted"; "All passing · 3 repositories" once nothing else is there.
     var quietTitle: String {
-        let (passing, muted, noRuns) = quietCounts
+        let (passing, muted, noRuns, unchecked) = quietCounts
         if allPassing { return "All passing · \(plural(quiet.count, "repository", "repositories"))" }
-        var parts = ["\(quietName) · \(passing > 0 ? passing : muted > 0 ? muted : noRuns)"]
+        var parts = ["\(quietName) · \(passing > 0 ? passing : muted > 0 ? muted : noRuns > 0 ? noRuns : unchecked)"]
         if passing > 0, muted > 0 { parts.append("\(muted) muted") }
         if (passing > 0 || muted > 0), noRuns > 0 { parts.append("\(noRuns) \(CIState.none.label)") }
+        if (passing > 0 || muted > 0 || noRuns > 0), unchecked > 0 { parts.append("\(unchecked) not checked") }
         return parts.joined(separator: ", ")
     }
 
     /// What VoiceOver adds to the group's name: its counts, in words.
     var quietSpeech: String {
-        let (passing, muted, noRuns) = quietCounts
+        let (passing, muted, noRuns, unchecked) = quietCounts
         if allPassing { return plural(quiet.count, "repository", "repositories") }
-        let parts = [(passing, CIState.success.label), (muted, "muted"), (noRuns, CIState.none.label)]
+        let parts = [(passing, CIState.success.label), (muted, "muted"), (noRuns, CIState.none.label), (unchecked, "not checked")]
         return parts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
     }
 }

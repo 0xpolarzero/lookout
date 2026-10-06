@@ -97,7 +97,8 @@ enum CISpeech {
             (list.attention.filter { $0.state == .pending }.count, CIState.pending.label),
             (list.quiet.filter { $0.state == .success && !$0.muted }.count, CIState.success.label),
             (list.quiet.filter(\.muted).count, "muted"),
-            (list.quiet.filter { $0.state == .none && !$0.muted }.count, CIState.none.label),
+            (list.quietCounts.noRuns, CIState.none.label),
+            (list.quietCounts.unchecked, "not checked"),
         ]
         return counts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
     }
@@ -198,8 +199,8 @@ private struct CIQuietRow: View {
 
     /// The glyph of what the row mostly holds: a check only when something really passes.
     private var symbol: String {
-        let (passing, muted, _) = list.quietCounts
-        return passing > 0 || list.allPassing ? CIState.success.symbol : muted > 0 ? "bell.slash" : CIState.none.symbol
+        let (passing, muted, noRuns, _) = list.quietCounts
+        return passing > 0 || list.allPassing ? CIState.success.symbol : muted > 0 ? "bell.slash" : noRuns > 0 ? CIState.none.symbol : "questionmark.circle"
     }
 
     var body: some View {
@@ -241,7 +242,7 @@ private struct CINameRow: View {
     @State private var hover = false
 
     private var selected: Bool { hub.selection == "c:" + entry.id }
-    private var note: String? { entry.muted ? "\(entry.state.label), muted" : entry.state == .none ? "no runs" : nil }
+    private var note: String? { entry.muted ? "\(entry.state.label), muted" : !entry.checked ? "not checked" : entry.state == .none ? "no runs" : nil }
 
     var body: some View {
         Ticking(coarse: true) { now in row(now) }
@@ -407,7 +408,14 @@ extension LookoutHub {
     var ciCap: CGFloat {
         let row = Theme.Metrics.twoLineRow
         if !showsDetail { return max(4 * row, maxLength - Self.cell - 120) }
-        if hub.focus == .ci { return max(160, maxLength - (edge.isHorizontal ? Self.cell + 60 : 260)) }
+        if hub.focus == .ci {
+            // What the other headers, the footer and CI's own stale and undo lines leave of the screen's length.
+            let extras = (staleChecked(Date()) == nil ? 0 : Self.staleHeight) + ciUndoRoom
+            let free = edge.isHorizontal
+                ? HubGeometry.stripRoom(maxLength: maxLength) - Theme.Metrics.pitch * (store.agents.enabled ? 2 : 1)
+                : fullLength - fixedLength(ciBody: 0)
+            return max(row, free - extras)
+        }
         return max(4 * row, (maxLength - 210) * 0.45)
     }
 
