@@ -1018,24 +1018,27 @@ extension LookoutHub {
 
     /// The groups, scrolling once past `cap`, always on a whole row.
     func sessionsScroll(cap: CGFloat) -> some View {
-        sessionsWithUndo(inset: Theme.Metrics.inset) {
+        // Beside the rail the list's rows run under the tiles, but the undo line stays in the detail column, as the others do.
+        let rail = edge.isHorizontal ? 0 : LookoutHub.cell
+        let inset = Theme.Metrics.inset
+        return sessionsWithUndo(leading: inset + (railSide == .leading ? rail : 0), trailing: inset + (railSide == .trailing ? rail : 0)) {
             SessionsScroll(store: store, ui: ui, hub: hub, rail: railSide, cap: max(cap - sessionsUndoRoom, 0))
         }
     }
 
     /// A peek's groups: whole rows up to `cap`, then "+N more" (never a scroll view or a fade).
     func sessionsPeek(cap: CGFloat) -> some View {
-        sessionsWithUndo(inset: 0) { SessionsList(store: store, ui: ui, hub: hub, rail: nil, inset: 0, peekCap: cap) }
+        sessionsWithUndo(leading: 0, trailing: 0) { SessionsList(store: store, ui: ui, hub: hub, rail: nil, inset: 0, peekCap: cap) }
     }
 
     /// The list and, under it, the undo line of what was just done to a session (Hide, Mute): on every surface that lists them.
     /// The list's cap leaves its room (`sessionsUndoRoom`), so the two together stay within the budget the layout gave them.
-    private func sessionsWithUndo(inset: CGFloat, @ViewBuilder list: () -> some View) -> some View {
+    private func sessionsWithUndo(leading: CGFloat, trailing: CGFloat, @ViewBuilder list: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             list()
             if let undo = store.undoStack.visible(in: .agents) {
                 UndoLine(message: undo.message) { store.undoLast() }
-                    .padding(.horizontal, inset).padding(.top, Theme.Space.xs)
+                    .padding(.leading, leading).padding(.trailing, trailing).padding(.top, Theme.Space.xs)
             }
         }
         .listMotion(value: store.undoStack.visibleID)
