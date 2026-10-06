@@ -62,7 +62,7 @@ extension LookoutHub {
         barDivider
         if store.agents.enabled {
             RestSessionCells(store: store, ui: ui, hub: hub, axis: axis, onRail: axis == .vertical, room: sessionRoom) {
-                show(.agents, session: $0)
+                show(.agents, session: $0, listingAll: $1)
             }
                 .modifier(probe(.agents))
                 .section("Sessions")
@@ -115,7 +115,7 @@ extension LookoutHub {
 
     /// A cell's `Show` (VoiceOver, and Return on a focused cell, or the "+N"): keeps the hub open on that cell's
     /// section with the selection there, and moves VoiceOver's cursor to the picked row (CI: its header).
-    func show(_ section: HubSection, session: String? = nil) {
+    func show(_ section: HubSection, session: String? = nil, listingAll: Bool = false) {
         // The controls are a menu, not a section: the peek at rest, the footer kept open (neither pins the hub).
         if section == .controls { return hub.showControls() }
         withAnimation(Self.opening.resolved(reduce: reduce)) {
@@ -128,7 +128,7 @@ extension LookoutHub {
             openInbox()
             hub.moveVoiceOver(to: hub.selection ?? "h:inbox")
         case .agents:
-            hub.showSession(session, store: store, ui: ui)
+            hub.showSession(session, store: store, ui: ui, listingAll: listingAll)
             hub.moveVoiceOver(to: hub.selection ?? "h:agents")
         case .ci:
             hub.showCI(store, ui: ui)
@@ -140,12 +140,12 @@ extension LookoutHub {
 
 extension HubState {
     /// The sessions' section as a bar cell shows it: `session` (else the first) picked and scrolled to, and every
-    /// session listed when it is one the list would leave out (New activity's "+N more"; the bar's "+N" stands for the
-    /// first of those). The keys walk through the same rows.
-    func showSession(_ id: String?, store: Store, ui: UIState) {
+    /// session listed when it is one the list would leave out (New activity's "+N more"), or when `listingAll` says so
+    /// (the bar's "+N" opens them all, whichever of them it stands for). The keys walk through the same rows.
+    func showSession(_ id: String?, store: Store, ui: UIState, listingAll: Bool = false) {
         query = ""
         inbox.endSearch()
-        if let id, !store.hubSessions(self).contains(where: { $0.id == id }) { sessionsExpanded = true }
+        if listingAll || id.map({ id in !store.hubSessions(self).contains { $0.id == id } }) == true { sessionsExpanded = true }
         guard let id = id ?? store.hubSessions(self).first?.id else { return }
         selection = "a:" + id
         requestScroll("a:" + id)
@@ -164,8 +164,8 @@ struct RestSessionCells: View {
     let onRail: Bool
     /// Points along the bar for the tiles and the "+N" (`LookoutHub.sessionRoom`).
     let room: CGFloat
-    /// Show the sessions' section, picking this session (or the first).
-    let show: (String?) -> Void
+    /// Show the sessions' section, picking this session (or the first), with every session listed or not.
+    let show: (String?, Bool) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
@@ -174,18 +174,18 @@ struct RestSessionCells: View {
         let byID = Dictionary(uniqueKeysWithValues: store.sessionGroups.flatMap(\.rows).map { ($0.id, $0) })
         let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
         layout {
-            if slots.isEmpty { SessionsAnchorCell(axis: axis) { show(nil) } }
+            if slots.isEmpty { SessionsAnchorCell(axis: axis) { show(nil, false) } }
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, slot in
                 if let row = byID[slot.id] {
-                    BarTile(row: row, axis: axis, onRail: onRail, store: store, ui: ui, hub: hub) { show(row.id) }
+                    BarTile(row: row, axis: axis, onRail: onRail, store: store, ui: ui, hub: hub) { show(row.id, false) }
                         .padding(axis == .vertical ? .top : .leading, BarSessions.gap(shown, before: index))
                         .transition(.opacity)
                 }
             }
             if !hidden.isEmpty {
-                MoreSessionsCell(axis: axis, count: hidden.count, waiting: hidden.filter(\.waiting).count) { show(hidden.first?.id) }
+                MoreSessionsCell(axis: axis, count: hidden.count, waiting: hidden.filter(\.waiting).count) { show(hidden.first?.id, true) }
             }
-            NewSessionBarCell(axis: axis, store: store) { show(nil) }
+            NewSessionBarCell(axis: axis, store: store) { show(nil, false) }
         }
         .animation(reduce ? nil : Theme.Motion.fade, value: shown.map { $0.id + $0.group })
     }

@@ -264,6 +264,19 @@ import Testing
         #expect(hub.query.isEmpty)
     }
 
+    @Test func theMoreTileListsEverySessionEvenWhenItsFirstOneIsAlreadyListed() throws {
+        let s = pendingStore()
+        let hub = HubState()
+        let ui = UIState(persists: false, edge: .right)
+        // The bar's room hid a session the list shows anyway: the "+N" still opens the sessions with every row.
+        let listed = try #require(s.hubSessions(hub).last)
+        hub.showSession(listed.id, store: s, ui: ui)
+        #expect(!hub.sessionsExpanded)
+        hub.showSession(listed.id, store: s, ui: ui, listingAll: true)
+        #expect(hub.sessionsExpanded && s.hubSessions(hub).count == 12)
+        #expect(hub.selection == "a:" + listed.id)
+    }
+
     @Test func theEdgesRoomCutsTheTilesAndTheMoreCellTakesOneSlot() {
         let pitch = Theme.Metrics.pitch
         let slots = (0..<12).map { slot("s\($0)") }

@@ -619,7 +619,7 @@ enum PlaygroundShots {
             $0.pinned = true; $0.scenario = .sessionsPending12; $0.focus = .agents
             $0.setup = { store, ui, hub in
                 let hidden = BarSessions.arrange(store.barSlots, frozen: nil).hidden
-                hub.showSession(hidden.first?.id, store: store, ui: ui)
+                hub.showSession(hidden.first?.id, store: store, ui: ui, listingAll: true)
                 hub.focus = .agents
             }
         },
