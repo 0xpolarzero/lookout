@@ -22,6 +22,8 @@ extension View {
 
 enum CappedScrollSpace {
     static let name = "capped-content"
+    /// The scroll view's own frame, which the content's frame is read in to know how far it has scrolled.
+    static let viewport = "capped-viewport"
 
     /// The tallest height up to `cap` that ends on a row's bottom edge, when the cap falls inside a measured row (a
     /// row ends past it). A lazy list only measures the rows it has laid out: with none ending past the cap, the cut
@@ -79,12 +81,16 @@ struct CappedScroll<Content: View>: View {
     var fades = true
     /// The system's scroll indicators (the inbox's, whose rows aren't lined up with the bar's cells).
     var indicators = false
+    /// Told where the list is scrolled to, as the content's y at the viewport's bottom edge (a list that says how much is below).
+    var onReach: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
     @State private var height: CGFloat = 0
     @State private var viewport: CGFloat = 0
     /// Lazy only: the content's height, once measured in a viewport as tall as the cap and found shorter than it.
     @State private var lazyShort: CGFloat?
     @State private var edges: [CGFloat] = []
+    /// What `onReach` is told from: kept out of the state, so scrolling doesn't redraw this view.
+    @State private var scrolled = Scrolled()
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
@@ -102,10 +108,17 @@ struct CappedScroll<Content: View>: View {
                         if height == 0 { height = h } else { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { height = h } }
                         settle()
                     }
+                    .onGeometryChange(for: CGFloat.self) { -$0.frame(in: .named(CappedScrollSpace.viewport)).minY.rounded() } action: { offset in
+                        scrolled.offset = offset
+                        reach()
+                    }
             }
+            .coordinateSpace(.named(CappedScrollSpace.viewport))
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
                 viewport = h
+                scrolled.viewport = h
                 settle()
+                reach()
             }
             .onPreferenceChange(CapEdges.self) { new in
                 let sorted = Array(Set(new.map { ($0 * 2).rounded() / 2 })).sorted()
@@ -151,7 +164,15 @@ private struct CutFade: ViewModifier {
     }
 }
 
+/// How far a `CappedScroll` is scrolled and how tall it is, for `onReach`.
+private final class Scrolled {
+    var offset: CGFloat = 0
+    var viewport: CGFloat = 0
+}
+
 extension CappedScroll {
+    fileprivate func reach() { onReach?(scrolled.offset + scrolled.viewport) }
+
     /// Lazy: trusts the content's height only when it was measured in a viewport as tall as the cap.
     fileprivate func settle() {
         guard lazy, height > 0 else { return }

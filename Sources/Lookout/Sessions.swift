@@ -88,6 +88,7 @@ struct SessionsList: View {
             } else {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
                     SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
+                        .id(i == 0 ? "s:top" : group.id)
                     ForEach(group.rows) { row($0, group.placement) }
                 }
                 if listed.hidden > 0 {
@@ -113,9 +114,9 @@ struct SessionsList: View {
     }
 }
 
-/// The groups in a scroll view that stops on a whole row, lazy once the list is long. Cut short while Sessions isn't
-/// focused, it ends with "Show all 12" (the system's scrollers are overlay-style, so nothing else says there is more),
-/// which gives Sessions the room.
+/// The groups in a scroll view that stops on a whole row, lazy once the list is long. Cut short, it ends with a line
+/// saying so (the system's scrollers are overlay-style, so nothing else does): "Show all 12" while Sessions isn't
+/// focused, which gives it the room; focused, "+4 below", which scrolls to the end, and "Back to top" once there.
 struct SessionsScroll: View {
     let store: Store
     let ui: UIState
@@ -123,20 +124,25 @@ struct SessionsScroll: View {
     let rail: HorizontalEdge
     let cap: CGFloat
     var inset: CGFloat = Theme.Metrics.inset
+    @State private var reach = ScrollReach()
 
     var body: some View {
         // Read here, not in the hub's body: the list changing length doesn't redraw the hub.
         let listed = store.listedGroups(expanded: hub.sessionsExpanded)
         let count = listed.groups.reduce(0) { $0 + $1.rows.count } + listed.hidden
-        let cut = hub.focus != .agents && hub.query.trimmingCharacters(in: .whitespaces).isEmpty
+        let focused = hub.focus == .agents
+        let cut = hub.query.trimmingCharacters(in: .whitespaces).isEmpty
             && SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0) > cap + 0.5
         VStack(spacing: 0) {
             CappedScroll(cap: cut ? cap - Theme.Metrics.pitch : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count),
-                         fades: false, indicators: true) {
+                         fades: false, indicators: true, onReach: focused ? { reach.bottom = $0 } : nil) {
                 SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
             }
-            if cut {
-                MoreSessionsRow(label: "Show all \(count)", spoken: "All " + plural(count, "session"), hub: hub, rail: rail,
+            if cut && focused {
+                SessionsCue(groups: listed.groups, hidden: listed.hidden, viewport: cap - Theme.Metrics.pitch, reach: reach, hub: hub, rail: rail)
+                    .padding(rail == .leading ? .trailing : .leading, inset)
+            } else if cut {
+                MoreSessionsRow(label: "Show all \(count)", spoken: "All " + plural(count, "session"), hint: "Shows them", hub: hub, rail: rail,
                                 pickable: false, action: showAll)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             }
@@ -145,6 +151,36 @@ struct SessionsScroll: View {
 
     private func showAll() {
         LookoutHub.animate(LookoutHub.refocus) { hub.focus = .agents }
+    }
+}
+
+/// Where a focused list is scrolled to, read by its cue alone: the list moving doesn't redraw anything else.
+@Observable @MainActor final class ScrollReach {
+    /// The content's y at the viewport's bottom edge; nil before the list has reported (it is at the top).
+    var bottom: CGFloat?
+}
+
+/// The last line of a focused list that doesn't fit: how many sessions are below, a click scrolling to them; at the
+/// end, the way back up.
+private struct SessionsCue: View {
+    let groups: [SessionGroup]
+    let hidden: Int
+    let viewport: CGFloat
+    let reach: ScrollReach
+    let hub: HubState
+    let rail: HorizontalEdge
+
+    var body: some View {
+        let below = SessionGroup.below(groups, hidden: hidden, reach: reach.bottom ?? viewport)
+        if below > 0 {
+            MoreSessionsRow(label: "+\(below) below", spoken: plural(below, "session") + " below", hint: "Scrolls to the end", hub: hub, rail: rail,
+                            pickable: false) {
+                hub.requestScroll(hidden > 0 ? "s:more" : groups.last?.rows.last.map { "a:" + $0.id } ?? "s:top")
+            }
+        } else {
+            MoreSessionsRow(label: "Back to top", spoken: "Back to the top", hint: "Scrolls to the first session", hub: hub, rail: rail,
+                            pickable: false) { hub.requestScroll("s:top") }
+        }
     }
 }
 
@@ -202,6 +238,21 @@ extension SessionGroup {
             count -= 1
         }
         return (shown, total - count)
+    }
+
+    /// How many sessions a list scrolled to `reach` (the content's y at the viewport's bottom edge) has not shown whole
+    /// yet, counting those "+N more" is hiding once its row is not whole either.
+    static func below(_ groups: [SessionGroup], hidden: Int, reach: CGFloat) -> Int {
+        var y: CGFloat = 0
+        var count = 0
+        for (i, group) in groups.enumerated() {
+            y += (i == 0 ? 0 : gap) + headerHeight
+            for row in group.rows {
+                y += height(of: row)
+                if y > reach + 0.5 { count += 1 }
+            }
+        }
+        return hidden > 0 && y + Theme.Metrics.pitch > reach + 0.5 ? count + hidden : count
     }
 
     var placement: SessionPlacement {
@@ -265,11 +316,12 @@ struct SessionGroupHeader: View {
     }
 }
 
-/// "+3 more" at the end of the list: shows the rest. Also the list's own "Show all" when it is cut short, which no key
-/// picks (⌘3 gives Sessions the room too).
+/// "+3 more" at the end of the list: shows the rest. Also the line a list cut short ends with (see `SessionsScroll`),
+/// which no key picks: ⌘3 gives Sessions the room, and the arrows scroll.
 struct MoreSessionsRow: View {
     let label: String
     let spoken: String
+    let hint: String
     let hub: HubState
     let rail: HorizontalEdge
     var pickable = true
@@ -277,12 +329,13 @@ struct MoreSessionsRow: View {
     @State private var hovering = false
 
     init(hidden: Int, hub: HubState, rail: HorizontalEdge, action: @escaping () -> Void) {
-        self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hub: hub, rail: rail, action: action)
+        self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hint: "Shows them", hub: hub, rail: rail, action: action)
     }
 
-    init(label: String, spoken: String, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
+    init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
         self.label = label
         self.spoken = spoken
+        self.hint = hint
         self.hub = hub
         self.rail = rail
         self.pickable = pickable
@@ -301,7 +354,7 @@ struct MoreSessionsRow: View {
         .focusRing(Theme.Radius.row, inset: true)
         .onHover { hovering = $0 }
         .accessibilityLabel(spoken)
-        .accessibilityHint("Shows them")
+        .accessibilityHint(hint)
     }
 }
 

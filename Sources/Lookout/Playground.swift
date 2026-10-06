@@ -312,7 +312,8 @@ struct Shot {
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus
 ///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
 ///   sessions-12, sessions-many-new (eleven under New activity); every edge for `peek-agents-`, `open-` and
-///   `focus-agents-`; `picked-sessions` (right and top: one picked with the keys, one under the pointer), `focus-agents-sessions-more` (tall screen, "+3 more" picked)
+///   `focus-agents-`; `picked-sessions` (right and top: one picked with the keys, one under the pointer), `focus-agents-sessions-more` (tall screen, "+3 more" picked),
+///   `focus-agents-sessions-end` (scrolled to the end), `open-sessions-12-short` (a 560pt hub on the sides)
 /// Update: `rest-`, `open-` plus
 ///   update-available, update-downloading, update-ready
 /// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y; Differentiate
@@ -356,6 +357,14 @@ enum PlaygroundShots {
             $0.pinned = true; $0.scenario = .sessionsWorking; $0.selection = .session("k2"); $0.hoveredSession = "k1"
             $0.setup = { _, _, hub in hub.requestScroll("a:k2") }
         }
+        // Scrolled to the end: the cue is the way back up.
+        shots += Shot.edges("focus-agents-sessions-end", on: .rightAndTop) {
+            $0.pinned = true; $0.scenario = .sessionsManyNew; $0.focus = .agents
+            // Once the list is on screen: the lists scroll for a request made after they appear.
+            $0.setup = { _, _, hub in DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { hub.requestScroll("s:more") } }
+        }
+        // A short screen (a 560pt hub on the sides): the inbox keeps a row beside the sessions' share.
+        shots += Shot.edges("open-sessions-12-short", on: [.right]) { $0.pinned = true; $0.scenario = .sessions12; $0.size = CGSize(width: 1280, height: 650) }
         // The whole list with its "+3 more" picked: a screen tall enough for it.
         shots += Shot.edges("focus-agents-sessions-more", on: .rightAndTop) {
             $0.pinned = true; $0.scenario = .sessionsManyNew; $0.focus = .agents; $0.size = CGSize(width: 1280, height: 1500)

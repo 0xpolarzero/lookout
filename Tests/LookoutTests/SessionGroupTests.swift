@@ -343,6 +343,20 @@ import Testing
         }
     }
 
+    @Test func aFocusedListCountsWhatIsBelowItsViewport() {
+        let s = store((0..<6).map { session("x\($0)", folder: "/code/x", minutesAgo: Double($0 + 1)) }, kept: (0..<6).map { "x\($0)" })
+        let groups = s.sessionGroups
+        let row = Theme.Metrics.twoLineRow
+        // Header and two whole rows in view: four rows below (a row cut by the edge is not shown yet).
+        #expect(SessionGroup.below(groups, hidden: 0, reach: SessionGroup.headerHeight + 2 * row) == 4)
+        #expect(SessionGroup.below(groups, hidden: 0, reach: SessionGroup.headerHeight + 3 * row - 1) == 4)
+        #expect(SessionGroup.below(groups, hidden: 0, reach: SessionGroup.height(groups)) == 0)
+        // "+N more" counts its sessions until its own row is whole in view.
+        let end = SessionGroup.height(groups)
+        #expect(SessionGroup.below(groups, hidden: 3, reach: end) == 3)
+        #expect(SessionGroup.below(groups, hidden: 3, reach: end + Theme.Metrics.pitch) == 0)
+    }
+
     @Test func theKeysSkipRowsAFocusedSectionHides() {
         let s = store([session("x1", folder: "/code/x")], kept: ["x1"])
         var started: [String] = []

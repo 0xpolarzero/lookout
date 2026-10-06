@@ -355,7 +355,8 @@ struct LookoutHub: View {
         VStack(alignment: .leading, spacing: 0) {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
-            sessionsScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90)).padding(.top, 8)
+            // Focused, the list has the screen's height before it scrolls.
+            sessionsScroll(cap: min(maxLength - Self.cell - 60, hub.focus == .agents ? .infinity : Self.listCap + 90)).padding(.top, 8)
             // At the bottom, whatever height the column gets.
             Spacer(minLength: 0)
             Hairline(inset: Self.inset + 10).padding(.bottom, Theme.Space.xs)
