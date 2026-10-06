@@ -266,6 +266,18 @@ enum AccessibilityTree {
         store.agents.expanded = true
     }
 
+    @Test func clickingTheInboxWithAnotherSectionFocusedPicksARowThatIsThere() {
+        for focus in [HubSection.ci, .agents] {
+            hub.focus = focus
+            view.openInbox()
+            #expect(hub.focus == nil && hub.selection == "i:" + store.list(.needsYou)[0].id, "\(focus)")
+        }
+        // The inbox focused already keeps the room it has.
+        hub.focus = .inbox
+        view.openInbox()
+        #expect(hub.focus == .inbox)
+    }
+
     @Test func showOnTheInboxKeepsTheHubOpenAndSendsVoiceOverToItsFirstRow() {
         view.show(.inbox)
         let first = "i:" + store.list(.needsYou)[0].id

@@ -105,6 +105,8 @@ extension LookoutHub {
             hub.query = ""
             hub.inbox.endSearch()
             hub.filter = .needsYou
+            // The pick is a row of the inbox: another section's focus would fold it away and leave nothing to pick.
+            if hub.focus != .inbox { hub.focus = nil }
         }
         if let first = store.list(.needsYou).first {
             hub.selection = "i:" + first.id
