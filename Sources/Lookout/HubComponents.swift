@@ -248,7 +248,8 @@ struct CappedScroll<Content: View>: View {
                 .scrollIndicatorsFlash(onAppear: true)
                 .scrollDisabled(!cut)
                 .frame(height: max(shown, 1))
-                .onChange(of: hub?.keyboardSelection) { _, request in
+                // A request made before the list mounted (a cell's Show opens the hub on a row) is met once it has.
+                .onChange(of: hub?.keyboardSelection, initial: true) { _, request in
                     if let id = request?.id { withAnimation(spatial(Theme.Motion.hover)) { proxy.scrollTo(id) } }
                 }
                 if band > 0, let cue {
