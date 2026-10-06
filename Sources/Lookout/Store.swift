@@ -24,17 +24,11 @@ final class Store {
     /// Bumped on every assignment to `items`, and those only happen on real changes: a cheap animation/memo key for views.
     private(set) var itemsRevision = 0
     var ci: [String: CIStatus] = [:] {
-        didSet {
-            memo = Memo()
-            persistedRevision &+= 1
-        }
+        didSet { persistedRevision &+= 1 }
     }
     /// CI the user muted, by repo full name: the sha it was muted at. A repo stays muted until its sha or state changes.
     var mutedCI: [String: String] = [:] {
-        didSet {
-            memo = Memo()
-            persistedRevision &+= 1
-        }
+        didSet { persistedRevision &+= 1 }
     }
     /// Review requests cleared from Done while GitHub still lists them: kept apart from `items` so they don't come back as new.
     var droppedRequests: Set<String> = [] {
@@ -553,13 +547,12 @@ final class Store {
         })
     }
 
-    /// Derived inbox data, rebuilt lazily after `items`, `settings`, `repos` or `ci` change.
+    /// Derived inbox data, rebuilt lazily after `items`, `settings` or `repos` change.
     private struct Memo {
         var lists: [InboxFilter: [InboxItem]] = [:]
         var unread: [InboxFilter: Int] = [:]
         var bots: Set<String>?
         var ciRepos: [RepoConfig]?
-        var byState: [CIState: [RepoConfig]] = [:]
     }
 
     // The getters touch the observed properties so SwiftUI tracks them, even on a memo hit.
@@ -568,15 +561,6 @@ final class Store {
         if let hit = memo.ciRepos { return hit }
         let result = repos.filter { $0.events.contains(.ciMain) }
         memo.ciRepos = result
-        return result
-    }
-
-    func ciRepos(in state: CIState) -> [RepoConfig] {
-        let ci = self.ci
-        let all = ciRepos
-        if let hit = memo.byState[state] { return hit }
-        let result = all.filter { ci[$0.fullName]?.state == state }
-        memo.byState[state] = result
         return result
     }
 
