@@ -160,6 +160,9 @@ final class Store {
     @ObservationIgnored var isRecordingShortcut = false
     /// Registers a global shortcut system-wide; `false` when the system refuses it.
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Bool)?
+    /// The system-wide shortcuts the system last refused to register (another app holds the key), by the key it refused:
+    /// one still stored does nothing, and Settings says so.
+    var refusedShortcuts: [ShortcutAction: Shortcut] = [:]
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
     @ObservationIgnored let activityReader = Claude.ActivityReader()
     @ObservationIgnored lazy var claudeFeed = ClaudeFeed(activityReader: activityReader)
@@ -652,6 +655,11 @@ final class Store {
 
     func shortcut(_ action: ShortcutAction) -> Shortcut {
         settings.shortcuts?[action.rawValue] ?? action.defaultShortcut
+    }
+
+    /// A stored system-wide shortcut that another app held when Lookout tried to register it.
+    func isShortcutHeldByAnotherApp(_ action: ShortcutAction) -> Bool {
+        refusedShortcuts[action].map { $0 == shortcut(action) } ?? false
     }
 
     /// `nil` resets to the default. A global one the system refuses is not kept: the one that works stays stored and

@@ -269,15 +269,18 @@ final class GlobalShortcuts {
         store.onAgentsEnabledChange = { [weak self] _ in self?.register(.sessionSwitcher) }
     }
 
-    /// `shortcut` is what the store has just set, or its current one. `false` when the system refused it.
+    /// `shortcut` is what the store has just set, or its current one. `false` when the system refused it, which the store
+    /// keeps (`refusedShortcuts`): a key refused at launch, or when the extension turns on, is not one the user just chose.
     @discardableResult
     func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) -> Bool {
         guard action.isGlobal else { return true }
         let shortcut = shortcut ?? store.shortcut(action)
         let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
-        return registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
+        let taken = registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
             DispatchQueue.main.async { perform(action) }
         }
+        store.refusedShortcuts[action] = taken ? nil : shortcut
+        return taken
     }
 }
 
@@ -295,6 +298,9 @@ struct ShortcutRecorder: View {
     var body: some View {
         let current = store.shortcut(action)
         let customized = current != action.defaultShortcut
+        // What was said at the last attempt, else the key another app holds: it is stored and does nothing.
+        let held = store.isShortcutHeldByAnotherApp(action) ? "\(current.display) is used by another app, so it does nothing" : nil
+        let shown = error ?? held
         VStack(alignment: .trailing, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.sm) {
                 if customized && !recording {
@@ -311,11 +317,11 @@ struct ShortcutRecorder: View {
                     .focusRing(Theme.Radius.tile)
                     .accessibilityLabel("Change shortcut for \(action.title)")
                     .accessibilityValue(recording ? ["Recording, press the new keys", error].compactMap { $0 }.joined(separator: ". ")
-                                        : current.isUnassigned ? "Not set" : current.display)
+                                        : current.isUnassigned ? "Not set" : [current.display, held].compactMap { $0 }.joined(separator: ". "))
                     .accessibilityHint("Delete clears it, Escape cancels")
             }
-            if let error {
-                Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.red)
+            if let shown {
+                Text(shown).font(Theme.Typography.meta).foregroundStyle(Theme.red)
                     .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
                     // Wider than the keycap it sits under, so a conflict reads on two lines at most.
                     .frame(maxWidth: 220, alignment: .trailing)

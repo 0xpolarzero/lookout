@@ -624,6 +624,10 @@ enum PlaygroundShots {
             $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
             $0.preview.recording = .openItem; $0.preview.recorderError = "Already used by Mark read / unread"
         },
+        page("settings-shortcuts-held", .settings) {
+            $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+            $0.setup = { store, _, _ in store.refusedShortcuts[.togglePanel] = store.shortcut(.togglePanel) }
+        },
         page("settings-shortcuts-restore-refused", .settings) {
             $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
             $0.preview.restoreError = "⌃⌥L is used by another app. Lookout keeps your shortcuts"
