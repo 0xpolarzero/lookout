@@ -31,9 +31,9 @@ import SwiftUI
 //   HoverFillButtonStyle   Hover/active/pressed fill for any button and shape; disabled shows no fill.
 //   .rowHighlight(hover:picked:)  A hub row's padding and fill; picked (keyboard) adds the accent bar.
 //   .focusRing(radius)     The one focus ring: 1.5pt accent, offset 2 (inset for rows), from @FocusState.
-//   .controlFocus(focused) Tells the key monitor a control has focus (so it keeps Space and Return); `focusRing` does
-//                          it for you unless the control keeps its own @FocusState.
-//   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
+//   .reportsControlFocus(focused)  Tells the key monitor a control has focus (so it keeps Space and Return); `focusRing`
+//                          does it for you unless the control keeps its own @FocusState.
+//   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, CheckboxStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
 //   EmptyBlock, UndoLine (presentation only), Hairline, Avatar, FlowLayout, `.tip(_:_:)` (icon-only controls only).
 //   .tile(size) / Tile.shape(size)   A rounded square filled like a tile, radius 27% of its size.
 //   plural(n, "folder")    "1 folder", "2 folders"; third arg for irregulars: plural(2, "repository", "repositories").
@@ -497,8 +497,15 @@ struct MenuRow: View {
 
 // MARK: - Forms
 
+/// A button that draws its label as it is, disabled or not: `.plain` fades a disabled label, and what a switch or
+/// checkbox row says stays readable (it draws its own unavailable look).
+private struct UnfadedButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { configuration.label }
+}
+
 /// A drawn switch, 32 x 20: accent when on, whatever the window's key state (the system one greys out in a panel
-/// that isn't key). The whole label row is the target; VoiceOver gets a toggle that says On or Off.
+/// that isn't key). The whole label row is the target; VoiceOver gets a toggle that says On or Off. Disabled changes
+/// the switch only (never fades the label).
 struct SwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         SwitchRow(configuration: configuration)
@@ -522,24 +529,78 @@ struct SwitchStyle: ToggleStyle {
                 .frame(minHeight: Theme.Metrics.formRow)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(UnfadedButtonStyle())
             .focusRing(10)
-            .opacity(enabled ? 1 : 0.6)
             .onHover { hovering = $0 }
             .accessibilityAddTraits(.isToggle)
             .accessibilityValue(on ? "On" : "Off")
         }
 
+        /// Unavailable is drawn on the switch alone, as a quiet outline and a grey knob: the label stays as it is, as it
+        /// is what the reason beside it explains.
         private func track(on: Bool) -> some View {
             Capsule()
-                .fill(on ? Theme.accent : resolved.fill(Theme.switchOff))
-                .overlay(Capsule().strokeBorder(on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
+                .fill(!enabled ? resolved.fill(Theme.Fill.field) : on ? Theme.accent : resolved.fill(Theme.switchOff))
+                .overlay(Capsule().strokeBorder(!enabled ? resolved.divider : on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
                 .overlay(alignment: on ? .trailing : .leading) {
-                    Circle().fill(.white).frame(width: 16, height: 16).padding(2)
+                    Circle().fill(enabled ? AnyShapeStyle(.white) : AnyShapeStyle(resolved.tertiary)).frame(width: 16, height: 16).padding(2)
                 }
                 .brightness(hovering && enabled ? 0.06 : 0)
                 .frame(width: 32, height: 20)
                 .animation(reduce ? nil : Theme.Motion.hover, value: on)
+                .motion(Theme.Motion.hover, value: hovering)
+        }
+    }
+}
+
+/// A drawn checkbox for the options of a list (SwitchStyle is for a setting that is on or off): a 14pt box with a
+/// `fieldBorder` outline, accent and an `onTint` check when on. Drawn because the system's greys out in a panel that
+/// isn't key and its off box is a borderless fill below 3:1. The row is 28pt and all of it is the target.
+struct CheckboxStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CheckboxRow(configuration: configuration)
+    }
+
+    private struct CheckboxRow: View {
+        let configuration: ToggleStyleConfiguration
+        @State private var hovering = false
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.resolved) private var resolved
+
+        var body: some View {
+            let on = configuration.isOn
+            Button { configuration.isOn.toggle() } label: {
+                HStack(spacing: Theme.Space.md) {
+                    box(on: on)
+                    configuration.label
+                        .foregroundStyle(enabled ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: Theme.Metrics.menuRow)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(UnfadedButtonStyle())
+            .focusRing(Theme.Radius.small + Theme.Space.xs)
+            .onHover { hovering = $0 }
+            .accessibilityAddTraits(.isToggle)
+            .accessibilityValue(on ? "On" : "Off")
+        }
+
+        private func box(on: Bool) -> some View {
+            let shape = Theme.Radius.shape(Theme.Radius.small)
+            let filled = on && enabled
+            return shape
+                .fill(filled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(resolved.fill(Theme.Fill.field)))
+                .overlay(shape.strokeBorder(filled ? .clear : enabled ? Theme.fieldBorder : resolved.divider, lineWidth: resolved.borderWidth))
+                .overlay {
+                    if on {
+                        Image(systemName: "checkmark").font(Theme.Typography.glyph(9, .heavy))
+                            .foregroundStyle(enabled ? AnyShapeStyle(Theme.onTint) : AnyShapeStyle(Theme.tertiary))
+                    }
+                }
+                .brightness(hovering && enabled ? 0.06 : 0)
+                .frame(width: 14, height: 14)
+                .motion(Theme.Motion.hover, value: on)
                 .motion(Theme.Motion.hover, value: hovering)
         }
     }

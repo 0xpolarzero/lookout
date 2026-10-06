@@ -588,7 +588,7 @@ final class Store {
         guard let (token, source) = resolved else {
             me = nil
             tokenSource = nil
-            authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
+            authError = SignInFailure.missingToken
             return
         }
         gh.token = token
@@ -614,8 +614,8 @@ final class Store {
         var name = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let range = name.range(of: "github.com/") { name = String(name[range.upperBound...]) }
         name = name.split(separator: "/").prefix(2).joined(separator: "/")
-        guard name.split(separator: "/").count == 2 else { return "Use the owner/repo format" }
-        guard !repos.contains(where: { $0.fullName.caseInsensitiveCompare(name) == .orderedSame }) else { return "Already watching \(name)" }
+        guard name.split(separator: "/").count == 2 else { return RepoFailure.badFormat }
+        guard !repos.contains(where: { $0.fullName.caseInsensitiveCompare(name) == .orderedSame }) else { return RepoFailure.alreadyWatching(name) }
         if me == nil { await authenticate() }
         do {
             let info: GHRepo = try await gh.get("/repos/\(name)")

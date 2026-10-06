@@ -85,14 +85,14 @@ final class HotKeys {
         }, 1, &spec, nil, nil)
     }
 
-    /// `nil` unregisters.
+    /// `nil` unregisters, and so does a shortcut that was cleared (nothing is registered for it).
     func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) {
         if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
         HotKeys.handlers[id] = nil
         taps[id] = nil
         buttons[id] = nil
         defer { updateMonitors(); updateButtonTap() }
-        guard let shortcut else { return }
+        guard let shortcut, !shortcut.isUnassigned else { return }
         if let button = shortcut.mouseButton {
             buttons[id] = (button, shortcut.flags, handler)
             return
@@ -219,6 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store!
     private var hub: HubController?
     private lazy var hotKeys = HotKeys()
+    private var globalShortcuts: GlobalShortcuts?
     private var playground: Playground?
     private var sigtermSource: DispatchSourceSignal?
 
@@ -260,12 +261,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
-        registerHotKey(.togglePanel)
-        registerHotKey(.sessionSwitcher)
-        store.onGlobalShortcutChange = { [weak self] action, _ in self?.registerHotKey(action) }
-        store.onAgentsEnabledChange = { [weak self] _ in
-            self?.registerHotKey(.sessionSwitcher)
+        let globals = GlobalShortcuts(store: store, registrar: hotKeys) { [weak self] action in
+            switch action {
+            case .togglePanel: self?.hub?.toggleShortcut()
+            case .sessionSwitcher: self?.hub?.showSessions()
+            default: break
+            }
         }
+        globals.start()
+        globalShortcuts = globals
         if CommandLine.arguments.contains("--open") {
             hub?.toggleShortcut()
         }
@@ -282,26 +286,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         store?.flushSave()
-    }
-
-    /// The session switcher only grabs its keys while the Claude extension is on.
-    private func registerHotKey(_ action: ShortcutAction) {
-        switch action {
-        case .togglePanel:
-            hotKeys.set(1, store.shortcut(action)) { [weak self] in
-                DispatchQueue.main.async {
-                    self?.hub?.toggleShortcut()
-                }
-            }
-        case .sessionSwitcher:
-            hotKeys.set(2, store.agents.enabled ? store.shortcut(action) : nil) { [weak self] in
-                DispatchQueue.main.async {
-                    self?.hub?.showSessions()
-                }
-            }
-        default:
-            break
-        }
     }
 
     /// Accessory apps have no visible menu bar, but key equivalents (⌘C/⌘V/⌘A) still route through the main menu.

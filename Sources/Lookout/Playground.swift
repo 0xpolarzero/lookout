@@ -280,6 +280,8 @@ struct Shot {
     var tip: String?
     var size = Shot.standard
     var environment = ShotEnvironment()
+    /// The pane, field or disclosure the Settings and Repositories pages open in (see `PagePreview`).
+    var preview = PagePreview()
     /// The playground's own "Lookout playground" card: hidden, as it is not part of what is being designed.
     var showsExplainer = false
     /// Anything the fields above don't cover, after they are applied.
@@ -342,6 +344,13 @@ struct Shot {
 ///   rest-sessions-waiting-20-720 and peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
 /// Frozen order, right and top
 ///   peek-agents-sessions-late-waiting (the twelfth of twelve starts to wait while the pointer holds the bar)
+/// Settings and Repositories, right edge
+///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
+///   settings-shortcuts-notice, settings-claude, settings-claude-off; repos (collapsed), repos-custom, repos-failure,
+///   repos-add, repos-add-error, repos-add-none, repos-undo, repos-empty, repos-contrast, repos-retry-focus, repos-drop
+/// Settings states the dev build and a healthy account never show, right edge
+///   settings-signed-out, settings-launch-error, settings-update-{idle,available,downloading,ready,failed},
+///   settings-notifications-off, settings-shortcuts-{recording,conflict}, settings-claude-{missing,key-saved}
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -611,7 +620,107 @@ enum PlaygroundShots {
             $0.scenario = .sessionsLateWaiting; $0.section = .agents
             $0.setup = { store, _, hub in hub.frozenSessions = Demo.lateWaiting(store) }
         },
+        // Settings, one pane each (General is `right-settings`), and Repositories in each of its states.
+        Shot.edges("settings-token", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.revealsToken = true },
+        Shot.edges("settings-notifications", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications },
+        Shot.edges("settings-notifications-snoozed", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications; $0.scenario = .snoozed
+        },
+        Shot.edges("settings-shortcuts", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts },
+        Shot.edges("settings-shortcuts-notice", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = false
+            $0.setup = { store, _, _ in
+                store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54),
+                                            ShortcutAction.markAllRead.rawValue: .unassigned]
+            }
+        },
+        Shot.edges("settings-claude", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude },
+        Shot.edges("settings-claude-off", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy
+        },
+        // The states of Settings that the dev build and a healthy account never show.
+        Shot.edges("settings-signed-out", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.scenario = .signedOut },
+        Shot.edges("settings-launch-error", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.launchError = "The operation couldn't be completed. Operation not permitted"
+        },
+        Shot.edges("settings-update-idle", on: [.right]) { settingsShot(&$0, .idle) },
+        Shot.edges("settings-update-available", on: [.right]) { settingsShot(&$0, .available) },
+        Shot.edges("settings-update-downloading", on: [.right]) { settingsShot(&$0, .downloading(0.42)) },
+        Shot.edges("settings-update-ready", on: [.right]) { settingsShot(&$0, .ready) },
+        Shot.edges("settings-update-failed", on: [.right]) { settingsShot(&$0, .failed("Couldn't verify the download: the checksum doesn't match")) },
+        Shot.edges("settings-notifications-off", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications
+            $0.setup = { store, _, _ in store.settings.notifications = false }
+        },
+        Shot.edges("settings-shortcuts-recording", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+            $0.preview.recording = .togglePanel
+        },
+        Shot.edges("settings-shortcuts-conflict", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+            $0.preview.recording = .openItem; $0.preview.recorderError = "Already used by Mark read / unread"
+        },
+        Shot.edges("settings-claude-missing", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy; $0.preview.claudeInstalled = false
+        },
+        Shot.edges("settings-claude-key-saved", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude
+            $0.setup = { store, _, _ in
+                store.hasTypesafeKey = true
+                store.agents.iconsEnabled = true
+            }
+        },
+        Shot.edges("repos-retry-focus", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed; $0.preview.retryFocused = "ziglang/zig"
+        },
+        Shot.edges("repos-drop", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.dropTarget = "ziglang/zig" },
+        Shot.edges("repos-custom", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig" },
+        // Names too long for the line beside the controls take a line of their own.
+        Shot.edges("repos-long-names", on: [.right]) {
+            $0.pinned = true; $0.page = .repos
+            $0.setup = { store, _, _ in
+                store.repos.append(contentsOf: ["pointfreeco/swift-composable-architecture", "superradiantlabs/sandbox-runtime-images"]
+                    .map { RepoConfig(fullName: $0) })
+            }
+        },
+        Shot.edges("repos-failure", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed },
+        Shot.edges("repos-add", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addHighlight = 1
+        },
+        Shot.edges("repos-add-error", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addError = "Not Found"
+            // The suggestion that was picked, not the text it was found with.
+            $0.preview.addSubmitted = "apple/swift-nio"
+        },
+        Shot.edges("repos-undo", on: [.right]) {
+            $0.pinned = true; $0.page = .repos
+            // Moved to Only what's for me: the comments that were not for you are gone, and the line says so.
+            $0.setup = { store, _, _ in
+                store.undoStack.announce = { _ in }
+                if let repo = store.repos.first(where: { $0.fullName == "0xpolarzero/lookout" }) {
+                    store.items.append(contentsOf: (0..<3).map { n in
+                        var item = InboxItem(id: "not-for-me-\(n)", repo: repo.fullName, kind: .issueComment, number: 40 + n, title: "Idea", snippet: "",
+                                             author: "someone", avatar: nil, authorIsApp: false, url: repo.url, createdAt: Date(), state: .unread)
+                        item.forYou = false
+                        return item
+                    })
+                    store.changePreset(.forMe, on: repo)
+                }
+            }
+        },
+        Shot.edges("repos-add-none", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "zzzz" },
+        Shot.edges("repos-empty", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .empty },
+        Shot.edges("repos-contrast", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig"; $0.environment = .contrast
+        },
     ].flatMap { $0 }
+
+    /// The General pane with the updater in a phase (a release, as the dev build is never one).
+    private static func settingsShot(_ shot: inout Shot, _ phase: Updater.Phase) {
+        shot.pinned = true
+        shot.page = .settings
+        shot.setup = { store, _, _ in store.updater.preview(phase, version: "0.5.0") }
+    }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.
     private static func scenarioShots(_ slug: String, _ scenario: Demo.Scenario, peek: HubSection? = nil) -> [Shot] {
@@ -677,7 +786,8 @@ enum PlaygroundShots {
         case .arcs: content = AnyView(MotionSheet())
         case nil:
             content = AnyView(PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
-                .environment(\.previewTip, shot.tip))
+                .environment(\.previewTip, shot.tip)
+                .environment(\.pagePreview, shot.preview))
         }
         let root = content
             .shotEnvironment(shot.environment)
@@ -803,7 +913,7 @@ private struct ComponentSheet: View {
     }
 
     private var forms: some View {
-        group("Switch (on, off, disabled) and field (rest, focused)") {
+        group("Switch and checkbox (on, off, disabled) and field (rest, focused)") {
             VStack(spacing: 0) {
                 Toggle("Launch at login", isOn: .constant(true))
                 Toggle("Desktop notifications", isOn: .constant(false))
@@ -813,6 +923,14 @@ private struct ComponentSheet: View {
             .font(Theme.Typography.body).foregroundStyle(Theme.text)
             .padding(.horizontal, Theme.Metrics.contentEdge - Theme.Metrics.inset)
             .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
+            VStack(spacing: 0) {
+                Toggle("Pull request comments", isOn: .constant(true))
+                Toggle("Issue comments", isOn: .constant(false))
+                Toggle("Every comment, not only the ones for me", isOn: .constant(false)).disabled(true)
+            }
+            .toggleStyle(CheckboxStyle())
+            .font(Theme.Typography.body).foregroundStyle(Theme.text)
+            .padding(.horizontal, Theme.Metrics.contentEdge)
             HStack(spacing: Theme.Space.md) {
                 TextField("owner/repo or GitHub URL", text: .constant("")).fieldStyle()
                 TextField("Search", text: .constant("zig")).fieldStyle(focused: true)

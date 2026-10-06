@@ -48,6 +48,8 @@ final class HubKeys {
         let flags = event.modifierFlags.intersection(Shortcut.relevant)
         let shortcut = Shortcut(event)
         if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
+            // A field or overlay with something open to cancel (a token, suggestions) takes Esc before the page does.
+            if EscapeRoute.run() { return true }
             if editing { event.window?.makeFirstResponder(nil) }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
@@ -63,8 +65,14 @@ final class HubKeys {
             hub.go(.settings)
             return true
         }
+        // What the user bound comes first, even ⌘Z; undo is what's left of the key when no action takes it.
+        if act(event, flags: flags, shortcut: shortcut) { return true }
+        return flags == .command && event.charactersIgnoringModifiers == "z" && store.undoLast()
+    }
+
+    /// The configured actions, and the typing that searches. False when the key is none of them.
+    private func act(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool {
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
-        if flags == .command, event.charactersIgnoringModifiers == "z" { return store.undoLast() }
         guard hub.expanded, hub.page == .main else { return false }
         if flags == .command, event.charactersIgnoringModifiers == "f" {
             hub.beginSearch()

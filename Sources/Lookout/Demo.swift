@@ -56,6 +56,9 @@ enum Demo {
                                       title: "Release 0.4.2", updatedAt: now.addingTimeInterval(-86400)),
         ]
         store.items = items(now)
+        // What the add field on Repositories offers.
+        store.suggestions = ["apple/swift-nio", "apple/swift-argument-parser", "pointfreeco/swift-composable-architecture",
+                             "vapor/vapor", "oven-sh/bun", "swiftlang/swift-package-manager"]
 
         switch scenario {
         case .busy:
@@ -88,7 +91,7 @@ enum Demo {
             store.tokenSource = nil
             store.lastSync = nil
             store.rateRemaining = nil
-            store.authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
+            store.authError = SignInFailure.missingToken
             // The rows it had stay cached; the message replaces them.
             store.ci = [:]
         case .inboxMany:

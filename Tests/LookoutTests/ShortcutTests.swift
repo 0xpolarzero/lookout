@@ -78,4 +78,128 @@ import Testing
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
         #expect(settings.shortcuts == nil)
     }
+
+    @Test func aClearedShortcutMatchesNothingAndComesBackWithReset() {
+        let store = Store()
+        store.persists = false
+        store.setShortcut(.unassigned, for: .markAllRead)
+        #expect(store.shortcut(.markAllRead).isUnassigned)
+        #expect(store.shortcut(.markAllRead).display == "None")
+        #expect(!store.shortcut(.markAllRead).isModifierTap && store.shortcut(.markAllRead).mouseButton == nil)
+        // Whatever key is pressed, none is the cleared one.
+        for code in [kVK_Space, kVK_Delete, kVK_Return, kVK_ANSI_Z] {
+            #expect(Shortcut(key(code, [.option])) != store.shortcut(.markAllRead))
+        }
+        store.setShortcut(nil, for: .markAllRead)
+        #expect(store.shortcut(.markAllRead) == ShortcutAction.markAllRead.defaultShortcut)
+    }
+
+    @Test func restoreDefaultsResetsEveryShortcutAndRegistersTheGlobalOnesAgain() {
+        let store = Store()
+        store.persists = false
+        var registered: [ShortcutAction] = []
+        store.onGlobalShortcutChange = { action, _ in registered.append(action) }
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
+        store.setShortcut(.unassigned, for: .discard)
+        #expect(store.hasCustomShortcuts)
+        registered = []
+        store.restoreDefaultShortcuts()
+        #expect(!store.hasCustomShortcuts)
+        for action in ShortcutAction.allCases { #expect(store.shortcut(action) == action.defaultShortcut) }
+        #expect(Set(registered) == [.togglePanel, .sessionSwitcher])
+    }
+
+    @Test func globalDefaultsAreUnchanged() {
+        #expect(ShortcutAction.togglePanel.defaultShortcut == Shortcut(keyCode: UInt16(kVK_ANSI_L), modifiers: [.control, .option]))
+        #expect(ShortcutAction.sessionSwitcher.defaultShortcut == Shortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.control, .option]))
+    }
+
+    @MainActor private func connected(_ store: Store, _ registrar: FakeRegistrar) -> GlobalShortcuts {
+        store.persists = false
+        store.agents.enabled = true
+        let globals = GlobalShortcuts(store: store, registrar: registrar) { _ in }
+        globals.start()
+        return globals
+    }
+
+    @MainActor @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keep = ShortcutAction.togglePanel.defaultShortcut, sessions = ShortcutAction.sessionSwitcher.defaultShortcut
+        // Swapped the way the recorder allows it: through a key neither holds.
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
+        store.setShortcut(keep, for: .sessionSwitcher)
+        store.setShortcut(sessions, for: .togglePanel)
+        #expect(registrar.registered == [1: sessions, 2: keep])
+        registrar.refused = []
+        store.restoreDefaultShortcuts()
+        #expect(registrar.refused.isEmpty)
+        #expect(registrar.registered == [1: keep, 2: sessions])
+        #expect(store.shortcut(.togglePanel) == keep && store.shortcut(.sessionSwitcher) == sessions)
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keepDefault = ShortcutAction.togglePanel.defaultShortcut
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        store.setShortcut(moved, for: .togglePanel)
+        // Open on sessions takes the key Keep open used to have: nothing holds it, so the recorder allows it.
+        #expect(store.shortcutConflict(keepDefault, for: .sessionSwitcher) == nil)
+        store.setShortcut(keepDefault, for: .sessionSwitcher)
+        registrar.refused = []
+        #expect(store.resetShortcut(for: .togglePanel) == .sessionSwitcher)
+        #expect(store.shortcut(.togglePanel) == moved)
+        #expect(store.shortcut(.sessionSwitcher) == keepDefault)
+        #expect(registrar.registered == [1: moved, 2: keepDefault])
+        #expect(registrar.refused.isEmpty)
+        // Once the other action lets go of it, the reset goes through.
+        store.setShortcut(nil, for: .sessionSwitcher)
+        #expect(store.resetShortcut(for: .togglePanel) == nil)
+        #expect(store.shortcut(.togglePanel) == keepDefault)
+        #expect(registrar.registered == [1: keepDefault, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        registrar.received = []
+        store.setShortcut(.unassigned, for: .togglePanel)
+        #expect(registrar.received == [nil])
+        #expect(registrar.registered[1] == nil)
+        #expect(registrar.registered[2] == ShortcutAction.sessionSwitcher.defaultShortcut)
+        store.setShortcut(nil, for: .togglePanel)
+        #expect(registrar.registered[1] == ShortcutAction.togglePanel.defaultShortcut)
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        #expect(registrar.registered[2] != nil)
+        store.agents.enabled = false
+        globals.register(.sessionSwitcher)
+        #expect(registrar.registered[2] == nil)
+    }
+}
+
+/// Stands in for the system: one registration per id, and a key another id holds is refused, as Carbon does.
+private final class FakeRegistrar: HotKeyRegistrar {
+    var registered: [UInt32: Shortcut] = [:]
+    var refused: [Shortcut] = []
+    var received: [Shortcut?] = []
+
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) {
+        received.append(shortcut)
+        registered[id] = nil
+        guard let shortcut, !shortcut.isUnassigned else { return }
+        if registered.values.contains(shortcut) { refused.append(shortcut); return }
+        registered[id] = shortcut
+    }
 }

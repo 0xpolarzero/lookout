@@ -272,8 +272,7 @@ struct LookoutHub: View {
 
     var verticalPage: some View {
         page
-            .frame(width: Self.detail)
-            .modifier(FitHeight(cap: maxLength))
+            .frame(width: Self.detail, height: maxLength)
             // (Reduce Motion: no slide, but still a short fade.)
             .transition(reduce ? .opacity.animation(Theme.Motion.fade) : .slide(from: edge == .right ? .trailing : .leading, reduce: false))
     }
@@ -347,8 +346,8 @@ struct LookoutHub: View {
                                             removal: .opacity.animation(Theme.Motion.hover)))
                 } else {
                     page
-                        .modifier(FitHeight(cap: maxLength - Self.cell))
                         .frame(idealWidth: Self.pageWidth, maxWidth: .infinity)
+                        .frame(height: maxLength - Self.cell)
                         // Settles toward the strip as it fades in.
                         .transition(reduce ? .opacity.animation(Theme.Motion.fade)
                                     : .opacity.combined(with: .offset(y: edge == .top ? -8 : 8)))
