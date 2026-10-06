@@ -10,7 +10,7 @@ extension LookoutHub {
             pageHeader
             Hairline()
             Group {
-                if hub.page == .repos { ReposView(store: store) } else { SettingsView(store: store) }
+                if hub.page == .repos { ReposView(store: store) } else { SettingsView(store: store, openRepos: { hub.go(.repos) }) }
             }
             .id(hub.page)
             .transition(reduce ? .opacity.animation(Theme.Motion.fade) : .push(from: hub.forward ? .trailing : .leading))

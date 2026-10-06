@@ -275,6 +275,8 @@ struct Shot {
     var tip: String?
     var size = Shot.standard
     var environment = ShotEnvironment()
+    /// The pane, field or disclosure the Settings and Repositories pages open in (see `PagePreview`).
+    var preview = PagePreview()
     /// The playground's own "Lookout playground" card: hidden, as it is not part of what is being designed.
     var showsExplainer = false
     /// Anything the fields above don't cover, after they are applied.
@@ -322,6 +324,9 @@ struct Shot {
 ///   components, components-contrast (each shared component in its states, no hub)
 /// 1280×720, every edge
 ///   open-720, settings-720, repos-720, rest-sessions-12-720
+/// Settings and Repositories, right edge
+///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
+///   settings-shortcuts-notice, settings-claude, settings-claude-off
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -392,6 +397,24 @@ enum PlaygroundShots {
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
         Shot.edges("repos-720") { $0.pinned = true; $0.page = .repos; $0.size = Shot.hd },
         Shot.edges("rest-sessions-12-720") { $0.scenario = .sessions12; $0.size = Shot.hd },
+        // Settings, one pane each (General is `right-settings`).
+        Shot.edges("settings-token", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.revealsToken = true },
+        Shot.edges("settings-notifications", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications },
+        Shot.edges("settings-notifications-snoozed", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications; $0.scenario = .snoozed
+        },
+        Shot.edges("settings-shortcuts", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts },
+        Shot.edges("settings-shortcuts-notice", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = false
+            $0.setup = { store, _, _ in
+                store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54),
+                                            ShortcutAction.markAllRead.rawValue: .unassigned]
+            }
+        },
+        Shot.edges("settings-claude", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude },
+        Shot.edges("settings-claude-off", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy
+        },
     ].flatMap { $0 }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.
@@ -455,7 +478,8 @@ enum PlaygroundShots {
         case .components: content = AnyView(ComponentSheet())
         case nil:
             content = AnyView(PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
-                .environment(\.previewTip, shot.tip))
+                .environment(\.previewTip, shot.tip)
+                .environment(\.pagePreview, shot.preview))
         }
         let root = content
             .shotEnvironment(shot.environment)
