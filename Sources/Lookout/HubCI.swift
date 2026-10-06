@@ -491,11 +491,17 @@ private struct CapEdgeIf: ViewModifier {
 
 extension HubState {
     /// The bar's CI cell, shown (VoiceOver's Show): the hub stays open on CI, with its first row picked and VoiceOver's
-    /// focus moved to its header. Another section's focus, or a search, would hide the rows, so they step back.
+    /// focus moved to its header. Another section's focus, or a search, would hide the rows, so they step back; so does the
+    /// screen's room, which can fold CI's rows away: CI is then the focused section.
     func showCI(_ store: Store, ui: UIState) {
         pinned = true
         if !query.isEmpty { query = "" }
         if focus != nil, focus != .ci { LookoutHub.animate(LookoutHub.refocus) { focus = nil } }
+        // A low bar folds CI to its header in the combined layout: its rows come back only as the focused section.
+        if ciFolded {
+            ciFolded = false
+            LookoutHub.animate(LookoutHub.refocus) { focus = .ci }
+        }
         if let first = ciTargets(store).first {
             selection = first
             ui.drawerSelection = nil

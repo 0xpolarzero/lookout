@@ -77,6 +77,20 @@ import Testing
         #expect(hub.voiceOverRequest?.target == "h:ci")
     }
 
+    @Test func showOnCIWhereTheRoomFoldsItsRowsFocusesCIInsteadOfPickingNothing() {
+        let store = Store()
+        store.persists = false
+        store.repos = [RepoConfig(fullName: "b/bad")]
+        let now = Date()
+        store.ci = ["b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
+                                      updatedAt: now)]
+        let (hub, ui) = state(selecting: "i:1", keyboard: false)
+        // A low bar on the side: CI is only its header, and has no rows to pick.
+        hub.ciFolded = true
+        hub.showCI(store, ui: ui)
+        #expect(hub.focus == .ci && hub.selection == "c:b/bad" && hub.keyboardSelection?.id == "c:b/bad")
+    }
+
     // MARK: A focused control
 
     private func press(_ code: Int, _ characters: String = "") -> NSEvent {
