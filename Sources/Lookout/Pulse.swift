@@ -6,7 +6,7 @@ import SwiftUI
 /// Animation: no hosting view, no second SwiftUI graph, no SwiftUI work per frame (the render server runs the loop). The
 /// SwiftUI content stays in the hierarchy at opacity 0 only for layout.
 ///
-/// Every pulse breathes in phase: each loop begins at the last multiple of its cycle on the shared media clock, so a
+/// Every pulse of one cycle breathes in phase: each loop begins at the last multiple of its cycle on the shared media clock, so a
 /// view that is made again, or a loop that is removed and added back, joins the others where they are. The image is
 /// shared by every pulse that draws the same thing, and rendered again when `id` changes (pass every input the content
 /// depends on: anything not in `id` is not refreshed), when Increase Contrast or Differentiate Without Colour changes,

@@ -3,27 +3,19 @@ import SwiftUI
 
 // A session's tile, as the bar draws it.
 
-/// A session's tile: its two letters (or emoji) on its status colour. Working agents get a pulsing dot in the
-/// corner; pending sessions are a size smaller and dimmer.
+/// A session's tile: its two letters (or emoji) on its status colour. Working agents carry the working arc;
+/// pending sessions are a size smaller and dimmer.
 struct AgentTile: View {
     let row: AgentRow
     var size: CGFloat = 26
     var selected = false
-    @Environment(\.resolved) private var resolved
 
     var body: some View {
-        // Busy (Claude answering, or a subagent or command still running after it): the tile fades and pulses,
-        // quieter than the sessions waiting on you. The face is rendered to an image that Core Animation fades.
-        let busy = (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty
-        Group {
-            if busy {
-                Pulse(from: 0.6, to: 0.28, duration: 1.1, id: AgentTileFace.Key(row: row, size: size, differentiate: resolved.differentiate)) {
-                    AgentTileFace(row: row, size: size, differentiate: resolved.differentiate)
-                }
-            } else {
-                AgentTileFace(row: row, size: size, differentiate: resolved.differentiate)
-            }
-        }
+        // Busy (Claude answering, or a subagent or command still running after it): the arc, on the face as it is.
+        // Never on a session waiting for you: its amber fill is the mark.
+        let busy = !row.waitsForYou && (row.session.running || !row.tasks.isEmpty)
+        AgentTileFace(row: row, size: size)
+            .overlay { WorkingArc(size: size, working: busy) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
             .accessibilityValue(row.stateName)
@@ -39,26 +31,11 @@ struct AgentTile: View {
     }
 }
 
-/// The tile itself, without its busy pulse (what `Pulse` renders to an image).
+/// The tile itself, without its marks.
 private struct AgentTileFace: View {
     let row: AgentRow
     var size: CGFloat
-    /// Differentiate Without Colour, passed in rather than read: `Pulse` renders this outside the environment.
-    var differentiate = false
-
-    /// What the face depends on.
-    struct Key: Hashable {
-        let label: String
-        let icon: String?
-        let tint: Color?
-        let pending: Bool
-        let size: CGFloat
-        let differentiate: Bool
-        init(row: AgentRow, size: CGFloat, differentiate: Bool) {
-            label = row.label; icon = row.icon; tint = row.tint; pending = row.pending; self.size = size
-            self.differentiate = differentiate
-        }
-    }
+    @Environment(\.resolved) private var resolved
 
     var body: some View {
         let shape = Tile.shape(size)
@@ -79,7 +56,7 @@ private struct AgentTileFace: View {
             .frame(width: size, height: size)
             .background(shape.fill(row.tint ?? Theme.Fill.tile))
             // Waiting is amber, which a colour-blind eye may not tell from the grey tile: a dark outline says it too.
-            .overlay { if differentiate, row.tint == Theme.amber { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
+            .overlay { if resolved.differentiate, row.tint == Theme.amber { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
             .opacity(row.pending ? 0.55 : 1)
     }
 }

@@ -87,11 +87,10 @@ import Testing
     @Test func reduceMotionRemovesTheLoopAndRestsAtFullOpacity() throws {
         let host = Window()
         let view = host.add(at: 0)
-        // A dimmed loop, as the busy tile's: nothing of it may stay under Reduce Motion.
-        let dimmed = PulseView.Spec(from: 0.6, to: 0.28, duration: 1.1)
-        view.set(dimmed, animated: true)
+        // Nothing of the loop may stay under Reduce Motion, not even a dimmed value.
+        view.set(spec, animated: true)
         #expect(loop(view) != nil)
-        view.set(dimmed, animated: false)
+        view.set(spec, animated: false)
         #expect(loop(view) == nil)
         #expect(view.layer?.opacity == 1)
     }
