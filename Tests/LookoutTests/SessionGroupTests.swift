@@ -530,9 +530,26 @@ import Testing
         let x = try #require(rows.first { $0.id == "x1" }), y = try #require(rows.first { $0.id == "y1" })
         // y's late waiter took x's only visible place under a frozen order: the group is still x's, and so are its actions.
         let group = SessionGroup(kind: .project("/code/x"), rows: [y])
-        #expect(group.title == "x")
+        #expect(group.title(s) == "x")
         #expect(group.placement(of: y) == .waiting && group.placement(of: x) == .project)
-        #expect(SessionGroup(kind: .project(""), rows: [y]).title == "Scratch")
+        #expect(SessionGroup(kind: .project(""), rows: [y]).title(s) == "Scratch")
+    }
+
+    @Test func sessionsOfSameNamedProjectsSayWhichProjectTheyAreIn() throws {
+        let s = store([session("a", folder: "/customer-a/app", blocked: true), session("b", folder: "/customer-b/app")],
+                      kept: ["a", "b"], unread: ["a"])
+        let rows = s.agentRows.kept
+        let a = try #require(rows.first { $0.id == "a" }), b = try #require(rows.first { $0.id == "b" })
+        #expect(s.sessionGroups.map { $0.title(s) } == ["Waiting for you", "customer-b/app"])
+        #expect(a.projectName == "customer-a/app" && b.projectName == "customer-b/app")
+        #expect(a.spokenValue(now: now).contains("customer-a/app") && b.tileValue(now: now).contains("customer-b/app"))
+        // The name follows the folders: with the other project gone, the folder's own name is enough again.
+        s.claudeSessions["a"] = nil
+        #expect(s.folderName("/customer-b/app") == "app")
+        #expect(try #require(s.agentRows.kept.first).projectName == "app")
+        // A muted project still tells a session's project from another of its name.
+        s.setFolderMuted("/customer-a/app", true)
+        #expect(s.folderName("/customer-b/app") == "customer-b/app")
     }
 
     @Test func aWaitingSessionIsNeverCutWhereverTheFreezeLeavesIt() {

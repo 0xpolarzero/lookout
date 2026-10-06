@@ -359,7 +359,7 @@ struct SessionGroupHeader: View {
         RailRow(rail: rail, height: SessionGroup.headerHeight, tile: { Color.clear }) {
             HStack(spacing: Theme.Space.sm) {
                 if let folder { dot(folder) }
-                Text(group.title)
+                Text(title)
                     .font(Theme.Typography.label)
                     .foregroundStyle(group.kind == .waiting ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
                     .lineLimit(1)
@@ -372,11 +372,11 @@ struct SessionGroupHeader: View {
         .contentShape(Rectangle())
         .modifier(ReorderableProject(folder: folder.flatMap { $0.isEmpty ? nil : $0 }, store: store, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
-        .contextMenu { if let folder { ProjectMenu(folder: folder, name: group.title, store: store) } }
+        .contextMenu { if let folder { ProjectMenu(folder: folder, store: store) } }
         .accessibilityElement(children: .contain)
         .accessibilityActions {
             if let folder {
-                Button("Mute \(group.title)") { store.muteFolder(folder) }
+                Button("Mute \(title)") { store.muteFolder(folder) }
                 if store.canMoveProject(folder, by: -1) { Button("Move project up") { LookoutHub.animate { store.moveProject(folder, by: -1) } } }
                 if store.canMoveProject(folder, by: 1) { Button("Move project down") { LookoutHub.animate { store.moveProject(folder, by: 1) } } }
             }
@@ -386,6 +386,8 @@ struct SessionGroupHeader: View {
     private var project: String? {
         if case .project(let folder) = group.kind { folder } else { nil }
     }
+
+    private var title: String { group.title(store) }
 
     /// 6pt in the project's colour; scratch chats have none, so theirs is an outline (the names still line up).
     @ViewBuilder private func dot(_ folder: String) -> some View {
@@ -586,7 +588,7 @@ struct SessionRow: View {
     private var headline: Text {
         let text = Text(row.headline).foregroundStyle(Theme.secondary)
         guard placement.namesProject else { return text }
-        let project = Text(row.session.folderName).foregroundStyle(Theme.tertiary)
+        let project = Text(row.projectName).foregroundStyle(Theme.tertiary)
         return plainHeadline.isEmpty ? project : project + Text(" · ").foregroundStyle(Theme.tertiary) + text
     }
 
@@ -678,7 +680,7 @@ struct ReorderableProject: ViewModifier {
         if let folder {
             content
                 .draggable("project:" + folder) {
-                    Text(URL(fileURLWithPath: folder).lastPathComponent)
+                    Text(store.folderName(folder))
                         .font(Theme.Typography.title)
                         .padding(.horizontal, 10)
                         .frame(height: Theme.Metrics.tile)
@@ -810,8 +812,7 @@ enum ProjectsMenu {
 
     /// Every project a session has been seen in, most recent first, with its palette colour.
     @MainActor static func entries(_ store: Store) -> [Entry] {
-        let all = store.namedFolders
-        return store.recentFolders.map { Entry(folder: $0, name: store.folderName($0, among: all), color: store.projectColor($0)) }
+        store.recentFolders.map { Entry(folder: $0, name: store.folderName($0), color: store.projectColor($0)) }
     }
 
     @MainActor static func make(_ store: Store) -> NSMenu {
@@ -1028,7 +1029,7 @@ struct SessionMenu: View {
         if store.canMoveAgent(row.id, by: -1) { Button("Move up") { store.moveAgent(row.id, by: -1) } }
         if store.canMoveAgent(row.id, by: 1) { Button("Move down") { store.moveAgent(row.id, by: 1) } }
         Divider()
-        ProjectMenu(folder: row.session.folderKey, name: row.session.folderName, store: store)
+        ProjectMenu(folder: row.session.folderKey, store: store)
         Divider()
         Button("Change label…") { editLabel() }
     }
@@ -1037,7 +1038,6 @@ struct SessionMenu: View {
 /// What a project's header and its sessions' menus share: its colour (not for scratch chats), and muting it.
 struct ProjectMenu: View {
     let folder: String
-    let name: String
     let store: Store
 
     var body: some View {
@@ -1054,7 +1054,7 @@ struct ProjectMenu: View {
         }
         if store.canMoveProject(folder, by: -1) { Button("Move project up") { LookoutHub.animate { store.moveProject(folder, by: -1) } } }
         if store.canMoveProject(folder, by: 1) { Button("Move project down") { LookoutHub.animate { store.moveProject(folder, by: 1) } } }
-        Button("Mute \u{201C}\(name)\u{201D}") { store.muteFolder(folder) }
+        Button("Mute \u{201C}\(store.folderName(folder))\u{201D}") { store.muteFolder(folder) }
     }
 }
 

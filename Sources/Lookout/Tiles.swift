@@ -35,7 +35,7 @@ extension AgentRow {
 
     /// What VoiceOver reads after the title: "waiting for you, lcu, 4 minutes".
     func tileValue(now: Date = Date()) -> String {
-        "\(tileState), \(session.folderName), \(Self.spoken(now.timeIntervalSince(session.lastActivity)))"
+        "\(tileState), \(projectName), \(Self.spoken(now.timeIntervalSince(session.lastActivity)))"
     }
 
     /// The question it is stopped on, else what it said last: the hint under the value.

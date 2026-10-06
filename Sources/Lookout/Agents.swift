@@ -109,6 +109,8 @@ struct AgentRow: Identifiable, Hashable {
     var label: String
     /// The project's colour (nil for scratch chats).
     var color: Color?
+    /// The project's name as the lists say it, with enough of its path to tell it from another of the same name.
+    var project: String?
     /// What it's doing, while it works.
     var activity: ClaudeActivity?
     /// Turn over, but subagents or commands it started are still running.
@@ -118,6 +120,8 @@ struct AgentRow: Identifiable, Hashable {
 
     /// The picked icon, unless you chose letters or an emoji yourself.
     var icon: String? { entry.label == nil ? entry.icon : nil }
+
+    var projectName: String { project ?? session.folderName }
 
     var id: String { session.id }
     var unread: Bool { entry.unread }
@@ -176,7 +180,7 @@ struct AgentRow: Identifiable, Hashable {
     func spokenValue(now: Date = Date()) -> String {
         let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
         let age = Self.spokenAge(now.timeIntervalSince(session.running ? workingSince ?? session.lastActivity : session.lastActivity))
-        var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), session.folderName, age]
+        var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), projectName, age]
         if !tasks.isEmpty { parts.append("\(tasks.count) running") }
         return parts.joined(separator: ", ")
     }
@@ -252,12 +256,12 @@ struct SessionGroup: Identifiable {
         }
     }
 
-    var title: String {
+    /// A project's name comes from the group's own folder, which is what its menu and actions act on: a row held in it that is
+    /// another project's (a late waiter under a frozen order) must not rename it.
+    @MainActor func title(_ store: Store) -> String {
         switch kind {
         case .waiting: "Waiting for you"
-        // From the group's own folder, which is what its menu and actions act on: a row held in it that is another project's
-        // (a late waiter under a frozen order) must not rename it.
-        case .project(let folder): folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent
+        case .project(let folder): store.folderName(folder)
         case .newActivity: "New activity"
         }
     }
@@ -428,7 +432,7 @@ extension Store {
     private func makeRow(_ session: ClaudeSession, _ entry: AgentEntry?, label: String?) -> AgentRow {
         AgentRow(session: session, entry: entry ?? AgentEntry(id: session.id),
                  label: label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
-                 color: projectColor(session.folderKey),
+                 color: projectColor(session.folderKey), project: folderName(session.folderKey),
                  activity: session.running ? claudeActivity[session.id] : nil,
                  tasks: session.running ? [] : claudeTasks[session.id] ?? [],
                  summaryText: summaryText(session.summary?.detail))
@@ -506,7 +510,7 @@ extension Store {
         func score(_ s: ClaudeSession) -> Int {
             let title = s.title.lowercased()
             if words.allSatisfy({ title.contains($0) }) { return title.hasPrefix(words[0]) ? 3 : 2 }
-            let both = title + " " + s.folderName.lowercased()
+            let both = title + " " + folderName(s.folderKey).lowercased()
             return words.allSatisfy { both.contains($0) } ? 1 : 0
         }
         return claudeSessions.values
@@ -539,10 +543,17 @@ extension Store {
     /// Every folder a name can be asked for: the ones sessions are in and the ones muted.
     var namedFolders: [String] { Array(Set(knownFolders + agents.mutedFolders).subtracting([""])) }
 
-    /// A project's name where menus choose between projects: its own, with as much of the path above it as it takes to tell it
-    /// from another project of the same name (`customer-a/app`), the same in every menu and tag.
-    func folderName(_ folder: String, among folders: [String]? = nil) -> String {
-        FolderNames.name(folder, among: folders ?? namedFolders)
+    /// A project's name wherever it is named: its own, with as much of the path above it as it takes to tell it from another
+    /// project of the same name (`customer-a/app`), the same in every menu, header, tag and spoken value.
+    func folderName(_ folder: String) -> String {
+        folder.isEmpty ? "Scratch" : folderNames[folder] ?? FolderNames.name(folder, among: namedFolders)
+    }
+
+    /// Called when the sessions or the muted folders change; the dictionary is only written when a name did.
+    func refreshFolderNames() {
+        let all = namedFolders
+        let names = Dictionary(all.map { ($0, FolderNames.name($0, among: all)) }, uniquingKeysWith: { a, _ in a })
+        if names != folderNames { folderNames = names }
     }
 
     var knownFolders: [String] {
@@ -687,7 +698,7 @@ extension Store {
     }
 
     func startAgent(in folder: String) {
-        if let interceptOpen { interceptOpen("New Claude session in \(folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent)"); return }
+        if let interceptOpen { interceptOpen("New Claude session in \(folderName(folder))"); return }
         Claude.newSession(in: folder)
     }
 
@@ -703,7 +714,7 @@ extension Store {
         return claudeSessions.values
             .filter { !kept.contains($0.id) }
             .filter { s in
-                let haystack = (s.title + " " + s.folderName).lowercased()
+                let haystack = (s.title + " " + folderName(s.folderKey)).lowercased()
                 return words.allSatisfy { haystack.contains($0) }
             }
             .sorted { a, b in

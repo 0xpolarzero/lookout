@@ -597,8 +597,7 @@ struct SettingsView: View {
     @ViewBuilder private var mutedFolders: some View {
         let muted = store.agents.mutedFolders
         let unmuted = store.knownFolders.filter { !muted.contains($0) }
-        let all = store.namedFolders
-        let name = { (folder: String) in folder.isEmpty ? "Scratch chats" : store.folderName(folder, among: all) }
+        let name = { (folder: String) in folder.isEmpty ? "Scratch chats" : store.folderName(folder) }
         FormRow("Muted folders") {
             PopUp(label: "Muted folders", value: muted.isEmpty ? "None" : plural(muted.count, "folder")) {
                 Section("Mute a folder") {
