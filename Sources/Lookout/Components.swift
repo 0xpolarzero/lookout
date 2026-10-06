@@ -366,7 +366,6 @@ struct HoverFillButtonStyle: ButtonStyle {
             configuration.label
                 .environment(\.hoverFillHovering, hot)
                 .background(style.shape.fill(resolved.fill(fill)))
-                .opacity(enabled ? 1 : 0.6)
                 .contentShape(style.hitOutset > 0 ? AnyShape(Rectangle().inset(by: -style.hitOutset)) : style.shape)
                 .onHover { hovering = $0 }
                 .motion(Theme.Motion.hover, value: hovering)
@@ -440,6 +439,7 @@ struct BorderedButton: View {
     let title: String
     let action: () -> Void
     @Environment(\.resolved) private var resolved
+    @Environment(\.isEnabled) private var enabled
 
     init(_ title: String, action: @escaping () -> Void) {
         self.title = title
@@ -450,7 +450,8 @@ struct BorderedButton: View {
         Button(action: action) {
             Text(title)
                 .font(Theme.Typography.control)
-                .foregroundStyle(Theme.text)
+                // Disabled: the label steps down a token, nothing is faded (DESIGN.md 4).
+                .foregroundStyle(enabled ? Theme.text : resolved.tertiary)
                 .padding(.horizontal, 12)
                 .frame(height: Theme.Metrics.button)
                 .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(Theme.fieldBorder, lineWidth: resolved.borderWidth))

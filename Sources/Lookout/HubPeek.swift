@@ -383,7 +383,7 @@ struct ControlsSyncRow: View {
                 Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
                 Spacer(minLength: 0)
                 if !line.opensSettings {
-                    Button { store.refreshNow() } label: {
+                    Button { if !store.isSyncing { store.refreshNow() } } label: {
                         HStack(spacing: Theme.Space.sm) {
                             Text("Sync now").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                             Text(store.shortcut(.refresh).display).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)
@@ -396,7 +396,6 @@ struct ControlsSyncRow: View {
                     .focusRing(Theme.Radius.small, isFocused: syncFocused)
                     .reportsControlFocus(syncFocused)
                     .onChange(of: syncFocused) { _, now in if now { onFocus() } }
-                    .disabled(store.isSyncing)
                     .accessibilityLabel("Sync now")
                 }
             }

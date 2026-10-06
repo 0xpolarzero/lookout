@@ -87,7 +87,8 @@ struct SyncButton: View {
     var body: some View {
         SyncStatus(store: store) { line in
             Button {
-                if line.opensSettings { hub.go(.settings) } else { store.refreshNow() }
+                // Not disabled while it checks: that would fade the one word that says so ("Checking…").
+                if line.opensSettings { hub.go(.settings) } else if !store.isSyncing { store.refreshNow() }
             } label: {
                 Text(line.text)
                     .font(Theme.Typography.meta)
@@ -98,7 +99,6 @@ struct SyncButton: View {
             }
             .buttonStyle(.plain)
             .focusRing(Theme.Radius.small)
-            .disabled(store.isSyncing)
             .help(line.help)
             .accessibilityLabel(line.text)
             .accessibilityHint(line.opensSettings ? "Opens Settings" : "Checks GitHub now")
