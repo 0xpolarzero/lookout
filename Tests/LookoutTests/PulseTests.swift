@@ -33,7 +33,7 @@ import Testing
     /// A short cycle (0.1 s), so a test can let several go by.
     private let spec = PulseView.Spec(from: 1, to: 0.55, duration: 0.05)
 
-    private final class Window {
+    @MainActor private final class Window {
         var showing = true
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 40), styleMask: .borderless, backing: .buffered, defer: false)
 

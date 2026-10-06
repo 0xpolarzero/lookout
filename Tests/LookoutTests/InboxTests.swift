@@ -142,11 +142,6 @@ import Testing
 /// is not sent again when a scroll view scrolls, so they read the scroll view's own offset).
 @MainActor
 @Suite struct InboxPaging {
-    private func scrollView(in view: NSView) -> NSScrollView? {
-        if let scroll = view as? NSScrollView { return scroll }
-        return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
-    }
-
     @Test func scrollingToTheEndEmptiesTheCountBelowAndRaisesTheHairline() async throws {
         let store = Store()
         Demo.populate(store, .inboxMany)
@@ -156,22 +151,18 @@ import Testing
                               maxWidth: 900, barLength: 700)
             .frame(width: 900, height: 800, alignment: .topLeading)
         let hosting = NSHostingView(rootView: view)
-        hosting.frame.size = CGSize(width: 900, height: 800)
-        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 900, height: 800))
         defer { window.close() }
-        try await Task.sleep(for: .seconds(0.6))
+        try await eventually { hub.inbox.hiddenBelow > 0 }
+        hosting.settle()
         #expect(hub.inbox.hiddenBelow > 0 && !hub.inbox.scrolled)
-        let scroll = try #require(scrollView(in: hosting))
+        let scroll = try #require(hosting.first(NSScrollView.self))
         let clip = scroll.contentView
         let document = try #require(scroll.documentView)
         let far = document.frame.height - clip.bounds.height
         clip.scroll(to: NSPoint(x: 0, y: document.isFlipped ? far : 0))
         scroll.reflectScrolledClipView(clip)
-        try await Task.sleep(for: .seconds(0.4))
+        try await eventually { hub.inbox.scrolled && hub.inbox.hiddenBelow == 0 }
         #expect(hub.inbox.scrolled && hub.inbox.hiddenBelow == 0)
     }
 }
@@ -186,7 +177,7 @@ import Testing
         withObservationTracking { _ = store.isSnoozed } onChange: { flag.set() }
         #expect(store.isSnoozed)
         // The banner and the Notifications row, which read it, are told once the time has passed (a busy run may be late).
-        for _ in 0..<100 where !flag.value { try await Task.sleep(for: .milliseconds(50)) }
+        try await eventually { flag.value }
         #expect(flag.value && !store.isSnoozed)
     }
 
@@ -199,9 +190,4 @@ import Testing
         try await Task.sleep(for: .seconds(0.7))
         #expect(store.snoozeRevision == revision)
     }
-}
-
-private final class Flag: @unchecked Sendable {
-    private(set) var value = false
-    func set() { value = true }
 }

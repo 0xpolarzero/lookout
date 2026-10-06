@@ -53,56 +53,47 @@ import Testing
 @Suite struct CappedScrollHosted {
     @Observable final class Count { var n: Int; init(_ n: Int) { self.n = n } }
 
+    /// A row of the lists below: `height` tall, and a place the list can cut at.
+    private struct Row: View {
+        let index: Int
+        var height: CGFloat = 40
+        var body: some View { Text("row \(index)").frame(height: height).frame(maxWidth: .infinity).capEdge() }
+    }
+
     private struct Changing: View {
         let count: Count
         var body: some View {
             CappedScroll(cap: 300, lazy: AdaptiveStack<EmptyView>.isLazy(count.n)) {
-                AdaptiveStack(count: count.n, spacing: 0) {
-                    ForEach(0..<count.n, id: \.self) { i in Text("row \(i)").frame(height: 40).frame(maxWidth: .infinity).capEdge() }
-                }
+                AdaptiveStack(count: count.n, spacing: 0) { ForEach(0..<count.n, id: \.self) { Row(index: $0) } }
             }
         }
     }
 
-    @Test func rowCountChangesResizeTheList() {
-        let count = Count(3)
-        let hosting = NSHostingView(rootView: Changing(count: count).frame(width: 300))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        func settle() -> CGFloat {
-            for _ in 0..<8 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded() }
+    /// Hosts `view` in a column 300 wide, runs each of `steps` (a change to what it shows) in turn, and returns the height it
+    /// settles at after each.
+    private func heights<V: View>(of view: V, after steps: [() -> Void] = [{}]) -> [CGFloat] {
+        let hosting = NSHostingView(rootView: view.frame(width: 300))
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 300, height: 900))
+        defer { window.dismiss() }
+        return steps.map { step in
+            step()
+            hosting.settle(turns: 10)
             return hosting.fittingSize.height
         }
-        #expect(abs(settle() - 120) < 1)
-        count.n = 100
-        let grown = settle()
-        #expect(grown >= 280 && grown <= 300, "grown: \(grown)")
-        count.n = 2
-        #expect(abs(settle() - 80) < 1)
-        window.contentView = nil
-        window.orderOut(nil)
     }
 
-    private func height<V: View>(of view: V) -> CGFloat {
-        let hosting = NSHostingView(rootView: view.frame(width: 300))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<8 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            hosting.layoutSubtreeIfNeeded()
-        }
-        let h = hosting.fittingSize.height
-        window.contentView = nil
-        window.orderOut(nil)
-        return h
+    private func height<V: View>(of view: V) -> CGFloat { heights(of: view)[0] }
+
+    @Test func rowCountChangesResizeTheList() {
+        let count = Count(3)
+        let h = heights(of: Changing(count: count), after: [{}, { count.n = 100 }, { count.n = 2 }])
+        #expect(abs(h[0] - 120) < 1)
+        #expect(h[1] >= 280 && h[1] <= 300, "grown: \(h[1])")
+        #expect(abs(h[2] - 80) < 1)
     }
 
     private func rows(_ n: Int) -> some View {
-        ForEach(0..<n, id: \.self) { i in Text("row \(i)").frame(height: 40).frame(maxWidth: .infinity).capEdge() }
+        ForEach(0..<n, id: \.self) { Row(index: $0) }
     }
 
     @Test func shortListIsAsTallAsItsContent() {
@@ -129,11 +120,11 @@ import Testing
             CappedScroll(cap: 300, lazy: true) {
                 if grid {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 1) {
-                        ForEach(0..<count.n, id: \.self) { i in Text("row \(i)").frame(height: 41).frame(maxWidth: .infinity).capEdge() }
+                        ForEach(0..<count.n, id: \.self) { Row(index: $0, height: 41) }
                     }.padding(.vertical, 8)
                 } else {
                     AdaptiveStack(count: count.n, spacing: 1) {
-                        ForEach(0..<count.n, id: \.self) { i in Text("row \(i)").frame(height: 41).frame(maxWidth: .infinity).capEdge() }
+                        ForEach(0..<count.n, id: \.self) { Row(index: $0, height: 41) }
                     }.padding(.vertical, 8)
                 }
             }
@@ -143,20 +134,7 @@ import Testing
     /// Hosts the list, settles it, and returns its height after each row-count change.
     private func heights(grid: Bool, counts: [Int]) -> [CGFloat] {
         let count = Count(counts[0])
-        let hosting = NSHostingView(rootView: LazyRows(count: count, grid: grid).frame(width: 300))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        var out: [CGFloat] = []
-        for n in counts {
-            count.n = n
-            for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded() }
-            out.append(hosting.fittingSize.height)
-        }
-        window.contentView = nil
-        window.orderOut(nil)
-        return out
+        return heights(of: LazyRows(count: count, grid: grid), after: counts.map { n in { count.n = n } })
     }
 
     /// Whole rows: 8 of padding at the top, then rows of 41 with 1 of spacing between them.
@@ -198,28 +176,14 @@ import Testing
         let count: Count
         var body: some View {
             CappedScroll(cap: 300, lazy: true) {
-                LazyVStack(spacing: 0) {
-                    ForEach(0..<count.n, id: \.self) { i in Text("row \(i)").frame(height: 30 + CGFloat(i % 3) * 10).frame(maxWidth: .infinity).capEdge() }
-                }
+                LazyVStack(spacing: 0) { ForEach(0..<count.n, id: \.self) { Row(index: $0, height: 30 + CGFloat($0 % 3) * 10) } }
             }
         }
     }
 
     @Test func variableRowHeightsStillRegrow() {
         let count = Count(200)
-        let hosting = NSHostingView(rootView: VariableRows(count: count).frame(width: 300))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        var out: [CGFloat] = []
-        for n in [200, 3, 200] {
-            count.n = n
-            for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded() }
-            out.append(hosting.fittingSize.height)
-        }
-        window.contentView = nil
-        window.orderOut(nil)
+        let out = heights(of: VariableRows(count: count), after: [200, 3, 200].map { n in { count.n = n } })
         #expect(abs(out[1] - 120) < 1.5, "\(out)")
         // Cut at a measured row edge (not through a row), and regrown to the same height.
         #expect(out[0] >= 260 && out[0] <= 300.5 && abs(out[2] - out[0]) < 1.5, "\(out)")
@@ -248,16 +212,13 @@ import Testing
 
     @discardableResult
     private func press(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String = "") -> Bool {
-        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
-                                     context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false,
-                                     keyCode: UInt16(code))!
-        return keys.key(event)
+        keys.key(keyDown(code, flags, chars))
     }
 
     private func focus(_ number: Int) { press([1: kVK_ANSI_1, 2: kVK_ANSI_2, 3: kVK_ANSI_3, 0: kVK_ANSI_0][number]!, .command, "\(number)") }
     private func down() { press(kVK_DownArrow, [], "\u{F701}") }
     private func up() { press(kVK_UpArrow, [], "\u{F700}") }
-    private func enter() -> Bool { press(kVK_Return, [], "\r") }
+    @discardableResult private func enter() -> Bool { press(kVK_Return, [], "\r") }
 
     @Test func downAfterFocusingTheSessionsPicksASession() {
         focus(3)
@@ -340,10 +301,7 @@ import Testing
 
     @discardableResult
     private func press(_ code: Int, _ chars: String = "") -> Bool {
-        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
-                                     context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false,
-                                     keyCode: UInt16(code))!
-        return keys.key(event)
+        keys.key(keyDown(code, [], chars))
     }
 
     @Test func theTabRingMovesTheHighlightAndTheArrowsTakeTheRingBack() {
@@ -521,10 +479,7 @@ import Testing
 
     @discardableResult
     func press(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String = "", in window: NSWindow? = nil) -> Bool {
-        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
-                                     windowNumber: window?.windowNumber ?? 0, context: nil, characters: chars,
-                                     charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(code))!
-        return keys.key(event)
+        keys.key(keyDown(code, flags, chars, in: window))
     }
 
     @discardableResult func down() -> Bool { press(kVK_DownArrow, [], "\u{F701}") }
@@ -1019,10 +974,10 @@ private final class Redrawn: @unchecked Sendable {
     private func bodyChanges(pinned: Bool, _ mutate: () -> Void) -> Bool {
         hub.pinned = pinned
         let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: 700)
-        var changed = false
-        withObservationTracking { _ = view.body } onChange: { changed = true }
+        let changed = Flag()
+        withObservationTracking { _ = view.body } onChange: { changed.set() }
         mutate()
-        return changed
+        return changed.value
     }
 
     init() {
@@ -1149,14 +1104,14 @@ private final class Redrawn: @unchecked Sendable {
         let id = try #require(store.claudeSessions.values.first { $0.running }?.id)
         let rows = store.allAgentRows
         #expect(rows.count > 3)
-        var redrawn = 0
+        let redrawn = Redrawn()
         for row in rows {
             let view = SessionRow(row: row, store: store, ui: ui, hub: hub, rail: .trailing, placement: .project)
-            withObservationTracking { _ = view.body } onChange: { redrawn += 1 }
+            withObservationTracking { _ = view.body } onChange: { redrawn.add(row.id) }
         }
         store.claudeActivity[id] = ClaudeActivity(text: "Running swift test", since: Date())
         store.claudeTasks[id] = [ClaudeTask(id: "t1", kind: .command, title: "swift test", since: Date())]
-        #expect(redrawn == 0, "\(redrawn) of \(rows.count) rows read what a single session's activity changes")
+        #expect(redrawn.ids.isEmpty, "\(redrawn.ids.count) of \(rows.count) rows read what a single session's activity changes")
     }
 
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
@@ -1172,24 +1127,17 @@ private final class Redrawn: @unchecked Sendable {
         Demo.populate(store, .agents)
         let hub = HubState()
         let hosting = NSHostingView(rootView: StaleWatch(store: store, hub: hub))
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 10, height: 10), styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 10, height: 10))
         defer { window.close() }
-        func settle(until done: () -> Bool) async throws {
-            for _ in 0..<40 where !done() { try await Task.sleep(for: .milliseconds(50)) }
-        }
         // Every repository's last check is long ago: the lists make room for the line.
         for repo in store.ciRepos { store.ciCheckedAt[repo.fullName] = Date().addingTimeInterval(-86400) }
         store.ciFreshnessRevision &+= 1
-        try await settle { hub.ciStale }
+        try await eventually(upTo: 2) { hub.ciStale }
         #expect(hub.ciStale)
         // A poll that checked them all again takes it away.
         for repo in store.ciRepos { store.ciCheckedAt[repo.fullName] = Date() }
         store.ciFreshnessRevision &+= 1
-        try await settle { !hub.ciStale }
+        try await eventually(upTo: 2) { !hub.ciStale }
         #expect(!hub.ciStale)
     }
 }
@@ -1205,16 +1153,11 @@ private final class Redrawn: @unchecked Sendable {
                               maxWidth: 900, barLength: 700)
             .frame(width: 900, height: 800, alignment: .topLeading)
         let hosting = NSHostingView(rootView: view)
-        hosting.frame.size = CGSize(width: 900, height: 800)
-        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 900, height: 800))
         defer { window.close() }
         try await Task.sleep(for: .seconds(0.3))
         hub.hovering = true
-        try await Task.sleep(for: .seconds(0.3))
+        try await eventually(upTo: 2) { hub.frozenSessions != nil }
         let held = try #require(hub.frozenSessions)
         #expect(!held.isEmpty)
         // Kept open with the pointer still there: the bar's cells are replaced, the order is not let go of.
@@ -1222,7 +1165,7 @@ private final class Redrawn: @unchecked Sendable {
         try await Task.sleep(for: .seconds(0.5))
         #expect(hub.frozenSessions == held)
         hub.hovering = false
-        try await Task.sleep(for: .seconds(0.3))
+        try await eventually(upTo: 2) { hub.frozenSessions == nil }
         #expect(hub.frozenSessions == nil)
     }
 }

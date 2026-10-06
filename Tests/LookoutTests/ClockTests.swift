@@ -209,21 +209,9 @@ import Testing
 
     private func host(_ list: List, in clock: Clock) -> (NSWindow, NSScrollView) {
         let hosting = NSHostingView(rootView: list.environment(\.clock, clock))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        settle(hosting)
-        return (window, find(NSScrollView.self, in: hosting)!)
-    }
-
-    private func settle(_ view: NSView) {
-        for _ in 0..<8 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); view.layoutSubtreeIfNeeded() }
-    }
-
-    private func find<V: NSView>(_ type: V.Type, in view: NSView) -> V? {
-        if let match = view as? V { return match }
-        return view.subviews.lazy.compactMap { self.find(type, in: $0) }.first
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 200, height: 120))
+        hosting.settle()
+        return (window, hosting.first(NSScrollView.self)!)
     }
 
     private func scroll(_ scrollView: NSScrollView, toBottom: Bool) {
@@ -234,7 +222,7 @@ import Testing
         let bottom = document.isFlipped ? far : 0, top = document.isFlipped ? 0 : far
         clip.scroll(to: NSPoint(x: 0, y: toBottom ? bottom : top))
         scrollView.reflectScrolledClipView(clip)
-        settle(scrollView)
+        scrollView.settle()
     }
 
     /// How many times each label's content was evaluated.
@@ -269,23 +257,18 @@ import Testing
         let clock = Clock(observing: false, windowVisible: { true }, showing: { _ in true }, date: { date })
         let counts = Evaluations()
         let hosting = NSHostingView(rootView: Counted(counts: counts).environment(\.clock, clock))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 200, height: 120))
+        defer { window.dismiss() }
         // The label that found itself on screen is redrawn once, from the clock, a moment after the update that found out.
-        try await Task.sleep(for: .milliseconds(300))
-        settle(hosting)
-        #expect(clock.interval == 30)
+        try await eventually { clock.interval == 30 }
+        hosting.settle()
         let (top, bottom) = (counts.top, counts.bottom)
         date.addTimeInterval(30)
         clock.tick()
-        try await Task.sleep(for: .milliseconds(200))
-        settle(hosting)
+        try await eventually { counts.top > top }
+        hosting.settle()
         #expect(counts.top > top, "the label in view is redrawn by the tick")
         #expect(counts.bottom == bottom, "the label scrolled away is not")
-        window.contentView = nil
-        window.orderOut(nil)
     }
 
     @Test func scrollingTheSecondsLabelOutOfViewDowngradesTheTimer() {
@@ -296,8 +279,7 @@ import Testing
         #expect(clock.interval == 1)
         scroll(scrollView, toBottom: false)
         #expect(clock.interval == 30)
-        window.contentView = nil
-        window.orderOut(nil)
+        window.dismiss()
         #expect(clock.interval == nil)
     }
 
@@ -306,8 +288,7 @@ import Testing
         let (window, scrollView) = host(List(hidden: true), in: clock)
         scroll(scrollView, toBottom: true)
         #expect(clock.interval == nil)  // in view, but not drawn
-        window.contentView = nil
-        window.orderOut(nil)
+        window.dismiss()
     }
 
     @Test func aLabelInACoveredWindowDoesNotTick() {
@@ -317,15 +298,8 @@ import Testing
         #expect(clock.interval == 30)
         showing = false
         NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
-        settle(scrollView)
+        scrollView.settle()
         #expect(clock.interval == nil)
-        window.contentView = nil
-        window.orderOut(nil)
+        window.dismiss()
     }
-}
-
-/// Set from an observation's change handler.
-private final class Flag: @unchecked Sendable {
-    private(set) var value = false
-    func set() { value = true }
 }

@@ -93,11 +93,6 @@ import Testing
 
     // MARK: A focused control
 
-    private func press(_ code: Int, _ characters: String = "") -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
-                         characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: UInt16(code))!
-    }
-
     /// A pinned hub with one failing repo, its row picked, and what the store was asked to open.
     private func pickedHub() -> (HubKeys, HubState, () -> [String]) {
         let store = Store()
@@ -117,7 +112,7 @@ import Testing
 
     @Test func returnOpensThePickedRowWhenNoControlHasFocus() {
         let (keys, _, opened) = pickedHub()
-        #expect(keys.key(press(kVK_Return)))
+        #expect(keys.key(keyDown(kVK_Return)))
         #expect(opened() == ["Open checks · b/bad"])
     }
 
@@ -125,20 +120,20 @@ import Testing
         let (keys, hub, opened) = pickedHub()
         let control = UUID()
         hub.controls.set(control, focused: true)
-        #expect(!keys.key(press(kVK_Return)))
-        #expect(!keys.key(press(kVK_ANSI_KeypadEnter)))
-        #expect(!keys.key(press(kVK_Space, " ")))
+        #expect(!keys.key(keyDown(kVK_Return)))
+        #expect(!keys.key(keyDown(kVK_ANSI_KeypadEnter)))
+        #expect(!keys.key(keyDown(kVK_Space, [], " ")))
         #expect(opened().isEmpty)
         // Once focus leaves the control, Return is the row's again.
         hub.controls.set(control, focused: false)
-        #expect(keys.key(press(kVK_Return)))
+        #expect(keys.key(keyDown(kVK_Return)))
         #expect(opened() == ["Open checks · b/bad"])
     }
 
     @Test func anArrowBoundToOpenOpensTheChecksInsteadOfMeaningPassing() {
         let (keys, hub, opened) = pickedHub()
         keys.store.setShortcut(Shortcut(keyCode: UInt16(kVK_RightArrow)), for: .openItem)
-        #expect(keys.key(press(kVK_RightArrow)))
+        #expect(keys.key(keyDown(kVK_RightArrow)))
         #expect(opened() == ["Open checks · b/bad"])
         #expect(hub.selection == "c:b/bad")
     }

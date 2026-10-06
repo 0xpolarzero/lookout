@@ -6,18 +6,12 @@ import Testing
 
 @MainActor
 @Suite struct Shortcuts {
-    private func key(_ code: Int, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
-                         context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
-                         keyCode: UInt16(code))!
-    }
-
     @Test func eventMatchesByKeyPositionAndModifiers() {
-        #expect(Shortcut(key(kVK_Space)) == ShortcutAction.toggleRead.defaultShortcut)
-        #expect(Shortcut(key(kVK_Space, [.option])) == ShortcutAction.markAllRead.defaultShortcut)
-        #expect(Shortcut(key(kVK_Space, [.option])) != ShortcutAction.toggleRead.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_Space)) == ShortcutAction.toggleRead.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_Space, [.option])) == ShortcutAction.markAllRead.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_Space, [.option])) != ShortcutAction.toggleRead.defaultShortcut)
         // Caps lock / fn don't change what was pressed.
-        #expect(Shortcut(key(kVK_ANSI_R, [.command, .capsLock, .function])) == ShortcutAction.refresh.defaultShortcut)
+        #expect(Shortcut(keyDown(kVK_ANSI_R, [.command, .capsLock, .function])) == ShortcutAction.refresh.defaultShortcut)
     }
 
     @Test func displayUsesSymbols() {
@@ -88,7 +82,7 @@ import Testing
         #expect(!store.shortcut(.markAllRead).isModifierTap && store.shortcut(.markAllRead).mouseButton == nil)
         // Whatever key is pressed, none is the cleared one.
         for code in [kVK_Space, kVK_Delete, kVK_Return, kVK_ANSI_Z] {
-            #expect(Shortcut(key(code, [.option])) != store.shortcut(.markAllRead))
+            #expect(Shortcut(keyDown(code, [.option])) != store.shortcut(.markAllRead))
         }
         store.setShortcut(nil, for: .markAllRead)
         #expect(store.shortcut(.markAllRead) == ShortcutAction.markAllRead.defaultShortcut)

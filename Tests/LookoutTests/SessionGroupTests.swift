@@ -6,15 +6,7 @@ import Testing
 
 @MainActor
 @Suite struct SessionGroups {
-    private let now = Date(timeIntervalSince1970: 2_000_000_000)
-
-    private func session(_ id: String, folder: String? = "/code/app", minutesAgo: Double = 5, blocked: Bool = false,
-                         running: Bool = false) -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: folder, completedTurns: 3,
-                      lastActivity: now.addingTimeInterval(-minutesAgo * 60), lastFocused: now.addingTimeInterval(-3600),
-                      lastUserMessage: now.addingTimeInterval(-(minutesAgo + 1) * 60),
-                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
-    }
+    private let now = sessionsNow
 
     /// A store that lists `sessions`: the ids in `kept` kept (in that order), the rest new activity, `unread` unread.
     private func store(_ sessions: [ClaudeSession], kept: [String] = [], unread: Set<String> = [],
@@ -345,9 +337,7 @@ import Testing
     private func key(_ code: Int, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
         let arrow = [kVK_UpArrow: NSUpArrowFunctionKey, kVK_DownArrow: NSDownArrowFunctionKey, kVK_RightArrow: NSRightArrowFunctionKey][code]
             .flatMap { Unicode.Scalar($0) }.map(String.init) ?? ""
-        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags.union([.numericPad, .function]), timestamp: 0,
-                                windowNumber: 0, context: nil, characters: arrow, charactersIgnoringModifiers: arrow,
-                                isARepeat: false, keyCode: UInt16(code))!
+        return keyDown(code, flags.union([.numericPad, .function]), arrow)
     }
 
     private func hubKeys(_ s: Store) -> (HubKeys, HubState) {

@@ -6,7 +6,7 @@ import Testing
 
 @MainActor
 @Suite struct Bar {
-    private let now = Date(timeIntervalSince1970: 2_000_000_000)
+    private let now = sessionsNow
 
     private func status(_ state: CIState, sha: String = "a1", minutesAgo: Double = 10) -> CIStatus {
         CIStatus(state: state, branch: "main", sha: sha, failing: state == .failure ? ["build"] : [],
@@ -92,14 +92,6 @@ import Testing
 
     // MARK: Sessions
 
-    private func session(_ id: String, folder: String? = "/code/app", blocked: Bool = false, running: Bool = false,
-                         minutesAgo: Double = 5) -> ClaudeSession {
-        ClaudeSession(id: id, title: "Session \(id)", folder: folder, completedTurns: 3,
-                      lastActivity: now.addingTimeInterval(-minutesAgo * 60), lastFocused: now.addingTimeInterval(-3600),
-                      lastUserMessage: now.addingTimeInterval(-(minutesAgo + 1) * 60),
-                      summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
-    }
-
     private func store(_ sessions: [ClaudeSession], seeded: Bool = false) -> Store {
         let s = Store()
         s.persists = false
@@ -120,7 +112,7 @@ import Testing
     }
 
     @Test func voiceOverValueIsStateProjectAndAge() {
-        let s = store([session("blocked", folder: "/code/lcu", blocked: true, minutesAgo: 4)])
+        let s = store([session("blocked", folder: "/code/lcu", minutesAgo: 4, blocked: true)])
         s.agents.entries[0].unread = true
         let row = s.allAgentRows[0]
         #expect(row.tileValue(now: now) == "waiting for you, lcu, 4 minutes")
@@ -196,7 +188,7 @@ import Testing
 
     /// Twelve sessions nobody kept, one project; the oldest is the one that waits.
     private func pendingStore() -> Store {
-        let s = store((0..<12).map { session("p\($0)", blocked: $0 == 11, minutesAgo: Double($0 + 1)) }, seeded: true)
+        let s = store((0..<12).map { session("p\($0)", minutesAgo: Double($0 + 1), blocked: $0 == 11) }, seeded: true)
         s.agents.entries.indices.forEach { s.agents.entries[$0].unread = true }
         return s
     }

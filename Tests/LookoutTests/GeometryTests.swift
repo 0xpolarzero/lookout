@@ -113,9 +113,17 @@ import Testing
         /// Whether anything in the window scrolls.
         var scrolls = false
 
-        func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int, a: Int) {
+        typealias Pixel = (r: Int, g: Int, b: Int, a: Int)
+
+        func pixel(_ x: Int, _ y: Int) -> Pixel {
             guard x >= 0, y >= 0, x < rep.pixelsWide, y < rep.pixelsHigh, let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0, 0, 0, 0) }
             return (Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255), Int(c.alphaComponent * 255))
+        }
+
+        /// Whether the pixel is off `surface` by more than `tolerance`, summed over the channels: something is drawn there.
+        func differs(_ x: Int, _ y: Int, from surface: Pixel, by tolerance: Int = 24) -> Bool {
+            let p = pixel(x, y)
+            return abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > tolerance
         }
 
         /// A tile that needs you is the one saturated colour in the first cells: any hue, so a new tile colour doesn't
@@ -138,30 +146,13 @@ import Testing
             return CGRect(x: box.minX / scale, y: box.minY / scale, width: (box.width) / scale, height: (box.height) / scale)
         }
 
-        /// How far above `y` (points) the nearest row with anything drawn over the surface colour is, within `x`.
-        func gapAbove(y: CGFloat, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> CGFloat? {
+        /// How far from `y` (points), upward or downward, the nearest row with anything drawn over the surface colour is, within `x`.
+        func gap(from y: CGFloat, up: Bool, x: ClosedRange<CGFloat>, surface: Pixel) -> CGFloat? {
             let xs = Int(x.lowerBound * scale)...Int(x.upperBound * scale)
-            var py = Int(y * scale) - 1
-            while py >= 0 {
-                for px in xs {
-                    let p = pixel(px, py)
-                    if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return y - CGFloat(py) / scale }
-                }
-                py -= 1
-            }
-            return nil
-        }
-
-        /// How far below `y` (points) the nearest row with anything drawn over the surface colour is, within `x`.
-        func gapBelow(y: CGFloat, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> CGFloat? {
-            let xs = Int(x.lowerBound * scale)...Int(x.upperBound * scale)
-            var py = Int(y * scale) + 1
-            while py < rep.pixelsHigh {
-                for px in xs {
-                    let p = pixel(px, py)
-                    if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return CGFloat(py) / scale - y }
-                }
-                py += 1
+            var py = Int(y * scale) + (up ? -1 : 1)
+            while up ? py >= 0 : py < rep.pixelsHigh {
+                if xs.contains(where: { differs($0, py, from: surface) }) { return up ? y - CGFloat(py) / scale : CGFloat(py) / scale - y }
+                py += up ? -1 : 1
             }
             return nil
         }
@@ -178,25 +169,18 @@ import Testing
         }
 
         /// Whether anything is drawn over `surface` in the rows `ys` (points), within `x`.
-        func hasContent(rows ys: ClosedRange<CGFloat>, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> Bool {
+        func hasContent(rows ys: ClosedRange<CGFloat>, x: ClosedRange<CGFloat>, surface: Pixel) -> Bool {
             for py in Int(ys.lowerBound * scale)...Int(ys.upperBound * scale) {
-                for px in Int(x.lowerBound * scale)...Int(x.upperBound * scale) {
-                    let p = pixel(px, py)
-                    if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return true }
-                }
+                for px in Int(x.lowerBound * scale)...Int(x.upperBound * scale) where differs(px, py, from: surface) { return true }
             }
             return false
         }
 
         /// The first row at or below `y` (points) that a hairline crosses: every sample along `x` is a little off `surface`.
-        func hairline(from y: CGFloat, to end: CGFloat, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> CGFloat? {
+        func hairline(from y: CGFloat, to end: CGFloat, x: ClosedRange<CGFloat>, surface: Pixel) -> CGFloat? {
             let samples = stride(from: x.lowerBound, through: x.upperBound, by: 24).map { Int($0 * scale) }
-            for py in Int(y * scale)...Int(end * scale) {
-                let all = samples.allSatisfy { px in
-                    let p = pixel(px, py)
-                    return abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 20
-                }
-                if all { return CGFloat(py) / scale }
+            for py in Int(y * scale)...Int(end * scale) where samples.allSatisfy({ differs($0, py, from: surface, by: 20) }) {
+                return CGFloat(py) / scale
             }
             return nil
         }
@@ -225,38 +209,22 @@ import Testing
         let layout = HubLayout()
         let root = HubRoot(store: store, ui: ui, hub: hub, layout: layout).frame(width: screen.width, height: screen.height)
         let hosting = NSHostingView(rootView: root)
-        hosting.frame.size = screen
-        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
+        let window = NSWindow.offscreen(hosting, size: screen)
         window.backgroundColor = .clear
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        func settle(_ seconds: Double) {
-            let end = Date().addingTimeInterval(seconds)
-            while Date() < end {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-                hosting.layoutSubtreeIfNeeded()
-            }
-        }
+        defer { window.dismiss() }
         func capture() -> Shot {
-            hosting.layoutSubtreeIfNeeded()
-            let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
-            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            let rep = PlaygroundShots.bitmap(of: window)!
             var shot = Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width, frame: layout.frame, panel: hub.panelFrame)
             shot.scrolls = hosting.hasScrollView
             return shot
         }
-        settle(0.7)
+        hosting.settle(for: 0.7)
         let rest = capture()
         if let section { hub.section = section } else { hub.pinned = true }
         if let page { hub.page = page }
         if let focus { hub.focus = focus }
-        settle(1.0)
-        let open = capture()
-        window.contentView = nil
-        window.orderOut(nil)
-        return (rest, open)
+        hosting.settle(for: 1)
+        return (rest, capture())
     }
 
     /// The hub never leaves the screen: both insets along the edge, and across it the screen's own edge.
@@ -363,8 +331,8 @@ import Testing
         let stripTop = open.frame.maxY - Theme.Metrics.bar
         let surface = open.pixel(Int((open.frame.minX + 100) * open.scale), Int((open.frame.minY + 4) * open.scale))
         // A few points above the hairline over the strip, in each column.
-        let left = open.gapAbove(y: stripTop - 3, x: (open.frame.minX + 24)...(open.frame.minX + 380), surface: surface)
-        let right = open.gapAbove(y: stripTop - 3, x: (open.frame.minX + 460)...(open.frame.maxX - 24), surface: surface)
+        let left = open.gap(from: stripTop - 3, up: true, x: (open.frame.minX + 24)...(open.frame.minX + 380), surface: surface)
+        let right = open.gap(from: stripTop - 3, up: true, x: (open.frame.minX + 460)...(open.frame.maxX - 24), surface: surface)
         #expect(left != nil && left! < 16, "inbox rows end \(left ?? -1)pt above the strip")
         #expect(right != nil && right! < 16, "session rows end \(right ?? -1)pt above the strip")
     }
@@ -384,8 +352,8 @@ import Testing
         let columns = [("inbox", (open.frame.minX + 24)...(open.frame.minX + 380)), ("sessions", (open.frame.minX + 460)...(open.frame.maxX - 24))]
         for (name, x) in columns {
             let gap = edge == .top
-                ? open.gapAbove(y: open.frame.maxY - lead - footer - 1, x: x, surface: surface)
-                : open.gapBelow(y: open.frame.minY + lead + footer + 1, x: x, surface: surface)
+                ? open.gap(from: open.frame.maxY - lead - footer - 1, up: true, x: x, surface: surface)
+                : open.gap(from: open.frame.minY + lead + footer + 1, up: false, x: x, surface: surface)
             #expect(gap != nil && gap! <= 60, "\(edge) \(scenario) \(height): \(name) column starts \(gap ?? -1)pt from the footer's hairline")
         }
     }
@@ -571,20 +539,12 @@ private extension NSView {
             .environment(\.previewTip, focusedAtStart ? nil : title)
             .tipSpace(region: { seen = $0 }, escape: route)
         let hosting = NSHostingView(rootView: control)
-        hosting.frame = CGRect(x: 0, y: 0, width: width, height: 400)
-        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 400))
         defer { window.close() }
-        for _ in 0..<80 where seen == .zero {
-            try await Task.sleep(for: .milliseconds(50))
-            hosting.layoutSubtreeIfNeeded()
-        }
+        try await eventually(upTo: 4) { hosting.layoutSubtreeIfNeeded(); return seen != .zero }
         if thenEscape {
             #expect(seen != .zero && route.answer())
-            for _ in 0..<40 where seen != .zero { try await Task.sleep(for: .milliseconds(50)) }
+            try await eventually(upTo: 2) { seen == .zero }
         }
         return seen
     }
@@ -650,11 +610,8 @@ private extension NSView {
 
     /// Waits for the tip to close, as long as a busy run needs.
     private func closes(_ center: TipCenter) async throws -> Bool {
-        for _ in 0..<100 {
-            if center.current == nil { return true }
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        return false
+        try await eventually { center.current == nil }
+        return center.current == nil
     }
 
     @Test func theTipOutlivesTheGapAndStaysWhileThePointerIsOnIt() async throws {

@@ -20,18 +20,10 @@ import Testing
         hub.query = query
         let row = InboxRow(item: item, store: store, ui: UIState(), hub: hub).frame(width: width)
         let hosting = NSHostingView(rootView: row)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<4 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.03))
-            hosting.layoutSubtreeIfNeeded()
-        }
-        let h = hosting.fittingSize.height
-        window.contentView = nil
-        window.orderOut(nil)
-        return h
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 400))
+        defer { window.dismiss() }
+        hosting.settle(turns: 4, interval: 0.03)
+        return hosting.fittingSize.height
     }
 
     @Test func everyKindOfRowIsExactlyTheSameHeight() {
@@ -62,24 +54,16 @@ import Testing
                              avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
                              createdAt: Date().addingTimeInterval(-18 * 60), state: .unread)
         let hosting = NSHostingView(rootView: InboxRow(item: item, store: store, ui: UIState(), hub: hub).frame(width: width))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 100), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<6 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.03))
-            hosting.layoutSubtreeIfNeeded()
-        }
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 100))
+        defer { window.dismiss() }
+        hosting.settle(turns: 6, interval: 0.03)
         hosting.frame.size = hosting.fittingSize
-        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
-        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        let rep = PlaygroundShots.bitmap(of: window)!
         var edge = 0
         for x in stride(from: rep.pixelsWide - 1, through: 0, by: -1) where (0..<rep.pixelsHigh).contains(where: { (rep.colorAt(x: x, y: $0)?.alphaComponent ?? 0) > 0.3 }) {
             edge = x
             break
         }
-        window.contentView = nil
-        window.orderOut(nil)
         return CGFloat(edge) * hosting.bounds.width / CGFloat(rep.pixelsWide)
     }
 
@@ -134,18 +118,13 @@ import Testing
                              store: store, ui: UIState(), hub: hub)
             .frame(width: 400)
         let hosting = NSHostingView(rootView: list)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        func settle() { for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() } }
-        settle()
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 400, height: 400))
+        defer { window.dismiss() }
+        hosting.settle(turns: 10, display: true)
         // 224 less the line is 4 rows: 14 below (as the list scrolls the count follows: see `theCountBelowFollowsTheScroll`).
         #expect(hub.inbox.hiddenBelow == 14)
         // Four whole rows and the line, never past the cap.
         #expect(abs(hosting.fittingSize.height - (4 * InboxList.pitch - 1 + InboxList.moreHeight)) < 1)
-        window.contentView = nil
-        window.orderOut(nil)
     }
 }
 
@@ -168,15 +147,10 @@ import Testing
         let hub = HubState()
         let view = LookoutHub(store: store, ui: UIState(), hub: hub, maxLength: 700).inboxBody(cap: cap).frame(width: 400)
         let hosting = NSHostingView(rootView: view)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
-        let h = hosting.fittingSize.height
-        window.contentView = nil
-        window.orderOut(nil)
-        return h
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: 400, height: 900))
+        defer { window.dismiss() }
+        hosting.settle(turns: 10, display: true)
+        return hosting.fittingSize.height
     }
 
     @Test func theBannerAndTheUndoLineComeOutOfTheListsRoom() {
@@ -207,15 +181,10 @@ import Testing
         if picked { hub.selection = "i:1" }
         let hosting = NSHostingView(rootView: InboxRow(item: item(), store: store, ui: UIState(), hub: hub).frame(width: width, height: 44)
             .background(Theme.bg).environment(\.colorScheme, .dark))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 44), styleMask: .borderless, backing: .buffered, defer: false)
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
-        for _ in 0..<6 { RunLoop.current.run(until: Date().addingTimeInterval(0.04)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
-        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
-        hosting.cacheDisplay(in: hosting.bounds, to: rep)
-        window.contentView = nil
-        window.orderOut(nil)
+        let window = NSWindow.offscreen(hosting, size: CGSize(width: width, height: 44))
+        defer { window.dismiss() }
+        hosting.settle(turns: 6, interval: 0.04, display: true)
+        let rep = PlaygroundShots.bitmap(of: window)!
         let scale = CGFloat(rep.pixelsWide) / width
         var right = 0
         // Line 2 is the lower half's text; the pick's accent bar is on the left, the action (when shown) on the right.

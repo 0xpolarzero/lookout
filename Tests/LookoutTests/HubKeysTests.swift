@@ -20,11 +20,7 @@ import Testing
         hub.selection = "i:one"
     }
 
-    private func commandZ() -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0, windowNumber: 0,
-                         context: nil, characters: "z", charactersIgnoringModifiers: "z", isARepeat: false,
-                         keyCode: UInt16(kVK_ANSI_Z))!
-    }
+    private func commandZ() -> NSEvent { keyDown(kVK_ANSI_Z, .command, "z") }
 
     @Test func commandZUndoesWhenNothingIsBoundToIt() {
         var reverted = false
@@ -55,25 +51,20 @@ import Testing
         #expect(!keys.key(commandZ()))
     }
 
-    private func arrow(_ code: Int) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
-                         context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(code))!
-    }
-
     @Test func anArrowBoundToAnActionActsInsteadOfSwitchingTabs() {
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_RightArrow)), for: .toggleRead)
-        #expect(keys.key(arrow(kVK_RightArrow)))
+        #expect(keys.key(keyDown(kVK_RightArrow)))
         #expect(store.items[0].state == .unread)
         #expect(hub.filter == .needsYou)
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_LeftArrow)), for: .discard)
-        #expect(keys.key(arrow(kVK_LeftArrow)))
+        #expect(keys.key(keyDown(kVK_LeftArrow)))
         #expect(!store.items[0].state.isOpen)
     }
 
     @Test func unboundArrowsStillSwitchTheInboxTabs() {
-        #expect(keys.key(arrow(kVK_RightArrow)))
+        #expect(keys.key(keyDown(kVK_RightArrow)))
         #expect(hub.filter == .bots)
-        #expect(keys.key(arrow(kVK_LeftArrow)))
+        #expect(keys.key(keyDown(kVK_LeftArrow)))
         #expect(hub.filter == .needsYou)
     }
 }
@@ -98,9 +89,7 @@ import Testing
 
     @discardableResult
     private func press(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String) -> Bool {
-        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
-                                     characters: chars, charactersIgnoringModifiers: chars.lowercased(), isARepeat: false, keyCode: UInt16(code))!
-        return keys.key(event)
+        keys.key(keyDown(code, flags, chars))
     }
 
     @Test func aLetterBoundToAnActionActsOnThePickedRowInsteadOfSearching() {

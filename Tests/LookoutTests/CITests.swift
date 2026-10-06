@@ -313,17 +313,11 @@ import Testing
         return (store, answers)
     }
 
-    /// Lets the tasks the test started run until `condition` holds, or a fixed number of turns have gone by: counted, not timed,
-    /// because the suite shares the main actor with the rendering tests, which can hold it for minutes together.
-    private func settle(_ condition: () -> Bool) async {
-        for _ in 0..<15_000 where !condition() { try? await Task.sleep(for: .milliseconds(2)) }
-    }
-
-    @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async {
+    @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async throws {
         let (store, answers) = quiet(store([:], ["a/x"]))
         async let first: () = { try? await store.syncCI("a/x") }()
         async let second: () = { try? await store.syncCI("a/x") }()
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         async let third: () = { try? await store.syncCI("a/x") }()
         try? await Task.sleep(for: .milliseconds(50))
         #expect(answers.asked == 1)
@@ -332,23 +326,23 @@ import Testing
         #expect(store.ci["a/x"]?.sha == "s1")
         // Once it has answered, the next check asks again.
         async let next: () = { try? await store.syncCI("a/x") }()
-        await settle { answers.waiting.count == 2 }
+        try await eventually(upTo: 30) { answers.waiting.count == 2 }
         answers.settle(1, with: status(.success, sha: "s2"))
         await next
         #expect(store.ci["a/x"]?.sha == "s2")
     }
 
-    @Test func anOlderAnswerThatArrivesLastDoesNotReplaceANewerOneOrItsMute() async {
+    @Test func anOlderAnswerThatArrivesLastDoesNotReplaceANewerOneOrItsMute() async throws {
         let (store, answers) = quiet(store(["a/x": status(.failure, sha: "s0")], ["a/x"]))
         let repo = store.repos[0]
         async let older: () = { try? await store.syncCI("a/x") }()
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         // CI turned off and on again while that check was out: the check it starts is the newer one.
         store.toggle(.ciMain, on: repo)
         store.toggle(.ciMain, on: repo)
-        await settle { answers.waiting.count == 2 }
+        try await eventually(upTo: 30) { answers.waiting.count == 2 }
         answers.settle(1, with: status(.failure, sha: "s2"))
-        await settle { store.ci["a/x"]?.sha == "s2" }
+        try await eventually(upTo: 30) { store.ci["a/x"]?.sha == "s2" }
         store.muteCI(store.repos[0])
         answers.settle(0, with: status(.failure, sha: "s1"))
         await older
@@ -356,7 +350,7 @@ import Testing
         #expect(store.mutedCI == ["a/x": "s2"])
     }
 
-    @Test func aCheckThatChangedNothingStillMovesWhenCIGoesStale() async {
+    @Test func aCheckThatChangedNothingStillMovesWhenCIGoesStale() async throws {
         let old = Date().addingTimeInterval(-3600)
         var first = status(.success, sha: "s1")
         first.checkedAt = old
@@ -365,7 +359,7 @@ import Testing
         let moved = Flag()
         withObservationTracking { _ = store.staleDeadlines } onChange: { moved.set() }
         async let check: () = store.checkCI("a/x")
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         // The same status, a new time: only the live record of the check changes.
         var same = first
         same.checkedAt = Date()
@@ -374,57 +368,57 @@ import Testing
         #expect(moved.value && store.staleDeadlines != before)
     }
 
-    @Test func aFailureThatArrivesAfterCIWasTurnedOffIsNoFault() async {
+    @Test func aFailureThatArrivesAfterCIWasTurnedOffIsNoFault() async throws {
         let (store, answers) = quiet(store([:], ["a/x"]))
         let repo = store.repos[0]
         async let check: () = store.checkCI("a/x")
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         store.toggle(.ciMain, on: repo)
         answers.fail(0, "Timed out")
         await check
         #expect(store.repoErrors.isEmpty && store.syncFault(stale: false) == nil)
     }
 
-    @Test func anOlderFailureDoesNotReplaceTheNewerChecksHealth() async {
+    @Test func anOlderFailureDoesNotReplaceTheNewerChecksHealth() async throws {
         let (store, answers) = quiet(store([:], ["a/x"]))
         let repo = store.repos[0]
         async let older: () = store.checkCI("a/x")
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         store.toggle(.ciMain, on: repo)
         store.toggle(.ciMain, on: repo)
-        await settle { answers.waiting.count == 2 }
+        try await eventually(upTo: 30) { answers.waiting.count == 2 }
         answers.settle(1, with: status(.success, sha: "s1"))
-        await settle { store.ci["a/x"]?.sha == "s1" }
+        try await eventually(upTo: 30) { store.ci["a/x"]?.sha == "s1" }
         answers.fail(0, "Timed out")
         await older
         #expect(store.repoErrors.isEmpty)
         // The newer check's own failure is a fault, and a later success clears it.
         async let newer: () = store.checkCI("a/x")
-        await settle { answers.waiting.count == 3 }
+        try await eventually(upTo: 30) { answers.waiting.count == 3 }
         answers.fail(2, "Server error")
         await newer
         #expect(store.repoErrors["a/x"] == "Server error")
     }
 
-    @Test func aFailureIsNotifiedOnceWhenTwoChecksBothSeeIt() async {
+    @Test func aFailureIsNotifiedOnceWhenTwoChecksBothSeeIt() async throws {
         let (store, answers) = quiet(store(["a/x": status(.success, sha: "s0")], ["a/x"]))
         let repo = store.repos[0]
         async let older: () = { try? await store.syncCI("a/x") }()
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         store.toggle(.ciMain, on: repo)
         store.toggle(.ciMain, on: repo)
-        await settle { answers.waiting.count == 2 }
+        try await eventually(upTo: 30) { answers.waiting.count == 2 }
         answers.settle(1, with: status(.failure, sha: "s1"))
         answers.settle(0, with: status(.failure, sha: "s1"))
         await older
-        await settle { store.ci["a/x"]?.state == .failure }
+        try await eventually(upTo: 30) { store.ci["a/x"]?.state == .failure }
         #expect(store.pulse == 1)
     }
 
-    @Test func aCheckThatReturnsAfterTheRepoWasRemovedLeavesNothingBehind() async {
+    @Test func aCheckThatReturnsAfterTheRepoWasRemovedLeavesNothingBehind() async throws {
         let (store, answers) = quiet(store([:], ["a/x"]))
         async let check: () = { try? await store.syncCI("a/x") }()
-        await settle { answers.waiting.count == 1 }
+        try await eventually(upTo: 30) { answers.waiting.count == 1 }
         store.removeRepo(store.repos[0])
         answers.settle(0, with: status(.success))
         await check
@@ -553,17 +547,11 @@ import Testing
         #expect(commit.headline == "Respect trailing commas (#1042)")
     }
 
-    @Test func aHeadlineIsOnlyAskedForWhenTheRunHasNone() async {
+    @Test func aHeadlineIsOnlyAskedForWhenTheRunHasNone() async throws {
         let store = store(["a/x": status(.failure, sha: "c1")], ["a/x"])
         #expect(await store.ciHeadline("a/x", commit: "c1", runTitle: "From the run") == "From the run")
         store.ci["a/x"]?.title = "Known"
         // Same commit as last time: what was fetched then stands (no request).
         #expect(await store.ciHeadline("a/x", commit: "c1", runTitle: nil) == "Known")
     }
-}
-
-/// Set from an observation's change handler.
-private final class Flag: @unchecked Sendable {
-    private(set) var value = false
-    func set() { value = true }
 }

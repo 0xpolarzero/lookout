@@ -45,12 +45,7 @@ enum AccessibilityTree {
                               maxWidth: size.width, barLength: 700)
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         let hosting = NSHostingView(rootView: view)
-        hosting.frame.size = size
-        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = hosting
-        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-        window.orderFrontRegardless()
+        let window = NSWindow.offscreen(hosting, size: size)
         defer { window.close() }
         configure(store, hub)
         try await Task.sleep(for: .seconds(0.7))
