@@ -63,7 +63,8 @@ struct RailRow<Tile: View, Content: View>: View {
 }
 
 /// The groups of the sessions list under one another, or (searching) the sessions that match, flat. Rows mark their
-/// bottom edge for `CappedScroll` and their id for scrolling to them.
+/// bottom edge for `CappedScroll` and their id for scrolling to them. A peek (`peekCap`) lists whole groups and rows
+/// up to that height, then "+N more", and never scrolls.
 struct SessionsList: View {
     let store: Store
     let ui: UIState
@@ -71,10 +72,11 @@ struct SessionsList: View {
     let rail: HorizontalEdge
     /// The hub's own inset on the side away from the tile; peeks pad themselves, and pass 0.
     var inset: CGFloat = Theme.Metrics.inset
+    var peekCap: CGFloat?
 
     var body: some View {
         let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
-        let listed = store.listedGroups(expanded: hub.sessionsExpanded)
+        let listed = peekCap.map { SessionGroup.peek(store.sessionGroups, cap: $0) } ?? store.listedGroups(expanded: hub.sessionsExpanded)
         AdaptiveStack(count: store.hubSessions(hub).count, alignment: .leading, spacing: 0) {
             if searching {
                 ForEach(store.hubSessions(hub)) { row($0, .search) }
@@ -82,16 +84,22 @@ struct SessionsList: View {
                 EmptyBlock("No Claude sessions")
             } else {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
-                    SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : Theme.Space.md)
+                    SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
                     ForEach(group.rows) { row($0, group.placement) }
                 }
                 if listed.hidden > 0 {
-                    MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail).id("s:more")
+                    MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail, action: moreAction).id("s:more")
                 }
             }
         }
         .padding(rail == .leading ? .trailing : .leading, inset)
         .motion(Theme.Motion.fade, value: store.agentsRevision)
+    }
+
+    /// Kept open, "+N more" shows the rest of New activity; a peek has no room for them, so it keeps the hub open on
+    /// Sessions, which gets all the room.
+    private func moreAction() {
+        if peekCap == nil { hub.expandSessions() } else { LookoutHub.animate(LookoutHub.refocus) { hub.pinned = true; hub.focus = .agents } }
     }
 
     private func row(_ row: AgentRow, _ placement: SessionPlacement) -> some View {
@@ -120,6 +128,46 @@ struct SessionsScroll: View {
 }
 
 extension SessionGroup {
+    /// The gap above every group but the first, and a group header's height.
+    static let gap = Theme.Space.md
+    static let headerHeight: CGFloat = 28
+
+    /// A row's height: a third line for what it left running.
+    static func height(of row: AgentRow) -> CGFloat { row.tasks.isEmpty ? Theme.Metrics.twoLineRow : Theme.Metrics.taskRow }
+
+    /// What a peek of `cap` points lists: the groups in order, whole rows only (a header never stands alone), and
+    /// how many sessions are left out. With any left out the last line is the "+N more" row, which is in the cap.
+    static func peek(_ groups: [SessionGroup], cap: CGFloat) -> (groups: [SessionGroup], hidden: Int) {
+        func height(_ groups: [SessionGroup]) -> CGFloat {
+            groups.enumerated().reduce(0) { sum, entry in
+                sum + (entry.offset == 0 ? 0 : gap) + headerHeight + entry.element.rows.reduce(0) { $0 + Self.height(of: $1) }
+            }
+        }
+        let total = groups.reduce(0) { $0 + $1.rows.count }
+        var shown: [SessionGroup] = []
+        outer: for group in groups {
+            var next = group
+            next.rows = []
+            shown.append(next)
+            for row in group.rows {
+                shown[shown.count - 1].rows.append(row)
+                if height(shown) > cap {
+                    shown[shown.count - 1].rows.removeLast()
+                    break outer
+                }
+            }
+        }
+        shown.removeAll { $0.rows.isEmpty }
+        var count = shown.reduce(0) { $0 + $1.rows.count }
+        // Room for "+N more": give up whole rows until it fits.
+        while count < total, height(shown) + Theme.Metrics.pitch > cap, count > 0 {
+            shown[shown.count - 1].rows.removeLast()
+            shown.removeAll { $0.rows.isEmpty }
+            count -= 1
+        }
+        return (shown, total - count)
+    }
+
     var placement: SessionPlacement {
         switch kind {
         case .waiting: .waiting
@@ -150,7 +198,7 @@ struct SessionGroupHeader: View {
                 if group.kind == .newActivity { keepAll }
             }
         }
-        .frame(height: 28)
+        .frame(height: SessionGroup.headerHeight)
         .contentShape(Rectangle())
         .contextMenu { if let folder { ProjectMenu(folder: folder, name: group.title, store: store) } }
         .accessibilityElement(children: .contain)
@@ -182,16 +230,17 @@ struct SessionGroupHeader: View {
     }
 }
 
-/// "+3 more" at the end of New activity: shows the rest, in place.
+/// "+3 more" at the end of the list: shows the rest.
 struct MoreSessionsRow: View {
     let hidden: Int
     let hub: HubState
     let rail: HorizontalEdge
+    let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         let picked = hub.selection == "s:more"
-        Button { hub.expandSessions() } label: {
+        Button(action: action) {
             RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
                     tile: { Color.clear }) {
                 Text("+\(hidden) more").font(Theme.Typography.body).foregroundStyle(Theme.secondary)
@@ -580,8 +629,13 @@ extension LookoutHub {
     }
 
     /// The groups, scrolling once past `cap`, always on a whole row.
-    func sessionsScroll(cap: CGFloat, inset: CGFloat = Theme.Metrics.inset) -> some View {
-        SessionsScroll(store: store, ui: ui, hub: hub, rail: railSide, cap: cap, inset: inset)
+    func sessionsScroll(cap: CGFloat) -> some View {
+        SessionsScroll(store: store, ui: ui, hub: hub, rail: railSide, cap: cap)
+    }
+
+    /// A peek's groups: whole rows up to `cap`, then "+N more" (never a scroll view or a fade).
+    func sessionsPeek(cap: CGFloat) -> some View {
+        SessionsList(store: store, ui: ui, hub: hub, rail: railSide, inset: 0, peekCap: cap)
     }
 
     /// New session, under the list (not while searching).

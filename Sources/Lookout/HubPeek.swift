@@ -248,7 +248,7 @@ extension LookoutHub {
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                sessionsScroll(cap: Self.peekListCap, inset: 0)
+                sessionsPeek(cap: Self.peekListCap)
                 newSessionRow(inset: 0)
             default:
                 // (The controls have their own panel.)
@@ -270,7 +270,7 @@ extension LookoutHub {
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                sessionsScroll(cap: Self.peekListCap, inset: 0)
+                sessionsPeek(cap: Self.peekListCap)
                 newSessionRow(inset: 0)
             default:
                 EmptyView()

@@ -85,6 +85,27 @@ import Testing
         #expect(capped.groups.first?.rows.map(\.id) == (0..<8).map { "n\($0)" })
     }
 
+    @Test func aPeekListsWholeRowsAndEndsWithTheCountOfTheRest() {
+        let sessions = (1...3).map { session("x\($0)", folder: "/code/x") } + (0..<10).map { session("n\($0)", minutesAgo: Double($0 + 1)) }
+        let s = store(sessions, kept: ["x1", "x2", "x3"])
+        // Header 28 + 3 rows of 44, a gap of 8, header 28, and rows of New activity while a "+N more" line (36) still fits.
+        let peek = SessionGroup.peek(s.sessionGroups, cap: 330)
+        #expect(peek.groups.map(\.id) == ["project:/code/x", "new"])
+        #expect(peek.groups.map(\.rows.count) == [3, 2])
+        #expect(peek.hidden == 8)
+        // Everything fits: nothing is left out, and no line for it.
+        let all = SessionGroup.peek(s.sessionGroups, cap: 1000)
+        #expect(all.hidden == 0 && all.groups.map(\.rows.count) == [3, 10])
+        // Exactly full is not cut either.
+        let few = SessionGroup.peek(Array(s.sessionGroups.prefix(1)), cap: 160)
+        #expect(few.hidden == 0 && few.groups.first?.rows.count == 3)
+        // A group's header never stands alone: no room for its first row, no header.
+        #expect(SessionGroup.peek(s.sessionGroups, cap: 200).groups.map(\.id) == ["project:/code/x"])
+        // A row with a task line is 60 tall.
+        s.claudeTasks = ["n0": [ClaudeTask(id: "a", kind: .command, title: "Run it", since: now)]]
+        #expect(SessionGroup.height(of: s.agentRows.pending.first { $0.id == "n0" }!) == Theme.Metrics.taskRow)
+    }
+
     @Test func moveUpAndDownStayInTheProject() {
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y"), session("x2", folder: "/code/x"),
                        session("y2", folder: "/code/y")], kept: ["x1", "y1", "x2", "y2"])
