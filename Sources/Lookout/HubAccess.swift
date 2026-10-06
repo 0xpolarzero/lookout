@@ -77,7 +77,9 @@ extension View {
 // MARK: - Announcements
 
 extension Store {
-    /// What the hub says when it opens: "Lookout, 5 need you, 1 CI failing, 1 session waiting".
+    /// What the hub says when it opens: "Lookout, 5 need you, 1 CI failing, 1 session waiting", then what is wrong that
+    /// it shows in a banner (sync, rate limit) or under Sessions (Claude's files): a fault found while it was closed is
+    /// not a change anyone is told of.
     var openingAnnouncement: String {
         let needs = unreadCount(.needsYou)
         var parts = ["Lookout", needs > 0 ? "\(needs) need you" : "nothing needs you"]
@@ -85,7 +87,12 @@ extension Store {
         if failing > 0 { parts.append("\(failing) CI failing") }
         let waiting = agentCounts.blocked
         if agents.enabled, waiting > 0 { parts.append("\(plural(waiting, "session")) waiting") }
-        return parts.joined(separator: ", ")
+        var faults = [inboxNotice()?.message].compactMap { $0 }
+        if agents.enabled, claudeLink == .missing || claudeLink == .unreadable {
+            let line = ClaudeLinkStatus.describe(claudeLink)
+            faults.append("\(line.text). \(line.detail)")
+        }
+        return ([parts.joined(separator: ", ")] + faults).joined(separator: ". ")
     }
 
     /// Each repository's state that counts (CI on, checked, not muted): what a change is told from.

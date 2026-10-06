@@ -342,7 +342,7 @@ All existing in-hub bindings stay customizable, and a binding comes before the a
 
 ### 6.3 Focus model
 
-Two layers: **row selection** (↑↓, the keyboard pick) and the **chrome ring** (Tab). Pointer hover is separate and never moves VoiceOver focus. Opening from the keyboard (shortcut or `Show`) moves VoiceOver focus into the hub; Esc moves it back out and restores the previous app. Clicking the Inbox cell with another section focused gives the sections their room back first, so the picked row is on screen. The root announces on open ("Lookout, 5 need you, 1 CI failing, 1 session waiting") and on `Back to bar`.
+Two layers: **row selection** (↑↓, the keyboard pick) and the **chrome ring** (Tab). Pointer hover is separate and never moves VoiceOver focus. Opening from the keyboard (shortcut or `Show`) moves VoiceOver focus into the hub; Esc moves it back out and restores the previous app. Clicking the Inbox cell with another section focused gives the sections their room back first, so the picked row is on screen. The root announces on open ("Lookout, 5 need you, 1 CI failing, 1 session waiting", then any banner or Claude notice already showing: a fault found while the hub was closed is not a change) and on `Back to bar`.
 
 ---
 

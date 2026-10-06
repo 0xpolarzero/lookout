@@ -264,7 +264,7 @@ extension LookoutHub {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: notice) { _, new in
-            if let new, NSApp != nil { AccessibilityNotification.Announcement(new.message).post() }
+            if let new { Announce.say(new.message) }
         }
     }
 

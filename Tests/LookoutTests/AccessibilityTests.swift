@@ -432,6 +432,15 @@ enum AccessibilityTree {
         #expect(store.openingAnnouncement == "Lookout, nothing needs you")
     }
 
+    @Test func aFaultFoundWhileTheHubWasClosedIsSaidWhenItOpens() {
+        store.repoErrors = ["ziglang/zig": "Not found (or no access)"]
+        store.claudeLink = .missing
+        #expect(store.openingAnnouncement.hasSuffix(". 1 repository didn't sync. Claude's sessions not found. Open the Claude desktop app once"),
+                "\(store.openingAnnouncement)")
+        store.agents.enabled = false
+        #expect(!store.openingAnnouncement.contains("Claude's sessions"))
+    }
+
     @Test func ciChangingUnderTheOpenHubIsSaidByNameAndEachRepositoryCounts() {
         let before = store.ciStates
         // Nothing moved.
