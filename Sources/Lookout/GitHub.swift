@@ -127,10 +127,22 @@ final class GitHubClient: @unchecked Sendable {
     private var coreResetsAt: Date?
     private var coreRemaining: Int?
     private var gqlRemaining: Int?
-    private var etags: [String: (etag: String, data: Data, used: Int)] = [:]
+    /// What an answer GitHub gave is remembered by: its ETag, its body and, once decoded, the value (a 304 returns that
+    /// value without parsing the body again).
+    private struct Remembered {
+        var etag: String
+        var data: Data
+        var used: Int
+        /// The decoded body and the type it was decoded as.
+        var decoded: (value: Any, type: ObjectIdentifier)?
+        /// What a commit's answers share across commits (`/repos/o/r/commits/{sha}/status`): a newer commit supersedes them.
+        var family: String?
+    }
+    private var etags: [String: Remembered] = [:]
     private var etagClock = 0
-    /// Most responses remembered; the least recently used go first.
-    private static let etagLimit = 200
+    /// Most responses remembered; the least recently used go first. A watched repository takes about eight (see `reserveETags`).
+    private var etagLimit = GitHubClient.etagFloor
+    private static let etagFloor = 200
     private let lock = NSLock()
 
     private let decoder: JSONDecoder = {
@@ -140,16 +152,49 @@ final class GitHubClient: @unchecked Sendable {
         return d
     }()
 
+    /// Room for every repository's answers at once: a poll visits each in turn, and a cache smaller than that cycle evicts each
+    /// answer just before it is asked for again, so every poll becomes full 200s against the rate limit. Per repository: issues,
+    /// issue comments and review comments, actions runs, check runs, status and the commit's headline, and a few spare for the
+    /// review search's pages.
+    func reserveETags(forRepositories count: Int) {
+        lock.withLock { etagLimit = max(Self.etagFloor, 8 * count + 40) }
+    }
+
+    /// How many answers are remembered (the tests count them).
+    var remembered: Int { lock.withLock { etags.count } }
+
     func get<T: Decodable>(_ path: String, _ query: [String: String] = [:], as type: T.Type = T.self) async throws -> T {
-        let data = try await raw(path, query)
+        let answer = try await exchange(path, query)
+        if answer.notModified, let value = answer.decoded?.value as? T, answer.decoded?.type == ObjectIdentifier(T.self) { return value }
+        let value: T
         do {
-            return try decoder.decode(T.self, from: data)
+            value = try decoder.decode(T.self, from: answer.data)
         } catch {
             throw GitHubError(message: "Unexpected response from \(path)")
         }
+        // Kept with the ETag that goes with the body it was made from.
+        if let key = answer.key, let etag = answer.etag {
+            lock.withLock {
+                if etags[key]?.etag == etag { etags[key]?.decoded = (value, ObjectIdentifier(T.self)) }
+            }
+        }
+        return value
     }
 
     func raw(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
+        try await exchange(path, query).data
+    }
+
+    private struct Answer {
+        let data: Data
+        /// Where it is remembered, and by what ETag (nil when GitHub gave none).
+        var key: String?
+        var etag: String?
+        var notModified = false
+        var decoded: (value: Any, type: ObjectIdentifier)?
+    }
+
+    private func exchange(_ path: String, _ query: [String: String]) async throws -> Answer {
         var comps = URLComponents(string: "https://api.github.com" + path)!
         if !query.isEmpty {
             comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -161,7 +206,7 @@ final class GitHubClient: @unchecked Sendable {
         var keyed = comps
         keyed.queryItems = comps.queryItems?.filter { $0.name != "since" }
         let key = keyed.url!.absoluteString
-        let cached = lock.withLock { () -> (etag: String, data: Data, used: Int)? in
+        let cached = lock.withLock { () -> Remembered? in
             guard var hit = etags[key] else { return nil }
             etagClock += 1
             hit.used = etagClock
@@ -173,18 +218,31 @@ final class GitHubClient: @unchecked Sendable {
         let (data, resp) = try await send(req)
         let http = resp as! HTTPURLResponse
         trackRate(http)
-        if http.statusCode == 304, let cached { return cached.data }
-        try check(http, data)
-        if let etag = http.value(forHTTPHeaderField: "ETag") {
-            lock.withLock {
-                etagClock += 1
-                etags[key] = (etag, data, etagClock)
-                if etags.count > Self.etagLimit, let oldest = etags.min(by: { $0.value.used < $1.value.used })?.key {
-                    etags[oldest] = nil
-                }
-            }
+        if http.statusCode == 304, let cached {
+            return Answer(data: cached.data, key: key, etag: cached.etag, notModified: true, decoded: cached.decoded)
         }
-        return data
+        try check(http, data)
+        guard let etag = http.value(forHTTPHeaderField: "ETag") else { return Answer(data: data) }
+        lock.withLock {
+            etagClock += 1
+            let family = Self.family(of: key)
+            // A newer commit's answers replace the older commit's: those are never asked for again.
+            if let family { etags = etags.filter { $0.key == key || $0.value.family != family } }
+            etags[key] = Remembered(etag: etag, data: data, used: etagClock, decoded: nil, family: family)
+            while etags.count > etagLimit, let oldest = etags.min(by: { $0.value.used < $1.value.used })?.key { etags[oldest] = nil }
+        }
+        return Answer(data: data, key: key, etag: etag)
+    }
+
+    /// `…/commits/<40 hex digits>/…` with the sha taken out, for the answers that are about one commit; nil for the others.
+    private static func family(of key: String) -> String? {
+        let parts = key.split(separator: "/", omittingEmptySubsequences: false)
+        guard let at = parts.firstIndex(of: "commits"), parts.indices.contains(at + 1) else { return nil }
+        let sha = parts[at + 1]
+        guard sha.count == 40, sha.allSatisfy(\.isHexDigit) else { return nil }
+        var rest = parts
+        rest[at + 1] = "{sha}"
+        return rest.joined(separator: "/")
     }
 
     func graphql(_ query: String) async throws -> [String: Any] {
