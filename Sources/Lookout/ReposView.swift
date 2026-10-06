@@ -637,14 +637,15 @@ struct RepoRow: View {
                 Text("Retry").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
                     .padding(.horizontal, Theme.Space.xs)
                     .frame(height: Self.line)
-                    // 24pt to hit, and a ring that stays within the line, without taking the room.
-                    .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconButton - Self.line) / 2))
+                    // The ring stays within the line; the 28pt to hit are the line's own height, so no control above or below is covered.
+                    .focusRing(Theme.Radius.small, isFocused: retryFocused || preview.retryFocused == repo.fullName)
+                    .frame(height: Theme.Metrics.iconHit)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .focused($retryFocused)
-            .focusRing(Theme.Radius.small, isFocused: retryFocused || preview.retryFocused == repo.fullName)
         }
-        .frame(height: Self.line)
+        .frame(height: Theme.Metrics.iconHit)
         .accessibilityElement(children: .contain)
         .accessibilityValue(message)
     }
