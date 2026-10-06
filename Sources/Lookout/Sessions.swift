@@ -346,6 +346,7 @@ struct DrawerRow: View {
                     .fixedSize(horizontal: busy, vertical: false)
                     .layoutPriority(busy ? 2 : 0)
                     .opacity(selected && plain ? 0 : 1)
+                    .tickingHidden(selected && plain)
             }
         }
         Group {
