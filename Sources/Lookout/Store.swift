@@ -422,7 +422,6 @@ final class Store {
         var bots: Set<String>?
         var ciRepos: [RepoConfig]?
         var byState: [CIState: [RepoConfig]] = [:]
-        var worst: CIState?
     }
 
     // The getters touch the observed properties so SwiftUI tracks them, even on a memo hit.
@@ -484,20 +483,6 @@ final class Store {
 
     func openCount(_ filter: InboxFilter) -> Int {
         list(filter).count
-    }
-
-    var worstCI: CIState {
-        let all = ciRepos
-        let ci = self.ci
-        if let hit = memo.worst { return hit }
-        let states = all.compactMap { ci[$0.fullName]?.state }
-        let result: CIState
-        if states.contains(.failure) { result = .failure }
-        else if states.contains(.pending) { result = .pending }
-        else if states.contains(.success) { result = .success }
-        else { result = .none }
-        memo.worst = result
-        return result
     }
 
     // MARK: Item actions
@@ -951,7 +936,7 @@ final class Store {
         if changed { items = all }
     }
 
-    private func syncCI(_ name: String) async throws {
+    func syncCI(_ name: String) async throws {
         guard var repo = repos.first(where: { $0.fullName == name }), repo.events.contains(.ciMain) else { return }
         if repo.defaultBranch == nil {
             let info: GHRepo = try await gh.get("/repos/\(name)")
@@ -995,6 +980,7 @@ final class Store {
                               failing: failing, checkedAt: Date(),
                               title: actions.workflowRuns.first?.displayTitle,
                               updatedAt: latest.values.compactMap(\.updatedAt).max())
+        unmuteCIIfChanged(name, to: status)
         // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
         ciCheckedAt[name] = status.checkedAt
         if var old = ci[name] {

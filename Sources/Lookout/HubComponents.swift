@@ -216,12 +216,6 @@ extension Store {
         return memo.result
     }
 
-    /// A repo's latest CI run on GitHub (its Actions page until a run is known); the playground reports it instead.
-    func openChecks(_ repo: RepoConfig) {
-        let url = ci[repo.fullName]?.url ?? repo.url.appendingPathComponent("actions")
-        if let interceptOpen { interceptOpen("Open checks · \(repo.fullName)") } else { NSWorkspace.shared.open(url) }
-    }
-
     /// A scratch Claude session (no folder), through the same interception as every other open.
     func startScratchSession() {
         if let interceptOpen { interceptOpen("New Claude session in Scratch"); return }

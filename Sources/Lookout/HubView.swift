@@ -20,11 +20,13 @@ final class HubState {
     /// No hover panels until the pointer has left the bar (set when the full view closes).
     var quiet = false
     var page: HubPage = .main
-    /// "i:<item id>" or "a:<session id>": the row the keys act on.
+    /// "i:<item id>", "c:<repo>" or "a:<session id>": the row the keys act on.
     var selection: String?
     /// The last row the keyboard (or a click on the inbox) picked: the lists scroll to it. Never set by hovering, so
     /// the pointer moving over a row doesn't move the list.
     var keyboardSelection: ScrollRequest?
+    /// CI's Passing row is open in place (it also is while CI is the focused section).
+    var ciPassingOpen = false
     var filter: InboxFilter = .needsYou {
         didSet { selection = nil; keyboardSelection = nil }
     }

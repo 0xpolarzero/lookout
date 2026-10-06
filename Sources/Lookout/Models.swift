@@ -122,6 +122,8 @@ struct InboxItem: Codable, Identifiable, Hashable {
     var clearedAt: Date?
 }
 
+/// A repository's CI state. One table gives each state its words and its silhouette, for every place CI is drawn or
+/// spoken (DESIGN.md 4.0): the bar's glyph, the rows, the header phrase, VoiceOver.
 enum CIState: String, Codable {
     case success, failure, pending, none
 
@@ -134,17 +136,8 @@ enum CIState: String, Codable {
         }
     }
 
+    /// A silhouette of its own, so the states read apart without their colours.
     var symbol: String {
-        switch self {
-        case .success: "checkmark.seal.fill"
-        case .failure: "xmark.seal.fill"
-        case .pending: "clock.fill"
-        case .none: "seal.fill"
-        }
-    }
-
-    /// A silhouette of its own beside a count, so the three read apart without their colours.
-    var countSymbol: String {
         switch self {
         case .failure: "xmark.octagon.fill"
         case .pending: "circle.dashed"
@@ -153,6 +146,7 @@ enum CIState: String, Codable {
         }
     }
 
+    /// Names a group of repos in this state.
     var title: String {
         switch self {
         case .success: "Passing"
@@ -162,12 +156,21 @@ enum CIState: String, Codable {
         }
     }
 
+    /// In a sentence or after a count: "1 failing".
     var label: String {
         switch self {
         case .success: "passing"
         case .failure: "failing"
         case .pending: "running"
         case .none: "no runs"
+        }
+    }
+
+    /// What VoiceOver says of one repo in this state.
+    var voice: String {
+        switch self {
+        case .none: "no runs yet"
+        default: label
         }
     }
 }

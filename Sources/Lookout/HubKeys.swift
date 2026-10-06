@@ -88,6 +88,7 @@ final class HubKeys {
             } else { return false }
             return true
         }
+        if selection.hasPrefix("c:") { return ciKey(event, id: id, flags: flags, shortcut: shortcut) }
         if selection.hasPrefix("a:") {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
@@ -99,9 +100,9 @@ final class HubKeys {
         return false
     }
 
-    /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
+    /// Every row the arrows walk through, top to bottom: inbox items, CI, then sessions.
     private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
+        store.hubItems(hub).map { "i:" + $0.id } + hub.ciTargets(store) + store.hubSessions(hub).map { "a:" + $0.id }
     }
 
     /// A new search picks its first result, so ↩ opens it straight away.
