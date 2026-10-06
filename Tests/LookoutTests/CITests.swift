@@ -152,4 +152,143 @@ import Testing
         #expect(CISpeech.age(now.addingTimeInterval(-3600), now: now) == "1 hour ago")
         #expect(CISpeech.list(["a", "b", "c"]) == "a, b and c")
     }
+
+    @Test func theBarOpensARepoInTheStateItShowsNotAMutedFailure() {
+        // An older passing repo and a newer failure that was muted: the bar says passing, so it opens the passing one.
+        let store = store(["a/ok": status(.success, changed: 5000), "b/bad": status(.failure, sha: "b1", changed: 10)], ["a/ok", "b/bad"])
+        store.muteCI(store.repos[1])
+        #expect(store.ciWorst.state == .success)
+        #expect(store.ciWorstRepo?.fullName == "a/ok")
+        // Only muted repos left: the bar still opens something.
+        store.ci["a/ok"] = nil
+        store.repos.removeFirst()
+        #expect(store.ciWorstRepo?.fullName == "b/bad")
+    }
+
+    @Test func theBarOpensTheNewestOfItsStateAndRepoWithoutRunsWhenNothingElseExists() {
+        let store = store(["a/old": status(.success, changed: 900), "b/new": status(.success, changed: 5)], ["a/old", "b/new", "c/none"])
+        #expect(store.ciWorstRepo?.fullName == "b/new")
+        let none = self.store([:], ["c/none"])
+        #expect(none.ciWorst.state == CIState.none)
+        #expect(none.ciWorstRepo?.fullName == "c/none")
+    }
+
+    // MARK: Undo
+
+    @Test func muteOffersAnUndoThatTakesItBack() {
+        let store = store(["b/bad": status(.failure, sha: "b1")], ["b/bad"])
+        store.muteCI(store.repos[0])
+        #expect(store.undoStack.visible(in: .ci)?.message == "Muted bad until it changes")
+        #expect(store.undoLast())
+        #expect(store.mutedCI.isEmpty)
+        #expect(store.ciWorst == CIWorst(state: .failure, failing: 1))
+        #expect(!store.undoLast())
+    }
+
+    @Test func anUndoLeavesAloneAMuteThatMovedOn() {
+        let store = store(["b/bad": status(.failure, sha: "b1")], ["b/bad"])
+        store.muteCI(store.repos[0])
+        // A new commit un-muted it, and the new one was muted: undoing the first mute must not touch the second.
+        store.unmuteCIIfChanged("b/bad", to: status(.failure, sha: "b2"))
+        store.ci["b/bad"] = status(.failure, sha: "b2")
+        store.mutedCI["b/bad"] = "b2"
+        store.undoLast()
+        #expect(store.mutedCI == ["b/bad": "b2"])
+    }
+
+    // MARK: The quiet group
+
+    @Test func theQuietGroupCountsOnlyWhatReallyPasses() {
+        let list = repos("a/ok", "b/bad", "c/none", "d/ok")
+        let ci = ["a/ok": status(.success), "b/bad": status(.failure, sha: "b1"), "c/none": status(CIState.none), "d/ok": status(.success)]
+        let rows = Store.ciList(repos: list, status: ci, muted: ["b/bad": "b1"])
+        #expect(rows.quietTitle == "Passing · 2, 1 muted, 1 no runs")
+        #expect(rows.quietSpeech == "2 passing, 1 muted, 1 no runs")
+        #expect(rows.quietName == "Passing")
+        let mutedOnly = Store.ciList(repos: repos("b/bad"), status: ["b/bad": status(.failure, sha: "b1")], muted: ["b/bad": "b1"])
+        #expect(mutedOnly.quietTitle == "Muted · 1")
+        let noRuns = Store.ciList(repos: repos("c/none"), status: [:], muted: [:])
+        #expect(noRuns.quietTitle == "No runs · 1")
+        let all = Store.ciList(repos: repos("a/x", "b/y"), status: ["a/x": status(.success), "b/y": status(.success)], muted: [:])
+        #expect(all.quietTitle == "All passing · 2 repositories")
+        #expect(all.quietSpeech == "2 repositories")
+    }
+
+    // MARK: Freshness
+
+    private func checked(_ ago: TimeInterval) -> CIStatus {
+        var s = status(.success)
+        s.checkedAt = now.addingTimeInterval(-ago)
+        return s
+    }
+
+    @Test func freshnessIsTheOldestCheckOfARepoWithCIOn() {
+        let store = store(["a/new": checked(60), "b/old": checked(7200), "c/off": checked(99999)], ["a/new", "b/old", "c/off"])
+        store.repos[2].events.remove(.ciMain)
+        #expect(store.ciFreshness == now.addingTimeInterval(-7200))
+        // Nothing checked yet: no date, so no "Last checked" line.
+        #expect(self.store([:], ["a/x"]).ciFreshness == nil)
+    }
+
+    // MARK: Reading GitHub's answer
+
+    private let t0 = Date(timeIntervalSince1970: 2_000_000)
+
+    private func check(_ name: String, _ status: String = "completed", _ conclusion: String? = "success", started: TimeInterval = 0,
+                       completed: TimeInterval? = nil, app: String? = "circleci") -> GHCheckRuns.Run {
+        GHCheckRuns.Run(app: GHCheckRuns.App(slug: app), name: name, status: status, conclusion: conclusion, headSha: "s",
+                        startedAt: t0.addingTimeInterval(started), completedAt: completed.map { t0.addingTimeInterval($0) })
+    }
+
+    private func combined(_ statuses: [GHCombinedStatus.Status] = []) -> GHCombinedStatus {
+        GHCombinedStatus(state: "success", totalCount: statuses.count, sha: "s", statuses: statuses)
+    }
+
+    @Test func aRepoWithOnlyExternalChecksHasAStateNamesAndAChangeTime() {
+        let failed = Store.readCI(runs: [], sha: nil, checks: [check("build", "completed", "failure", started: 10, completed: 90),
+                                                                check("lint", started: 5, completed: 40)], combined: combined())
+        #expect(failed.state == .failure)
+        #expect(failed.failing == ["build"])
+        #expect(failed.changedAt == t0.addingTimeInterval(90))
+        let running = Store.readCI(runs: [], sha: nil, checks: [check("build", "in_progress", nil, started: 30)], combined: combined())
+        #expect(running.state == .pending)
+        // Still running: it last changed when it started.
+        #expect(running.changedAt == t0.addingTimeInterval(30))
+    }
+
+    @Test func aRepoWithOnlyLegacyStatusesHasAChangeTime() {
+        let status = GHCombinedStatus.Status(context: "ci/jenkins", state: "failure", createdAt: t0, updatedAt: t0.addingTimeInterval(20))
+        let reading = Store.readCI(runs: [], sha: nil, checks: [], combined: combined([status]))
+        #expect(reading == Store.CIReading(state: .failure, failing: ["ci/jenkins"], changedAt: t0.addingTimeInterval(20)))
+        let neverUpdated = GHCombinedStatus.Status(context: "ci/x", state: "success", createdAt: t0, updatedAt: nil)
+        #expect(Store.readCI(runs: [], sha: nil, checks: [], combined: combined([neverUpdated])).changedAt == t0)
+    }
+
+    @Test func theLatestChangeAmongActionsAndExternalSourcesWins() {
+        let run = GHWorkflowRuns.Run(name: "build", workflowId: 1, headSha: "s", displayTitle: "Fix", updatedAt: t0.addingTimeInterval(50),
+                                     status: "completed", conclusion: "success")
+        let other = GHWorkflowRuns.Run(name: "old", workflowId: 2, headSha: "older", displayTitle: nil, updatedAt: t0.addingTimeInterval(500),
+                                       status: "completed", conclusion: "failure")
+        // A github-actions check run is the Actions run again, not an external source.
+        let mirror = check("build", started: 0, completed: 900, app: "github-actions")
+        let external = check("deploy", started: 10, completed: 70)
+        let reading = Store.readCI(runs: [run, other], sha: "s", checks: [mirror, external], combined: combined())
+        #expect(reading.state == .success)
+        #expect(reading.changedAt == t0.addingTimeInterval(70))
+        #expect(Store.readCI(runs: [], sha: nil, checks: [], combined: combined()) == Store.CIReading(state: .none, failing: [], changedAt: nil))
+    }
+
+    @Test func aCommitsHeadlineIsItsFirstLine() throws {
+        let decoder = JSONDecoder()
+        let commit = try decoder.decode(GHCommit.self, from: Data(#"{"commit":{"message":"Respect trailing commas (#1042)\n\nLong body"}}"#.utf8))
+        #expect(commit.headline == "Respect trailing commas (#1042)")
+    }
+
+    @Test func aHeadlineIsOnlyAskedForWhenTheRunHasNone() async {
+        let store = store(["a/x": status(.failure, sha: "c1")], ["a/x"])
+        #expect(await store.ciHeadline("a/x", commit: "c1", runTitle: "From the run") == "From the run")
+        store.ci["a/x"]?.title = "Known"
+        // Same commit as last time: what was fetched then stands (no request).
+        #expect(await store.ciHeadline("a/x", commit: "c1", runTitle: nil) == "Known")
+    }
 }

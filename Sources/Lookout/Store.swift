@@ -116,7 +116,7 @@ final class Store {
     /// When the one-shot Claude timer fires (it only ever moves earlier until it does).
     @ObservationIgnored private var claudeDeadline: Date?
     /// When each repo's CI was last checked, live (the persisted `checkedAt` only changes with the status).
-    @ObservationIgnored private var ciCheckedAt: [String: Date] = [:]
+    @ObservationIgnored private(set) var ciCheckedAt: [String: Date] = [:]
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
@@ -246,8 +246,6 @@ final class Store {
     /// What nothing announces is the clock: a turn with no summary stops counting as running two hours after its last
     /// message, and a background subagent that stopped writing is given up on. One timer, set after each read for the
     /// first moment something can expire (and none while the screens are asleep or nothing is running).
-    func lastCICheck(_ name: String) -> Date? { ciCheckedAt[name] ?? ci[name]?.checkedAt }
-
     func scheduleClaudeTick() {
         guard agents.enabled, persists, !screensAsleep else {
             claudeTimer?.invalidate()
@@ -701,14 +699,20 @@ final class Store {
     }
 
     private func sync(_ name: String) async {
+        var failure: Error?
         do {
             try await syncConversations(name)
             try await syncThreads(name)
-            try await syncCI(name)
-            if repoErrors[name] != nil { repoErrors[name] = nil }
         } catch {
-            let message = error.localizedDescription
+            failure = error
+        }
+        // CI has endpoints of its own: conversations failing doesn't keep it from being checked.
+        do { try await syncCI(name) } catch { failure = failure ?? error }
+        if let failure {
+            let message = failure.localizedDescription
             if repoErrors[name] != message { repoErrors[name] = message }
+        } else if repoErrors[name] != nil {
+            repoErrors[name] = nil
         }
     }
 
@@ -958,34 +962,21 @@ final class Store {
         let actions: GHWorkflowRuns = try await gh.get("/repos/\(name)/actions/runs",
                                                        ["branch": branch, "event": "push", "per_page": "30"])
         let sha = actions.workflowRuns.first?.headSha
-        var latest: [Int: GHWorkflowRuns.Run] = [:]
-        for run in actions.workflowRuns where run.headSha == sha && latest[run.workflowId] == nil {
-            latest[run.workflowId] = run
-        }
         let target = sha ?? ref
         async let checksReq: GHCheckRuns = gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
         async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
         let (checks, combined) = try await (checksReq, statusReq)
-        let external = checks.checkRuns.filter { $0.app?.slug != "github-actions" }
-
-        let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
-        var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()
-        failing += external.filter { bad.contains($0.conclusion ?? "") }.map(\.name)
-        failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
-        let pending = latest.values.contains { $0.status != "completed" }
-            || external.contains { $0.status != "completed" }
-            // design-lint: ignore (GitHub's own status name, not ours)
-            || combined.statuses.contains { $0.state == "pending" }
-        let any = !latest.isEmpty || !external.isEmpty || combined.totalCount > 0
-        let state: CIState = !failing.isEmpty ? .failure : pending ? .pending : any ? .success : .none
+        let reading = Self.readCI(runs: actions.workflowRuns, sha: sha, checks: checks.checkRuns, combined: combined)
         let commit = sha ?? combined.sha
+        let state = reading.state
+        let failing = reading.failing
 
         let previous = ci[name]?.state
+        // The headline comes from the Actions run; a repo with only external CI asks the commit for it (once per commit).
+        let title = await ciHeadline(name, commit: commit, runTitle: actions.workflowRuns.first?.displayTitle)
         let status = CIStatus(state: state, branch: branch, sha: commit,
                               url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
-                              failing: failing, checkedAt: Date(),
-                              title: actions.workflowRuns.first?.displayTitle,
-                              updatedAt: latest.values.compactMap(\.updatedAt).max())
+                              failing: failing, checkedAt: Date(), title: title, updatedAt: reading.changedAt)
         unmuteCIIfChanged(name, to: status)
         // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
         ciCheckedAt[name] = status.checkedAt

@@ -68,6 +68,8 @@ struct GHCheckRuns: Decodable {
         let status: String
         let conclusion: String?
         let headSha: String
+        let startedAt: Date?
+        let completedAt: Date?
     }
     let totalCount: Int
     let checkRuns: [Run]
@@ -77,11 +79,24 @@ struct GHCombinedStatus: Decodable {
     struct Status: Decodable {
         let context: String
         let state: String
+        let createdAt: Date?
+        let updatedAt: Date?
     }
     let state: String
     let totalCount: Int
     let sha: String
     let statuses: [Status]
+}
+
+/// A commit, for its headline.
+struct GHCommit: Decodable {
+    struct Detail: Decodable { let message: String }
+    let commit: Detail
+
+    /// The message's first line.
+    var headline: String? {
+        commit.message.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
 }
 
 struct GitHubError: LocalizedError {

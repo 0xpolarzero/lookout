@@ -36,6 +36,37 @@ struct CIList {
 
     /// What a row calls a repo: its name, with `owner/` only where the name alone is ambiguous.
     func title(_ repo: RepoConfig) -> String { shared.contains(repo.name.lowercased()) ? repo.fullName : repo.name }
+
+    /// What the quiet group holds, by what each repo really is: a muted repo is not passing, whatever it shows.
+    var quietCounts: (passing: Int, muted: Int, noRuns: Int) {
+        (quiet.filter { $0.state == .success && !$0.muted }.count, quiet.filter(\.muted).count,
+         quiet.filter { $0.state == .none && !$0.muted }.count)
+    }
+
+    /// The group's name, for the row and for VoiceOver's label: the biggest part of it.
+    var quietName: String {
+        let (passing, muted, _) = quietCounts
+        if allPassing { return "All passing" }
+        return passing > 0 ? CIState.success.title : muted > 0 ? "Muted" : CIState.none.title
+    }
+
+    /// "Passing · 11, 1 muted"; "All passing · 3 repositories" once nothing else is there.
+    var quietTitle: String {
+        let (passing, muted, noRuns) = quietCounts
+        if allPassing { return "All passing · \(plural(quiet.count, "repository", "repositories"))" }
+        var parts = ["\(quietName) · \(passing > 0 ? passing : muted > 0 ? muted : noRuns)"]
+        if passing > 0, muted > 0 { parts.append("\(muted) muted") }
+        if (passing > 0 || muted > 0), noRuns > 0 { parts.append("\(noRuns) \(CIState.none.label)") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// What VoiceOver adds to the group's name: its counts, in words.
+    var quietSpeech: String {
+        let (passing, muted, noRuns) = quietCounts
+        if allPassing { return plural(quiet.count, "repository", "repositories") }
+        let parts = [(passing, CIState.success.label), (muted, "muted"), (noRuns, CIState.none.label)]
+        return parts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
+    }
 }
 
 extension Store {
@@ -50,11 +81,21 @@ extension Store {
 
     func isCIMuted(_ repo: RepoConfig) -> Bool { Self.isMuted(repo.fullName, status: ci, muted: mutedCI) }
 
-    /// Quiets a repo until its commit or state changes: out of the worst state and the bar's glyph.
+    /// Quiets a repo until its commit or state changes: out of the worst state and the bar's glyph. The undo line says so.
     func muteCI(_ repo: RepoConfig) {
-        guard let status = ci[repo.fullName] else { return }
-        mutedCI[repo.fullName] = status.sha ?? ""
+        let name = repo.fullName
+        guard let status = ci[name] else { return }
+        let sha = status.sha ?? ""
+        let before = mutedCI[name]
+        mutedCI[name] = sha
         save()
+        registerUndo("Muted \(ciList.title(repo)) until it changes", in: .ci,
+                     announcement: "Muted \(repo.name) until it changes. Undo available") { [self] in
+            // Only if nothing has moved it since: a new commit already un-muted it.
+            guard mutedCI[name] == sha else { return }
+            mutedCI[name] = before
+            save()
+        }
     }
 
     func unmuteCI(_ repo: RepoConfig) {
@@ -124,12 +165,65 @@ extension Store {
         return list
     }
 
+    // MARK: Freshness
+
+    func lastCICheck(_ name: String) -> Date? { ciCheckedAt[name] ?? ci[name]?.checkedAt }
+
+    /// How old what the CI rows show is: the oldest answer GitHub gave for a repo whose CI is on. Failed polls don't
+    /// move it, so rows can't look fresh while nothing is being checked. Nil until something has been checked.
+    var ciFreshness: Date? { ciRepos.compactMap { lastCICheck($0.fullName) }.min() }
+
+    // MARK: Reading GitHub
+
+    /// What CI's three sources say about one commit.
+    struct CIReading: Equatable {
+        var state: CIState
+        var failing: [String]
+        /// The latest change among them: an Actions run, an external check run or a legacy status.
+        var changedAt: Date?
+    }
+
+    /// Folds Actions runs (the latest of each workflow, on `sha`), external check runs and legacy statuses into one
+    /// state, the names that failed and when it last changed. Any of the three can be all a repo has.
+    nonisolated static func readCI(runs: [GHWorkflowRuns.Run], sha: String?, checks: [GHCheckRuns.Run],
+                                   combined: GHCombinedStatus) -> CIReading {
+        var latest: [Int: GHWorkflowRuns.Run] = [:]
+        for run in runs where run.headSha == sha && latest[run.workflowId] == nil { latest[run.workflowId] = run }
+        let external = checks.filter { $0.app?.slug != "github-actions" }
+
+        let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
+        var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()
+        failing += external.filter { bad.contains($0.conclusion ?? "") }.map(\.name)
+        failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
+        let pending = latest.values.contains { $0.status != "completed" }
+            || external.contains { $0.status != "completed" }
+            // design-lint: ignore (GitHub's own status name, not ours)
+            || combined.statuses.contains { $0.state == "pending" }
+        let any = !latest.isEmpty || !external.isEmpty || combined.totalCount > 0
+        let state: CIState = !failing.isEmpty ? .failure : pending ? .pending : any ? .success : .none
+        let changed = latest.values.compactMap(\.updatedAt)
+            + external.compactMap { $0.completedAt ?? $0.startedAt }
+            + combined.statuses.compactMap { $0.updatedAt ?? $0.createdAt }
+        return CIReading(state: state, failing: failing, changedAt: changed.max())
+    }
+
+    /// The commit's headline: the Actions run's title when there is one; else what the commit says, asked once per
+    /// commit (a repo with only external CI has no run to read it from).
+    func ciHeadline(_ name: String, commit: String, runTitle: String?) async -> String? {
+        if let runTitle { return runTitle }
+        if let known = ci[name], known.sha == commit, let title = known.title { return title }
+        let found: GHCommit? = try? await gh.get("/repos/\(name)/commits/\(commit)")
+        return found?.headline
+    }
+
     // MARK: Opening
 
-    /// The repo the bar's CI cell opens: the worst one, the latest change first.
+    /// The repo the bar's CI cell opens: the latest change among the repos in the state the bar shows. A muted repo
+    /// isn't one of them (the bar doesn't count it), unless nothing else is left.
     var ciWorstRepo: RepoConfig? {
-        let list = ciList
-        return (list.attention.first ?? list.entries.max { ($0.changedAt ?? .distantPast) < ($1.changedAt ?? .distantPast) })?.repo
+        let entries = ciList.entries
+        let shown = entries.filter { !$0.muted && $0.state == ciWorst.state }
+        return (shown.isEmpty ? entries : shown).max { ($0.changedAt ?? .distantPast) < ($1.changedAt ?? .distantPast) }?.repo
     }
 
     func openWorstChecks() {
