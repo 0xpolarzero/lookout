@@ -230,7 +230,6 @@ struct ReposView: View {
     /// stays as it was.
     @State private var customOpen: Set<String> = []
     @Environment(\.pagePreview) private var preview
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var matches: [String] {
         let q = input.lowercased().trimmingCharacters(in: .whitespaces)
@@ -399,13 +398,12 @@ struct ReposView: View {
             failure = reason.map { (name, $0) }
             // The sentence appears in the list; it is said too, once, as the other notices are (WCAG 4.1.3).
             if let reason { Announce.say(RepoFailure.add(reason, input: name)) }
+            // The suggestions are gone, and the pointer that was over them is not any more.
+            overList = false
             if reason == nil {
                 input = ""
                 fieldFocused = false
-                overList = false
             } else {
-                // The overlay is gone with the error showing; the pointer that was over it is not any more.
-                overList = false
                 highlight = nil
             }
         }
@@ -466,20 +464,11 @@ struct RepoRow: View {
     var body: some View {
         let twoLines = failure != nil || shown == .custom
         VStack(alignment: .leading, spacing: 0) {
-            // The name and its controls on one line; when the name would be cut short, it takes a line to itself.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Theme.Space.md) {
-                    name.fixedSize()
-                    Spacer(minLength: Theme.Space.md)
-                    controls
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    name.frame(minHeight: Self.line + Theme.Space.sm).padding(.top, Theme.Space.xs)
-                    HStack(spacing: Theme.Space.md) {
-                        Spacer(minLength: 0)
-                        controls
-                    }
-                }
+            // The controls keep their width, the same on every row; the name gives way, in the middle.
+            HStack(spacing: Theme.Space.md) {
+                name
+                Spacer(minLength: 0)
+                controls
             }
             .frame(minHeight: twoLines ? Self.firstLine : Theme.Metrics.formRow)
             if let failure { failureLine(failure) }
@@ -525,7 +514,7 @@ struct RepoRow: View {
     /// The first line of a row with a second one: a pop-up's height and a hairline of margin.
     private static let firstLine: CGFloat = Theme.Metrics.button + 2
 
-    /// `owner/` quiet, the name in bold; the middle gives way first, and only on a line of its own (see `body`).
+    /// `owner/` quiet, the name in bold; the middle gives way first.
     private var name: some View {
         (Text("\(repo.owner)/").foregroundStyle(Theme.tertiary) + Text(repo.name).fontWeight(.semibold).foregroundStyle(Theme.text))
             .font(Theme.Typography.body)

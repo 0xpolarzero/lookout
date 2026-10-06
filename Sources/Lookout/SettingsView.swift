@@ -304,6 +304,18 @@ struct SettingsView: View {
         revealToken = false
     }
 
+    /// A pop-up over a single choice among `options`, the checked one marked in its menu.
+    private func choice<Value: Hashable>(_ label: String, value: String, room: [String] = [], selection: Binding<Value>,
+                                         options: [(value: Value, title: String)]) -> some View {
+        PopUp(label: label, value: value, room: room) {
+            Picker(label, selection: selection) {
+                ForEach(options, id: \.value) { Text($0.title).tag($0.value) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        }
+    }
+
     /// Where the bar rests, without dragging it (WCAG 2.5.7): its display, its edge, and where along the edge, which
     /// centring takes over.
     @ViewBuilder private func placement(_ ui: UIState) -> some View {
@@ -311,24 +323,16 @@ struct SettingsView: View {
         let centred = store.settings.centerPill == true
         if screens.count > 1 {
             FormRow("Display") {
-                PopUp(label: "Display", value: screens.first { $0.id == ui.display }?.title ?? "", room: screens.map(\.title)) {
-                    Picker("Display", selection: Binding(get: { ui.display }, set: { ui.place(BarPlacement(display: $0)) })) {
-                        ForEach(screens, id: \.id) { Text($0.title).tag($0.id) }
-                    }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                }
+                choice("Display", value: screens.first { $0.id == ui.display }?.title ?? "", room: screens.map(\.title),
+                       selection: Binding(get: { ui.display }, set: { ui.place(BarPlacement(display: $0)) }),
+                       options: screens.map { ($0.id, $0.title) })
             }
             FormDivider()
         }
         FormRow("Edge") {
-            PopUp(label: "Edge", value: ui.edge.title, room: DockEdge.allCases.map(\.title)) {
-                Picker("Edge", selection: Binding(get: { ui.edge }, set: { ui.place(BarPlacement(edge: $0)) })) {
-                    ForEach(DockEdge.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            }
+            choice("Edge", value: ui.edge.title, room: DockEdge.allCases.map(\.title),
+                   selection: Binding(get: { ui.edge }, set: { ui.place(BarPlacement(edge: $0)) }),
+                   options: DockEdge.allCases.map { ($0, $0.title) })
         }
         FormDivider()
         FormRow("Position", detail: centred ? "Centred, as set below" : nil) {
@@ -351,13 +355,8 @@ struct SettingsView: View {
     private var checkEvery: some View {
         let seconds = store.settings.pollInterval
         return FormRow("Check every", detail: seconds < 60 ? "Checking more than once a minute uses more of GitHub's rate limit." : nil) {
-            PopUp(label: "Check every", value: Self.intervalTitle(seconds)) {
-                Picker("Check every", selection: $store.settings.pollInterval) {
-                    ForEach(Self.intervals, id: \.self) { Text(Self.intervalTitle($0)).tag($0) }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            }
+            choice("Check every", value: Self.intervalTitle(seconds), selection: $store.settings.pollInterval,
+                   options: Self.intervals.map { ($0, Self.intervalTitle($0)) })
         }
         .onChange(of: store.settings.pollInterval) { store.restartPolling() }
     }
