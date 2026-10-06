@@ -444,7 +444,8 @@ struct CICell: View {
             .focusRing(Theme.Radius.tile)
             .accessibilityLabel("CI")
             .accessibilityValue(CISpeech.summary(store.ciList))
-            .accessibilityHint("Opens the checks of the repository that needs you most")
+            .accessibilityHint(store.ciOpensHelp)
+            .tip("CI", store.ciOpensHelp)
             .motion(Theme.Motion.fade, value: worst)
         }
     }

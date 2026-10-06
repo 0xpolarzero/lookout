@@ -318,6 +318,12 @@ extension Store {
         return (shown.isEmpty ? entries : shown).max { ($0.changedAt ?? .distantPast) < ($1.changedAt ?? .distantPast) }?.repo
     }
 
+    /// What the bar's CI cell says it opens, in its tooltip and for VoiceOver: the repository by name.
+    var ciOpensHelp: String {
+        guard let repo = ciWorstRepo else { return "No repository to open" }
+        return "Opens \(ciList.title(repo))'s checks"
+    }
+
     func openWorstChecks() {
         if let repo = ciWorstRepo { openChecks(repo) }
     }

@@ -153,6 +153,15 @@ import Testing
         #expect(store.ciWorstRepo?.fullName == "b/run")
     }
 
+    @Test func theBarsTooltipNamesTheRepoItOpens() {
+        let store = store(["a/ok": status(.success), "c/bad": status(.failure, sha: "c1")], ["a/ok", "c/bad"])
+        #expect(store.ciOpensHelp == "Opens bad's checks")
+        // Passing: the repo it opens is still named. A name two repos share shows its owner.
+        let calm = self.store(["a/ok": status(.success, changed: 900), "b/ok": status(.success, changed: 5)], ["a/ok", "b/ok"])
+        #expect(calm.ciOpensHelp == "Opens b/ok's checks")
+        #expect(self.store([:], []).ciOpensHelp == "No repository to open")
+    }
+
     @Test func theBarsCountNeverNeedsMoreThanTwoCharacters() {
         #expect([1, 9, 10, 15, 120].map(CICell.count) == ["1", "9", "9+", "9+", "9+"])
     }

@@ -378,6 +378,8 @@ enum PlaygroundShots {
         Shot.edges("focus-ci-many-ci", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.focus = .ci },
         // CI rows: Passing open in place, a row picked, a muted repo, stale data, Increase Contrast.
         Shot.edges("open-ci-passing-open", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.ciPassingOpen = true } },
+        // The bar's CI cell names the repository a click opens.
+        Shot.edges("rest-ci-tip", on: .rightAndTop) { $0.tip = "CI" },
         Shot.edges("open-ci-picked", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" } },
         Shot.edges("open-ci-muted", on: .rightAndTop) {
             $0.pinned = true
