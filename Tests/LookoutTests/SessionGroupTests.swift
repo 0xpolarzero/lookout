@@ -72,6 +72,15 @@ import Testing
         #expect(store([session("n")]).sessionShortcutPick == nil)
     }
 
+    @Test func theKeyboardsTooltipListsEveryTaskTheRowOnlyCounts() throws {
+        let s = store([session("a")], kept: ["a"])
+        s.claudeTasks = ["a": [ClaudeTask(id: "t1", kind: .agent, title: "Review the diff", since: now),
+                               ClaudeTask(id: "t2", kind: .command, title: "swift test", since: now)]]
+        let row = try #require(s.agentRows.kept.first)
+        #expect(row.tasks.count == 2)
+        #expect(SessionRow.tipDetail(row) == "Detail a\nReview the diff\nswift test")
+    }
+
     @Test func aReadQuestionIsNotWaiting() {
         let s = store([session("a", blocked: true)], kept: ["a"], unread: [])
         #expect(s.sessionGroups.map(\.id) == ["project:/code/app"])

@@ -506,7 +506,7 @@ struct SessionRow: View {
             }
         }
         .help(help)
-        .tip(row.session.title, plainHeadline.isEmpty ? nil : plainHeadline, focused: picked, hover: false)
+        .tip(row.session.title, tipDetail, focused: picked, hover: false)
         .sessionMenu(row, store)
         .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
@@ -595,7 +595,17 @@ struct SessionRow: View {
         }
     }
 
-    /// The title, then what it says: also for the row the keyboard picked.
+    /// What the row the keyboard picked says under the title: the question or summary, then everything it left running (the
+    /// row's line has the first, and a count).
+    private var tipDetail: String? { Self.tipDetail(row) }
+
+    static func tipDetail(_ row: AgentRow) -> String? {
+        let headline = String(row.headline.characters)
+        let lines = (headline.isEmpty ? [] : [headline]) + row.tasks.map(\.title)
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    /// The title, then what it says, for the pointer; the keyboard's pick has `tipDetail`.
     private var help: String { plainHeadline.isEmpty ? row.session.title : row.session.title + "\n" + plainHeadline }
 }
 
