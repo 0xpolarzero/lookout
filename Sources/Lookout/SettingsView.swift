@@ -72,7 +72,6 @@ struct SettingsView: View {
     @State private var botInput = ""
     @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
-    @State private var launchWanted = false
     @State private var launchError: String?
     @FocusState private var botFocused: Bool
 
@@ -153,9 +152,17 @@ struct SettingsView: View {
                 FormToggle(label: "Launch at login", isOn: Binding(get: { launchAtLogin }, set: setLaunchAtLogin))
                 if let launchError {
                     FormDivider()
-                    FormRow("Couldn't change it", detail: launchError) {
-                        BorderedButton("Try again") { setLaunchAtLogin(launchWanted) }
+                    // The switch went back to what is, so what was wanted is the other way. The system's reason is for a
+                    // tooltip and VoiceOver, not the line: it is not a sentence about this.
+                    let wanted = !launchAtLogin
+                    let title = "Couldn't turn \(wanted ? "on" : "off") Launch at login"
+                    FormRow(title) {
+                        BorderedButton("Try again") { setLaunchAtLogin(wanted) }
                     }
+                    .help(launchError)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(title)
+                    .accessibilityValue(launchError)
                 }
                 FormDivider()
                 FormToggle(label: "Keep the bar centred", isOn: Binding(
@@ -248,9 +255,8 @@ struct SettingsView: View {
         }
     }
 
-    /// Off to on and back; a refusal puts the switch back and says why, with a way to try again.
+    /// Off to on and back; a refusal puts the switch back and says so, with a way to try again.
     private func setLaunchAtLogin(_ on: Bool) {
-        launchWanted = on
         do {
             try LaunchAtLogin.set(on)
             launchAtLogin = on

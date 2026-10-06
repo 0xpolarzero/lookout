@@ -71,6 +71,68 @@ enum RepoPreset: CaseIterable {
     }
 }
 
+/// What went wrong with a repository, as a sentence about it. GitHub's and the system's own wording ("Forbidden",
+/// "Not Found") has no subject and is worded differently for the same cause, so it goes in a tooltip and
+/// VoiceOver's value, and the line says what it means for this repository.
+enum RepoFailure: Equatable {
+    case notFound, forbidden, rateLimited, badToken, unreachable
+
+    /// Nil for a reason that is not one of these, which is left as it is.
+    init?(reason: String) {
+        let r = reason.lowercased()
+        if r.contains("rate limit") { self = .rateLimited }
+        else if r.contains("not found") { self = .notFound }
+        else if r.contains("forbidden") { self = .forbidden }
+        else if r.contains("rejected the token") || r.contains("bad credentials") { self = .badToken }
+        else if ["internet connection", "network connection", "offline", "timed out", "could not connect", "hostname"].contains(where: r.contains) {
+            self = .unreachable
+        } else { return nil }
+    }
+
+    /// The line under a watched repository.
+    func sync(of repo: String) -> String {
+        switch self {
+        case .notFound: "Couldn't find \(repo), or no access to it"
+        case .forbidden: "No access to \(repo)"
+        default: general
+        }
+    }
+
+    /// The line under the add field, for what was typed.
+    func add(_ name: String) -> String {
+        switch self {
+        case .notFound: "Couldn't find \(name) on GitHub. Check the owner/repo."
+        case .forbidden: "No access to \(name)"
+        default: general
+        }
+    }
+
+    private var general: String {
+        switch self {
+        case .rateLimited: "GitHub is rate limiting requests"
+        case .badToken: "GitHub rejected your token"
+        default: "Couldn't reach GitHub"
+        }
+    }
+
+    /// The row's line for a reason: unrecognised ones say the repository didn't sync, and nothing more.
+    static func sync(_ reason: String, of repo: String) -> String {
+        RepoFailure(reason: reason)?.sync(of: repo) ?? "Couldn't sync \(repo)"
+    }
+
+    /// The add field's line for a reason: Store's own sentences ("Already watching …") are already one.
+    static func add(_ reason: String, input: String) -> String {
+        RepoFailure(reason: reason)?.add(repoName(from: input)) ?? reason
+    }
+
+    /// `owner/repo` out of what was typed (a GitHub URL too), as `Store.addRepo` reads it.
+    static func repoName(from input: String) -> String {
+        var name = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = name.range(of: "github.com/") { name = String(name[range.upperBound...]) }
+        return name.split(separator: "/").prefix(2).joined(separator: "/")
+    }
+}
+
 extension Store {
     /// Turns the preset's kinds on and the others off, and sets All comments to match, through the same calls the
     /// checkboxes make. What those calls remove from the inbox (issues and PRs that were opened, comments that
@@ -250,9 +312,13 @@ struct ReposView: View {
                     .disabled(input.isEmpty || adding)
             }
             if let error {
-                Label(error, systemImage: "exclamationmark.circle.fill")
+                let sentence = RepoFailure.add(error, input: input)
+                Label(sentence, systemImage: "exclamationmark.circle.fill")
                     .font(Theme.Typography.meta).foregroundStyle(Theme.red)
                     .padding(.horizontal, Theme.Space.xs)
+                    // What GitHub said, for whoever wants it.
+                    .help(sentence == error ? "" : error)
+                    .accessibilityValue(sentence == error ? "" : error)
             }
         }
         .overlay(alignment: .topLeading) {
@@ -524,7 +590,8 @@ struct RepoRow: View {
         HStack(spacing: Theme.Space.sm) {
             Image(systemName: "exclamationmark.circle.fill").font(Theme.Typography.glyph(11, .regular)).foregroundStyle(Theme.red)
                 .accessibilityHidden(true)
-            Text("Couldn't sync: \(message)").font(Theme.Typography.meta).foregroundStyle(Theme.red).lineLimit(1)
+            Text(RepoFailure.sync(message, of: repo.fullName)).font(Theme.Typography.meta).foregroundStyle(Theme.red).lineLimit(1)
+                .help(message)
             Spacer(minLength: Theme.Space.md)
             Button(action: store.refreshNow) {
                 Text("Retry").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
@@ -539,6 +606,7 @@ struct RepoRow: View {
         }
         .frame(height: Self.line)
         .accessibilityElement(children: .contain)
+        .accessibilityValue(message)
     }
 
     // MARK: Menu and order
