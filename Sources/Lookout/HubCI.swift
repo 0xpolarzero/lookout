@@ -283,7 +283,7 @@ extension LookoutHub {
     var showsCI: Bool { !searching }
 
     /// The bar's CI cell: the worst state that isn't muted, and how many repos fail. Click opens that repo's checks.
-    var ciCell: some View { CICell(store: store) }
+    var ciCell: some View { CICell(store: store) { hub.showCI(store, ui: ui) } }
 
     /// CI's section header: "CI", and one phrase only when something is not green.
     var ciHeader: some View {
@@ -293,6 +293,7 @@ extension LookoutHub {
         } : nil
         return SectionHeader(title: "CI", status: ciPhrase, focused: focused, expandHelp: focused ? "Back to all sections" : "Expand CI",
                              onFocus: toggle) {}
+            .modifier(CIShowTarget(hub: hub))
     }
 
     /// "2 failing" in red; "1 running" while nothing fails; nothing once everything has passed.
@@ -414,6 +415,8 @@ extension LookoutHub {
 /// sits under it, only when some fail, and over two digits reads "9+": the glyph never moves with the count.
 struct CICell: View {
     let store: Store
+    /// VoiceOver's "Show": the hub's own way into the section (the click opens a page in the browser instead).
+    let show: () -> Void
     @Environment(\.resolved) private var resolved
 
     /// What the cell shows of how many fail: the number, or "9+" so two digits never reach the screen's edge.
@@ -445,6 +448,7 @@ struct CICell: View {
             .accessibilityLabel("CI")
             .accessibilityValue(CISpeech.summary(store.ciList))
             .accessibilityHint(store.ciOpensHelp)
+            .accessibilityAction(named: "Show", show)
             .tip("CI", store.ciOpensHelp)
             .motion(Theme.Motion.fade, value: worst)
         }
@@ -453,7 +457,42 @@ struct CICell: View {
 
 // MARK: - Keys
 
+/// The CI header takes VoiceOver's focus when the bar's Show asks for it.
+private struct CIShowTarget: ViewModifier {
+    let hub: HubState
+    @AccessibilityFocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityFocused($focused)
+            // `initial`: the header may have appeared with the hub opening, after the request was made.
+            .onChange(of: hub.ciFocusPending, initial: true) { _, pending in
+                guard pending else { return }
+                Task { @MainActor in
+                    // Let the opened hub lay out before focus moves into it.
+                    try? await Task.sleep(for: .milliseconds(100))
+                    focused = true
+                    hub.ciFocusPending = false
+                }
+            }
+    }
+}
+
 extension HubState {
+    /// The bar's CI cell, shown (VoiceOver's Show): the hub stays open on CI, with its first row picked and VoiceOver's
+    /// focus moved to its header. Another section's focus, or a search, would hide the rows, so they step back.
+    func showCI(_ store: Store, ui: UIState) {
+        pinned = true
+        if !query.isEmpty { query = "" }
+        if focus != nil, focus != .ci { LookoutHub.animate(LookoutHub.refocus) { focus = nil } }
+        if let first = ciTargets(store).first {
+            selection = first
+            ui.drawerSelection = nil
+            requestScroll(first)
+        }
+        ciFocusPending = true
+    }
+
     /// Opens or closes the Passing group in place.
     func setCIPassingOpen(_ open: Bool) {
         LookoutHub.animate(open ? Theme.Motion.move : Theme.Motion.close) { ciPassingOpen = open }

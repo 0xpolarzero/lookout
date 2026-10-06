@@ -53,4 +53,25 @@ import Testing
         inbox.rehomeCI(from: ["c:a"], to: [])
         #expect(inbox.selection == "i:1")
     }
+
+    @Test func showKeepsTheHubOpenOnCIWithItsFirstRowPicked() {
+        let store = Store()
+        store.persists = false
+        store.repos = [RepoConfig(fullName: "a/ok"), RepoConfig(fullName: "b/bad")]
+        let now = Date()
+        store.ci = ["a/ok": CIStatus(state: .success, branch: "main", sha: "a1", url: nil, failing: [], checkedAt: now, title: nil, updatedAt: now),
+                    "b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
+                                      updatedAt: now)]
+        let (hub, ui) = state(selecting: "i:1", keyboard: false)
+        // From a search, with another section filling the view: CI's rows have to come back first.
+        hub.query = "zig"
+        hub.focus = .agents
+        hub.showCI(store, ui: ui)
+        #expect(hub.pinned)
+        #expect(hub.query.isEmpty)
+        #expect(hub.focus == nil)
+        #expect(hub.selection == "c:b/bad")
+        #expect(hub.keyboardSelection?.id == "c:b/bad")
+        #expect(hub.ciFocusPending)
+    }
 }

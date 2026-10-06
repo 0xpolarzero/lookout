@@ -27,6 +27,8 @@ final class HubState {
     var keyboardSelection: ScrollRequest?
     /// CI's Passing row is open in place (it also is while CI is the focused section).
     var ciPassingOpen = false
+    /// The bar's CI cell asked VoiceOver to move into CI's section (`showCI`); the section's header answers it.
+    var ciFocusPending = false
     var filter: InboxFilter = .needsYou {
         didSet { selection = nil; keyboardSelection = nil }
     }
