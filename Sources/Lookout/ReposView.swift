@@ -392,6 +392,7 @@ struct ReposView: View {
         guard !name.isEmpty, !adding else { return }
         adding = true
         failure = nil
+        let draft = input
         Task {
             let reason = await store.addRepo(name)
             adding = false
@@ -401,8 +402,11 @@ struct ReposView: View {
             // The suggestions are gone, and the pointer that was over them is not any more.
             overList = false
             if reason == nil {
-                input = ""
-                fieldFocused = false
+                // Whatever was typed meanwhile is the next one: it stays, and so does the focus.
+                if input == draft {
+                    input = ""
+                    fieldFocused = false
+                }
             } else {
                 highlight = nil
             }
