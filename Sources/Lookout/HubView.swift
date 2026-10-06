@@ -118,8 +118,13 @@ final class HubState {
     var expanded: Bool { pinned }
     /// In the full view, the section given all the room it needs; the others shrink to their header (and counts).
     var focus: HubSection? {
-        // A pick in a section that just shrank is no longer a row the keys may act on.
-        didSet { if let selection, !isVisible(selection) { self.selection = nil; keyboardSelection = nil } }
+        didSet {
+            // A pick in a section that just shrank is no longer a row the keys may act on.
+            if let selection, !isVisible(selection) { self.selection = nil; keyboardSelection = nil }
+            // CI isn't drawn while there is a query, and the inbox, shrunk to its header, would hide the field it is typed in:
+            // CI focused ends the search, whichever way it was focused (⌘2, its header, a bar cell).
+            if focus == .ci, !query.isEmpty || inbox.searchOpen { query = ""; inbox.endSearch() }
+        }
     }
 
     /// Whether a section's rows show: all of them do, unless another section is the focused one.

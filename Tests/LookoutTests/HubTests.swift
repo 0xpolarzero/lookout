@@ -301,6 +301,23 @@ import Testing
         #expect(hub.selection?.hasPrefix("c:") == true, "\(hub.selection ?? "nothing")")
     }
 
+    @Test func focusingCIEndsASearchWhichWouldHideBothCIAndTheField() {
+        hub.query = "zig"
+        hub.inbox.searchOpen = true
+        focus(2)
+        #expect(hub.focus == .ci && hub.query.isEmpty && !hub.inbox.searchOpen)
+        // The headers do the same: the focus is one transition, whoever asks.
+        hub.focus = nil
+        hub.query = "zig"
+        hub.toggleFocus(.ci)
+        #expect(hub.focus == .ci && hub.query.isEmpty)
+        // The other sections keep the search they were focused from.
+        hub.focus = nil
+        hub.query = "zig"
+        focus(1)
+        #expect(hub.focus == .inbox && hub.query == "zig")
+    }
+
     @Test func markAllReadNeedsTheInboxToShow() {
         let before = store.unreadCount(.needsYou)
         focus(3)
