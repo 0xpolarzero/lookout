@@ -314,3 +314,71 @@ import Testing
         #expect(store.unreadCount(.needsYou) == before)
     }
 }
+
+/// The controls menu asked for by VoiceOver or a key: it has the keyboard and walks like NSMenu (DESIGN.md 4.7).
+@MainActor
+@Suite struct ControlsMenuKeys {
+    private let store = Store()
+    private let hub = HubState()
+    private let keys: HubKeys
+
+    init() {
+        Demo.populate(store, .agents)
+        keys = HubKeys(store: store, ui: UIState(persists: false, edge: .right), hub: hub)
+    }
+
+    @discardableResult
+    private func press(_ code: Int, _ chars: String = "") -> Bool {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                     context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false,
+                                     keyCode: UInt16(code))!
+        return keys.key(event)
+    }
+
+    @Test func showingControlsPicksTheFirstRow() {
+        hub.showControls()
+        #expect(hub.section == .controls && hub.menuKeys && hub.menuPick == .keepOpen)
+    }
+
+    @Test func theArrowsWalkTheRowsRound() {
+        hub.showControls()
+        #expect(press(kVK_DownArrow, "\u{F701}"))
+        #expect(hub.menuPick == .repositories)
+        press(kVK_DownArrow); press(kVK_DownArrow)
+        #expect(hub.menuPick == .sync)
+        press(kVK_DownArrow)
+        #expect(hub.menuPick == .keepOpen)
+        press(kVK_UpArrow)
+        #expect(hub.menuPick == .sync)
+    }
+
+    @Test func signInTroubleLeavesNoSyncRow() {
+        store.authError = "Bad credentials"
+        #expect(ControlsRow.listed(store) == [.keepOpen, .repositories, .settings])
+        hub.showControls()
+        for _ in 0..<3 { press(kVK_DownArrow) }
+        #expect(hub.menuPick == .keepOpen)
+    }
+
+    @Test func returnDoesTheRowAndLeavesTheMenu() {
+        hub.showControls()
+        press(kVK_DownArrow)
+        #expect(press(kVK_Return, "\r"))
+        #expect(hub.page == .repos && hub.pinned)
+        #expect(!hub.menuKeys)
+    }
+
+    @Test func escapeClosesTheMenuAndGivesTheKeyboardBack() {
+        var gaveBack = false
+        keys.onClose = { gaveBack = true }
+        hub.showControls()
+        #expect(press(kVK_Escape, "\u{1b}"))
+        #expect(hub.section == nil && !hub.menuKeys && gaveBack)
+        #expect(!hub.pinned)
+    }
+
+    @Test func aMenuThatIsNotUpLeavesTheKeysAlone() {
+        #expect(!press(kVK_DownArrow, "\u{F701}"))
+        #expect(!press(kVK_Return, "\r"))
+    }
+}

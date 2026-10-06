@@ -17,6 +17,37 @@ enum HubSection: Hashable {
     }
 }
 
+/// The controls menu's rows, top to bottom (DESIGN.md 5.7): what its view draws and its keys walk.
+enum ControlsRow: CaseIterable {
+    case keepOpen, repositories, settings, sync
+
+    /// The rows the menu lists: while sign-in is the fault its line opens Settings, so there is nothing to sync.
+    @MainActor static func listed(_ store: Store) -> [ControlsRow] { allCases.filter { $0 != .sync || store.authError == nil } }
+}
+
+extension HubState {
+    /// Opens the controls peek for the keyboard and VoiceOver: first row highlighted, the keys acting on it.
+    func showControls() {
+        quiet = false
+        cancelDwell()
+        section = .controls
+        menuPick = .keepOpen
+        menuKeys = true
+    }
+
+    /// Does what a row of the controls menu says.
+    func perform(_ row: ControlsRow, store: Store) {
+        switch row {
+        case .keepOpen: LookoutHub.animate(LookoutHub.opening) { pinned = true }
+        case .repositories: go(.repos)
+        case .settings: go(.settings)
+        case .sync: if !store.isSyncing { store.refreshNow() }
+        }
+        // A page or the full view takes over; syncing leaves the menu as it is.
+        if row != .sync { menuKeys = false }
+    }
+}
+
 struct PeekMeasure: Equatable {
     let section: HubSection
     let size: CGSize
@@ -280,6 +311,7 @@ extension LookoutHub {
     var controlsCell: some View {
         ControlsGear(active: hub.page != .main) { hub.page == .settings ? hub.back() : hub.go(.settings) }
             .accessibilityLabel(hub.page == .settings ? "Close Settings" : "Settings")
+            .accessibilityAction(named: "Show controls") { hub.showControls() }
             .accessibilityAction(named: "Keep open") { keepOpen() }
             .accessibilityAction(named: "Repositories") { hub.go(.repos) }
             .accessibilityAction(named: "Check now") { store.refreshNow() }
@@ -287,9 +319,14 @@ extension LookoutHub {
 
     /// The controls (DESIGN.md 5.7): what the footer holds, as menu rows, then how syncing is going.
     @ViewBuilder var peekControls: some View {
-        MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display) { keepOpen() }
-        MenuRow(symbol: "books.vertical", title: "Repositories…", key: nil) { hub.go(.repos) }
-        MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,") { hub.go(.settings) }
+        let picked = hub.menuKeys ? hub.menuPick : nil
+        MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display, picked: picked == .keepOpen) {
+            hub.perform(.keepOpen, store: store)
+        }
+        MenuRow(symbol: "books.vertical", title: "Repositories…", key: nil, picked: picked == .repositories) {
+            hub.perform(.repositories, store: store)
+        }
+        MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,", picked: picked == .settings) { hub.perform(.settings, store: store) }
         Hairline().padding(.vertical, Theme.Space.xs)
         Ticking(coarse: true) { now in
             let line = syncLine(now: now)
@@ -313,6 +350,9 @@ extension LookoutHub {
             }
             .padding(.horizontal, Theme.Metrics.rowPadding)
             .frame(height: Theme.Metrics.menuRow)
+            // Picked by the keys: the whole line is the row, as the other rows are.
+            .background(Theme.Radius.shape(Theme.Radius.field).fill(picked == .sync ? Theme.Fill.selected : Theme.Fill.rest))
+            .focusRing(Theme.Radius.field, isFocused: picked == .sync)
             .help(line.help)
         }
     }

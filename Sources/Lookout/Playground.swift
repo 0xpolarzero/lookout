@@ -341,6 +341,8 @@ enum PlaygroundShots {
         Shot.edges("peek-ci") { $0.section = .ci },
         Shot.edges("peek-agents") { $0.section = .agents },
         Shot.edges("peek-controls") { $0.section = .controls },
+        // Asked for by VoiceOver or a key: the first row is picked and the keys walk the rows.
+        Shot.edges("peek-controls-keys", on: .rightAndTop) { $0.section = .controls; $0.setup = { _, _, hub in hub.menuKeys = true } },
         // An inbox item and a session picked, their actions showing, to compare them.
         Shot.edges("picked", on: .rightAndTop) { $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci" },
         Shot.edges("focus-inbox", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },
@@ -560,6 +562,7 @@ private struct ComponentSheet: View {
             .padding(Theme.Space.xs)
             MenuRow(symbol: "pin", title: "Keep open", key: "⌃⌥L") {}
             MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,") {}
+            MenuRow(symbol: "books.vertical", title: "Repositories… (picked)", key: nil, picked: true) {}
         }
     }
 

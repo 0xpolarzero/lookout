@@ -49,7 +49,13 @@ final class HubState {
     @ObservationIgnored private var navigating = false
 
     /// The section the pointer is on: just that one opens beside the bar.
-    var section: HubSection?
+    var section: HubSection? {
+        didSet { if section != .controls { menuKeys = false } }
+    }
+    /// The controls menu was asked for by VoiceOver ("Show controls") and has the keyboard: ↑↓ walk its rows, Return does
+    /// one and Esc closes it. `menuPick` is the highlighted row.
+    var menuKeys = false
+    var menuPick = ControlsRow.keepOpen
     /// The bar is being carried to another edge: no panels meanwhile.
     @ObservationIgnored var dragging = false
     @ObservationIgnored private var dwell: Task<Void, Never>?

@@ -427,11 +427,14 @@ struct KeyCap: View {
 }
 
 /// A line of a menu-like panel, as in NSMenu: symbol column, label, the key that does the same as plain text.
+/// `picked` is the menu's own highlight, moved by the arrow keys: it fills like a pick and draws the focus ring.
 struct MenuRow: View {
     let symbol: String
     let title: String
     let key: String?
+    var picked = false
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) {
@@ -449,8 +452,9 @@ struct MenuRow: View {
             .frame(height: Theme.Metrics.menuRow)
             .contentShape(Rectangle())
         }
-        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.field), hover: Theme.Fill.selected))
-        .focusRing(Theme.Radius.field)
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.field), hover: Theme.Fill.selected, isActive: picked))
+        .focused($focused)
+        .focusRing(Theme.Radius.field, isFocused: focused || picked)
         .accessibilityLabel(title)
     }
 }

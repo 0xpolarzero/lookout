@@ -139,6 +139,7 @@ final class HubController {
     /// Whether the hub was last reported to the store as visible beyond the bare bar.
     private var reportedOpen = false
     private var lastPinned = false
+    private var lastMenuKeys = false
     /// The app that had focus before the hub took it, to hand it back.
     private var previousApp: NSRunningApplication?
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
@@ -382,6 +383,7 @@ final class HubController {
             _ = ui.edge
             _ = hub.section
             _ = hub.quiet
+            _ = hub.menuKeys
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -393,6 +395,12 @@ final class HubController {
                     self.takeFocus()
                 } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
                     self.giveFocusBack()
+                }
+                // The controls menu, asked for by VoiceOver or a key, takes the keyboard while it is up.
+                if self.hub.menuKeys != self.lastMenuKeys {
+                    self.lastMenuKeys = self.hub.menuKeys
+                    if self.hub.menuKeys, !self.window.isKeyWindow { self.takeFocus() }
+                    else if !self.hub.menuKeys, !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow { self.giveFocusBack() }
                 }
                 self.mouseMoved()
                 self.reportOpen()

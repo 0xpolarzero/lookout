@@ -41,6 +41,7 @@ final class HubKeys {
         let shortcut = Shortcut(event)
         if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
             if editing { event.window?.makeFirstResponder(nil) }
+            else if hub.menuKeys, !hub.expanded { closeMenu() }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
             else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
@@ -59,6 +60,7 @@ final class HubKeys {
             rehome()
             return true
         }
+        if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
         guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
@@ -105,6 +107,29 @@ final class HubKeys {
             return true
         }
         return false
+    }
+
+    /// The controls menu has the keyboard (DESIGN.md 4.7): ↑↓ walk its rows, Return or Space does the picked one.
+    private func menuKey(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags.isEmpty else { return false }
+        let rows = ControlsRow.listed(store)
+        switch Int(event.keyCode) {
+        case kVK_DownArrow, kVK_UpArrow:
+            // Round, as NSMenu's.
+            let i = rows.firstIndex(of: hub.menuPick) ?? 0
+            hub.menuPick = rows[(i + (Int(event.keyCode) == kVK_DownArrow ? 1 : rows.count - 1)) % rows.count]
+        case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space:
+            hub.perform(hub.menuPick, store: store)
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// Esc: the menu goes, and the keyboard goes back to where it was.
+    private func closeMenu() {
+        hub.section = nil
+        onClose()
     }
 
     /// What a ⌘-digit asks of the section focus: a section, or nil for ⌘0. Outer nil: not a focus key.
