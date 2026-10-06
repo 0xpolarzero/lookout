@@ -36,6 +36,42 @@ import Testing
         }
     }
 
+    /// The brightest grey the bar's CI cell draws in a shot of this scenario (0...255): the real hub, on its edge, as the
+    /// playground renders it.
+    private func ciGlyphBrightness(_ scenario: Demo.Scenario, contrast: Bool = false) async -> Int? {
+        var shot = Shot(name: "ci-glyph", scenario: scenario)
+        if contrast { shot.environment = .contrast }
+        guard let rep = await PlaygroundShots.render(shot) else { return nil }
+        let scale = CGFloat(rep.pixelsWide) / shot.size.width
+        func red(_ x: Int, _ y: Int) -> Int { Int(((rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)?.redComponent ?? 0) * 255).rounded()) }
+        let x0 = Int((shot.size.width - Theme.Metrics.bar) * scale)
+        // The inbox tile is the bar's first amber mark: the CI cell is the one slot under its own.
+        guard let tileTop = (0..<rep.pixelsHigh).first(where: { y in (x0..<rep.pixelsWide).contains { x in red(x, y) > 240 && (rep.colorAt(x: x, y: y)?.blueComponent ?? 1) < 0.4 } })
+        else { return nil }
+        let top = tileTop - Int(((Theme.Metrics.pitch - Theme.Metrics.tile) / 2) * scale) + Int(Theme.Metrics.pitch * scale)
+        var best = 0
+        for y in top..<(top + Int(Theme.Metrics.pitch * scale)) {
+            for x in x0..<rep.pixelsWide { best = max(best, red(x, y)) }
+        }
+        return best
+    }
+
+    /// The quietest states are the quietest marks on the bar (DESIGN.md 5.1): passing and no runs draw `tertiary`,
+    /// running `secondary`, and none reaches the white of a tile's letters. (Measured in the shot, where the two outline
+    /// symbols once drew pure white whatever their style said.)
+    @Test func ciGlyphsDrawTheirOwnTokenNotWhite() async throws {
+        let passing = try #require(await ciGlyphBrightness(.allPassing))
+        let noRuns = try #require(await ciGlyphBrightness(.ciNoRuns))
+        let running = try #require(await ciGlyphBrightness(.ciRunning))
+        #expect(passing == noRuns)
+        #expect(passing < running, "passing draws \(passing), running \(running)")
+        #expect(running < 215, "running draws \(running)")
+        // 3:1 against the rail, from the pixels' own luminance.
+        func luminance(_ v: Int) -> Double { let c = Double(v) / 255; return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let rail = 30
+        #expect((luminance(passing) + 0.05) / (luminance(rail) + 0.05) >= 3)
+    }
+
     @Test func clickOpensTheWorstReposNewestChecks() {
         let s = summary(["a": status(.failure, minutesAgo: 90), "b": status(.failure, minutesAgo: 5), "c": status(.pending, minutesAgo: 1)])
         #expect(s.open?.name == "b")

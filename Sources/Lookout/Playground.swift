@@ -425,7 +425,9 @@ enum PlaygroundShots {
                 let windows = batch.map { (name: $0.name, window: open($0)) }
                 try? await Task.sleep(for: .seconds(2.5))
                 for (name, window) in windows {
-                    capture(window, to: "\(dir)/\(name).png")
+                    if let png = bitmap(of: window)?.representation(using: .png, properties: [:]) {
+                        try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+                    }
                     window.close()
                 }
             }
@@ -475,12 +477,20 @@ enum PlaygroundShots {
         return window
     }
 
-    private static func capture(_ window: NSWindow, to path: String) {
-        guard let view = window.contentView else { return }
+    private static func bitmap(of window: NSWindow) -> NSBitmapImageRep? {
+        guard let view = window.contentView else { return nil }
         view.layoutSubtreeIfNeeded()
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        return rep
+    }
+
+    /// One shot as pixels, for the tests that measure what the views draw (its window is closed again).
+    static func render(_ shot: Shot) async -> NSBitmapImageRep? {
+        let window = open(shot)
+        defer { window.close() }
+        try? await Task.sleep(for: .seconds(1.5))
+        return bitmap(of: window)
     }
 }
 

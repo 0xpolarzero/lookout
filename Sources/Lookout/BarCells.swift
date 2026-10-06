@@ -150,7 +150,10 @@ struct CIBarCell: View {
             VStack(spacing: -1) {
                 Image(systemName: worst.countSymbol)
                     .font(Theme.Typography.glyph(14, .regular))
-                    .foregroundStyle(worst.color)
+                    // One colour in both layers: left to the default rendering, the two outline symbols (check,
+                    // minus) ignore the style in the bar and draw white.
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(worst.color, worst.color)
                 if worst == .failure {
                     Text(failing > 99 ? "99+" : "\(failing)").font(Theme.Typography.numeral).foregroundStyle(Theme.red)
                 }
