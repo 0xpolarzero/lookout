@@ -230,7 +230,7 @@ extension LookoutHub {
             InboxMenuGlyph()
         }
         .menuStyle(.button)
-        .buttonStyle(HoverFillButtonStyle(shape: Circle()))
+        .buttonStyle(HoverFillButtonStyle(shape: Circle(), hitOutset: (Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
         .menuIndicator(.hidden)
         .fixedSize()
         .focusRing(Theme.Metrics.iconButton / 2)

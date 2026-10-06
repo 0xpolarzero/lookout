@@ -701,7 +701,8 @@ struct NewSessionRow: View {
                 .font(Theme.Typography.glyph(11, .semibold))
                 .foregroundStyle(Theme.secondary)
                 .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
-                .contentShape(Rectangle())
+                // The icon buttons' own 28pt to hit, drawn as it was.
+                .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
         }
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.small)
@@ -1070,6 +1071,9 @@ struct LabelEditor: View {
                     .fieldStyle(focused: focused)
                     .frame(width: 90)
                     .onSubmit(save)
+                    // Named for what it holds, not the example it shows, and the way back said (what the line below says).
+                    .accessibilityLabel(name)
+                    .accessibilityHint(help)
                 BorderedButton("Save", action: save)
             }
             Text(help).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
