@@ -623,10 +623,6 @@ final class Store {
         return n
     }
 
-    func openCount(_ filter: InboxFilter) -> Int {
-        list(filter).count
-    }
-
     // MARK: Item actions
 
     private func mutate(_ id: String, _ f: (inout InboxItem) -> Void) {

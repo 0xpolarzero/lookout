@@ -292,9 +292,6 @@ private struct CINameRow: View {
 // MARK: - The section
 
 extension LookoutHub {
-    /// While searching, the results are the inbox and the sessions: CI leaves the layout (it isn't dimmed).
-    var showsCI: Bool { !searching }
-
     /// CI's section header: "CI", and one phrase only when something is not green.
     var ciHeader: some View {
         let focused = hub.focus == .ci

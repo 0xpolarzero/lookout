@@ -311,10 +311,6 @@ extension LookoutHub {
             EmptyBlock("Cleared items land here")
         }
     }
-
-    func itemRow(_ item: InboxItem) -> some View {
-        InboxRow(item: item, store: store, ui: ui, hub: hub).capEdge()
-    }
 }
 
 extension InboxNotice {
