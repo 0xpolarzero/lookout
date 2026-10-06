@@ -224,23 +224,49 @@ import Testing
         let (shown, hidden) = BarSessions.arrange(slots, frozen: nil)
         #expect(shown.count == 10)
         #expect(hidden.count == 2)
-        // Even when the frozen order has it far down the list.
+        // Even when the frozen order has it far down the list: it takes the last other tile's place, so no tile is added.
         let late = (0..<12).map { slot("s\($0)", waiting: $0 == 11) }
         let frozen = (0..<12).map { slot("s\($0)") }
         let arranged = BarSessions.arrange(late, frozen: frozen)
         #expect(arranged.shown.contains { $0.id == "s11" })
-        #expect(arranged.shown.count == 9)
+        #expect(arranged.shown.count == 8)
     }
 
-    @Test func aLateWaitingSessionIsNinthInTheBarAndTheHiddenOnesFollowIt() {
+    @Test func aLateWaitingSessionTakesTheLastTilesPlaceAndTheRunKeepsItsLength() {
         // Twelve of one project, held in order by the pointer; the twelfth then waits. The bar and the side panel arrange
-        // the same way, so its tile and its row are both the ninth and the "+3" row stands beside the "+3" tile.
+        // the same way: its tile and its row stand where the eighth did, the "+4" stays the "+4", and nothing after it
+        // (the "+", update, gear) moves under the pointer.
         let frozen = (0..<12).map { slot("s\($0)") }
         let late = (0..<12).map { $0 == 11 ? slot("s11", "waiting", waiting: true) : slot("s\($0)") }
-        let (shown, hidden) = BarSessions.arrange(late, frozen: frozen)
-        #expect(shown.count == 9)
-        #expect(shown[8].id == "s11")
-        #expect(hidden.map(\.id) == ["s8", "s9", "s10"])
+        let before = BarSessions.arrange(frozen, frozen: frozen)
+        let after = BarSessions.arrange(late, frozen: frozen)
+        #expect(after.shown.map(\.id) == (0..<7).map { "s\($0)" } + ["s11"])
+        #expect(after.shown.last?.group == "p:a")
+        #expect(after.hidden.map(\.id) == ["s7", "s8", "s9", "s10"])
+        // The "+N" cell starts where it did, and the run ends where it did: so do the "+", the update and the gear.
+        #expect(BarSessions.length(after.shown, more: false) == BarSessions.length(before.shown, more: false))
+        #expect(BarSessions.length(after.shown, more: true) == BarSessions.length(before.shown, more: true))
+        #expect(after.shown.indices.map { BarSessions.gap(after.shown, before: $0) }
+                == before.shown.indices.map { BarSessions.gap(before.shown, before: $0) })
+    }
+
+    @Test func aLateWaiterFromAnotherProjectKeepsTheTilesGaps() {
+        // Its own project differs from the tile it replaces: the gaps are the held ones, not its own.
+        let frozen = (0..<8).map { slot("a\($0)", "p:a") } + (0..<4).map { slot("b\($0)", "p:b") }
+        var late = frozen
+        late[11] = slot("b3", "p:b", waiting: true)
+        let after = BarSessions.arrange(late, frozen: frozen)
+        #expect(after.shown.map(\.id) == (0..<7).map { "a\($0)" } + ["b3"])
+        #expect(after.shown.indices.allSatisfy { BarSessions.gap(after.shown, before: $0) == 0 })
+        #expect(after.hidden.count == 4)
+    }
+
+    @Test func aLateWaiterWithNoOtherTileToTakeIsAddedAndTheRoomCutsTheRest() {
+        // Every tile shown already waits: there is nothing to give up, so it joins them (the room has the last word).
+        let frozen = (0..<12).map { slot("w\($0)", "waiting", waiting: $0 < 10) }
+        let late = (0..<12).map { slot("w\($0)", "waiting", waiting: true) }
+        #expect(BarSessions.arrange(late, frozen: frozen).shown.count == 12)
+        #expect(BarSessions.arrange(late, frozen: frozen, room: 6 * Theme.Metrics.pitch).shown.count == 5)
     }
 
     @Test func theEdgesRoomCutsTheTilesAndTheMoreCellTakesOneSlot() {

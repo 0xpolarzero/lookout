@@ -406,7 +406,8 @@ enum PlaygroundShots {
         Shot.edges("peek-agents-sessions-waiting-20-720", on: .rightAndTop) {
             $0.scenario = .sessionsWaiting20; $0.section = .agents; $0.size = Shot.hd
         },
-        // The pointer holds the bar's order while the twelfth session starts to wait: its tile, and its row, are the ninth.
+        // The pointer holds the bar's order while the twelfth session starts to wait: its tile, and its row, take the eighth's
+        // place, so the "+4" and the cells after it stay where they were.
         Shot.edges("peek-agents-sessions-late-waiting", on: .rightAndTop) {
             $0.scenario = .sessionsLateWaiting; $0.section = .agents
             $0.setup = { store, _, hub in hub.frozenSessions = Demo.lateWaiting(store) }

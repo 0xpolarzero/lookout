@@ -466,7 +466,8 @@ enum BarSessions {
     }
 
     /// `slots` in the frozen order, each in the group it had (those still there, then any new ones as they are),
-    /// cut to `visible` plus every waiting one (whether it waits is as it is now), then to `room` points along the bar,
+    /// cut to `visible` plus every waiting one (whether it waits is as it is now; when frozen, one that began to wait
+    /// past the tiles shown takes the last other tile's place), then to `room` points along the bar,
     /// the "+N" cell included: what goes is the last of the others, and only when they are gone, the last waiting one.
     /// One session over would be a "+1" in the place of its own tile: it shows instead, room allowing.
     static func arrange(_ slots: [Slot], frozen: [Slot]?, visible: Int = visible,
@@ -479,6 +480,17 @@ enum BarSessions {
                 + slots.filter { !known.contains($0.id) }
         }
         var shown = ordered.enumerated().filter { $0.offset < visible || $0.element.waiting }.map(\.element)
+        if let frozen {
+            // A session that starts waiting past the tiles the pointer found takes the place of the last tile that
+            // doesn't, in that tile's group: the run keeps its length, so the "+N" and what follows don't move.
+            let waited = Set(frozen.filter(\.waiting).map(\.id))
+            for (offset, late) in ordered.enumerated() where offset >= visible && late.waiting && !waited.contains(late.id) {
+                guard let from = shown.firstIndex(where: { $0.id == late.id }),
+                      let into = shown.lastIndex(where: { !$0.waiting }), into < from else { continue }
+                shown[into] = Slot(id: late.id, group: shown[into].group, waiting: true)
+                shown.remove(at: from)
+            }
+        }
         while length(shown, more: shown.count < ordered.count) > room,
               let cut = shown.lastIndex(where: { !$0.waiting }) ?? shown.indices.last {
             shown.remove(at: cut)
@@ -489,7 +501,7 @@ enum BarSessions {
     }
 
     /// What the tiles take along the bar, with their gaps, and the "+N" cell when there is one.
-    private static func length(_ run: [Slot], more: Bool) -> CGFloat {
+    static func length(_ run: [Slot], more: Bool) -> CGFloat {
         CGFloat(run.count + (more ? 1 : 0)) * Theme.Metrics.pitch + run.indices.reduce(0) { $0 + gap(run, before: $1) }
     }
 
