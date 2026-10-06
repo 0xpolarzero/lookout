@@ -103,6 +103,34 @@ import Testing
         #expect(view.layer?.opacity == 1)
     }
 
+    @Test func theIdleGateCanAskHowManyRingsLoopAndIsToldWhenThatChanges() {
+        let host = Window()
+        let view = host.add(at: 0)
+        var told = 0
+        PulseView.onLoopingChange = { told += 1 }
+        defer { PulseView.onLoopingChange = nil }
+        let before = PulseView.looping
+        view.set(spec, animated: true)
+        #expect(PulseView.looping == before + 1 && told == 1)
+        // Hidden window, or Reduce Motion: no loop, and the gate would see it.
+        host.showing = false
+        view.refresh()
+        #expect(PulseView.looping == before && told == 2)
+        view.refresh()
+        #expect(told == 2)
+        host.showing = true
+        view.set(spec, animated: false)
+        #expect(PulseView.looping == before)
+    }
+
+    @Test func theLifecycleReportIsTheLineTheIdleScriptReads() {
+        let store = Store()
+        store.persists = false
+        let line = store.lifecycleLine()
+        let pattern = #"^lifecycle: sessions=\d+ working=\d+ rings=\d+ showing=[01] reduceMotion=[01]\n$"#
+        #expect(line.range(of: pattern, options: .regularExpression) != nil, "\(line)")
+    }
+
     @Test func aLoopRemovedWhileTheWindowIsHiddenRejoinsThePhase() throws {
         let host = Window()
         let running = host.add(at: 0), occluded = host.add(at: 30)

@@ -107,9 +107,18 @@ final class PulseView: NSView {
         let scale: CGFloat
     }
 
+    /// Every ring that exists, so the idle gate can ask how many are looping (`looping`).
+    private static let all = NSHashTable<PulseView>.weakObjects()
+    /// How many rings have their loop attached now: what costs the render server something, and what the idle gate needs to be
+    /// sure it measures (a covered window, a locked screen or Reduce Motion each leave it at 0).
+    static var looping: Int { all.allObjects.filter { $0.layer?.animation(forKey: "pulse") != nil }.count }
+    /// Told when a ring starts or stops looping (the idle gate's report; it costs nothing while none changes).
+    static var onLoopingChange: (() -> Void)?
+
     init() {
         super.init(frame: .zero)
         wantsLayer = true
+        Self.all.add(self)
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -187,7 +196,10 @@ final class PulseView: NSView {
     func refresh() {
         guard let layer else { return }
         guard animated, let spec, let window, windowShowing(window) else {
-            layer.removeAnimation(forKey: "pulse")
+            if layer.animation(forKey: "pulse") != nil {
+                layer.removeAnimation(forKey: "pulse")
+                Self.onLoopingChange?()
+            }
             return
         }
         // Already looping: leave it, or it would start over.
@@ -204,6 +216,7 @@ final class PulseView: NSView {
         a.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
         a.beginTime = layer.convertTime(Self.beginTime(cycle: spec.cycle, at: CACurrentMediaTime()), from: nil)
         layer.add(a, forKey: "pulse")
+        Self.onLoopingChange?()
     }
 
     override func viewDidMoveToWindow() {

@@ -245,14 +245,33 @@ final class Store {
         // no ring and no ticking rows. They are kept; what the watchers, the reads and the timer do is not skipped.
         refreshClaude()
         scheduleClaudeTick()
-        Task { @MainActor [weak self] in
-            // What the gate reads from stdout: that what it measures has working sessions on it.
-            try? await Task.sleep(for: .seconds(3))
+        // What the gate reads from stdout: the sessions, how many work, and what the app knows of the rings (how many have their
+        // loop, whether a window is showing, whether Reduce Motion is on). Said after a few seconds, and again whenever it
+        // changes (a ring starting or stopping), once each, so a covered window or a locked screen shows in the output.
+        var said = ""
+        var pending = false
+        let say = { @MainActor [weak self] in
+            pending = false
             guard let self else { return }
-            let rows = allAgentRows
-            let line = "lifecycle: sessions=\(rows.count) working=\(rows.filter { $0.tileMarks.working }.count)\n"
-            FileHandle.standardOutput.write(Data(line.utf8))
+            let line = lifecycleLine()
+            if line != said { said = line; FileHandle.standardOutput.write(Data(line.utf8)) }
         }
+        PulseView.onLoopingChange = {
+            guard !pending else { return }
+            pending = true
+            DispatchQueue.main.async { MainActor.assumeIsolated { say() } }
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            say()
+        }
+    }
+
+    func lifecycleLine() -> String {
+        let rows = allAgentRows
+        let showing = NSApp.windows.contains { $0.isShowing }
+        return "lifecycle: sessions=\(rows.count) working=\(rows.filter { $0.tileMarks.working }.count) rings=\(PulseView.looping) "
+            + "showing=\(showing ? 1 : 0) reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 1 : 0)\n"
     }
 
     /// File events give near-instant updates: the sessions folder triggers a read of the sessions, the app's local

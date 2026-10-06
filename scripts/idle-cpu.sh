@@ -6,18 +6,22 @@
 # process's cumulative CPU time at the start and end of a window and asserts the average stays under the limit, at rest
 # and kept open (`--open`), on the right edge and along the top (the full-width strip is where the window grew).
 #
-# What is measured has to have a ring: the app says on stdout how many sessions it has and how many work, and the script
-# fails when none does (a verdict from a bar with no ring proves nothing, as one from a bar nobody can see does not).
+# What is measured has to have a ring that is looping: the app says on stdout how many sessions it has, how many work, how
+# many rings have their animation attached, whether one of its windows is showing and whether Reduce Motion is on
+# (`lifecycle: sessions=S working=W rings=R showing=0|1 reduceMotion=0|1`, once after a few seconds and again whenever
+# that changes). The script fails when no ring loops, or Reduce Motion is on, at the start or at any moment of the window:
+# a verdict from a bar with no moving ring, or one nobody can see, proves nothing. Nothing is inferred from the sessions
+# or from the window list, which lists covered windows too.
 #
 # WindowServer's share over the same window is printed apart and is not part of the verdict: it draws the rings. To say
 # what they cost it is measured once more on `--demo busy`, which has no working session, and the difference is printed.
 #
+# It needs the bar on screen: with the screen locked or asleep, or the bar covered, the ring's animation is removed and
+# any number would be about 0%. The app reports that as its rings leaving (`rings=0`, `showing=0`), which the script
+# reads at the start and after the window; ALLOW_HIDDEN=1 turns the failure into a warning.
+#
 # A sample that is missing or malformed (ps failed, the process went), a window that is not positive or a CPU time that goes
 # backwards is a failure, never a 0%.
-#
-# It needs the bar on screen: with the screen locked or asleep, or the bar covered, the ring's animation is removed and
-# any number would be about 0%. So the script checks that the bar's window is on screen and fails when it is not;
-# ALLOW_HIDDEN=1 turns that into a warning.
 #
 # What it does not measure: the network (every request fails at once, so nothing is parsed or drawn from an answer),
 # notifications, the updater's loop, a real Claude app's files changing under the watchers, a transcript being read,
@@ -60,15 +64,26 @@ cpu_seconds() {
     }'
 }
 
-# on_screen <pid>: how many windows of the process are on screen and not transparent (0 when the screen is locked).
-on_screen() {
-    osascript -l JavaScript -e '
-        function run(argv) {
-            ObjC.import("CoreGraphics")
-            const pid = Number(argv[0])
-            const windows = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)))
-            return String(windows.filter(w => w.kCGWindowOwnerPID === pid && w.kCGWindowAlpha > 0).length)
-        }' "$1" 2>/dev/null || echo 0
+# ring_problem <first>: why the rings were not looping at some point since the <first>th report of the app (the last report
+# before a window is the state it begins in), or nothing when they were. A report that never came is a problem too.
+ring_problem() {
+    awk -v first="$1" '
+        /^lifecycle:/ {
+            n++
+            if (n < first) next
+            rings = showing = reduce = ""
+            for (i = 2; i <= NF; i++) {
+                split($i, kv, "=")
+                if (kv[1] == "rings") rings = kv[2]
+                else if (kv[1] == "showing") showing = kv[2]
+                else if (kv[1] == "reduceMotion") reduce = kv[2]
+            }
+            seen = 1
+            if (reduce == "1") { print "Reduce Motion is on: the rings are static, so the number would mean nothing (turn it off in System Settings)"; exit }
+            if (rings + 0 < 1) { print "no ring is looping (rings=" rings ", window showing=" showing "): locked or asleep screen, or a covered bar"; exit }
+        }
+        END { if (!seen) print "the app made no report of its rings" }
+    ' "$out"
 }
 
 # The Claude app's folders, empty: the watchers have something to watch and nothing happens in it.
@@ -100,12 +115,19 @@ measure() {
         return
     fi
     if [ "$scenario" = agents ] && ! grep -q 'lifecycle: sessions=[0-9]* working=[1-9]' "$out"; then
-        echo "idle-cpu: $label $edge: no working session on the bar ($(grep 'lifecycle:' "$out" || echo 'no report')): there is no ring to measure"
+        echo "idle-cpu: $label $edge: no working session on the bar ($(grep 'lifecycle:' "$out" | tail -1 || echo 'no report')): there is no ring to measure"
         failed=1
     fi
-    if [ "$(on_screen "$pid")" = "0" ]; then
-        echo "idle-cpu: $label $edge: the bar's window is not on screen (locked or asleep screen, or covered): the rings aren't drawing, so a number would mean nothing"
-        [ "${ALLOW_HIDDEN:-0}" = "1" ] || failed=1
+    # The reports so far; the window starts from the last of them.
+    local reports problem
+    reports=$(grep -c '^lifecycle:' "$out")
+    if [ "$scenario" = agents ] && problem=$(ring_problem "$reports") && [ -n "$problem" ]; then
+        echo "idle-cpu: $label $edge: $problem"
+        if [ "${ALLOW_HIDDEN:-0}" != "1" ]; then
+            failed=1
+            kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; pid=
+            return
+        fi
     fi
     local ws; ws=$(pgrep -x WindowServer | head -1)
     local app0 app1 ws0 ws1
@@ -119,6 +141,11 @@ measure() {
     fi
     app1=$(cpu_seconds "$pid") || { echo "idle-cpu: $label $edge: no CPU sample of Lookout at the end"; failed=1; return; }
     ws1=$(cpu_seconds "${ws:-0}") || ws1=
+    # Nothing may have hidden the rings while the window ran: a stretch with none looping costs nothing and passes for free.
+    if [ "$scenario" = agents ] && problem=$(ring_problem "$reports") && [ -n "$problem" ]; then
+        echo "idle-cpu: $label $edge: $problem (during the measurement)"
+        [ "${ALLOW_HIDDEN:-0}" = "1" ] || failed=1
+    fi
     if [ -n "$ws0" ] && [ -n "$ws1" ]; then
         last_ws=$(awk -v w0="$ws0" -v w1="$ws1" -v window="$window" 'BEGIN { printf "%.2f", (w1 - w0) / window * 100 }')
     else
