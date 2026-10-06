@@ -175,7 +175,10 @@ extension Store {
 
     /// How old what the CI rows show is: the oldest answer GitHub gave for a repo whose CI is on. Failed polls don't
     /// move it, so rows can't look fresh while nothing is being checked. Nil until something has been checked.
-    var ciFreshness: Date? { ciRepos.compactMap { lastCICheck($0.fullName) }.min() }
+    var ciFreshness: Date? {
+        _ = ciFreshnessRevision
+        return ciRepos.compactMap { lastCICheck($0.fullName) }.min()
+    }
 
     // MARK: Checking
 
@@ -247,7 +250,10 @@ extension Store {
         let previous = ci[name]?.state
         unmuteCIIfChanged(name, to: status)
         // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
+        let freshness = ciFreshness
         ciCheckedAt[name] = status.checkedAt
+        // The record of a check that changed nothing isn't observed: whoever waits on the oldest check's age is told when it moves.
+        if ciFreshness != freshness { ciFreshnessRevision &+= 1 }
         if var old = ci[name] {
             old.checkedAt = status.checkedAt
             if old != status { ci[name] = status; save() }

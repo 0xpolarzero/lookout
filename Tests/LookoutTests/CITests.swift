@@ -353,6 +353,24 @@ import Testing
         #expect(store.mutedCI == ["a/x": "s2"])
     }
 
+    @Test func aCheckThatChangedNothingStillMovesWhenCIGoesStale() async {
+        let old = Date().addingTimeInterval(-3600)
+        var first = status(.success, sha: "s1")
+        first.checkedAt = old
+        let (store, answers) = quiet(store(["a/x": first], ["a/x"]))
+        let before = store.staleDeadlines
+        let moved = Flag()
+        withObservationTracking { _ = store.staleDeadlines } onChange: { moved.set() }
+        async let check: () = store.checkCI("a/x")
+        await settle { answers.waiting.count == 1 }
+        // The same status, a new time: only the live record of the check changes.
+        var same = first
+        same.checkedAt = Date()
+        answers.settle(0, with: same)
+        await check
+        #expect(moved.value && store.staleDeadlines != before)
+    }
+
     @Test func aFailureThatArrivesAfterCIWasTurnedOffIsNoFault() async {
         let (store, answers) = quiet(store([:], ["a/x"]))
         let repo = store.repos[0]
@@ -539,4 +557,10 @@ import Testing
         // Same commit as last time: what was fetched then stands (no request).
         #expect(await store.ciHeadline("a/x", commit: "c1", runTitle: nil) == "Known")
     }
+}
+
+/// Set from an observation's change handler.
+private final class Flag: @unchecked Sendable {
+    private(set) var value = false
+    func set() { value = true }
 }

@@ -152,6 +152,8 @@ final class Store {
     @ObservationIgnored private var claudeDeadline: Date?
     /// When each repo's CI was last checked, live (the persisted `checkedAt` only changes with the status).
     @ObservationIgnored var ciCheckedAt: [String: Date] = [:]
+    /// Bumped when the oldest check's time moves though no status did (`ciCheckedAt` isn't observed): the gear's wait on it.
+    var ciFreshnessRevision = 0
     /// CI checks under way, by repo, and the newest one each repo has started (StoreCI.swift).
     @ObservationIgnored var ciChecks: [String: Task<Void, Error>] = [:]
     @ObservationIgnored var ciTickets: [String: Int] = [:]
