@@ -96,6 +96,8 @@ final class Store {
 
     @ObservationIgnored let gh = GitHubClient()
     @ObservationIgnored let notifier = Notifier()
+    /// What ⌘Z and the undo lines take back (see StoreUndo.swift).
+    let undoStack = UndoStack()
     @ObservationIgnored let updater = Updater()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var loading = false
@@ -469,7 +471,11 @@ final class Store {
             case .done: !item.state.isOpen
             }
         }
-        .sorted { $0.createdAt > $1.createdAt }
+        .sorted { a, b in
+            // Done by when it was cleared (older items, cleared before that was kept, by when they arrived).
+            let (x, y) = filter == .done ? (a.clearedAt ?? a.createdAt, b.clearedAt ?? b.createdAt) : (a.createdAt, b.createdAt)
+            return (x, a.createdAt, a.id) > (y, b.createdAt, b.id)
+        }
         memo.lists[filter] = result
         return result
     }
