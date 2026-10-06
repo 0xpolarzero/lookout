@@ -90,10 +90,10 @@ extension LookoutHub {
         store.authError == nil && store.repoErrors.isEmpty && !store.isSyncing && store.lastSync != nil
     }
 
-    /// The sync line for `content`, redrawn on the minute clock only while it counts minutes.
+    /// The sync line for `content`, redrawn on the minute clock (which never starts the seconds one) only while it counts minutes.
     @ViewBuilder func syncLine<Content: View>(@ViewBuilder _ content: @escaping (SyncLine) -> Content) -> some View {
         if syncNamesTime {
-            Ticking(coarse: true) { content(syncLine(now: $0)) }
+            Ticking(minute: true) { content(syncLine(now: $0)) }
         } else {
             content(syncLine(now: Date()))
         }
