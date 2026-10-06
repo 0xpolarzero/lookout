@@ -860,7 +860,11 @@ final class Store {
             failure = error
         }
         // A request that outlived the repository's removal has nobody to tell.
-        if repos.contains(where: { $0.fullName == name }) { conversationErrors[name] = failure?.localizedDescription }
+        if repos.contains(where: { $0.fullName == name }) {
+            conversationErrors[name] = failure?.localizedDescription
+            // Published here, not left to the CI check: with CI off there is none, and the fault would never come or go.
+            publishHealth(name)
+        }
         // CI has endpoints of its own: conversations failing doesn't keep it from being checked.
         await checkCI(name)
     }

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import Lookout
 
@@ -108,6 +109,26 @@ import Testing
         #expect(s.repoErrors["a/x"] != nil)
         await s.checkCI("a/x")
         #expect(s.repoErrors["a/x"] != nil)
+    }
+
+    @Test func theConversationsHealthIsPublishedWithCIOffToo() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.settings.reviewRequests = false
+        var repo = RepoConfig(fullName: "a/x")
+        repo.events.remove(.ciMain)
+        s.repos = [repo]
+        let offline = OSAllocatedUnfairLock(initialState: true)
+        s.gh.transport = { _ in
+            offline.withLock { $0 } ? SyncHealth.reply(500, #"{"message": "Server error"}"#) : SyncHealth.reply(200, "[]")
+        }
+        await s.pollAll()
+        #expect(s.repoErrors["a/x"] != nil && s.syncFault(stale: false) == .partial)
+        // The next poll that gets through clears it, with no CI check to do it.
+        offline.withLock { $0 = false }
+        await s.pollAll()
+        #expect(s.repoErrors.isEmpty && s.syncFault(stale: false) == nil)
     }
 
     @Test func aLaterReviewPageFailingKeepsTheRequestsAlreadyFetched() async {
