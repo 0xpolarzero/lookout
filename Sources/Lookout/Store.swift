@@ -69,6 +69,8 @@ final class Store {
     /// Every project's name, with as much of its path as tells it from another of the same name (`customer-a/app`): worked
     /// out when the folders change, not by each view that names a project. Only a change in it redraws what reads it.
     var folderNames: [String: String] = [:]
+    /// The folders `folderNames` was worked out for: the work is skipped while they are the same.
+    @ObservationIgnored var namedFoldersSeen: Set<String>?
     /// Bumped whenever the rows the hub shows can change (agents, sessions, activity, tasks): a cheap memo/animation key.
     private(set) var agentsRevision = 0
     /// Bumped when the sessions themselves or what is kept change, not their activity or tasks: what a search's matches

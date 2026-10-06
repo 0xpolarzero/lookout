@@ -541,26 +541,31 @@ extension Store {
     }
 
     /// Every folder a name can be asked for: the ones sessions are in and the ones muted.
-    var namedFolders: [String] { Array(Set(knownFolders + agents.mutedFolders).subtracting([""])) }
+    var namedFolders: Set<String> { Set(claudeSessions.values.map(\.folderKey)).union(agents.mutedFolders).subtracting([""]) }
 
     /// A project's name wherever it is named: its own, with as much of the path above it as it takes to tell it from another
     /// project of the same name (`customer-a/app`), the same in every menu, header, tag and spoken value.
     func folderName(_ folder: String) -> String {
-        folder.isEmpty ? "Scratch" : folderNames[folder] ?? FolderNames.name(folder, among: namedFolders)
+        folder.isEmpty ? "Scratch" : folderNames[folder] ?? FolderNames.name(folder, among: Array(namedFolders))
     }
 
-    /// Called when the sessions or the muted folders change; the dictionary is only written when a name did.
+    /// Called when the sessions or the muted folders change (and with every change of what is kept, which changes neither): the
+    /// names are worked out again only when the set of folders is another, and the dictionary is only written when a name did.
     func refreshFolderNames() {
-        let all = namedFolders
-        let names = Dictionary(all.map { ($0, FolderNames.name($0, among: all)) }, uniquingKeysWith: { a, _ in a })
+        let folders = namedFolders
+        guard folders != namedFoldersSeen else { return }
+        namedFoldersSeen = folders
+        let names = FolderNames.names(for: folders)
         if names != folderNames { folderNames = names }
     }
 
     var knownFolders: [String] {
-        Array(Set(claudeSessions.values.map(\.folderKey))).sorted { a, b in
-            if a.isEmpty != b.isEmpty { return !a.isEmpty }
-            return URL(fileURLWithPath: a).lastPathComponent.lowercased() < URL(fileURLWithPath: b).lastPathComponent.lowercased()
-        }
+        // The names to sort by are taken once each, not on every comparison.
+        let keyed = Set(claudeSessions.values.map(\.folderKey)).map { ($0, FolderNames.components($0).last?.lowercased() ?? "") }
+        return keyed.sorted { a, b in
+            if a.0.isEmpty != b.0.isEmpty { return !a.0.isEmpty }
+            return a.1 != b.1 ? a.1 < b.1 : a.0 < b.0
+        }.map(\.0)
     }
 
     // MARK: Reading the app
@@ -993,16 +998,35 @@ extension Store {
 
 /// Names for folders: the last component, and the folders above it only where another project would have the same one.
 enum FolderNames {
-    static func name(_ folder: String, among folders: [String]) -> String {
-        guard !folder.isEmpty else { return "Scratch" }
-        let parts = components(folder)
-        let others = folders.filter { $0 != folder }.map(components)
-        var depth = 1
-        while depth < parts.count, others.contains(where: { $0.suffix(depth) == parts.suffix(depth) }) { depth += 1 }
-        return parts.suffix(depth).joined(separator: "/")
+    /// The names of all of `folders` at once. A folder whose last component no other has is named by it alone; only the ones that
+    /// share a last component are compared, each by as many of the components above as it takes to differ.
+    static func names(for folders: Set<String>) -> [String: String] {
+        var named: [String: [String]] = [:]
+        var parts: [String: [String]] = [:]
+        for folder in folders {
+            let own = components(folder)
+            parts[folder] = own
+            named[own.last ?? "", default: []].append(folder)
+        }
+        var names: [String: String] = [:]
+        for (_, group) in named {
+            for folder in group {
+                let own = parts[folder]!
+                var depth = 1
+                while depth < own.count, group.contains(where: { $0 != folder && parts[$0]!.suffix(depth) == own.suffix(depth) }) { depth += 1 }
+                names[folder] = own.suffix(depth).joined(separator: "/")
+            }
+        }
+        return names
     }
 
-    private static func components(_ folder: String) -> [String] {
-        URL(fileURLWithPath: folder).pathComponents.filter { $0 != "/" }
+    static func name(_ folder: String, among folders: [String]) -> String {
+        guard !folder.isEmpty else { return "Scratch" }
+        return names(for: Set(folders).union([folder]))[folder] ?? ""
+    }
+
+    /// A path's components, without the root and empty ones.
+    static func components(_ folder: String) -> [String] {
+        folder.split(separator: "/").map(String.init)
     }
 }

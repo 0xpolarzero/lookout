@@ -503,4 +503,40 @@ import Testing
         let all = ["/work/customer-a/app", "/work/customer-b/app", "/play/app", "/play/other/app", "/solo/tool"]
         #expect(all.map { FolderNames.name($0, among: all) } == ["customer-a/app", "customer-b/app", "play/app", "other/app", "tool"])
     }
+    @Test func allTheNamesAtOnceAreWhatEachOneWouldBeAmongTheOthers() {
+        // The same rule as one name at a time, which is the definition: the shortest suffix that no other folder shares.
+        func reference(_ folder: String, _ all: [String]) -> String {
+            func parts(_ f: String) -> [String] { f.split(separator: "/").map(String.init) }
+            let own = parts(folder)
+            let others = all.filter { $0 != folder }.map(parts)
+            var depth = 1
+            while depth < own.count, others.contains(where: { $0.suffix(depth) == own.suffix(depth) }) { depth += 1 }
+            return own.suffix(depth).joined(separator: "/")
+        }
+        var all: [String] = []
+        for a in 0..<6 { for b in 0..<4 { for c in ["app", "api", "lib"] where (a + b) % 3 != 0 { all.append("/work/g\(a)/p\(b % 2)/\(c)") } } }
+        all += ["/play/app", "/app", "/solo/tool", "/x/y/z/app"]
+        let names = FolderNames.names(for: Set(all))
+        #expect(names.count == Set(all).count)
+        for folder in Set(all) { #expect(names[folder] == reference(folder, all), "\(folder)") }
+    }
+
+    @MainActor @Test func theNamesAreOnlyWorkedOutAgainWhenTheFoldersChange() {
+        let s = Store()
+        s.persists = false
+        func session(_ id: String, _ folder: String) -> ClaudeSession {
+            ClaudeSession(id: id, title: id, folder: folder, lastActivity: Date())
+        }
+        s.claudeSessions = ["a": session("a", "/x/app"), "b": session("b", "/y/app")]
+        #expect(s.folderNames == ["/x/app": "x/app", "/y/app": "y/app"])
+        let seen = s.namedFoldersSeen
+        // A session's own change (its activity moves its time) leaves the folders as they were.
+        s.claudeSessions["a"]?.lastActivity = Date().addingTimeInterval(60)
+        #expect(s.namedFoldersSeen == seen && s.folderNames["/x/app"] == "x/app")
+        // A new folder, or a muted one, does not.
+        s.claudeSessions["c"] = session("c", "/z/tool")
+        #expect(s.folderNames["/z/tool"] == "tool")
+        s.agents.mutedFolders = ["/w/app"]
+        #expect(s.folderNames["/w/app"] == "w/app" && s.folderNames["/x/app"] == "x/app")
+    }
 }
