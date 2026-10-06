@@ -146,6 +146,22 @@ import Testing
         #expect(clock.interval == nil)
     }
 
+    @Test func anElapsedTimeHandedToTheMinuteClockNeverGoesBack() {
+        let t = Date(timeIntervalSince1970: 2_000_000_000)
+        let claim = ClockClaim()
+        // At the end of its seconds it drew t+59; the minute clock last ticked at t+43.
+        claim.drawn = t.addingTimeInterval(59)
+        let held = claim.time(ticked: t.addingTimeInterval(43), system: t.addingTimeInterval(60))
+        #expect(held == t.addingTimeInterval(60))
+        claim.drawn = held
+        // Kept until the minute clock catches up, without waiting for the next tick to move.
+        #expect(claim.time(ticked: t.addingTimeInterval(43), system: t.addingTimeInterval(66)) == held)
+        #expect(claim.time(ticked: t.addingTimeInterval(73), system: t.addingTimeInterval(74)) == t.addingTimeInterval(73))
+        // A label that was only following the minute clock is never held back.
+        claim.drawn = t.addingTimeInterval(73)
+        #expect(claim.time(ticked: t.addingTimeInterval(103), system: t.addingTimeInterval(104)) == t.addingTimeInterval(103))
+    }
+
     @Test func aHiddenLabelAsksForNothing() {
         let clock = clock()
         let claim = ClockClaim()

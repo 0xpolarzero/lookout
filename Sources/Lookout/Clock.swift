@@ -142,6 +142,7 @@ final class ClockClaim {
     @ObservationIgnored var hidden = false { didSet { sync() } }
     /// The time the label last drew, which it keeps while it is off screen.
     @ObservationIgnored var drawn: Date?
+    @ObservationIgnored private var handoff: Date?
     /// Counts the times it came on screen or left it, for the label to be redrawn then (and not at every tick while it is away).
     private(set) var visibility = 0
     @ObservationIgnored private var announcing = false
@@ -150,6 +151,18 @@ final class ClockClaim {
         self.clock = clock
         self.hidden = hidden
         self.rate = rate
+    }
+
+    /// What a label on screen draws, given the time of the clock it follows. One handed from the seconds clock to the minute
+    /// clock (an elapsed time passing its first minute) can find the minute clock older than what it drew: it keeps the
+    /// system's date from the handoff until the clock catches up, so a count never goes back to an earlier second.
+    func time(ticked: Date, system: Date) -> Date {
+        guard let drawn, ticked < drawn else {
+            handoff = nil
+            return ticked
+        }
+        if handoff == nil { handoff = max(system, drawn) }
+        return handoff!
     }
 
     private func sync() {
@@ -221,7 +234,7 @@ struct Ticking<Content: View>: View {
         } else {
             // The clock's time is the one that ticks; a stopped clock's is old, and a label that has just appeared reads the
             // system's date for its first frame.
-            date = clock.interval == nil ? Date() : rate == .second ? clock.now : clock.minute
+            date = claim.time(ticked: clock.interval == nil ? Date() : rate == .second ? clock.now : clock.minute, system: Date())
         }
         claim.drawn = date
         return content(date)
