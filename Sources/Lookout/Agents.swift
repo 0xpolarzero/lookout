@@ -151,7 +151,7 @@ struct AgentRow: Identifiable, Hashable {
     }
 
     /// When the running turn began, if known.
-    var workingSince: Date? { session.lastUserMessage ?? activity?.since }
+    var workingSince: Date? { session.lastUserMessage ?? activity?.since ?? session.lastActivity }
 
     /// How long the turn has been going.
     func elapsed(now: Date = Date()) -> String {
@@ -175,7 +175,7 @@ struct AgentRow: Identifiable, Hashable {
     /// For VoiceOver: "waiting, lcu, 2 minutes", and "3 running" for what a finished turn left behind.
     func spokenValue(now: Date = Date()) -> String {
         let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
-        let age = Self.spokenAge(now.timeIntervalSince(session.running ? session.lastUserMessage ?? session.lastActivity : session.lastActivity))
+        let age = Self.spokenAge(now.timeIntervalSince(session.running ? workingSince ?? session.lastActivity : session.lastActivity))
         var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), session.folderName, age]
         if !tasks.isEmpty { parts.append("\(tasks.count) running") }
         return parts.joined(separator: ", ")

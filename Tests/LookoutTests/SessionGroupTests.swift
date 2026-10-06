@@ -560,4 +560,12 @@ import Testing
         let held = s.listedGroups(expanded: false, frozen: frozen).groups
         #expect(held.map(\.id) == ["project:/code/x"] && SessionGroup.waiting(held) == 1)
     }
+
+    @Test func theAgeSpokenIsTheAgeShownForAWorkingSessionToo() {
+        // No message of yours to count from: both fall back to the same date.
+        let working = ClaudeSession(id: "r", title: "R", folder: "/code/app", lastActivity: now.addingTimeInterval(-300), running: true)
+        let row = AgentRow(session: working, entry: AgentEntry(id: "r"), label: "R")
+        #expect(row.statusLabel(now: now) == "Working 5m")
+        #expect(row.spokenValue(now: now) == "working, app, 5 minutes")
+    }
 }

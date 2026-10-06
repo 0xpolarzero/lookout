@@ -226,8 +226,18 @@ struct BarTile: View {
     let hub: HubState
     var show: (() -> Void)? = nil
 
-    var body: some View {
-        BarCell(axis: axis, name: row.session.title, value: row.tileValue(), hint: row.tileHint,
+    /// The age VoiceOver speaks follows the minute clock, which at rest only a screen reader needs: nothing ticks for
+    /// a bar nobody is listening to.
+    @ViewBuilder var body: some View {
+        if NSWorkspace.shared.isVoiceOverEnabled {
+            Ticking(coarse: true) { cell(now: $0) }
+        } else {
+            cell(now: Date())
+        }
+    }
+
+    private func cell(now: Date) -> some View {
+        BarCell(axis: axis, name: row.session.title, value: row.tileValue(now: now), hint: row.tileHint,
                 picked: hub.selection == "a:" + row.id, show: show, action: { store.openAgent(row.id) }) { hovering in
             StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size, hovering: hovering, onRail: onRail)
         }

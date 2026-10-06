@@ -473,14 +473,20 @@ struct SessionRow: View {
     /// Line 2's centre, where the action sits.
     private static let actionTop: CGFloat = 31
 
+    /// The row's ages (the status it shows, and the one it speaks) come from one clock: a working session under a minute old
+    /// counts seconds, everything else the minute clock, and only while the row is on screen.
     var body: some View {
+        Ticking(since: row.session.running && !row.isWaiting ? row.workingSince : nil) { now in content(now: now) }
+    }
+
+    @ViewBuilder private func content(now: Date) -> some View {
         let id = "a:" + row.id
         let picked = hub.selection == id && hub.keyboardSelection?.id == id
         let hot = ui.drawerSelection == row.id
         let showsAction = hot || picked || voiceOverFocused
         Button { store.openAgent(row.id) } label: {
             RailRow(rail: rail, height: SessionGroup.height(of: row), fill: picked ? Theme.Fill.selected : hot ? Theme.Fill.hover : Theme.Fill.rest,
-                    picked: picked, tile: { AgentTile(row: row) }, content: { lines })
+                    picked: picked, tile: { AgentTile(row: row) }, content: { lines(now: now) })
         }
         .buttonStyle(.plain)
         .focusable(false)
@@ -504,7 +510,7 @@ struct SessionRow: View {
         .sessionMenu(row, store)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.spokenValue())
+        .accessibilityValue(row.spokenValue(now: now))
         .accessibilityHint(row.spokenHint.isEmpty ? "Opens it in Claude" : row.spokenHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityFocused($voiceOverFocused)
@@ -519,7 +525,7 @@ struct SessionRow: View {
         }
     }
 
-    private var lines: some View {
+    private func lines(now: Date) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.hair) {
             HStack(spacing: Theme.Space.md) {
                 Text(row.session.title)
@@ -527,7 +533,7 @@ struct SessionRow: View {
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                status.fixedSize()
+                status(now: now).fixedSize()
             }
             HStack(spacing: Theme.Space.md) {
                 headline.font(Theme.Typography.meta).lineLimit(1)
@@ -539,19 +545,12 @@ struct SessionRow: View {
         }
     }
 
-    /// "Waiting" in amber, "Working 2m", "Finished 4m". The ages follow the 30-second clock; only a working session
-    /// under a minute old counts seconds, and only while it is on screen.
-    @ViewBuilder private var status: some View {
+    /// "Waiting" in amber, "Working 2m", "Finished 4m".
+    @ViewBuilder private func status(now: Date) -> some View {
         if row.isWaiting {
             Text("Waiting").font(Theme.Typography.numeral).foregroundStyle(Theme.amber)
-        } else if row.session.running {
-            Ticking(since: row.workingSince) { now in
-                Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
-            }
         } else {
-            Ticking(coarse: true) { now in
-                Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
-            }
+            Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
         }
     }
 
