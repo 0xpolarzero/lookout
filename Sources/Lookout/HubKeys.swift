@@ -65,10 +65,17 @@ final class HubKeys {
         if hub.controls.isActive, flags.isEmpty, [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) {
             return false
         }
+        // What the user bound comes first, even ⌘Z and the hub's own chords (⌘1, ⌘F, ⌘,): they are what is left of the key
+        // when the action has nothing to act on (no row picked), as undo is.
+        if isBound(shortcut), act(event, flags: flags, shortcut: shortcut) { return true }
         if chord(event, flags: flags, shortcut: shortcut) { return true }
-        // What the user bound comes first, even ⌘Z; undo is what's left of the key when no action takes it.
         if act(event, flags: flags, shortcut: shortcut) { return true }
         return flags == .command && event.charactersIgnoringModifiers == "z" && store.undoLast()
+    }
+
+    /// Whether an in-hub action (not a global one) is bound to `shortcut`.
+    private func isBound(_ shortcut: Shortcut) -> Bool {
+        ShortcutAction.allCases.contains { !$0.isGlobal && store.shortcut($0) == shortcut }
     }
 
     /// The hub's chords, which a text field has no use for and so doesn't keep: ⌘, ⌘R (and a Check now bound to another
@@ -100,24 +107,14 @@ final class HubKeys {
         }
         if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
         guard hub.expanded, hub.page == .main else { return false }
-        if flags == .command, event.charactersIgnoringModifiers == "f" {
-            hub.beginSearch()
-            return true
-        }
+        let bound = isBound(shortcut)
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
             setQuery(String(hub.query.dropLast()))
             return true
         }
-        if flags.subtracting(.shift).isEmpty, let typed = event.characters, !typed.isEmpty,
-           typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }),
-           !(typed == " " && hub.query.isEmpty) {
-            setQuery(hub.query + typed)
-            return true
-        }
         let targets = targets()
         // A configured action comes before the arrows' own meaning: Right bound to "Mark read / unread" does that.
-        let bound = ShortcutAction.allCases.contains { !$0.isGlobal && store.shortcut($0) == shortcut }
         if event.keyCode == 125 || event.keyCode == 126, flags.isEmpty, !bound {
             move(down: event.keyCode == 125, in: targets)
             return true
@@ -128,8 +125,29 @@ final class HubKeys {
             if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }
             return true
         }
-        // Row commands act only on a row the lists show: a pick the search has since filtered out, or one in a section
-        // that shrank, is not one.
+        if rowCommand(shortcut, targets: targets, event: event, flags: flags) { return true }
+        // What no action took: ⌘F, and typing, which starts the search (a letter someone bound to an action is that action's,
+        // while a row is picked to act on).
+        if searchKey(event, flags: flags) { return true }
+        if flags.subtracting(.shift).isEmpty, let typed = event.characters, !typed.isEmpty,
+           typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }),
+           !(typed == " " && hub.query.isEmpty) {
+            setQuery(hub.query + typed)
+            return true
+        }
+        return false
+    }
+
+    /// ⌘F: starts the search.
+    private func searchKey(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags == .command, event.charactersIgnoringModifiers == "f" else { return false }
+        hub.beginSearch()
+        return true
+    }
+
+    /// What the bound actions do to the row that is picked. Row commands act only on a row the lists show: a pick the search
+    /// has since filtered out, or one in a section that shrank, is not one. False when `shortcut` is none of them.
+    private func rowCommand(_ shortcut: Shortcut, targets: [String], event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
         guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {

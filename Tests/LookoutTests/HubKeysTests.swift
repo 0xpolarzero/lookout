@@ -77,3 +77,55 @@ import Testing
         #expect(hub.filter == .needsYou)
     }
 }
+
+/// DESIGN.md 6.2: what the user bound comes before the typing that searches and before the hub's own chords; the menu key
+/// asks the picked row for its context menu.
+@MainActor
+@Suite struct HubKeysBindings {
+    private let store = Store()
+    private let hub = HubState()
+    private let keys: HubKeys
+
+    init() {
+        store.persists = false
+        store.undoStack.announce = { _ in }
+        keys = HubKeys(store: store, ui: UIState(persists: false, edge: .right), hub: hub)
+        store.items = [InboxItem(id: "one", repo: "a/one", kind: .issueComment, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
+                                 authorIsApp: false, url: URL(string: "https://github.com/a/one")!, createdAt: Date(), state: .unread)]
+        hub.pinned = true
+        hub.selection = "i:one"
+    }
+
+    @discardableResult
+    private func press(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String) -> Bool {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                                     characters: chars, charactersIgnoringModifiers: chars.lowercased(), isARepeat: false, keyCode: UInt16(code))!
+        return keys.key(event)
+    }
+
+    @Test func aLetterBoundToAnActionActsOnThePickedRowInsteadOfSearching() {
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_T)), for: .toggleRead)
+        #expect(press(kVK_ANSI_T, [], "t"))
+        #expect(store.items[0].state == .read && hub.query.isEmpty)
+        // With Shift: a Shift-letter binding is the same.
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_Y), modifiers: [.shift]), for: .toggleRead)
+        #expect(press(kVK_ANSI_Y, [.shift], "Y"))
+        #expect(store.items[0].state == .unread && hub.query.isEmpty)
+        // Unbound letters still search, and so does the bound one with nothing picked to act on.
+        #expect(press(kVK_ANSI_Z, [], "z") && hub.query == "z")
+        hub.query = ""
+        hub.selection = nil
+        #expect(press(kVK_ANSI_T, [], "t") && hub.query == "t")
+    }
+
+    @Test func aBindingOnACommandDigitRunsBeforeTheFocusChord() {
+        store.agents.enabled = true
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_3), modifiers: [.command]), for: .toggleRead)
+        #expect(press(kVK_ANSI_3, [.command], "3"))
+        #expect(store.items[0].state == .read && hub.focus == nil)
+        // With nothing picked the action has nothing to do: the chord is what is left, as ⌘Z leaves undo.
+        hub.selection = nil
+        #expect(press(kVK_ANSI_3, [.command], "3"))
+        #expect(hub.focus == .agents)
+    }
+}
