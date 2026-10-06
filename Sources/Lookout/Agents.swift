@@ -122,6 +122,8 @@ struct AgentRow: Identifiable, Hashable {
     var id: String { session.id }
     var unread: Bool { entry.unread }
     var pending: Bool { !entry.kept }
+    /// Hidden until new activity: only search lists such a session.
+    var hidden: Bool { !entry.kept && entry.hiddenAt != nil }
 
     /// Mid-turn but stopped on you (a question, a plan): counts as waiting, not as working.
     var waitsForYou: Bool { session.running && activity?.waitsForYou == true }
@@ -162,6 +164,7 @@ struct AgentRow: Identifiable, Hashable {
         let age = Self.spokenAge(now.timeIntervalSince(session.running ? workingSince ?? session.lastActivity : session.lastActivity))
         var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), projectName, age]
         if !tasks.isEmpty { parts.append("\(tasks.count) running") }
+        if hidden { parts.append("hidden") }
         return parts.joined(separator: ", ")
     }
 
@@ -744,6 +747,8 @@ extension Store {
         }
         let title = claudeSessions[id]?.title ?? "session"
         let after = agents.entries.first { $0.id == id }
+        // Already hidden (a search result): nothing changed, so nothing is offered to take back.
+        guard after != before else { return }
         registerUndo("Hidden \u{201C}\(title)\u{201D}", in: .agents) { [weak self] in
             // Only while it is as Hide left it: a Keep since (found through search) is newer than what is being taken back.
             self?.mutateAgent(id) {

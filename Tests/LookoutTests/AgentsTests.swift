@@ -126,6 +126,17 @@ import Testing
         #expect(t.agentRows.pending.map(\.id) == ["a"])
     }
 
+    @Test func hidingASessionAlreadyHiddenOffersNothingToTakeBack() {
+        let s = store([session("a")])
+        s.keepAgent("a")
+        s.dismissAgent("a")
+        let row = s.row(s.claudeSessions["a"]!)
+        #expect(row.hidden && row.spokenValue().hasSuffix(", hidden"))
+        let line = s.undoStack.entries.count
+        s.dismissAgent("a")
+        #expect(s.undoStack.entries.count == line)
+    }
+
     @Test func archivedSessionsLeave() {
         let s = store([session("a")])
         s.keepAgent("a")

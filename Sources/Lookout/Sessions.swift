@@ -564,7 +564,7 @@ struct SessionRow: View {
         .accessibilityActions {
             Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
             if row.pending { Button("Keep") { store.keepAgent(row.id) } }
-            Button("Hide") { store.dismissAgent(row.id) }
+            if !row.hidden { Button("Hide") { store.dismissAgent(row.id) } }
             if let up = moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, with: up, store: store) } }
             if let down = moves.down { Button("Move down") { hub.moveSession(row.id, by: 1, with: down, store: store) } }
         }
@@ -1079,7 +1079,7 @@ struct SessionMenu: View {
         Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
         Divider()
         if row.pending { Button("Keep") { store.keepAgent(row.id) } }
-        Button("Hide") { store.dismissAgent(row.id) }
+        if !row.hidden { Button("Hide") { store.dismissAgent(row.id) } }
         let moves = moves ?? SessionGroup.Moves(up: store.neighbour(of: row.id, -1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions),
                                                 down: store.neighbour(of: row.id, 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions))
         if let up = moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, with: up, store: store) } }
