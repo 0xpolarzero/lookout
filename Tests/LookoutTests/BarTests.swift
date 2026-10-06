@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Lookout
 
@@ -23,6 +25,15 @@ import Testing
         #expect(summary(["a": status(.success), "b": status(.pending), "c": status(.failure)]).worst == .failure)
         #expect(summary(["a": status(.success)]).worst == .success)
         #expect(summary(["a": status(.none)]).worst == .none)
+    }
+
+    @Test func ciGlyphIsOneTileWhateverItSays() {
+        // The first failure, or a second digit, never widens it: it stays the 26pt footprint of the other cells.
+        let tile = CGSize(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
+        for (worst, failing) in [(CIState.failure, 1), (.failure, 12), (.failure, 123), (.pending, 0), (.success, 0), (.none, 0)] {
+            let face = CIBarCell.Face(worst: worst, failing: failing, hovering: false)
+            #expect(NSHostingView(rootView: face).fittingSize == tile)
+        }
     }
 
     @Test func clickOpensTheWorstReposNewestChecks() {

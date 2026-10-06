@@ -121,8 +121,9 @@ struct CIBarSummary {
     }
 }
 
-/// CI as one glyph, no tile: the worst state's own silhouette, and the failing count beside it only when something
-/// fails. The bar leaves it out when no repository has CI on.
+/// CI as one glyph, no tile: the worst state's own silhouette, and the failing count under it only when something
+/// fails. Always the 26pt footprint of the other cells, so the glyph stays on the bar's axis and nothing shifts
+/// (or changes its hover fill) when the first failure arrives. The bar leaves it out when no repository has CI on.
 struct CIBarCell: View {
     let axis: Axis
     let summary: CIBarSummary
@@ -138,22 +139,24 @@ struct CIBarCell: View {
         }
     }
 
-    private struct Face: View {
+    /// What the cell draws (not private: the tests measure it).
+    struct Face: View {
         let worst: CIState
         let failing: Int
         let hovering: Bool
+        @Environment(\.resolved) private var resolved
 
         var body: some View {
-            HStack(spacing: 3) {
+            VStack(spacing: -1) {
                 Image(systemName: worst.countSymbol)
-                    .font(Theme.Typography.glyph(16, .regular))
+                    .font(Theme.Typography.glyph(14, .regular))
                     .foregroundStyle(worst.color)
                 if worst == .failure {
-                    Text("\(failing)").font(Theme.Typography.numeral).foregroundStyle(Theme.red)
+                    Text(failing > 99 ? "99+" : "\(failing)").font(Theme.Typography.numeral).foregroundStyle(Theme.red)
                 }
             }
-            .frame(minWidth: Theme.Metrics.tile, minHeight: Theme.Metrics.tile)
-            .background(Tile.shape(Theme.Metrics.tile).fill(hovering ? Theme.Fill.hover : Theme.Fill.rest))
+            .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
+            .background(Tile.shape(Theme.Metrics.tile).fill(resolved.fill(hovering ? Theme.Fill.hover : Theme.Fill.rest)))
         }
     }
 }
