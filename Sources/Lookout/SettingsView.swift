@@ -661,10 +661,16 @@ struct SettingsView: View {
         }
     }
 
-    /// Saved and said only once the Keychain has it; a refusal keeps what was typed (the error is announced where it shows).
+    /// Saved and said only once the Keychain has it; a refusal keeps what was typed and is said at each attempt (the same
+    /// error does not change, so the line's own announcement would not say it again; `Announce` keeps the first from
+    /// being said twice).
     private func saveTypesafeKey() {
         let key = typesafeKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, store.setTypesafeKey(key) else { return }
+        guard !key.isEmpty else { return }
+        guard store.setTypesafeKey(key) else {
+            if let error = store.iconError { Announce.say(error) }
+            return
+        }
         typesafeKey = ""
         Announce.say("TypeSafe key saved")
     }
