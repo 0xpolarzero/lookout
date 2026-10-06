@@ -170,10 +170,60 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
 extension Store {
     var hasCustomShortcuts: Bool { !(settings.shortcuts ?? [:]).isEmpty }
 
-    /// Every shortcut back to its default; the global ones are registered again.
+    /// Every shortcut back to its default. The global ones are unregistered first and registered again after: with
+    /// the two swapped, registering one default while the other still holds its key would be refused, and Settings
+    /// would show a default that does nothing.
     func restoreDefaultShortcuts() {
+        let globals = ShortcutAction.allCases.filter(\.isGlobal)
+        for action in globals { onGlobalShortcutChange?(action, .unassigned) }
         settings.shortcuts = nil
-        for action in ShortcutAction.allCases where action.isGlobal { onGlobalShortcutChange?(action, shortcut(action)) }
+        for action in globals { onGlobalShortcutChange?(action, shortcut(action)) }
+    }
+}
+
+/// Where a system-wide shortcut is registered: `HotKeys`, or a stand-in under test.
+protocol HotKeyRegistrar: AnyObject {
+    /// `nil` unregisters.
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void)
+}
+
+extension HotKeys: HotKeyRegistrar {}
+
+extension ShortcutAction {
+    /// The registration a global action holds, one per action.
+    var hotKeyID: UInt32 { self == .togglePanel ? 1 : 2 }
+}
+
+/// Keeps the registrar in step with the store's global shortcuts: one registration per action, none for a shortcut
+/// that was cleared, and the session switcher only while the Claude extension is on.
+@MainActor
+final class GlobalShortcuts {
+    private let store: Store
+    private let registrar: HotKeyRegistrar
+    private let perform: (ShortcutAction) -> Void
+
+    /// `perform` runs on the main queue when a global shortcut is pressed.
+    init(store: Store, registrar: HotKeyRegistrar, perform: @escaping (ShortcutAction) -> Void) {
+        self.store = store
+        self.registrar = registrar
+        self.perform = perform
+    }
+
+    /// Registers both and follows the store from here on.
+    func start() {
+        for action in ShortcutAction.allCases where action.isGlobal { register(action) }
+        store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) }
+        store.onAgentsEnabledChange = { [weak self] _ in self?.register(.sessionSwitcher) }
+    }
+
+    /// `shortcut` is what the store has just set, or its current one.
+    func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) {
+        guard action.isGlobal else { return }
+        let shortcut = shortcut ?? store.shortcut(action)
+        let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
+        registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
+            DispatchQueue.main.async { perform(action) }
+        }
     }
 }
 
