@@ -9,10 +9,10 @@ import Testing
         (Data(body.utf8), HTTPURLResponse(url: URL(string: "https://api.github.com")!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
 
-    private nonisolated static func issue(_ id: Int) -> String {
+    private nonisolated static func issue(_ id: Int, updated: String = "2026-01-01T00:00:00Z") -> String {
         """
         {"id": \(id), "number": \(id), "title": "PR \(id)", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
-         "html_url": "https://github.com/a/b/pull/\(id)", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+         "html_url": "https://github.com/a/b/pull/\(id)", "created_at": "2026-01-01T00:00:00Z", "updated_at": "\(updated)",
          "pull_request": null, "repository_url": "https://api.github.com/repos/a/b"}
         """
     }
@@ -115,7 +115,7 @@ import Testing
         s.persists = false
         s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
         s.settings.didInitialReviewSync = true
-        let page1 = "[" + (1...100).map(Self.issue).joined(separator: ",") + "]"
+        let page1 = "[" + (1...100).map { Self.issue($0) }.joined(separator: ",") + "]"
         s.gh.transport = { request in
             let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "page" }?.value
             if page == "1" { return SyncHealth.reply(200, #"{"total_count": 101, "incomplete_results": false, "items": \#(page1)}"#) }
@@ -126,6 +126,28 @@ import Testing
         #expect(s.reviewRequestsError != nil && s.syncFault(stale: false) == .reviewRequests)
         // Nothing the failed page might have held is taken for gone: a request that was there stays.
         #expect(s.items.allSatisfy { $0.state.isOpen })
+    }
+
+    @Test func aSearchThatOutlivesTheSwitchAddsNothingAndSaysNothing() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.settings.didInitialReviewSync = true
+        s.gh.transport = { _ in
+            // Review requests is turned off while the page is out.
+            await MainActor.run { s.settings.reviewRequests = false }
+            return SyncHealth.reply(200, #"{"total_count": 1, "incomplete_results": true, "items": [\#(Self.issue(1))]}"#)
+        }
+        await s.syncReviewRequests()
+        #expect(s.items.isEmpty && s.pulse == 0 && !s.reviewRequestsIncomplete)
+        // Nor does one that fails.
+        s.settings.reviewRequests = true
+        s.gh.transport = { _ in
+            await MainActor.run { s.settings.reviewRequests = false }
+            return SyncHealth.reply(500, #"{"message": "Timed out"}"#)
+        }
+        await s.syncReviewRequests()
+        #expect(s.reviewRequestsError == nil && s.items.isEmpty)
     }
 
     @Test func anIncompleteReviewSearchIsOneFaultOnEverySurface() {

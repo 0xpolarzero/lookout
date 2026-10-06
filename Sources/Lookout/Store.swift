@@ -44,8 +44,10 @@ final class Store {
         didSet {
             memo = Memo()
             persistedRevision &+= 1
-            if oldValue.reviewRequests, !settings.reviewRequests, !loading {
-                removeItems { $0.kind == .reviewRequested }
+            if oldValue.reviewRequests != settings.reviewRequests {
+                // A search under way for the source as it was has nothing to say to it as it is now.
+                reviewGeneration &+= 1
+                if !settings.reviewRequests, !loading { removeItems { $0.kind == .reviewRequested } }
             }
             armSnoozeExpiry()
             save()
@@ -111,6 +113,8 @@ final class Store {
     /// The last search for review requests ended without all of them (GitHub cut it short, or past ten pages): what it
     /// found is real, but nothing can say the rest is empty. Cleared by the next complete search.
     var reviewRequestsIncomplete = false
+    /// Counts the times Review requests was switched, so a search that outlives its switch is let go (see `syncReviewRequests`).
+    @ObservationIgnored private var reviewGeneration = 0
     var isSyncing = false
     var lastSync: Date?
     var rateRemaining: Int? {
@@ -1104,10 +1108,13 @@ final class Store {
     func syncReviewRequests() async {
         var found: [GHIssue] = []
         var complete = false
+        // Switched off (or off and on) while a page was out: what comes back is no answer to the source as it is now.
+        let generation = reviewGeneration
         do {
             for page in 1...Self.reviewRequestPages {
                 let result: GHSearch<GHIssue> = try await gh.get("/search/issues", [
                     "q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "100", "page": "\(page)"])
+                guard generation == reviewGeneration else { return }
                 found += result.items
                 if result.incompleteResults == true { break }
                 if result.items.count < 100 || found.count >= (result.totalCount ?? .max) {
@@ -1116,6 +1123,7 @@ final class Store {
                 }
             }
         } catch {
+            guard generation == reviewGeneration else { return }
             // Said, not swallowed: the inbox can't claim to be caught up on a source it couldn't check. The pages that did
             // arrive are real requests: kept, as a search that stopped short (nothing can be told missing from it).
             reviewRequestsError = error.localizedDescription
