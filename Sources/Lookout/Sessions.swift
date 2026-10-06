@@ -9,7 +9,7 @@ struct WorkingText: View {
     let row: AgentRow
 
     var body: some View {
-        Ticking { now in
+        Ticking(since: row.workingSince) { now in
             Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
         }
     }
@@ -37,7 +37,8 @@ struct TaskLines: View {
     let tasks: [ClaudeTask]
 
     var body: some View {
-        Ticking { now in
+        // Seconds count only while the newest task is under a minute old.
+        Ticking(since: tasks.map(\.since).max()) { now in
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(tasks) { task in
                     HStack(spacing: 6) {

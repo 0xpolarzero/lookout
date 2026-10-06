@@ -140,9 +140,12 @@ struct AgentRow: Identifiable, Hashable {
         return session.summary?.blocked == true ? Theme.amber : Theme.accent
     }
 
+    /// When the running turn began, if known.
+    var workingSince: Date? { session.lastUserMessage ?? activity?.since }
+
     /// "Running swift test · 3m" while working: the current step, and how long the turn has run.
     func workingText(now: Date = Date()) -> String {
-        let elapsed = Self.duration(now.timeIntervalSince(session.lastUserMessage ?? activity?.since ?? now))
+        let elapsed = Self.duration(now.timeIntervalSince(workingSince ?? now))
         return "\(activity?.text ?? "Working") · \(elapsed)"
     }
 
