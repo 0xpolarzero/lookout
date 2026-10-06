@@ -155,6 +155,20 @@ import Testing
         #expect(rows["f"]?.spokenValue(now: now) == "finished, app, 4 minutes")
     }
 
+    @Test func aFinishedSessionSpeaksWhatItLeftRunning() {
+        let s = store([session("f", minutesAgo: 4)], unread: ["f"])
+        s.claudeTasks = ["f": [ClaudeTask(id: "a", kind: .agent, title: "Review the changes", since: now),
+                               ClaudeTask(id: "b", kind: .command, title: "Run the full test suite", since: now),
+                               ClaudeTask(id: "c", kind: .command, title: "Watch the build", since: now)]]
+        let row = s.agentRows.pending[0]
+        #expect(row.spokenValue(now: now) == "finished, unread, app, 4 minutes, 3 running")
+        #expect(row.spokenHint == "Detail f Running: Review the changes, Run the full test suite, Watch the build.")
+        // Nothing left running: the value and hint say nothing of it.
+        s.claudeTasks = [:]
+        #expect(s.agentRows.pending[0].spokenValue(now: now) == "finished, unread, app, 4 minutes")
+        #expect(s.agentRows.pending[0].spokenHint == "Detail f")
+    }
+
     @Test func theKeysWalkTheRowsInTheOrderTheyShow() {
         let sessions = [session("x1", folder: "/code/x"), session("ask", folder: "/code/y", blocked: true), session("n1", minutesAgo: 1)]
             + (2..<11).map { session("n\($0)", minutesAgo: Double($0)) }

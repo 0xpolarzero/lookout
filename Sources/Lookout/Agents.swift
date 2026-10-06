@@ -182,11 +182,21 @@ struct AgentRow: Identifiable, Hashable {
         return summaryText
     }
 
-    /// For VoiceOver: "waiting, lcu, 2 minutes".
+    /// For VoiceOver: "waiting, lcu, 2 minutes", and "3 running" for what a finished turn left behind.
     func spokenValue(now: Date = Date()) -> String {
         let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
         let age = Self.spokenAge(now.timeIntervalSince(session.running ? session.lastUserMessage ?? session.lastActivity : session.lastActivity))
-        return [state + (unread && !isWaiting && !session.running ? ", unread" : ""), session.folderName, age].joined(separator: ", ")
+        var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), session.folderName, age]
+        if !tasks.isEmpty { parts.append("\(tasks.count) running") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// For VoiceOver, after the value: the question or summary, then everything it left running by name (the row
+    /// shows the first and a count).
+    var spokenHint: String {
+        let said = String(headline.characters)
+        let running = tasks.isEmpty ? "" : "Running: " + tasks.map(\.title).joined(separator: ", ") + "."
+        return [said, running].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     static func spokenAge(_ t: TimeInterval) -> String {

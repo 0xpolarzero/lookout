@@ -241,7 +241,7 @@ struct SessionRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
         .accessibilityValue(row.spokenValue())
-        .accessibilityHint(plainHeadline.isEmpty ? "Opens it in Claude" : plainHeadline)
+        .accessibilityHint(row.spokenHint.isEmpty ? "Opens it in Claude" : row.spokenHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityFocused($voiceOverFocused)
         .accessibilityAction { store.openAgent(row.id) }
