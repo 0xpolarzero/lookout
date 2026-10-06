@@ -65,6 +65,10 @@ extension LookoutHub {
         return !searching && hub.focus == nil && fullLength - fixedLength(ciBody: ciBodyHeight) < lists * Theme.Metrics.twoLineRow
     }
 
+    /// CI is only its header in the full view: another section is focused, or (on the sides) the room below a low bar
+    /// folds it.
+    var ciIsHeaderOnly: Bool { showsDetail && (shrunk(.ci) || (!edge.isHorizontal && foldsCI)) }
+
     /// Whether CI's lines show under its header.
     var showsCIBody: Bool { !shrunk(.ci) && !foldsCI && !store.ciRepos.isEmpty }
 

@@ -293,8 +293,10 @@ extension LookoutHub {
             .modifier(CIShowTarget(hub: hub))
     }
 
-    /// "2 failing" in red; "1 running" while nothing fails; nothing once everything has passed.
+    /// "2 failing" in red; "1 running" while nothing fails; nothing once everything has passed. Only while CI is just its
+    /// header (`ciIsHeaderOnly`): with its rows showing, the failing ones say it (DESIGN.md 10.5).
     var ciPhrase: (text: String, color: AnyShapeStyle)? {
+        guard ciIsHeaderOnly else { return nil }
         let worst = store.ciWorst
         switch worst.state {
         case .failure: return ("\(worst.failing) failing", AnyShapeStyle(Theme.red))

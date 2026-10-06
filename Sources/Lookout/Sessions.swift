@@ -731,19 +731,24 @@ extension LookoutHub {
     /// The tile column's side for this edge.
     var railSide: HorizontalEdge { edge == .right ? .trailing : .leading }
 
-    /// "Sessions" and, when something needs you, "1 waiting" (a button: it picks the first one).
-    var agentsHeader: some View {
+    /// What the Sessions header says beside its title: while searching, how many were found (as the Inbox group's label
+    /// counts), and nothing when neither group found any; else, once the section is only its header (another is focused)
+    /// while something needs you, "1 waiting" (a button: it picks the first one). Open, the Waiting for you group says it
+    /// (DESIGN.md 10.5).
+    var agentsStatus: (text: String, color: AnyShapeStyle)? {
+        if searching { return searchFoundNothing ? nil : ("\(store.hubSessions(hub).count)", AnyShapeStyle(Theme.secondary)) }
         let waiting = store.agentCounts.blocked
-        // Searching, how many were found (as the Inbox group's label counts), and nothing when neither group found any.
-        let status: (String, AnyShapeStyle)? = searching
-            ? (searchFoundNothing ? nil : ("\(store.hubSessions(hub).count)", AnyShapeStyle(Theme.secondary)))
-            : waiting > 0 ? ("\(waiting) waiting", AnyShapeStyle(Theme.amber)) : nil
-        return SectionHeader(title: "Sessions", status: status,
-                             statusAction: searching ? nil : pickFirstWaiting, focused: hub.focus == .agents,
-                             expandHelp: hub.focus == .agents ? "Back to all sections" : "Expand Sessions",
-                             onFocus: showsDetail ? {
-                                 withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = hub.focus == .agents ? nil : .agents }
-                             } : nil) {}
+        return waiting > 0 && shrunk(.agents) ? ("\(waiting) waiting", AnyShapeStyle(Theme.amber)) : nil
+    }
+
+    /// "Sessions" and its status.
+    var agentsHeader: some View {
+        SectionHeader(title: "Sessions", status: agentsStatus,
+                      statusAction: searching ? nil : pickFirstWaiting, focused: hub.focus == .agents,
+                      expandHelp: hub.focus == .agents ? "Back to all sections" : "Expand Sessions",
+                      onFocus: showsDetail ? {
+                          withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = hub.focus == .agents ? nil : .agents }
+                      } : nil) {}
     }
 
     /// The first row of Waiting for you, picked as the keys would, and scrolled to.

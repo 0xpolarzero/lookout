@@ -413,3 +413,49 @@ import Testing
         #expect(!press(kVK_Return, "\r"))
     }
 }
+
+/// A header says "1 waiting" or "1 failing" only when its section is nothing but the header (DESIGN.md 10.5): open, the
+/// Waiting for you group and the failing rows say it.
+@MainActor
+@Suite struct HeaderPhrases {
+    private func rig() -> (view: LookoutHub, hub: HubState) {
+        let store = Store()
+        Demo.populate(store, .agents)
+        let hub = HubState()
+        return (LookoutHub(store: store, ui: UIState(persists: false, edge: .right), hub: hub, maxLength: 700), hub)
+    }
+
+    @Test func aPeekAndTheFullViewSayNothingWhileTheirRowsDo() {
+        let (view, hub) = rig()
+        #expect(view.ciPhrase == nil && view.agentsStatus == nil)
+        // A peek.
+        hub.section = .agents
+        #expect(view.ciPhrase == nil && view.agentsStatus == nil)
+        // Kept open: every section shows its rows.
+        hub.section = nil
+        hub.pinned = true
+        #expect(view.ciPhrase == nil && view.agentsStatus == nil)
+    }
+
+    @Test func aSectionShrunkToItsHeaderSaysWhatIsInIt() {
+        let (view, hub) = rig()
+        hub.pinned = true
+        hub.focus = .inbox
+        #expect(view.ciPhrase?.text == "1 failing")
+        #expect(view.agentsStatus?.text == "1 waiting")
+        // The focused section is not shrunk: its own rows say it.
+        hub.focus = .agents
+        #expect(view.agentsStatus == nil)
+        #expect(view.ciPhrase?.text == "1 failing")
+        hub.focus = .ci
+        #expect(view.ciPhrase == nil)
+    }
+
+    @Test func aSearchCountsWhatItFoundInsteadOfWhoWaits() {
+        let (view, hub) = rig()
+        hub.pinned = true
+        hub.query = "lcu"
+        #expect(view.agentsStatus?.text == "\(view.store.hubSessions(hub).count)")
+        #expect(view.ciPhrase == nil)
+    }
+}
