@@ -57,7 +57,7 @@ extension HubState {
         case .keepOpen: LookoutHub.animate(LookoutHub.opening) { pinned = true }
         case .repositories: go(.repos)
         case .settings: go(.settings)
-        case .sync: if !store.isSyncing { store.refreshNow() }
+        case .sync: store.checkNow()
         }
         // A page or the full view takes over; syncing leaves the menu as it is.
         if row != .sync { menuKeys = false }
@@ -94,9 +94,6 @@ struct PanelGeometry: Equatable {
 
 extension LookoutHub {
     static let barSpace = "hub-bar"
-    /// Between the bar and a section's panel: none, so the pointer never falls between them.
-    static let peekGap: CGFloat = 0
-
     func probe(_ section: HubSection) -> SectionProbe {
         SectionProbe(section: section, hub: hub, frames: $sectionFrames)
     }
@@ -160,11 +157,12 @@ extension LookoutHub {
         guard let section = peeking, let size = peekSizes[section], let place = currentPlacement else { return nil }
         let w = panelWidth(section)
         let h = edge.isHorizontal ? size.height : place.length
+        // Flush with the bar, so the pointer never falls between them.
         let rect = switch edge {
-        case .right: CGRect(x: -(w + Self.peekGap), y: place.start, width: w, height: h)
-        case .left: CGRect(x: barSize.width + Self.peekGap, y: place.start, width: w, height: h)
-        case .top: CGRect(x: place.start, y: barSize.height + Self.peekGap, width: w, height: h)
-        case .bottom: CGRect(x: place.start, y: -(h + Self.peekGap), width: w, height: h)
+        case .right: CGRect(x: -w, y: place.start, width: w, height: h)
+        case .left: CGRect(x: barSize.width, y: place.start, width: w, height: h)
+        case .top: CGRect(x: place.start, y: barSize.height, width: w, height: h)
+        case .bottom: CGRect(x: place.start, y: -h, width: w, height: h)
         }
         return PanelGeometry(rect: rect, radii: panelRadii(place))
     }
@@ -232,10 +230,6 @@ extension LookoutHub {
 
     // MARK: Content
 
-    /// Between rows and the panel's edge: the one outer inset, and along the bar the same lead as its first cell, so a
-    /// header sits level with the cell it belongs to.
-    static let peekPad: CGFloat = Theme.Metrics.inset
-
     /// A panel's width (DESIGN.md 3.4), on every edge.
     func panelWidth(_ section: HubSection) -> CGFloat {
         switch section {
@@ -269,7 +263,9 @@ extension LookoutHub {
             case .controls: peekControls
             }
         }
-        .padding(.horizontal, Self.peekPad)
+        // Between rows and the panel's edge: the one outer inset, and along the bar the same lead as its first cell, so a
+        // header sits level with the cell it belongs to.
+        .padding(.horizontal, Self.inset)
         .padding(.vertical, HubGeometry.lead)
         .frame(width: panelWidth(section), alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -289,20 +285,15 @@ extension LookoutHub {
         ciRows(cap: peekCap(.ci, fixed: Theme.Metrics.pitch), peek: true)
     }
 
-    /// The sessions' header and notice over their rows, which have no tile column: the bar's tiles are beside them.
-    @ViewBuilder var sessionsPeekHeader: some View {
-        agentsHeader.frame(height: Theme.Metrics.pitch)
-        ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
-    }
-
-    /// The sessions as the full view lists them, without their tiles: as many whole rows as fit, then New session.
+    /// The sessions as the full view lists them, without their tiles (the bar's are beside them): as many whole rows as
+    /// fit, then New session.
     @ViewBuilder var peekAgents: some View {
-        // Its header and the New session row are always there, the notice when Claude's files are not, and the undo line while there
-        // is one.
-        // A group's header, a whole row and the "+N more" under them are the least it can show.
+        // Always there: the header and the New session row; sometimes the notice (Claude's files are not) and the undo
+        // line. A group's header, a whole row and the "+N more" under them are the least it can show.
         let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store) + sessionsUndoRoom,
                           least: SessionGroup.headerHeight + Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
-        sessionsPeekHeader
+        agentsHeader.frame(height: Theme.Metrics.pitch)
+        ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
         sessionsPeek(cap: cap)
         newSessionRow(inset: 0, tile: false)
     }
@@ -386,7 +377,7 @@ struct ControlsSyncRow: View {
                 Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
                 Spacer(minLength: 0)
                 if !line.opensSettings {
-                    Button { if !store.isSyncing { store.refreshNow() } } label: {
+                    Button(action: store.checkNow) {
                         HStack(spacing: Theme.Space.sm) {
                             Text("Sync now").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                             Text(store.shortcut(.refresh).display).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)

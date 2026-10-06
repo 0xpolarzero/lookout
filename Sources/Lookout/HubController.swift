@@ -83,12 +83,6 @@ struct HubRoot: View {
             .tipSpace { hub.tipRegion = $0 }
     }
 
-    /// The hub may take the screen's whole usable length less both insets, never a floor: it grows from the bar's
-    /// place and only the screen's end moves it (see `HubGeometry.along`).
-    private func length(in size: CGSize) -> CGFloat {
-        HubGeometry.maxLength(visibleHeight: size.height)
-    }
-
     /// On the sides the full view stays below the bar's rest anchor, so the inbox tile never moves.
     private func openLength(in size: CGSize) -> CGFloat? {
         guard !ui.edge.isHorizontal, layout.restLength > 0 else { return nil }
@@ -99,7 +93,7 @@ struct HubRoot: View {
     static func position(_ ui: UIState, _ store: Store) -> Double { store.settings.centerPill == true ? 0.5 : ui.position }
 
     @ViewBuilder private func content(in size: CGSize) -> some View {
-        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), openLength: openLength(in: size), maxWidth: size.width,
+        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: HubGeometry.maxLength(visibleHeight: size.height), openLength: openLength(in: size), maxWidth: size.width,
                               barLength: (ui.edge.isHorizontal ? size.width : size.height) - 12)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
@@ -409,11 +403,12 @@ final class HubController {
                 // Keyboard focus moves only when pinning changes: a panel closing under a pinned hub must not steal it back.
                 let pinnedChanged = self.hub.pinned != self.lastPinned && !self.placing
                 self.lastPinned = self.hub.pinned
-                if !pinnedChanged {
-                } else if self.hub.pinned, !self.window.isKeyWindow {
-                    self.takeFocus()
-                } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
-                    self.giveFocusBack()
+                if pinnedChanged {
+                    if self.hub.pinned, !self.window.isKeyWindow {
+                        self.takeFocus()
+                    } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
+                        self.giveFocusBack()
+                    }
                 }
                 // The controls menu, asked for by VoiceOver or a key, takes the keyboard while it is up.
                 if self.hub.menuKeys != self.lastMenuKeys {
@@ -444,8 +439,6 @@ final class HubController {
         }
     }
 
-    func agentsChanged() {}
-
     // MARK: Dragging to another edge
 
     private func dragChanged(to mouse: NSPoint) {
@@ -456,9 +449,7 @@ final class HubController {
             hub.section = nil
             // Back to the bar at once (no closing animation), and carry just the bar, under the cursor where you
             // grabbed it.
-            var instant = Transaction(animation: nil)
-            instant.disablesAnimations = true
-            withTransaction(instant) {
+            LookoutHub.instantly {
                 hub.pinned = false
                 hub.hovering = false
                 hub.page = .main
@@ -510,9 +501,7 @@ final class HubController {
             // The bar is measured at rest for its new axis, which needs the hub shut (a hub kept open stops that measure, and
             // the strip would take the old length): the page and Keep open come back once it has.
             placing = true
-            var instant = Transaction(animation: nil)
-            instant.disablesAnimations = true
-            withTransaction(instant) {
+            LookoutHub.instantly {
                 if page != .main { hub.go(.main) }
                 hub.pinned = false
             }

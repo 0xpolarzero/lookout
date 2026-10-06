@@ -4,19 +4,6 @@ import SwiftUI
 // The footer of the full view (DESIGN.md 4.11): one 36pt row, last on every edge. On the left how syncing is going, as
 // a button that checks now; on the right Keep open and Repositories. Settings is the gear cell, not part of it.
 
-/// Beside the sync status, on every edge: the GitHub rate limit running low (nothing otherwise).
-struct RateNotice: View {
-    let store: Store
-    /// Takes the whole line (its text at the leading edge); off, only the room it needs.
-    var fill = true
-
-    var body: some View {
-        RateLimitWarning(store: store)
-            .font(Theme.Typography.meta)
-            .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
-    }
-}
-
 /// How syncing is going, in a few words: a fault says what and why, otherwise when it last checked.
 struct SyncLine {
     var text: String
@@ -29,41 +16,24 @@ struct SyncLine {
 }
 
 extension LookoutHub {
-    /// The footer row, as tall as every one-line row.
+    /// The footer row, as tall as every one-line row. The GitHub rate limit running low (nothing otherwise) sits beside the
+    /// sync status.
     var footerRow: some View {
         HStack(spacing: Theme.Space.md) {
-            syncButton
-            RateNotice(store: store, fill: false).lineLimit(1).layoutPriority(-1)
+            SyncButton(store: store, hub: hub)
+            RateLimitWarning(store: store).font(Theme.Typography.meta).lineLimit(1).layoutPriority(-1)
             Spacer(minLength: 0)
-            pinButton
-            reposButton
+            IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Stop keeping open" : "Keep open",
+                       detail: store.shortcut(.togglePanel).display, active: hub.pinned) {
+                hub.pinned.toggle()
+            }
+            IconButton(symbol: "books.vertical", help: "Repositories", detail: "Watched repos and what they notify",
+                       active: hub.page == .repos) { hub.go(.repos) }
         }
         .padding(.leading, Theme.Metrics.rowPadding)
         .padding(.trailing, Theme.Space.hair)
         .frame(height: Theme.Metrics.pitch)
     }
-
-    var pinButton: some View {
-        IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Stop keeping open" : "Keep open",
-                   detail: store.shortcut(.togglePanel).display, active: hub.pinned) {
-            hub.pinned.toggle()
-        }
-    }
-
-    var reposButton: some View {
-        IconButton(symbol: "books.vertical", help: "Repositories", detail: "Watched repos and what they notify",
-                   active: hub.page == .repos) { hub.go(.repos) }
-    }
-
-    /// Lit while Settings is open; its tooltip and label say what a click does.
-    var settingsCell: some View {
-        let open = hub.page == .settings
-        return IconButton(symbol: open ? "gearshape.fill" : "gearshape", help: open ? "Close Settings" : "Settings",
-                          detail: "⌘,", active: open) { open ? hub.back() : hub.go(.settings) }
-    }
-
-    /// "Checked 2m ago", or the fault in its place: a button that checks now (or opens Settings to sign in).
-    var syncButton: some View { SyncButton(store: store, hub: hub) }
 }
 
 /// The sync state is read here, in views of their own: a poll flips `isSyncing` and `lastSync` every time, and that
@@ -80,6 +50,7 @@ struct SyncStatus<Content: View>: View {
     }
 }
 
+/// "Checked 2m ago", or the fault in its place: a button that checks now (or opens Settings to sign in).
 struct SyncButton: View {
     let store: Store
     let hub: HubState
@@ -88,7 +59,7 @@ struct SyncButton: View {
         SyncStatus(store: store) { line in
             Button {
                 // Not disabled while it checks: that would fade the one word that says so ("Checking…").
-                if line.opensSettings { hub.go(.settings) } else if !store.isSyncing { store.refreshNow() }
+                if line.opensSettings { hub.go(.settings) } else { store.checkNow() }
             } label: {
                 Text(line.text)
                     .font(Theme.Typography.meta)
@@ -105,6 +76,11 @@ struct SyncButton: View {
             .voiceOverTarget("h:controls", hub: hub)
         }
     }
+}
+
+extension Store {
+    /// Checks GitHub now, unless a check is already running.
+    func checkNow() { if !isSyncing { refreshNow() } }
 }
 
 extension SyncLine {
@@ -161,9 +137,4 @@ extension SyncLine {
         self.init(text: "Checked \(agoPhrase(last, now: now))", color: AnyShapeStyle(Theme.tertiary),
                   help: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n" + refresh)
     }
-}
-
-extension LookoutHub {
-    /// Still named by the old full view in HubBar.swift, which `HubOpen.swift` replaces: it goes with it.
-    var footerDetail: some View { footerRow }
 }
