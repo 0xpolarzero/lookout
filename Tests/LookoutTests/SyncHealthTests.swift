@@ -18,6 +18,38 @@ import Testing
         """
     }
 
+    @Test func pollsThatCantReachGitHubKeepTheTokenTheyHaveInsteadOfFindingOneEachTime() async {
+        let s = Store.unsaved()
+        let asks = OSAllocatedUnfairLock(initialState: 0)
+        s.resolveToken = { asks.withLock { $0 += 1 }; return ("token", .environment) }
+        s.keychainWrite = { _, _ in true }
+        s.interceptRefresh = {}
+        // Offline: finding a token reads the Keychain and may run gh, which every poll would do at rest.
+        s.gh.transport = { _ in throw URLError(.notConnectedToInternet) }
+        for _ in 0..<3 { await s.pollAll() }
+        #expect(asks.withLock { $0 } == 1 && s.me == nil && s.gh.token == "token")
+        // GitHub refuses it: another is looked for, on the next poll.
+        s.gh.transport = { _ in SyncHealth.reply(401, #"{"message": "Bad credentials"}"#) }
+        await s.pollAll()
+        #expect(asks.withLock { $0 } == 1 && s.gh.token == nil)
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"login": "me", "avatar_url": null, "type": "User"}"#) }
+        await s.pollAll()
+        #expect(asks.withLock { $0 } == 2 && s.me?.login == "me")
+        // A token saved in Settings is looked for too.
+        s.me = nil
+        s.setToken("new")
+        await s.pollAll()
+        #expect(asks.withLock { $0 } == 3 && s.me != nil)
+    }
+
+    @Test func signedOutPollsLookForATokenEachTimeSoALoginIsNoticed() async {
+        let s = Store.unsaved()
+        let asks = OSAllocatedUnfairLock(initialState: 0)
+        s.resolveToken = { asks.withLock { $0 += 1 }; return nil }
+        for _ in 0..<2 { await s.pollAll() }
+        #expect(asks.withLock { $0 } == 2 && s.authError == SignInFailure.missingToken)
+    }
+
     @Test func stoppingAFailedRepositoryClearsItsFault() {
         let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one"), RepoConfig(fullName: "a/two")]

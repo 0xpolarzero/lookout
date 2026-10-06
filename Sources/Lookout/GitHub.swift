@@ -108,6 +108,9 @@ struct GHCommit: Decodable {
 }
 
 struct GitHubError: LocalizedError {
+    /// What a 401 says: the token was looked at and refused.
+    static let rejectedToken = "GitHub rejected the token"
+
     let message: String
     var errorDescription: String? { message }
 }
@@ -279,7 +282,7 @@ final class GitHubClient: @unchecked Sendable {
         guard !(200..<300).contains(http.statusCode) else { return }
         let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
         switch http.statusCode {
-        case 401: throw GitHubError(message: "GitHub rejected the token")
+        case 401: throw GitHubError(message: GitHubError.rejectedToken)
         case 404: throw GitHubError(message: "Not found (or no access)")
         default: throw GitHubError(message: message ?? "GitHub error \(http.statusCode)")
         }

@@ -176,6 +176,8 @@ final class Store {
     @ObservationIgnored var typesafeKeyCache: String?
     /// What keeps a key in the Keychain (tests answer for it).
     @ObservationIgnored var keychainWrite: ((String, String) -> Bool)?
+    /// Finds the token to sign in with (the Keychain, the environment, `gh`); the tests count the asks.
+    @ObservationIgnored var resolveToken: @Sendable () -> (String, TokenSource)? = { TokenProvider.resolve() }
     /// A token was just saved or taken away: the next sign-in that fails is its result and is said aloud (a poll's isn't).
     @ObservationIgnored private(set) var awaitingSignIn = false
     @ObservationIgnored var announceSignIn: (String) -> Void = { Announce.say($0) }
@@ -700,20 +702,26 @@ final class Store {
 
     // MARK: Auth
 
+    /// Signs in with the token held, else the one `resolveToken` finds. A token already held is asked about as it is: finding one
+    /// reads the Keychain and may run `gh`, which a poll that fails (offline, a VPN down, GitHub's own trouble) would do every
+    /// minute. Only no token, one GitHub refused, or a change in Settings (`setToken`) looks again.
     func authenticate() async {
-        let resolved = await Task.detached { TokenProvider.resolve() }.value
-        guard let (token, source) = resolved else {
-            tokenSource = nil
-            signInFailed(SignInFailure.missingToken)
-            return
+        if gh.token == nil {
+            let find = resolveToken
+            guard let (token, source) = await Task.detached(operation: find).value else {
+                tokenSource = nil
+                signInFailed(SignInFailure.missingToken)
+                return
+            }
+            gh.token = token
+            tokenSource = source
         }
-        gh.token = token
-        tokenSource = source
         do {
             me = try await gh.get("/user", as: GHUser.self)
             authError = nil
             awaitingSignIn = false
         } catch {
+            if (error as? GitHubError)?.message == GitHubError.rejectedToken { gh.token = nil }
             signInFailed(error.localizedDescription)
         }
     }
@@ -738,6 +746,7 @@ final class Store {
             Keychain.delete()
         }
         me = nil
+        gh.token = nil
         awaitingSignIn = true
         refreshNow()
         return true
