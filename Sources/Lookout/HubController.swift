@@ -461,25 +461,54 @@ final class HubController {
     private func dragEnded(at mouse: NSPoint) {
         screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? screen
         let vf = screen.visibleFrame
-        (ui.edge, ui.position) = EdgeSnap.snap(window.frame, in: vf)
-        // Let SwiftUI lay the bar out for its new edge (it may turn), then glide it into place and dock.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+        let (edge, position) = EdgeSnap.snap(window.frame, in: vf)
+        let turns = edge.isHorizontal != ui.edge.isHorizontal
+        (ui.edge, ui.position) = (edge, position)
+        // The bar may turn for its new edge: once SwiftUI has laid it out, glide it into place and dock (no glide
+        // under Reduce Motion: the frame is set directly).
+        afterBarLayout(turns) { [weak self] in
             guard let self else { return }
-            let size = self.host.fittingSize
-            let target = self.restFrame(size: size, in: vf)
+            let target = self.restFrame(size: self.host.fittingSize, in: vf)
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                self.window.setFrame(target, display: true)
+                self.dropped()
+                return
+            }
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.26
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 self.window.animator().setFrame(target, display: true)
-            }, completionHandler: {
-                MainActor.assumeIsolated {
-                    self.dragStart = nil
-                    self.hub.dragging = false
-                    self.dock()
-                    self.mouseMoved()
-                }
-            })
+            }, completionHandler: { MainActor.assumeIsolated { self.dropped() } })
         }
+    }
+
+    /// The bar is on its edge: back to rest.
+    private func dropped() {
+        dragStart = nil
+        hub.dragging = false
+        dock()
+        mouseMoved()
+    }
+
+    /// Calls `then` once the bar has been laid out for its new edge: when its frame changes, if it turns (a bar
+    /// along the other axis is another size); at once if it doesn't. A turn that never reports still lands, so a
+    /// drag can't end half done.
+    private func afterBarLayout(_ turns: Bool, then: @escaping @MainActor () -> Void) {
+        guard turns else { return then() }
+        let previous = layout.onFrame
+        var landed = false
+        let land = { [weak self] in
+            guard !landed else { return }
+            landed = true
+            self?.layout.onFrame = previous
+            then()
+        }
+        layout.onFrame = {
+            previous?()
+            // Not from inside SwiftUI's own layout pass: the window is about to be resized.
+            DispatchQueue.main.async { land() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { land() }
     }
 
     /// Where the bar rests on its edge: the same place `EdgeLayout` puts it once docked.
