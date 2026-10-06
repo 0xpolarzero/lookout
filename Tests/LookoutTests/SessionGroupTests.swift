@@ -60,6 +60,18 @@ import Testing
         #expect(s.agentCounts.blocked == 3)
     }
 
+    @Test func theSessionsShortcutPicksTheFirstWaitingOneWorkingOrFinished() {
+        // A finished, unread session and another that is mid-turn, stopped on a question: the question is the pick.
+        let s = store([session("done", minutesAgo: 1), session("busy", minutesAgo: 9, running: true), session("kept", minutesAgo: 20)],
+                      kept: ["done", "kept"], unread: ["done"], asking: ["busy"])
+        #expect(s.sessionShortcutPick?.id == "busy")
+        // Nothing waits: the first kept one.
+        s.claudeActivity = [:]
+        #expect(s.sessionShortcutPick?.id == "done")
+        // None kept either: nothing to pick.
+        #expect(store([session("n")]).sessionShortcutPick == nil)
+    }
+
     @Test func aReadQuestionIsNotWaiting() {
         let s = store([session("a", blocked: true)], kept: ["a"], unread: [])
         #expect(s.sessionGroups.map(\.id) == ["project:/code/app"])

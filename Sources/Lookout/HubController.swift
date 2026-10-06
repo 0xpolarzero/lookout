@@ -372,9 +372,7 @@ final class HubController {
         hub.go(.main)
         hub.pinned = true
         LookoutHub.animate(LookoutHub.refocus) { hub.focus = .agents }
-        let rows = store.agentRows
-        let first = (rows.kept + rows.pending).first(where: { $0.unread && !$0.session.running }) ?? rows.kept.first
-        hub.showSession(first?.id, store: store, ui: ui)
+        hub.showSession(store.sessionShortcutPick?.id, store: store, ui: ui)
     }
 
     private func takeFocus() {

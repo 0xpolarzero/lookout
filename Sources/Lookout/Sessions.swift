@@ -872,6 +872,13 @@ extension Store {
         return listedGroups(hub).groups.flatMap(\.rows)
     }
 
+    /// What the sessions shortcut picks: the first row of Waiting for you (a session stopped on a question, mid-turn or
+    /// finished unread), else the first kept one.
+    var sessionShortcutPick: AgentRow? {
+        let rows = agentRows
+        return SessionGroup.build(kept: rows.kept, pending: rows.pending).first { $0.id == "waiting" }?.rows.first ?? rows.kept.first
+    }
+
     /// The first session "+N more" is hiding.
     func firstHiddenSession(_ hub: HubState) -> String? { listedGroups(expanded: false, frozen: hub.frozenSessions).hiddenIDs.first }
 
