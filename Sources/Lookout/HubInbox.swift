@@ -509,6 +509,12 @@ private struct InboxMoreRow: View {
 
 // MARK: - Search
 
+/// The query and what it found: a change of either is something to say.
+private struct SearchSaid: Equatable {
+    let query: String
+    let summary: String
+}
+
 /// A real text field (paste, IME and dead keys work): a magnifier, the field, how many results, clear, and the `esc`
 /// that ends it. Typing elsewhere seeds it and ⌘F focuses it (see `HubKeys`); the key monitor leaves it alone
 /// while it has focus.
@@ -551,11 +557,12 @@ struct InboxSearchField: View {
         }
         .onDisappear { hub.inbox.searchFocused = false }
         .onChange(of: targets) { hub.reconcileSelection(among: targets, ui: ui) }
-        // What was found, said once the typing has paused.
-        .task(id: hub.query) {
+        // What was found, said once the typing has paused, and again when the result changes under a query that stays (a poll
+        // brought a match, Claude started a session): the count said is the one now on screen, and an older one is dropped.
+        .task(id: SearchSaid(query: hub.query, summary: summary)) {
             guard !hub.query.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(400))
-            if !Task.isCancelled, NSApp != nil { AccessibilityNotification.Announcement(summary).post() }
+            if !Task.isCancelled { Announce.say(summary, after: .zero) }
         }
     }
 
