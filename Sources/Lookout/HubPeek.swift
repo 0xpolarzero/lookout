@@ -214,6 +214,9 @@ extension LookoutHub {
     /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
     static let peekLine: CGFloat = Theme.Metrics.line
 
+    /// How tall a peek's list of sessions gets before it scrolls (the inbox's is the same).
+    static let peekListCap: CGFloat = 330
+
     /// A panel's width: the controls' is a small menu; along the top and bottom, CI's is its column's.
     func panelWidth(_ section: HubSection) -> CGFloat {
         switch section {
@@ -243,25 +246,10 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                let rows = agentRows
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                // By project and draggable, like the full view's.
-                let starts = projectStarts(rows.kept)
-                ForEach(rows.kept) { r in
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
-                        .sessionMenu(r, store)
-                        .modifier(GroupRule(on: starts.contains(r.id)))
-                        .modifier(AgentReorder(row: r, store: store))
-                }
-                if !rows.pending.isEmpty {
-                    pendingLabel(twoLines: false).frame(height: 14)
-                    ForEach(rows.pending) { r in
-                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
-                            .sessionMenu(r, store)
-                    }
-                }
-                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
+                sessionsScroll(cap: Self.peekListCap, inset: 0)
+                newSessionRow(inset: 0)
             default:
                 // (The controls have their own panel.)
                 EmptyView()
@@ -282,21 +270,8 @@ extension LookoutHub {
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                let rows = agentRows
-                CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        let starts = projectStarts(rows.kept)
-                        ForEach(rows.kept) { r in
-                            if starts.contains(r.id) { groupDivider }
-                            twoLineRow(r).modifier(AgentReorder(row: r, store: store))
-                        }
-                        if !rows.pending.isEmpty {
-                            pendingLabel(twoLines: true).padding(.top, 6).padding(.bottom, 2)
-                            ForEach(rows.pending) { twoLineRow($0) }
-                        }
-                    }
-                }
-                NewSessionRow(store: store, style: .twoLines)
+                sessionsScroll(cap: Self.peekListCap, inset: 0)
+                newSessionRow(inset: 0)
             default:
                 EmptyView()
             }

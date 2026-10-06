@@ -593,6 +593,8 @@ struct Tabs<ID: Hashable>: View {
 struct SectionHeader<Trailing: View>: View {
     let title: String
     var status: (text: String, color: AnyShapeStyle)? = nil
+    /// Makes the status a button ("1 waiting" picks the first one).
+    var statusAction: (() -> Void)? = nil
     /// This section is the focused one: `esc` shows beside the title, the chevron points back.
     var focused = false
     /// What the chevron's tooltip says: "Expand Inbox", or "Back to all sections".
@@ -607,8 +609,7 @@ struct SectionHeader<Trailing: View>: View {
             Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             if let status {
-                Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
-                    .transition(.opacity)
+                statusLabel(status).transition(.opacity)
             }
             if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
             Spacer(minLength: 0)
@@ -632,6 +633,19 @@ struct SectionHeader<Trailing: View>: View {
         .motion(Theme.Motion.hover, value: hovering)
         .motion(Theme.Motion.fade, value: status?.text)
         .accessibilityAction(named: "Focus") { onFocus?() }
+    }
+}
+
+extension SectionHeader {
+    @ViewBuilder fileprivate func statusLabel(_ status: (text: String, color: AnyShapeStyle)) -> some View {
+        let text = Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
+        if let statusAction {
+            Button(action: statusAction) { text.frame(minHeight: Theme.Metrics.iconButton).contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .focusRing(Theme.Radius.small)
+        } else {
+            text
+        }
     }
 }
 

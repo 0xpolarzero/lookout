@@ -227,38 +227,6 @@ extension Store {
         if let interceptOpen { interceptOpen("New Claude session in Scratch"); return }
         NewSessionRow.startScratch()
     }
-
-    /// Sessions as the hub lists them: yours and the pending ones, or any session matching the search.
-    func hubSessions(_ hub: HubState) -> [AgentRow] {
-        guard agents.enabled else { return [] }
-        if !hub.query.trimmingCharacters(in: .whitespaces).isEmpty {
-            let memo = hub.sessionMemo
-            if memo.revision == agentsRevision, memo.query == hub.query { return memo.result }
-            let result = searchSessions(hub.query)
-            hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
-            return result
-        }
-        let rows = agentRows
-        return rows.kept + rows.pending.prefix(LookoutHub.pendingTiles)
-    }
-}
-
-/// A session's context menu (open, read state, label, keep/remove, colour, mute) and the popover its label editor
-/// opens in. Attach with `.sessionMenu(row, store)`.
-private struct SessionContextMenu: ViewModifier {
-    let row: AgentRow
-    let store: Store
-    @State private var editing = false
-
-    func body(content: Content) -> some View {
-        content
-            .contextMenu { SessionMenu(row: row, store: store, editLabel: { editing = true }) }
-            .popover(isPresented: $editing, arrowEdge: .bottom) { LabelEditor(row: row, store: store) }
-    }
-}
-
-extension View {
-    func sessionMenu(_ row: AgentRow, _ store: Store) -> some View { modifier(SessionContextMenu(row: row, store: store)) }
 }
 
 /// The "+" tile: shaped and filled like a session's tile, so it reads as the next one in the column.
@@ -287,109 +255,6 @@ private struct NewSessionTileLabel: View {
     }
 }
 
-/// What a session left running, on one line: each subagent and command with its icon.
-struct RunningLine: View {
-    let tasks: [ClaudeTask]
-
-    var body: some View {
-        tasks.enumerated().reduce(Text("")) { line, item in
-            let (i, task) = item
-            let icon = Text(Image(systemName: task.kind == .agent ? "asterisk" : "terminal")).foregroundStyle(Theme.secondary)
-            return line + (i == 0 ? Text("") : Text("   ")) + icon + Text(" " + task.title).foregroundStyle(Theme.secondary)
-        }
-        .font(Theme.Typography.meta)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        // Cut short at the row's width: hovering has the whole list.
-        .tip("Running", tasks.map(\.title).joined(separator: "\n"))
-    }
-}
-
-/// A session's turn summary on one line: Markdown (**bold**, `code`) shown as such.
-struct SummaryText: View {
-    let row: AgentRow
-
-    var body: some View {
-        Text(row.summaryText).font(Theme.Typography.meta).foregroundStyle(Theme.secondary).lineLimit(1)
-    }
-}
-
-/// A session in the full view: its line, then (short) what it did and what it left running. One block: it
-/// highlights, opens and shows its actions as a whole, wherever the pointer is on it. Whether it's the picked one
-/// is compared here, in its own body.
-struct SessionBlock: View {
-    let row: AgentRow
-    let twoLines: Bool
-    let store: Store
-    @Bindable var ui: UIState
-    let hub: HubState
-
-    var body: some View {
-        let selected = ui.drawerSelection == row.id
-        VStack(alignment: .leading, spacing: 0) {
-            DrawerRow(row: row, store: store, ui: ui, number: 0, twoLines: twoLines, highlight: hub.query,
-                      showsKept: !hub.query.isEmpty, inHub: !twoLines, plain: true)
-                // The card below is the one button; its inner row's own (a second, unnamed-or-duplicate button) is hidden.
-                .accessibilityHidden(true)
-            // Under the title: past the tile on two-line rows (10 + 24 + 9), else at the title's 8.
-            Group { if twoLines { cardDetail } else { details } }
-                .padding(.leading, twoLines ? 43 : 8)
-                .padding(.trailing, 8)
-                .padding(.top, twoLines ? -8 : -3)
-                .padding(.bottom, twoLines ? 4 : 7)
-        }
-        .background(Theme.Radius.shape(Theme.Radius.row).fill(selected ? Theme.Fill.hover : Theme.Fill.rest))
-        // The same actions as an inbox item's, over the title line's right end, centred on it.
-        .overlay(alignment: .topTrailing) {
-            if selected {
-                AgentActions(row: row, store: store)
-                    .padding(.top, twoLines ? 9 : 0)
-                    .padding(.trailing, 4)
-                    .transition(.opacity)
-            }
-        }
-        .motion(Theme.Motion.hover, value: selected)
-        .contentShape(Rectangle())
-        .onTapGesture { store.openAgent(row.id) }
-        // One button for the card (named, with its state); the hover actions stay reachable inside it.
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.stateName)
-        .accessibilityHint("Opens it in Claude")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { store.openAgent(row.id) }
-        .sessionMenu(row, store)
-        .onHover { if $0 { ui.drawerSelection = row.id } }
-    }
-
-    private var summary: String? {
-        guard !row.session.running, let detail = row.session.summary?.detail, !detail.isEmpty else { return nil }
-        return detail
-    }
-
-    /// A grid card's one line under its title, always there so every card is the same height: the turn's summary,
-    /// else what's still running (the count is in the status above either way).
-    @ViewBuilder private var cardDetail: some View {
-        if summary != nil {
-            SummaryText(row: row)
-        } else if !row.tasks.isEmpty {
-            RunningLine(tasks: row.tasks)
-        } else {
-            Text(" ").font(Theme.Typography.meta)
-        }
-    }
-
-    /// At most two short lines: the turn's summary, and what's still running after it.
-    @ViewBuilder private var details: some View {
-        if summary != nil || !row.tasks.isEmpty {
-            VStack(alignment: .leading, spacing: 1) {
-                if summary != nil { SummaryText(row: row) }
-                if !row.tasks.isEmpty { RunningLine(tasks: row.tasks) }
-            }
-        }
-    }
-}
-
 /// Keeps `ui.drawerSelection` (a session row hovered anywhere) and the hub's selection (what the keys act on) the
 /// same, from a view of its own: only this body reads the drawer's selection, not the hub's.
 struct SelectionSync: View {
@@ -401,17 +266,5 @@ struct SelectionSync: View {
             .onChange(of: ui.drawerSelection) { _, id in
                 if let id, hub.selection != "a:" + id { hub.selection = "a:" + id }
             }
-    }
-}
-
-/// Your sessions in the hub can be dragged onto one another to reorder them, when `enabled` (the bar's tiles at
-/// rest are plain buttons).
-struct ReorderIf: ViewModifier {
-    let enabled: Bool
-    let row: AgentRow
-    let store: Store
-
-    @ViewBuilder func body(content: Content) -> some View {
-        if enabled { content.modifier(AgentReorder(row: row, store: store)) } else { content }
     }
 }

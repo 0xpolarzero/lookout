@@ -88,6 +88,12 @@ final class HubKeys {
             } else { return false }
             return true
         }
+        // The list's own rows ("+N more", New session).
+        if selection.hasPrefix("s:") {
+            guard shortcut == store.shortcut(.openItem) else { return false }
+            hub.activateSessionTarget(selection, store: store)
+            return true
+        }
         if selection.hasPrefix("a:") {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
@@ -99,9 +105,9 @@ final class HubKeys {
         return false
     }
 
-    /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
+    /// Every row the arrows walk through, top to bottom: inbox items, then sessions, then the list's own rows.
     private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
+        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id } + store.sessionExtraTargets(hub)
     }
 
     /// A new search picks its first result, so ↩ opens it straight away.

@@ -1,80 +1,342 @@
 import AppKit
 import SwiftUI
 
-// Session and inbox views shared by the hub: rows, actions, label editor, update button, and the
-// menus / status lines the hub ports next (claude link, rate limit, session and inbox context menus).
+// Sessions in the hub: the list (groups, rows, "+N more", the New session row), a session's menus and label
+// editor; then the update button, the inbox item menu and the status lines the hub also uses.
 
-/// "Running swift test · 3m", ticking.
-struct WorkingText: View {
-    let row: AgentRow
+// MARK: - The list
 
-    var body: some View {
-        Ticking { now in
-            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
-        }
-    }
+/// What a row is listed under: it decides the row's action, and whether the row names its project (under a project's
+/// own header it would say the same thing twice).
+enum SessionPlacement {
+    case waiting, project, newActivity, search
+
+    var namesProject: Bool { self != .project }
 }
 
-/// A project's colour dot and name.
-struct ProjectLabel: View {
-    let session: ClaudeSession
-    let color: Color?
+/// A line of the sessions list and the bar's tile column beside it: a bar-wide slot for the tile (the rail itself on a
+/// side edge, so tile and text read as one row) and the text next to it. The fill spans both. Rows lay out the same
+/// in a peek and kept open, on every edge: only the side the tile is on changes.
+struct RailRow<Tile: View, Content: View>: View {
+    /// The screen's side on the left and right edges, the leading edge along the top and bottom.
+    let rail: HorizontalEdge
+    var fill = Color.clear
+    var picked = false
+    @ViewBuilder let tile: Tile
+    @ViewBuilder let content: Content
+    @Environment(\.resolved) private var resolved
+
+    /// The fill starts this far in from the rail's side, so the tile sits inside it.
+    private static var fillInset: CGFloat { 4 }
+
+    /// How far the text's end is from the row's end on the side `rail` puts the tile: a trailing action lines up here.
+    static func textEnd(_ rail: HorizontalEdge) -> CGFloat {
+        Theme.Metrics.rowPadding + (rail == .trailing ? Theme.Metrics.bar : 0)
+    }
 
     var body: some View {
-        HStack(spacing: 5) {
-            if let color {
-                Circle().fill(color).frame(width: 6, height: 6)
-            } else {
-                Image(systemName: "text.bubble").font(Theme.Typography.glyph(9, .regular))
+        HStack(spacing: 0) {
+            if rail == .leading { slot }
+            content
+                .padding(.horizontal, Theme.Metrics.rowPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if rail == .trailing { slot }
+        }
+        .background {
+            Theme.Radius.shape(Theme.Radius.row).fill(resolved.fill(fill))
+                .padding(rail == .leading ? .leading : .trailing, Self.fillInset)
+        }
+        .overlay(alignment: .leading) {
+            if picked {
+                Capsule().fill(Theme.accent).frame(width: 2, height: 24)
+                    .padding(.leading, 2 + (rail == .leading ? Self.fillInset : 0))
             }
-            Text(session.folderName)
         }
+        .contentShape(Rectangle())
+        .motion(Theme.Motion.hover, value: fill)
+        .motion(Theme.Motion.hover, value: picked)
+    }
+
+    private var slot: some View {
+        tile.frame(width: Theme.Metrics.bar)
     }
 }
 
-/// One line per subagent or command still running, with what a subagent is on and how long it's been going.
-struct TaskLines: View {
-    let tasks: [ClaudeTask]
+/// The groups of the sessions list under one another, or (searching) the sessions that match, flat. Rows mark their
+/// bottom edge for `CappedScroll` and their id for scrolling to them.
+struct SessionsList: View {
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+    let rail: HorizontalEdge
+    /// The hub's own inset on the side away from the tile; peeks pad themselves, and pass 0.
+    var inset: CGFloat = Theme.Metrics.inset
 
     var body: some View {
-        Ticking { now in
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(tasks) { task in
-                    HStack(spacing: 6) {
-                        Image(systemName: task.kind == .agent ? "asterisk" : "terminal")
-                            .font(Theme.Typography.glyph(9))
-                            .foregroundStyle(Theme.secondary)
-                            .frame(width: 12)
-                        Text(task.title).foregroundStyle(Theme.secondary).lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text(status(task, now: now))
-                            .font(Theme.Typography.numeral)
-                            .foregroundStyle(Theme.secondary)
-                            .lineLimit(1)
-                            .layoutPriority(1)
+        let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
+        let listed = store.listedGroups(expanded: hub.sessionsExpanded)
+        VStack(alignment: .leading, spacing: 0) {
+            if searching {
+                ForEach(store.hubSessions(hub)) { row($0, .search) }
+            } else if listed.groups.isEmpty {
+                EmptyBlock("No Claude sessions")
+            } else {
+                ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
+                    SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : Theme.Space.md)
+                    ForEach(group.rows) { row($0, group.placement) }
+                    if group.kind == .newActivity, listed.hidden > 0 {
+                        MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail).id("s:more")
                     }
                 }
             }
         }
-        .font(.system(size: 11))
+        .padding(rail == .leading ? .trailing : .leading, inset)
+        .motion(Theme.Motion.fade, value: store.agentsRevision)
     }
 
-    private func status(_ task: ClaudeTask, now: Date) -> String {
-        let elapsed = AgentRow.duration(now.timeIntervalSince(task.since))
-        guard let activity = task.activity?.text else { return elapsed }
-        return "\(activity) · \(elapsed)"
+    private func row(_ row: AgentRow, _ placement: SessionPlacement) -> some View {
+        SessionRow(row: row, store: store, ui: ui, hub: hub, rail: rail, placement: placement)
+            .transition(.opacity)
+            .capEdge()
+            .id("a:" + row.id)
     }
 }
 
-/// Only kept sessions can be dragged; dropping on another kept one moves it there.
+extension SessionGroup {
+    var placement: SessionPlacement {
+        switch kind {
+        case .waiting: .waiting
+        case .project: .project
+        case .newActivity: .newActivity
+        }
+    }
+}
+
+/// A group's header: a project's palette dot (hollow for scratch chats), name and count; Waiting for you in amber;
+/// New activity with its Keep all. A project's header is where its colour and mute live (right-click).
+struct SessionGroupHeader: View {
+    let group: SessionGroup
+    let store: Store
+    let rail: HorizontalEdge
+
+    var body: some View {
+        let folder = project
+        RailRow(rail: rail, tile: { Color.clear }) {
+            HStack(spacing: Theme.Space.sm) {
+                if let folder { dot(folder) }
+                Text(group.title)
+                    .font(Theme.Typography.label)
+                    .foregroundStyle(group.kind == .waiting ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
+                    .lineLimit(1)
+                if folder != nil { Text("\(group.rows.count)").font(Theme.Typography.numeral).foregroundStyle(Theme.tertiary) }
+                Spacer(minLength: 0)
+                if group.kind == .newActivity { keepAll }
+            }
+        }
+        .frame(height: 28)
+        .contentShape(Rectangle())
+        .contextMenu { if let folder { ProjectMenu(folder: folder, name: group.title, store: store) } }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var project: String? {
+        if case .project(let folder) = group.kind { folder } else { nil }
+    }
+
+    /// 6pt in the project's colour; scratch chats have none, so theirs is an outline (the names still line up).
+    @ViewBuilder private func dot(_ folder: String) -> some View {
+        if let color = store.projectColor(folder) {
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+        } else {
+            Circle().strokeBorder(Theme.tertiary, lineWidth: 1).frame(width: 6, height: 6).accessibilityHidden(true)
+        }
+    }
+
+    private var keepAll: some View {
+        Button { LookoutHub.animate { store.keepAllAgents() } } label: {
+            Text("Keep all").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
+                .frame(minHeight: Theme.Metrics.iconButton)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.small)
+        .help("Keeps every session under New activity")
+    }
+}
+
+/// "+3 more" at the end of New activity: shows the rest, in place.
+struct MoreSessionsRow: View {
+    let hidden: Int
+    let hub: HubState
+    let rail: HorizontalEdge
+    @State private var hovering = false
+
+    var body: some View {
+        let picked = hub.selection == "s:more"
+        Button { hub.expandSessions() } label: {
+            RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
+                    tile: { Color.clear }) {
+                Text("+\(hidden) more").font(Theme.Typography.body).foregroundStyle(Theme.secondary)
+            }
+            .frame(height: Theme.Metrics.pitch)
+        }
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.row, inset: true)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(plural(hidden, "more session"))
+        .accessibilityHint("Shows them")
+        .capEdge()
+    }
+}
+
+/// A session: its tile in the rail; its title and status; the question or summary; a line for what it left running.
+/// 44pt tall, 60 with that line. One action, shown on hover, keyboard pick and VoiceOver focus; the rest are in the
+/// context menu and VoiceOver's actions.
+struct SessionRow: View {
+    let row: AgentRow
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+    let rail: HorizontalEdge
+    let placement: SessionPlacement
+    @State private var dropTarget = false
+    @AccessibilityFocusState private var voiceOverFocused: Bool
+    @Environment(\.resolved) private var resolved
+
+    /// Keep for a session that isn't yours yet, Hide for the others (see `Store.dismissAgent`).
+    private var keeps: Bool { row.pending && (placement == .newActivity || placement == .search) }
+    /// Line 2's centre, where the action sits.
+    private static let actionTop: CGFloat = 31
+
+    var body: some View {
+        let id = "a:" + row.id
+        let picked = hub.selection == id && hub.keyboardSelection?.id == id
+        let hot = ui.drawerSelection == row.id
+        let showsAction = hot || picked || voiceOverFocused
+        Button { store.openAgent(row.id) } label: {
+            RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hot ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
+                    tile: { AgentTile(row: row) }, content: { lines })
+                .frame(height: row.tasks.isEmpty ? Theme.Metrics.twoLineRow : Theme.Metrics.taskRow)
+        }
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.row, inset: true)
+        .overlay(alignment: .topTrailing) {
+            if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail)) }
+        }
+        .motion(Theme.Motion.hover, value: showsAction)
+        .modifier(Reorderable(enabled: placement == .project, row: row, store: store, dropTarget: $dropTarget))
+        .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
+        .onHover { inside in
+            if inside {
+                ui.drawerSelection = row.id
+            } else if !picked {
+                // The pointer left: keys don't act on this row any more (unless the keyboard is what picked it).
+                if ui.drawerSelection == row.id { ui.drawerSelection = nil }
+                if hub.selection == id { hub.selection = nil }
+            }
+        }
+        .help(help)
+        .sessionMenu(row, store)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.session.title)
+        .accessibilityValue(row.spokenValue())
+        .accessibilityHint(plainHeadline.isEmpty ? "Opens it in Claude" : plainHeadline)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityFocused($voiceOverFocused)
+        .accessibilityAction { store.openAgent(row.id) }
+        .accessibilityActions {
+            Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
+            if row.pending { Button("Keep") { store.keepAgent(row.id) } }
+            Button("Hide") { store.dismissAgent(row.id) }
+            if store.canMoveAgent(row.id, by: -1) { Button("Move up") { store.moveAgent(row.id, by: -1) } }
+            if store.canMoveAgent(row.id, by: 1) { Button("Move down") { store.moveAgent(row.id, by: 1) } }
+        }
+    }
+
+    private var lines: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.hair) {
+            HStack(spacing: Theme.Space.md) {
+                Text(row.session.title)
+                    .font(row.unread || row.isWaiting ? Theme.Typography.title : Theme.Typography.body)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                status.fixedSize()
+            }
+            HStack(spacing: Theme.Space.md) {
+                headline.font(Theme.Typography.meta).lineLimit(1)
+                Spacer(minLength: 0)
+                // Room for the action, always: nothing re-flows when it shows.
+                Color.clear.frame(width: Theme.Metrics.iconButton, height: 1)
+            }
+            if let first = row.tasks.first { taskLine(first) }
+        }
+    }
+
+    /// "Waiting" in amber, "Working 2m", "Finished 4m". Only a working session ticks by the second.
+    @ViewBuilder private var status: some View {
+        if row.isWaiting {
+            Text("Waiting").font(Theme.Typography.numeral).foregroundStyle(Theme.amber)
+        } else {
+            Ticking(coarse: !row.session.running) { now in
+                Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+            }
+        }
+    }
+
+    /// The question or summary, led by the project's name where the group doesn't say it.
+    private var headline: Text {
+        let text = Text(row.headline).foregroundStyle(Theme.secondary)
+        guard placement.namesProject else { return text }
+        let project = Text(row.session.folderName).foregroundStyle(Theme.tertiary)
+        return plainHeadline.isEmpty ? project : project + Text("  ") + text
+    }
+
+    private var plainHeadline: String { String(row.headline.characters) }
+
+    /// The first thing it left running, in full, and how many more there are; the whole list on hover.
+    private func taskLine(_ first: ClaudeTask) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: first.kind == .agent ? "asterisk" : "terminal")
+                .font(Theme.Typography.glyph(10))
+                .frame(width: 12)
+                .accessibilityHidden(true)
+            Text(first.title).lineLimit(1)
+            if row.tasks.count > 1 { Text("+\(row.tasks.count - 1) more").fixedSize() }
+            Spacer(minLength: 0)
+        }
+        .font(Theme.Typography.meta)
+        .foregroundStyle(Theme.secondary)
+        .help(row.tasks.map(\.title).joined(separator: "\n"))
+    }
+
+    @ViewBuilder private var action: some View {
+        if keeps {
+            IconButton(symbol: "bookmark", help: "Keep", detail: "Keeps it in your list · \(store.shortcut(.keepSession).display)") {
+                LookoutHub.animate { store.keepAgent(row.id) }
+            }
+        } else {
+            IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)") {
+                LookoutHub.animate { store.dismissAgent(row.id) }
+            }
+        }
+    }
+
+    /// The title, then what it says: also for the row the keyboard picked.
+    private var help: String { plainHeadline.isEmpty ? row.session.title : row.session.title + "\n" + plainHeadline }
+}
+
+/// Your sessions in a project can be dragged onto one another to reorder them; everything else stays put.
 struct Reorderable: ViewModifier {
+    let enabled: Bool
     let row: AgentRow
     let store: Store
     @Binding var dropTarget: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     func body(content: Content) -> some View {
-        if row.pending {
+        if !enabled || row.pending {
             content
         } else {
             content
@@ -88,109 +350,304 @@ struct Reorderable: ViewModifier {
                 }
                 .dropDestination(for: String.self) { ids, _ in
                     guard let id = ids.first, id.hasPrefix("agent:") else { return false }
-                    withAnimation(Theme.Motion.move.resolved(reduce: reduce)) { store.moveAgent(String(id.dropFirst(6)), onto: row.id) }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.moveAgent(String(id.dropFirst(6)), onto: row.id) }
                     return true
                 } isTargeted: { dropTarget = $0 }
         }
     }
 }
 
-/// Hover/selection actions, the same in the panel and the pill's drawer.
-struct AgentActions: View {
-    let row: AgentRow
+/// The list's last row: a neutral "+" tile in the rail, "New session" (a scratch chat), and a menu of the projects to
+/// start one in.
+struct NewSessionRow: View {
     let store: Store
-    /// The row already shows Keep and Hide: only read/unread and open here.
-    var keepsInline = false
+    let hub: HubState
+    let rail: HorizontalEdge
+    var inset: CGFloat = Theme.Metrics.inset
+    @State private var hovering = false
 
     var body: some View {
-        RowActions {
-            if row.pending && !keepsInline {
-                IconButton(symbol: "bookmark", help: "Keep", detail: "Keeps it in your list · \(store.shortcut(.keepSession).display)") {
-                    store.keepAgent(row.id)
-                }
-                IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)") {
-                    store.dismissAgent(row.id)
-                }
-            } else {
-                if row.unread {
-                    IconButton(symbol: "checkmark", help: "Mark as read", detail: store.shortcut(.toggleRead).display) {
-                        store.toggleAgentRead(row.id)
-                    }
-                } else {
-                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: store.shortcut(.toggleRead).display) {
-                        store.toggleAgentRead(row.id)
-                    }
-                }
-                if !row.pending {
-                    IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)") {
-                        store.dismissAgent(row.id)
-                    }
+        let picked = hub.selection == "s:new"
+        let lit = hovering || picked
+        Button { store.startScratchSession() } label: {
+            RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
+                    tile: {
+                        Image(systemName: "plus")
+                            .font(Theme.Typography.glyph(12, .bold))
+                            .foregroundStyle(lit ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
+                            .tile(Theme.Metrics.tile, fill: lit ? Theme.Fill.selected : Theme.Fill.tile)
+                    }) {
+                Text("New session").font(Theme.Typography.body).foregroundStyle(lit ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
+            }
+            .frame(height: Theme.Metrics.pitch)
+        }
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.row, inset: true)
+        .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail) - 6) }
+        .onHover { hovering = $0 }
+        .padding(rail == .leading ? .trailing : .leading, inset)
+        .accessibilityLabel("New session")
+        .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
+    }
+
+    /// Scratch, then every project by name, the most recent first.
+    private var projects: some View {
+        Menu {
+            Button("Scratch (no folder)") { store.startScratchSession() }
+            Divider()
+            ForEach(store.recentFolders, id: \.self) { folder in
+                Button { store.startAgent(in: folder) } label: {
+                    Label { Text(URL(fileURLWithPath: folder).lastPathComponent) } icon: { Swatch(color: store.projectColor(folder)) }
                 }
             }
-            IconButton(symbol: "arrow.up.right", help: "Open in Claude", detail: store.shortcut(.openItem).display) {
-                store.openAgent(row.id)
-            }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(Theme.Typography.glyph(11, .semibold))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Start a session in a project")
+        .accessibilityLabel("New session in a project")
+    }
+
+    /// The app's new-session link with no folder opens its composer with none picked: a scratch session.
+    static func startScratch() {
+        guard let url = URL(string: "claude://code/new") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+/// A project's colour as a menu item's image (a menu draws an image, not a view): a 10pt dot, or nothing.
+private struct Swatch: View {
+    let color: Color?
+
+    var body: some View {
+        if let color {
+            Image(nsImage: NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
+                NSColor(color).setFill()
+                NSBezierPath(ovalIn: rect).fill()
+                return true
+            })
         }
     }
 }
 
-/// Two letters or an emoji; empty goes back to letters from the title.
-struct LabelEditor: View {
+extension HubState {
+    /// "+N more" opens the rest of New activity.
+    func expandSessions() {
+        LookoutHub.animate { sessionsExpanded = true }
+    }
+
+    /// Return on a row of the list that isn't a session: "+N more", New session.
+    func activateSessionTarget(_ target: String, store: Store) {
+        if target == "s:more" { expandSessions() } else { store.startScratchSession() }
+    }
+}
+
+extension Store {
+    /// Sessions as the hub lists them, in the order they show (and the keys walk): your groups, or any session
+    /// matching the search.
+    func hubSessions(_ hub: HubState) -> [AgentRow] {
+        guard agents.enabled else { return [] }
+        if !hub.query.trimmingCharacters(in: .whitespaces).isEmpty {
+            let memo = hub.sessionMemo
+            if memo.revision == agentsRevision, memo.query == hub.query { return memo.result }
+            let result = searchSessions(hub.query)
+            hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
+            return result
+        }
+        return listedGroups(expanded: hub.sessionsExpanded).groups.flatMap(\.rows)
+    }
+
+    /// What the keys can pick after the session rows: "+N more" while New activity is cut, then New session.
+    func sessionExtraTargets(_ hub: HubState) -> [String] {
+        guard agents.enabled, hub.query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        return (listedGroups(expanded: hub.sessionsExpanded).hidden > 0 ? ["s:more"] : []) + ["s:new"]
+    }
+}
+
+extension LookoutHub {
+    /// The tile column's side for this edge.
+    var railSide: HorizontalEdge { edge == .right ? .trailing : .leading }
+
+    /// "Sessions" and, when something needs you, "1 waiting" (a button: it picks the first one).
+    var agentsHeader: some View {
+        let waiting = store.agentCounts.blocked
+        return SectionHeader(title: "Sessions", status: waiting > 0 ? ("\(waiting) waiting", AnyShapeStyle(Theme.amber)) : nil,
+                             statusAction: pickFirstWaiting, focused: hub.focus == .agents,
+                             expandHelp: hub.focus == .agents ? "Back to all sections" : "Expand Sessions",
+                             onFocus: showsDetail ? {
+                                 withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = hub.focus == .agents ? nil : .agents }
+                             } : nil) {}
+    }
+
+    /// The first row of Waiting for you, picked as the keys would, and scrolled to.
+    func pickFirstWaiting() {
+        guard let id = store.sessionGroups.first(where: { $0.kind == .waiting })?.rows.first?.id else { return }
+        hub.selection = "a:" + id
+        hub.requestScroll("a:" + id)
+        ui.drawerSelection = id
+    }
+
+    /// The groups, scrolling once past `cap`.
+    func sessionsScroll(cap: CGFloat, inset: CGFloat = Theme.Metrics.inset) -> some View {
+        CappedScroll(cap: cap, hub: hub) { SessionsList(store: store, ui: ui, hub: hub, rail: railSide, inset: inset) }
+    }
+
+    /// New session, under the list (not while searching).
+    @ViewBuilder func newSessionRow(inset: CGFloat = Theme.Metrics.inset) -> some View {
+        if !searching { NewSessionRow(store: store, hub: hub, rail: railSide, inset: inset) }
+    }
+}
+
+// MARK: - Menus
+
+/// A session's context menu: open, read state, keep, hide, move, its project's colour, mute, label.
+struct SessionMenu: View {
     let row: AgentRow
     let store: Store
+    /// Opens the label editor (`LabelEditor`) wherever the caller hosts it.
+    var editLabel: () -> Void = {}
+
+    var body: some View {
+        Button("Open in Claude") { store.openAgent(row.id) }
+        Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
+        Divider()
+        if row.pending { Button("Keep") { store.keepAgent(row.id) } }
+        Button("Hide") { store.dismissAgent(row.id) }
+        if store.canMoveAgent(row.id, by: -1) { Button("Move up") { store.moveAgent(row.id, by: -1) } }
+        if store.canMoveAgent(row.id, by: 1) { Button("Move down") { store.moveAgent(row.id, by: 1) } }
+        Divider()
+        ProjectMenu(folder: row.session.folderKey, name: row.session.folderName, store: store)
+        Divider()
+        Button("Change label…") { editLabel() }
+    }
+}
+
+/// What a project's header and its sessions' menus share: its colour (not for scratch chats), and muting it.
+struct ProjectMenu: View {
+    let folder: String
+    let name: String
+    let store: Store
+
+    var body: some View {
+        if !folder.isEmpty {
+            Menu("Colour") {
+                Picker("Colour", selection: Binding(get: { store.agents.folderColors[folder] ?? 0 },
+                                                    set: { store.setProjectColor(folder, $0) })) {
+                    ForEach(Theme.projectColors.indices, id: \.self) { i in
+                        Label { Text(Theme.projectColorNames[i]) } icon: { Swatch(color: Theme.projectColors[i]) }.tag(i)
+                    }
+                }
+                .pickerStyle(.inline)
+            }
+        }
+        Button("Mute \u{201C}\(name)\u{201D}") { store.muteFolder(folder) }
+    }
+}
+
+private struct SessionContextMenu: ViewModifier {
+    let row: AgentRow
+    let store: Store
+    @State private var editing = false
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu { SessionMenu(row: row, store: store, editLabel: { editing = true }) }
+            .popover(isPresented: $editing, arrowEdge: .bottom) { LabelEditor(row: row, store: store) }
+    }
+}
+
+extension View {
+    /// A session's context menu, and the popover its label editor opens in.
+    func sessionMenu(_ row: AgentRow, _ store: Store) -> some View { modifier(SessionContextMenu(row: row, store: store)) }
+}
+
+/// A session's label: letters (two, or the title's own), an emoji, or the icon picked for it.
+struct LabelEditor: View {
+    enum Mode: Hashable { case letters, emoji, icon }
+
+    let row: AgentRow
+    let store: Store
+    @State private var mode = Mode.letters
     @State private var text = ""
     @FocusState private var focused: Bool
     @Environment(\.dismiss) private var dismiss
 
+    private var hasIcons: Bool { store.agents.iconsEnabled && store.hasTypesafeKey }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
             Text("Label for \(row.session.title)").font(Theme.Typography.title).lineLimit(1)
-            Text("Two letters or an emoji; empty goes back to the \(row.entry.icon != nil ? "icon" : "letters")")
-                .font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
-            HStack(spacing: 6) {
-                TextField(row.label, text: $text)
-                    .focused($focused)
-                    .fieldStyle()
-                    .frame(width: 90)
-                    .onSubmit(save)
-                IconButton(symbol: "face.smiling", help: "Emoji") {
-                    focused = true
-                    NSApp.orderFrontCharacterPalette(nil)
+            Tabs(label: "Label style", tabs: modes, selection: mode) { mode = $0; text = ""; focused = true }
+            switch mode {
+            case .letters:
+                entry(prompt: row.label, help: "Two letters; empty goes back to the title's")
+            case .emoji:
+                HStack(spacing: Theme.Space.sm) {
+                    entry(prompt: "🙂", help: "One emoji")
+                    IconButton(symbol: "face.smiling", help: "Emoji") {
+                        focused = true
+                        NSApp.orderFrontCharacterPalette(nil)
+                    }
                 }
-                Button("Save", action: save).controlSize(.small)
-            }
-            if row.entry.label != nil {
-                Button(row.entry.icon != nil ? "Use the picked icon" : "Use letters from the title") {
-                    store.setAgentLabel(row.id, nil)
-                    dismiss()
+            case .icon:
+                Text(row.entry.icon == nil ? "Jev picks an icon from the title and the first message." : "Jev picked this icon for it.")
+                    .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                HStack(spacing: Theme.Space.sm) {
+                    BorderedButton(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") {
+                        store.setAgentLabel(row.id, nil)
+                        if row.entry.icon != nil { store.repickIcon(row.id) } else { store.pickIcons() }
+                        dismiss()
+                    }
+                    if row.entry.label != nil, row.entry.icon != nil {
+                        BorderedButton("Use it") { store.setAgentLabel(row.id, nil); dismiss() }
+                    }
                 }
-                .buttonStyle(.plain)
-                .font(Theme.Typography.meta)
-                .foregroundStyle(Theme.accent)
-            }
-            if store.agents.iconsEnabled && store.hasTypesafeKey && row.entry.label == nil {
-                Button(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") {
-                    store.repickIcon(row.id)
-                    dismiss()
-                }
-                .buttonStyle(.plain)
-                .font(Theme.Typography.meta)
-                .foregroundStyle(Theme.accent)
             }
         }
-        .padding(12)
-        .frame(width: 240)
+        .padding(Theme.Space.lg)
+        .frame(width: 260)
         .onAppear {
-            text = row.entry.label ?? ""
-            focused = true
+            mode = row.entry.label.map { AgentLabel.isEmoji($0) ? .emoji : .letters } ?? (row.icon != nil ? .icon : .letters)
+            focused = mode != .icon
         }
     }
 
+    private var modes: [Tabs<Mode>.Tab] {
+        [.init(id: .letters, title: "Letters"), .init(id: .emoji, title: "Emoji")] + (hasIcons ? [.init(id: .icon, title: "Icon")] : [])
+    }
+
+    private func entry(prompt: String, help: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            HStack(spacing: Theme.Space.sm) {
+                TextField(prompt, text: $text)
+                    .focused($focused)
+                    .fieldStyle(focused: focused)
+                    .frame(width: 90)
+                    .onSubmit(save)
+                BorderedButton("Save", action: save)
+            }
+            Text(help).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+        }
+    }
+
+    /// Empty goes back to letters from the title, or to the icon that was picked.
     private func save() {
-        store.setAgentLabel(row.id, text.isEmpty ? nil : text)
+        if text.isEmpty {
+            store.setAgentLabel(row.id, row.entry.icon == nil ? nil : row.label)
+        } else if let label = AgentLabel.sanitize(text) {
+            guard AgentLabel.isEmoji(label) == (mode == .emoji) else { return }
+            store.setAgentLabel(row.id, label)
+        }
         dismiss()
     }
 }
+
+// MARK: - Update, inbox menu, status lines
 
 /// A new release, fetched in the background: an icon that says what it is on hover; click to restart into it
 /// (or to download it, with a ring for progress, if that didn't happen on its own). Right-click for the release
@@ -287,296 +744,6 @@ private struct UpdateLabel: View {
         case .downloading: AnyShapeStyle(Theme.secondary)
         default: AnyShapeStyle(Theme.accent)
         }
-    }
-}
-
-
-struct DrawerRow: View {
-    let row: AgentRow
-    let store: Store
-    @Bindable var ui: UIState
-    /// Unused (the switcher numbers are gone); kept so older call sites compile.
-    var number: Int = 0
-    /// Under/over a horizontal pill: tile, title, then project and status on a second line.
-    var twoLines = false
-    /// Search: the words to highlight in the title.
-    var highlight: String?
-    /// Search results mix kept sessions and others: say which aren't in your list.
-    var showsKept = false
-    /// In the hub, beside its bar tile: padded and highlighted like the inbox's rows (`.rowHighlight`).
-    var inHub = false
-    /// Inside a larger block that draws the highlight itself (title and details hover as one).
-    var plain = false
-
-    var body: some View {
-        let selected = ui.drawerSelection == row.id
-        // The hub's one-line rows get the shared row look; the two-line and drawer rows pad and fill by hand.
-        let hubRow = inHub && !twoLines
-        let content = HStack(spacing: 9) {
-            if twoLines { AgentTile(row: row, size: 24) }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(row.unread ? Theme.Typography.title : Theme.Typography.body)
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-                if twoLines {
-                    HStack(spacing: 4) {
-                        ProjectLabel(session: row.session, color: row.color).foregroundStyle(Theme.tertiary)
-                        Text("·").foregroundStyle(Theme.tertiary)
-                        status
-                        if showsKept && !row.entry.kept {
-                            Text("· not in your list").foregroundStyle(Theme.tertiary)
-                        }
-                    }
-                    .font(Theme.Typography.meta)
-                    .lineLimit(1)
-                }
-            }
-            .layoutPriority(1)
-            Spacer(minLength: 6)
-
-            if selected && !plain {
-                AgentActions(row: row, store: store)
-            } else if !twoLines {
-                // In a hub block the actions are laid over this spot instead: the status steps aside without the
-                // row changing size.
-                status.font(Theme.Typography.numeral).lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: busy ? 170 : 110, alignment: .trailing)
-                    .fixedSize(horizontal: busy, vertical: false)
-                    .layoutPriority(busy ? 2 : 0)
-                    .opacity(selected && plain ? 0 : 1)
-            }
-        }
-        Group {
-            if hubRow {
-                content.rowHighlight(hover: selected && !plain)
-            } else {
-                content
-                    .padding(.leading, 10)
-                    .padding(.trailing, selected ? 3 : 10)
-                    .frame(height: twoLines ? Theme.Metrics.twoLineRow : nil)
-                    .frame(maxHeight: twoLines ? Theme.Metrics.twoLineRow : .infinity)
-                    .background(Theme.Radius.shape(Theme.Radius.row).fill(selected && !plain ? Theme.Fill.hover : Theme.Fill.rest))
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { store.openAgent(row.id) }
-        .onHover { if $0 { ui.drawerSelection = row.id } }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.stateName)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { store.openAgent(row.id) }
-    }
-
-    /// Working, or done with something still running: the status says more than the end of the title.
-    private var busy: Bool { row.session.running || !row.tasks.isEmpty }
-
-    /// The title, with what you typed picked out.
-    private var title: AttributedString {
-        var text = AttributedString(row.session.title)
-        let lower = row.session.title.lowercased()
-        for word in (highlight ?? "").lowercased().split(separator: " ") {
-            var from = lower.startIndex
-            while let range = lower.range(of: word, range: from..<lower.endIndex) {
-                if let r = Range(NSRange(range, in: lower), in: text) { text[r].foregroundColor = Theme.amber }
-                from = range.upperBound
-            }
-        }
-        return text
-    }
-
-    @ViewBuilder private var status: some View {
-        if row.session.running {
-            WorkingText(row: row)
-        } else {
-            HStack(spacing: 4) {
-                Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "new activity") : row.statusText)
-                    .foregroundStyle(row.statusColor)
-                if let tasks = row.tasksText {
-                    Text("·").foregroundStyle(Theme.tertiary)
-                    Text(tasks).foregroundStyle(Theme.secondary)
-                }
-            }
-        }
-    }
-}
-
-/// The drawer's last row: a new scratch session on the row itself, one in a listed project from its tile, and
-/// every option by name in the menu when there are more projects than tiles.
-struct NewSessionRow: View {
-    let store: Store
-    var style: Style = .drawer
-
-    enum Style {
-        /// The pill's drawer: a small "+" before the label.
-        case drawer
-        /// The hub, beside its bar cell (the cell is the "+"): the label and the project tiles, padded like a row.
-        case detail
-        /// The hub's two-line session rows (top and bottom edges): a 24pt "+" tile where theirs sit, 44pt tall.
-        case twoLines
-    }
-
-    static let maxTiles = 4
-
-    var body: some View {
-        let folders = store.agentFolders
-        HStack(spacing: 5) {
-            Button { store.startScratchSession() } label: { NewSessionLabel(style: style) }
-                .buttonStyle(HoverFillButtonStyle())
-                .tip("New session", "Scratch chat, no folder · or pick a project")
-
-            let shown = Array(folders.prefix(Self.maxTiles))
-            let initials = Self.initials(shown.map { URL(fileURLWithPath: $0).lastPathComponent })
-            ForEach(Array(shown.enumerated()), id: \.element) { i, folder in
-                ProjectTile(folder: folder, initials: initials[i], color: store.projectColor(folder)) { store.startAgent(in: folder) }
-            }
-            if folders.count > Self.maxTiles { menu(folders) }
-        }
-        .padding(.trailing, style == .drawer ? 4 : 8)
-        .frame(height: style == .twoLines ? 44 : nil)
-        .frame(minHeight: style == .detail ? Theme.Metrics.line : nil)
-    }
-
-    private func menu(_ folders: [String]) -> some View {
-        Menu {
-            Button("Scratch (no folder)") { store.startScratchSession() }
-            Divider()
-            ForEach(folders, id: \.self) { folder in
-                Button(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
-            }
-        } label: {
-            Image(systemName: "chevron.down").font(Theme.Typography.glyph(9))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .foregroundStyle(Theme.tertiary)
-        .frame(width: 20, height: 22)
-        .tip("New session in…", "Every project, by name")
-    }
-
-    /// Two letters per project, told apart from the others shown: the first letters of its first two words
-    /// ("lcu-research" → LR), else its first two; on a clash, its first and last.
-    static func initials(_ names: [String]) -> [String] {
-        func first(_ name: String) -> String {
-            let words = name.split { !$0.isLetter && !$0.isNumber }
-            if words.count >= 2 { return String([words[0].first!, words[1].first!]) }
-            return String(name.filter { $0.isLetter || $0.isNumber }.prefix(2))
-        }
-        var out = names.map { first($0).uppercased() }
-        for i in out.indices where out.firstIndex(of: out[i]) != i {
-            let letters = names[i].filter { $0.isLetter || $0.isNumber }
-            if let a = letters.first, let b = letters.last { out[i] = String([a, b]).uppercased() }
-        }
-        return out.map { $0.isEmpty ? "?" : $0 }
-    }
-
-    /// The app's new-session link with no folder opens its composer with none picked: a scratch session.
-    static func startScratch() {
-        guard let url = URL(string: "claude://code/new") else { return }
-        NSWorkspace.shared.open(url)
-    }
-}
-
-/// The new-session row's button face: a "+" (except beside a bar cell) and the label, brighter on hover.
-private struct NewSessionLabel: View {
-    let style: NewSessionRow.Style
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
-        HStack(spacing: 9) {
-            if style != .detail { plus }
-            Text("New session").font(Theme.Typography.body).foregroundStyle(hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
-            Spacer(minLength: 4)
-        }
-        .padding(.leading, leading)
-        .frame(maxHeight: .infinity)
-        .contentShape(Rectangle())
-    }
-
-    private var leading: CGFloat {
-        switch style {
-        case .drawer: 6
-        case .detail: 8
-        case .twoLines: 10
-        }
-    }
-
-    @ViewBuilder private var plus: some View {
-        let size: CGFloat = style == .twoLines ? 24 : 18
-        Image(systemName: "plus")
-            .font(Theme.Typography.glyph(style == .twoLines ? 11 : 10, .bold))
-            .foregroundStyle(hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
-            .frame(width: size, height: size)
-            .background(Tile.shape(size).fill(hover ? Theme.Fill.selected : Theme.Fill.field))
-    }
-}
-
-/// A listed project in the new-session row: its colour, its initials, its name on hover.
-private struct ProjectTile: View {
-    let folder: String
-    let initials: String
-    let color: Color?
-    let action: () -> Void
-
-    var body: some View {
-        let name = URL(fileURLWithPath: folder).lastPathComponent
-        Button(action: action) { ProjectTileFace(initials: initials, color: color) }
-            // The face does its own hover look (a ring), so the style adds no fill.
-            .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.small), hover: .clear, pressed: .clear))
-            .accessibilityLabel("New session in \(name)")
-            .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-    }
-}
-
-private struct ProjectTileFace: View {
-    let initials: String
-    let color: Color?
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
-        let shape = Theme.Radius.shape(Theme.Radius.tile)
-        Text(initials)
-            .font(Theme.Typography.tile)
-            .foregroundStyle(color == nil ? Theme.text.opacity(0.88) : Theme.onTint)
-            .frame(width: 22, height: 22)
-            .background(shape.fill(color ?? Theme.Fill.tile))
-            .opacity(hover ? 1 : 0.8)
-            .overlay { if hover { shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5).padding(-2.5) } }
-            .contentShape(shape)
-            .motion(Theme.Motion.hover, value: hover)
-    }
-}
-
-// MARK: - Kept for the hub to adopt (the classic UI's menus and warnings)
-
-/// A session's context menu: open, read state, label, keep/remove, project colour, mute.
-struct SessionMenu: View {
-    let row: AgentRow
-    let store: Store
-    /// Opens the label editor (`LabelEditor`) wherever the caller hosts it.
-    var editLabel: () -> Void = {}
-
-    var body: some View {
-        Button("Open in Claude") { store.openAgent(row.id) }
-        Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
-        Button("Change label…") { editLabel() }
-        Divider()
-        if row.pending {
-            Button("Keep") { store.keepAgent(row.id) }
-            Button("Hide") { store.dismissAgent(row.id) }
-        } else {
-            Button("Hide") { store.dismissAgent(row.id) }
-        }
-        if !row.session.folderKey.isEmpty {
-            Menu("Colour for \(row.session.folderName)") {
-                ForEach(Theme.projectColorNames.indices, id: \.self) { i in
-                    Button(Theme.projectColorNames[i]) { store.setProjectColor(row.session.folderKey, i) }
-                }
-            }
-        }
-        Button("Mute \(row.session.folderName)") { store.setFolderMuted(row.session.folderKey, true) }
     }
 }
 

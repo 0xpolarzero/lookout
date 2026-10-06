@@ -139,4 +139,32 @@ import Testing
         #expect(rows["w"]?.spokenValue(now: now) == "waiting, app, 2 minutes")
         #expect(rows["f"]?.spokenValue(now: now) == "finished, app, 4 minutes")
     }
+
+    @Test func theKeysWalkTheRowsInTheOrderTheyShow() {
+        let sessions = [session("x1", folder: "/code/x"), session("ask", folder: "/code/y", blocked: true), session("n1", minutesAgo: 1)]
+            + (2..<11).map { session("n\($0)", minutesAgo: Double($0)) }
+        let s = store(sessions, kept: ["x1", "ask"], unread: ["ask"])
+        let hub = HubState()
+        let shown = s.hubSessions(hub).map(\.id)
+        // Waiting for you, the project, then eight of New activity; the rest behind "+N more", then New session.
+        #expect(Array(shown.prefix(2)) == ["ask", "x1"])
+        #expect(shown.count == 2 + SessionGroup.newActivityCap)
+        #expect(s.sessionExtraTargets(hub) == ["s:more", "s:new"])
+        hub.sessionsExpanded = true
+        #expect(s.hubSessions(hub).count == 10 + 2)
+        #expect(s.sessionExtraTargets(hub) == ["s:new"])
+        // A search lists matches flat and offers no New session row.
+        hub.query = "session x1"
+        #expect(s.sessionExtraTargets(hub).isEmpty)
+    }
+
+    @Test func newSessionOffersTheMostRecentProjectFirst() {
+        let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1),
+                       session("c", folder: nil, minutesAgo: 0)])
+        #expect(s.recentFolders == ["/code/new", "/code/old"])
+    }
+
+    @Test func labelsKnowEmoji() {
+        #expect(AgentLabel.isEmoji("🐧") && !AgentLabel.isEmoji("AB") && !AgentLabel.isEmoji("7") && !AgentLabel.isEmoji(""))
+    }
 }

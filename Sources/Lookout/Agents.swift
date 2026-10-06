@@ -143,12 +143,6 @@ struct AgentRow: Identifiable, Hashable {
         return session.summary?.blocked == true ? Theme.amber : Theme.accent
     }
 
-    /// "Running swift test · 3m" while working: the current step, and how long the turn has run.
-    func workingText(now: Date = Date()) -> String {
-        let elapsed = Self.duration(now.timeIntervalSince(session.lastUserMessage ?? activity?.since ?? now))
-        return "\(activity?.text ?? "Working") · \(elapsed)"
-    }
-
     static func duration(_ t: TimeInterval) -> String {
         let s = max(0, Int(t))
         if s < 60 { return "\(s)s" }
@@ -156,16 +150,7 @@ struct AgentRow: Identifiable, Hashable {
         return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
-    var statusText: String {
-        switch status {
-        case .running: "working"
-        case .blocked: "waiting"
-        case .finished: shortAgo(session.lastActivity) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity))"
-        case .idle: shortAgo(session.lastActivity)
-        }
-    }
-
-    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / done / new activity.
+    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / finished / new activity.
     var stateName: String {
         // A session with new activity keeps what it left running: "new activity, 2 running".
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
@@ -173,13 +158,10 @@ struct AgentRow: Identifiable, Hashable {
         switch status {
         case .blocked: return "waiting"
         case .running: return "working"
-        case .finished: return (unread ? "done, unread" : "done") + running
+        case .finished: return (unread ? "finished, unread" : "finished") + running
         case .idle: return (pending ? "new activity" : "idle") + running
         }
     }
-
-    /// "3 running": what's left in the background, after the status.
-    var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
 
     /// How long the turn has been going.
     func elapsed(now: Date = Date()) -> String {
@@ -212,15 +194,6 @@ struct AgentRow: Identifiable, Hashable {
         if s < 60 { return "just now" }
         let (n, unit) = s < 3600 ? (s / 60, "minute") : s < 86400 ? (s / 3600, "hour") : (s / 86400, "day")
         return plural(n, unit)
-    }
-
-    var statusColor: AnyShapeStyle {
-        switch status {
-        case .running: AnyShapeStyle(Theme.secondary)
-        case .blocked: entry.unread || waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary)
-        case .finished: AnyShapeStyle(Theme.accent)
-        case .idle: AnyShapeStyle(Theme.tertiary)
-        }
     }
 }
 
@@ -332,14 +305,17 @@ enum AgentLabel {
         return result
     }
 
+    /// Digits, # and * count as emoji in Unicode; real emoji are past Latin-1.
+    static func isEmoji(_ label: String) -> Bool {
+        guard let scalar = label.first?.unicodeScalars.first else { return false }
+        return scalar.properties.isEmoji && scalar.value > 0xFF
+    }
+
     /// Up to two characters, or one emoji.
     static func sanitize(_ input: String) -> String? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = trimmed.first else { return nil }
-        // Digits, # and * count as emoji in Unicode; real emoji are past Latin-1.
-        if let scalar = first.unicodeScalars.first, scalar.properties.isEmoji, scalar.value > 0xFF {
-            return String(first)
-        }
+        if isEmoji(String(first)) { return String(first) }
         let letters = String(trimmed.filter { !$0.isWhitespace }.prefix(2))
         return letters.isEmpty ? nil : letters.uppercased()
     }
@@ -494,6 +470,16 @@ extension Store {
 
     /// Projects with a session in your list or pending, in the order they're listed: where a new session can start.
     var agentFolders: [String] { cache.folders }
+
+    /// Every project a session has been seen in, the one with the most recent session first: where New session offers
+    /// to start one.
+    var recentFolders: [String] {
+        var latest: [String: Date] = [:]
+        for session in claudeSessions.values where !session.folderKey.isEmpty {
+            latest[session.folderKey] = max(latest[session.folderKey] ?? .distantPast, session.lastActivity)
+        }
+        return latest.keys.sorted { latest[$0]! != latest[$1]! ? latest[$0]! > latest[$1]! : $0 < $1 }
+    }
 
     var knownFolders: [String] {
         Array(Set(claudeSessions.values.map(\.folderKey))).sorted { a, b in
