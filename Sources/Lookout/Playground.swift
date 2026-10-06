@@ -54,7 +54,8 @@ struct PlaygroundView: View {
     @ViewBuilder private func docked(_ size: CGSize) -> some View {
         let hubView = LookoutHub(store: store, ui: ui, hub: hub,
                                  maxLength: ui.edge.isHorizontal ? size.height - menuBar - 80 : size.height - menuBar - 60,
-                                 maxWidth: size.width)
+                                 maxWidth: size.width,
+                                 barLength: ui.edge.isHorizontal ? size.width - 12 : size.height - menuBar - 60)
             .onHover(perform: hover)
         switch ui.edge {
         case .right: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.top, menuBar + 40)
@@ -322,7 +323,10 @@ struct Shot {
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// 1280×720, every edge
-///   open-720, settings-720, repos-720, rest-sessions-12-720
+///   open-720, settings-720, repos-720, rest-sessions-12-720; on right and top rest-sessions-waiting-20-720 and
+///   peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
+/// Frozen order, right and top
+///   peek-agents-sessions-late-waiting (the twelfth of twelve starts to wait while the pointer holds the bar)
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -397,6 +401,16 @@ enum PlaygroundShots {
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
         Shot.edges("repos-720") { $0.pinned = true; $0.page = .repos; $0.size = Shot.hd },
         Shot.edges("rest-sessions-12-720") { $0.scenario = .sessions12; $0.size = Shot.hd },
+        // More waiting than the screen has room for: the bar keeps Update and the gear, a "+N" holds the rest.
+        Shot.edges("rest-sessions-waiting-20-720", on: .rightAndTop) { $0.scenario = .sessionsWaiting20; $0.size = Shot.hd },
+        Shot.edges("peek-agents-sessions-waiting-20-720", on: .rightAndTop) {
+            $0.scenario = .sessionsWaiting20; $0.section = .agents; $0.size = Shot.hd
+        },
+        // The pointer holds the bar's order while the twelfth session starts to wait: its tile, and its row, are the ninth.
+        Shot.edges("peek-agents-sessions-late-waiting", on: .rightAndTop) {
+            $0.scenario = .sessionsLateWaiting; $0.section = .agents
+            $0.setup = { store, _, hub in hub.frozenSessions = Demo.lateWaiting(store) }
+        },
     ].flatMap { $0 }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.

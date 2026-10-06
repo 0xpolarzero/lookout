@@ -19,6 +19,8 @@ enum Demo {
         case updateAvailable, updateDownloading, updateReady
         // The bar's other states: CI with nothing failing, CI with no run yet, every session waiting.
         case ciRunning, ciNoRuns, sessionsWaiting10
+        // More waiting than a screen has room for; twelve in one project, the last one waiting (see `lateWaiting`).
+        case sessionsWaiting20, sessionsLateWaiting
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -186,6 +188,10 @@ enum Demo {
             store.ci = [:]
         case .sessionsWaiting10:
             sessionsWaiting10(store, now)
+        case .sessionsWaiting20:
+            sessionsWaiting20(store, now)
+        case .sessionsLateWaiting:
+            sessionsLateWaiting(store, now)
         }
     }
 
@@ -321,6 +327,35 @@ enum Demo {
                            detail: i < 10 ? "Which one should it be?" : "Finished turn \(i)."), unread: i < 10)
         }
         sessions(store, now, listed)
+    }
+
+    /// Twenty sessions waiting for you and two finished: more than a 720pt screen's bar has room for, so the bar keeps
+    /// its other cells and a "+N" holds the rest.
+    private static func sessionsWaiting20(_ store: Store, _ now: Date) {
+        let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
+        let listed = (0..<22).map { i in
+            Listed(session("w\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 3 + 1), blocked: i < 20,
+                           detail: i < 20 ? "Which one should it be?" : "Finished turn \(i)."), unread: i < 20)
+        }
+        sessions(store, now, listed)
+    }
+
+    /// Twelve sessions of one project, none waiting: `lateWaiting` is what the bar shows while the pointer holds its
+    /// order and the twelfth then starts to wait.
+    private static func sessionsLateWaiting(_ store: Store, _ now: Date) {
+        let listed: [Listed] = (0..<12).map { i in
+            let last = i == 11
+            let detail = last ? "Which one should it be?" : "Finished turn \(i)."
+            return Listed(session("l\(i)", "Session number \(i)", "lookout", minutes: Double(i * 11 + 1), blocked: last, detail: detail),
+                          unread: last)
+        }
+        sessions(store, now, listed)
+    }
+
+    /// The order the bar held before the twelfth session of `sessionsLateWaiting` began to wait.
+    static func lateWaiting(_ store: Store) -> [BarSessions.Slot] {
+        let rows = store.agentRows
+        return (rows.kept + rows.pending).map { BarSessions.Slot(id: $0.id, group: "p:" + $0.session.folderKey, waiting: false) }
     }
 
     private static func items(_ now: Date) -> [InboxItem] {
