@@ -61,6 +61,8 @@ enum Theme {
         var divider: Color { contrast ? Color.white.opacity(0.20) : Theme.divider }
         var secondary: Color { contrast ? Color.white.opacity(0.86) : Theme.secondary }
         var tertiary: Color { contrast ? Color.white.opacity(0.80) : Theme.tertiary }
+        /// A step lighter under Increase Contrast: the stronger fills would take `red` text on a picked row below 4.5:1.
+        var red: Color { contrast ? Color(red: 1.0, green: 0.58, blue: 0.56) : Theme.red }
         /// Outlines of fields, switches and bordered buttons.
         var borderWidth: CGFloat { contrast ? 1.5 : 1 }
         var focusWidth: CGFloat { contrast ? 2 : 1.5 }

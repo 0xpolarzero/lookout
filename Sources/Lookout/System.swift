@@ -126,6 +126,7 @@ final class HotKeys {
         }
         // Only modifier changes are watched; whether anything else happened during a tap is asked on release.
         let events: NSEvent.EventTypeMask = [.flagsChanged]
+        // design-lint: ignore (`events` is just .flagsChanged)
         if let global = NSEvent.addGlobalMonitorForEvents(matching: events, handler: { [weak self] in self?.handle($0) }) {
             monitors.append(global)
         }

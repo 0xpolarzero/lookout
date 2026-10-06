@@ -334,7 +334,7 @@ extension LookoutHub {
     /// CI in a panel: its header, then a line per state, each as tall as its count in the bar.
     @ViewBuilder var peekCI: some View {
         if store.ciRepos.isEmpty {
-            linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) }.frame(height: Self.peekLine)
+            linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) }.frame(height: Self.peekLine)
         } else {
             ciHeader.frame(height: Self.peekLine)
             ForEach(Self.ciLineOrder, id: \.self) { state in

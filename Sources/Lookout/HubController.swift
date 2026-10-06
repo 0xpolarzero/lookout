@@ -273,6 +273,7 @@ final class HubController {
     private func syncTrigger() {
         if !window.ignoresMouseEvents {
             if globalMouse == nil {
+                // design-lint: ignore (only while the pointer is on the hub)
                 globalMouse = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseUp]) { [weak self] _ in
                     MainActor.assumeIsolated { self?.mouseMoved() }
                 }

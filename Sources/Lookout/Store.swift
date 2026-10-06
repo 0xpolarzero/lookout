@@ -983,6 +983,7 @@ final class Store {
         failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
         let pending = latest.values.contains { $0.status != "completed" }
             || external.contains { $0.status != "completed" }
+            // design-lint: ignore (GitHub's own status name, not ours)
             || combined.statuses.contains { $0.state == "pending" }
         let any = !latest.isEmpty || !external.isEmpty || combined.totalCount > 0
         let state: CIState = !failing.isEmpty ? .failure : pending ? .pending : any ? .success : .none
