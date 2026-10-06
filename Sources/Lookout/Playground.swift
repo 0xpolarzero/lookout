@@ -592,86 +592,71 @@ enum PlaygroundShots {
             $0.setup = { store, _, hub in hub.frozenSessions = Demo.lateWaiting(store) }
         },
         // Settings, one pane each (General is `right-settings`), and Repositories in each of its states.
-        Shot.edges("settings-token", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.revealsToken = true },
-        Shot.edges("settings-notifications", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications },
-        Shot.edges("settings-notifications-snoozed", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications; $0.scenario = .snoozed
-        },
-        Shot.edges("settings-shortcuts", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts },
-        Shot.edges("settings-shortcuts-notice", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = false
+        page("settings-token", .settings) { $0.preview.revealsToken = true },
+        page("settings-notifications", .settings) { $0.preview.pane = .notifications },
+        page("settings-notifications-snoozed", .settings) { $0.preview.pane = .notifications; $0.scenario = .snoozed },
+        page("settings-shortcuts", .settings) { $0.preview.pane = .shortcuts },
+        page("settings-shortcuts-notice", .settings) {
+            $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = false
             $0.setup = { store, _, _ in
                 store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54),
                                             ShortcutAction.markAllRead.rawValue: .unassigned]
             }
         },
-        Shot.edges("settings-claude", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude },
-        Shot.edges("settings-claude-off", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy
-        },
+        page("settings-claude", .settings) { $0.preview.pane = .claude },
+        page("settings-claude-off", .settings) { $0.preview.pane = .claude; $0.scenario = .busy },
         // The states of Settings that the dev build and a healthy account never show.
-        Shot.edges("settings-signed-out", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.scenario = .signedOut },
-        Shot.edges("settings-launch-error", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.launchError = "The operation couldn't be completed. Operation not permitted"
-        },
-        Shot.edges("settings-update-idle", on: [.right]) { settingsShot(&$0, .idle) },
-        Shot.edges("settings-update-available", on: [.right]) { settingsShot(&$0, .available) },
-        Shot.edges("settings-update-downloading", on: [.right]) { settingsShot(&$0, .downloading, fraction: 0.42) },
-        Shot.edges("settings-update-ready", on: [.right]) { settingsShot(&$0, .ready) },
-        Shot.edges("settings-update-failed", on: [.right]) { settingsShot(&$0, .failed("Couldn't verify the download: the checksum doesn't match")) },
-        Shot.edges("settings-notifications-off", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications
+        page("settings-signed-out", .settings) { $0.scenario = .signedOut },
+        page("settings-launch-error", .settings) { $0.preview.launchError = "The operation couldn't be completed. Operation not permitted" },
+        page("settings-update-idle", .settings) { $0.setup = updater(.idle) },
+        page("settings-update-available", .settings) { $0.setup = updater(.available) },
+        page("settings-update-downloading", .settings) { $0.setup = updater(.downloading, fraction: 0.42) },
+        page("settings-update-ready", .settings) { $0.setup = updater(.ready) },
+        page("settings-update-failed", .settings) { $0.setup = updater(.failed("Couldn't verify the download: the checksum doesn't match")) },
+        page("settings-notifications-off", .settings) {
+            $0.preview.pane = .notifications
             $0.setup = { store, _, _ in store.settings.notifications = false }
         },
-        Shot.edges("settings-shortcuts-recording", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
-            $0.preview.recording = .togglePanel
+        page("settings-shortcuts-recording", .settings) {
+            $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true; $0.preview.recording = .togglePanel
         },
-        Shot.edges("settings-shortcuts-conflict", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+        page("settings-shortcuts-conflict", .settings) {
+            $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
             $0.preview.recording = .openItem; $0.preview.recorderError = "Already used by Mark read / unread"
         },
-        Shot.edges("settings-shortcuts-restore-refused", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+        page("settings-shortcuts-restore-refused", .settings) {
+            $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
             $0.preview.restoreError = "⌃⌥L is used by another app. Lookout keeps your shortcuts"
             $0.setup = { store, _, _ in
                 store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])]
             }
         },
-        Shot.edges("settings-claude-missing", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy; $0.preview.claudeInstalled = false
-        },
-        Shot.edges("settings-claude-key-saved", on: [.right]) {
-            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude
+        page("settings-claude-missing", .settings) { $0.preview.pane = .claude; $0.scenario = .busy; $0.preview.claudeInstalled = false },
+        page("settings-claude-key-saved", .settings) {
+            $0.preview.pane = .claude
             $0.setup = { store, _, _ in
                 store.hasTypesafeKey = true
                 store.agents.iconsEnabled = true
             }
         },
-        Shot.edges("repos-retry-focus", on: [.right]) {
-            $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed; $0.preview.retryFocused = "ziglang/zig"
-        },
-        Shot.edges("repos-drop", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.dropTarget = "ziglang/zig" },
-        Shot.edges("repos-custom", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig" },
+        page("repos-retry-focus", .repos) { $0.scenario = .reposFailed; $0.preview.retryFocused = "ziglang/zig" },
+        page("repos-drop", .repos) { $0.preview.dropTarget = "ziglang/zig" },
+        page("repos-custom", .repos) { $0.preview.expandedRepo = "ziglang/zig" },
         // Names too long for the line beside the controls take a line of their own.
-        Shot.edges("repos-long-names", on: [.right]) {
-            $0.pinned = true; $0.page = .repos
+        page("repos-long-names", .repos) {
             $0.setup = { store, _, _ in
                 store.repos.append(contentsOf: ["pointfreeco/swift-composable-architecture", "superradiantlabs/sandbox-runtime-images"]
                     .map { RepoConfig(fullName: $0) })
             }
         },
-        Shot.edges("repos-failure", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed },
-        Shot.edges("repos-add", on: [.right]) {
-            $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addHighlight = 1
-        },
-        Shot.edges("repos-add-error", on: [.right]) {
-            $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addError = "Not Found"
+        page("repos-failure", .repos) { $0.scenario = .reposFailed },
+        page("repos-add", .repos) { $0.preview.addQuery = "swift"; $0.preview.addHighlight = 1 },
+        page("repos-add-error", .repos) {
+            $0.preview.addQuery = "swift"; $0.preview.addError = "Not Found"
             // The suggestion that was picked, not the text it was found with.
             $0.preview.addSubmitted = "apple/swift-nio"
         },
-        Shot.edges("repos-undo", on: [.right]) {
-            $0.pinned = true; $0.page = .repos
+        page("repos-undo", .repos) {
             // Moved to Only what's for me: the comments that were not for you are gone, and the line says so.
             $0.setup = { store, _, _ in
                 store.undoStack.announce = { _ in }
@@ -686,11 +671,9 @@ enum PlaygroundShots {
                 }
             }
         },
-        Shot.edges("repos-add-none", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "zzzz" },
-        Shot.edges("repos-empty", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .empty },
-        Shot.edges("repos-contrast", on: [.right]) {
-            $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig"; $0.environment = .contrast
-        },
+        page("repos-add-none", .repos) { $0.preview.addQuery = "zzzz" },
+        page("repos-empty", .repos) { $0.scenario = .empty },
+        page("repos-contrast", .repos) { $0.preview.expandedRepo = "ziglang/zig"; $0.environment = .contrast },
         // The chrome on a 1280×720 screen: every peek, a focused section and the fullest views, on every edge.
         Shot.edges("peek-inbox-720") { $0.section = .inbox; $0.size = Shot.hd },
         Shot.edges("peek-ci-720") { $0.section = .ci; $0.size = Shot.hd },
@@ -713,11 +696,14 @@ enum PlaygroundShots {
         Shot.edges("open-many-ci-720") { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
     ].flatMap { $0 }
 
-    /// The General pane with the updater in a phase (a release, as the dev build is never one).
-    private static func settingsShot(_ shot: inout Shot, _ phase: Updater.Phase, fraction: Double = 0) {
-        shot.pinned = true
-        shot.page = .settings
-        shot.setup = { store, _, _ in store.updater.preview(phase, version: "0.5.0", fraction: fraction) }
+    /// A page kept open on the right edge, named `name`.
+    private static func page(_ name: String, _ page: HubPage, _ configure: (inout Shot) -> Void) -> [Shot] {
+        Shot.edges(name, on: [.right]) { $0.pinned = true; $0.page = page; configure(&$0) }
+    }
+
+    /// The updater in a phase (a release, as the dev build is never one).
+    private static func updater(_ phase: Updater.Phase, fraction: Double = 0) -> (Store, UIState, HubState) -> Void {
+        { store, _, _ in store.updater.preview(phase, version: "0.5.0", fraction: fraction) }
     }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.
