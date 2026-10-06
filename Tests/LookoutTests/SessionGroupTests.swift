@@ -510,6 +510,17 @@ import Testing
         #expect(held[1].rows.map(\.id) == ["y1", "y2"] && held[1].rows[1].isWaiting)
     }
 
+    @Test func aFrozenProjectGroupHoldingAnotherProjectsRowKeepsItsOwnNameAndNamesTheRow() throws {
+        let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y")], kept: ["x1", "y1"])
+        let rows = s.agentRows.kept
+        let x = try #require(rows.first { $0.id == "x1" }), y = try #require(rows.first { $0.id == "y1" })
+        // y's late waiter took x's only visible place under a frozen order: the group is still x's, and so are its actions.
+        let group = SessionGroup(kind: .project("/code/x"), rows: [y])
+        #expect(group.title == "x")
+        #expect(group.placement(of: y) == .waiting && group.placement(of: x) == .project)
+        #expect(SessionGroup(kind: .project(""), rows: [y]).title == "Scratch")
+    }
+
     @Test func aWaitingSessionIsNeverCutWhereverTheFreezeLeavesIt() {
         let sessions = (0..<10).map { session("n\($0)", minutesAgo: Double($0 + 1)) }
         let s = store(sessions)

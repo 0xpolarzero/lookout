@@ -255,7 +255,9 @@ struct SessionGroup: Identifiable {
     var title: String {
         switch kind {
         case .waiting: "Waiting for you"
-        case .project: rows.first?.session.folderName ?? "Scratch"
+        // From the group's own folder, which is what its menu and actions act on: a row held in it that is another project's
+        // (a late waiter under a frozen order) must not rename it.
+        case .project(let folder): folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent
         case .newActivity: "New activity"
         }
     }

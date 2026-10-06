@@ -94,7 +94,7 @@ struct SessionsList: View {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
                     SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
                         .id(i == 0 ? "s:top" : group.id)
-                    ForEach(group.rows) { row($0, group.placement) }
+                    ForEach(group.rows) { row($0, group.placement(of: $0)) }
                 }
                 if listed.hidden > 0 {
                     MoreSessionsRow(hidden: listed.hidden, waiting: peeked?.waiting ?? 0, hub: hub, rail: rail, action: moreAction)
@@ -316,10 +316,12 @@ extension SessionGroup {
         }
     }
 
-    var placement: SessionPlacement {
+    /// What `row` is listed under here: a project's own rows say nothing of their project, but a row held in a frozen group
+    /// that is another project's now names it.
+    func placement(of row: AgentRow) -> SessionPlacement {
         switch kind {
         case .waiting: .waiting
-        case .project: .project
+        case .project(let folder): row.session.folderKey == folder ? .project : .waiting
         case .newActivity: .newActivity
         }
     }
