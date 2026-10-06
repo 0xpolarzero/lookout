@@ -112,10 +112,8 @@ struct PlaygroundView: View {
                 Text("↑ ↓ ↩ Space ⌫ ⌘K ⌘⌫ ⌥Space ⌘, as in the app").foregroundStyle(.secondary)
             }
             .font(.system(size: 11.5))
-            HStack(spacing: 10) {
-                Label(hub.pinned ? "Pinned" : "Not pinned", systemImage: hub.pinned ? "pin.fill" : "pin")
-            }
-            .font(.system(size: 11.5, weight: .medium))
+            Label(hub.pinned ? "Pinned" : "Not pinned", systemImage: hub.pinned ? "pin.fill" : "pin")
+                .font(.system(size: 11.5, weight: .medium))
         }
         .padding(16)
         .frame(width: 400)
@@ -209,7 +207,7 @@ private extension View {
 
 extension [DockEdge] {
     static let all: [DockEdge] = [.right, .top, .left, .bottom]
-    /// The side bar and the strip: where a state differs between them, and the two the old shots covered.
+    /// The side bar and the strip: where a state differs between them.
     static let rightAndTop: [DockEdge] = [.right, .top]
     static let sides: [DockEdge] = [.right, .left]
     static let strips: [DockEdge] = [.top, .bottom]
@@ -219,7 +217,6 @@ extension [DockEdge] {
 enum ShotSelection {
     /// The newest inbox item that needs you.
     case firstNeedsYou
-    case item(String)
     case session(String)
 }
 
@@ -825,7 +822,6 @@ enum PlaygroundShots {
         if let filter = shot.filter { hub.filter = filter }
         switch shot.selection {
         case .firstNeedsYou: hub.selection = store.list(.needsYou).first.map { "i:" + $0.id }
-        case .item(let id): hub.selection = "i:" + id
         case .session(let id): hub.selection = "a:" + id
         case nil: break
         }
