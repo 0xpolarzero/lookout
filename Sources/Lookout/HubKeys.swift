@@ -164,8 +164,7 @@ final class HubKeys {
             if shortcut == store.shortcut(.openItem) { store.open(item) }
             else if shortcut == store.shortcut(.toggleRead) { item.state == .unread ? store.markRead(item) : store.markUnread(item) }
             else if shortcut == store.shortcut(.discard) {
-                let i = targets.firstIndex(of: selection) ?? 0
-                if targets.indices.contains(i + 1) { select(targets[i + 1]) }
+                if let next = Self.neighbour(of: selection, in: targets) { select(next) }
                 LookoutHub.animate { item.state.isOpen ? store.done(item) : store.restore(item) }
             } else { return false }
             return true
@@ -181,7 +180,11 @@ final class HubKeys {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
             else if shortcut == store.shortcut(.keepSession) { LookoutHub.animate { store.keepAgent(id) } }
-            else if shortcut == store.shortcut(.removeSession) { LookoutHub.animate { store.dismissAgent(id) } }
+            else if shortcut == store.shortcut(.removeSession) {
+                LookoutHub.animate { store.dismissAgent(id) }
+                // A row that left the list takes the pick to its neighbour (one search shows hidden stays, and keeps it).
+                if !self.targets().contains(selection), let next = Self.neighbour(of: selection, in: targets) { select(next) }
+            }
             else if shortcut == store.shortcut(.moveSessionUp) || shortcut == store.shortcut(.moveSessionDown) {
                 let step = shortcut == store.shortcut(.moveSessionUp) ? -1 : 1
                 // The row keeps the pick wherever it lands, and the list follows it.
@@ -193,6 +196,12 @@ final class HubKeys {
             return true
         }
         return false
+    }
+
+    /// The row the pick moves to when its own goes (Done, Hide): the one after it, or the one before at the end of the list.
+    private static func neighbour(of selection: String, in targets: [String]) -> String? {
+        guard let i = targets.firstIndex(of: selection) else { return nil }
+        return targets.indices.contains(i + 1) ? targets[i + 1] : i > 0 ? targets[i - 1] : nil
     }
 
     /// The Menu key, ⇧F10 and ⌃Return: the row's context menu, as the right button opens it.

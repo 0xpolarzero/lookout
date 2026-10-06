@@ -624,6 +624,22 @@ import Testing
         #expect(store.hubSessions(hub).contains { $0.id == new.id })
     }
 
+    @Test func hidingThePickedSessionPicksANeighbourSoTheKeysGoOn() {
+        let group = store.sessionGroups.first { $0.rows.count > 2 && $0.kind != .newActivity }!
+        let picked = "a:" + group.rows[1].id
+        pick(picked)
+        #expect(press(kVK_Delete, .command, "\u{7f}"))
+        #expect(!keys.targets().contains(picked))
+        #expect(hub.selection == "a:" + group.rows[2].id)
+        // The last row of the list hands its pick to the one before.
+        let all = keys.targets()
+        let last = all.last { $0.hasPrefix("a:") }!
+        let index = all.firstIndex(of: last)!
+        pick(last)
+        #expect(press(kVK_Delete, .command, "\u{7f}"))
+        #expect(hub.selection == (index + 1 < all.count ? all[index + 1] : all[index - 1]))
+    }
+
     @Test func optionArrowsMoveASessionAndTheListFollowsIt() {
         let group = store.sessionGroups.first { $0.rows.count > 2 && $0.kind != .newActivity }!
         let second = group.rows[1].id
