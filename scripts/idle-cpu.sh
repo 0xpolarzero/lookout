@@ -20,9 +20,10 @@
 #
 # Polling is measured once more with GitHub's answers served from memory (`--canned`: a quiet account's, sized as GitHub sizes
 # them, each with an ETag, and a 304 for every request that has it; the first poll is the full answers, the rest the 304s the
-# shipped app gets at rest). It polls every 5 seconds so that a window holds several, and the figure is scaled to the default
-# minute: that is what a poll's requests, cache and bookkeeping cost at rest, which the other runs (every request failing) do
-# not reach.
+# shipped app gets at rest). It polls every 5 seconds so that a window holds several, and what it costs over the plain run at
+# rest (the rings, the clock) is scaled to the default minute and added to that: what a poll's requests, cache and
+# bookkeeping cost at rest, which the other runs (every request failing) do not reach. The rest of the process does not poll
+# faster, so it is not scaled with it.
 #
 # What it does not measure: the network itself (TLS, the radio), what a changed answer costs to parse and draw,
 # notifications, the updater's loop, a real Claude app's files changing under the watchers, a transcript being read,
@@ -102,8 +103,11 @@ trap cleanup EXIT
 failed=0
 scenario=agents
 last_ws=0
-# What a measurement is multiplied by before it is judged: 1, except the canned polling's, which runs faster than the default.
+# The canned polling's run polls faster than the default: what it costs over `baseline` (the plain run's figure, in percent)
+# is multiplied by `scale` before it is judged, and `baseline` is not.
 scale=1
+baseline=0
+last_app=0
 
 # measure <label> <edge> [launch argument]: one launch, one verdict.
 measure() {
@@ -154,14 +158,16 @@ measure() {
     else
         last_ws="n/a"
     fi
-    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v ws="$last_ws" -v scale="$scale" 'BEGIN {
+    last_app=$(awk -v window="$window" -v a0="$app0" -v a1="$app1" 'BEGIN { printf "%.4f", (a1 - a0) / window * 100 }')
+    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v ws="$last_ws" -v scale="$scale" -v base="$baseline" 'BEGIN {
         if (!(window > 0) || a1 < a0) {
             printf "%-12s FAIL: a window of %s s and CPU time going from %s to %s are no measurement\n", label, window, a0, a1
             exit 1
         }
-        app = (a1 - a0) / window * 100 * scale
+        app = (a1 - a0) / window * 100
+        if (scale != 1) app = base + (app > base ? (app - base) * scale : 0)
         verdict = app < limit ? "ok" : "FAIL"
-        note = scale == 1 ? "" : sprintf(" (scaled by %.3f to the default poll)", scale)
+        note = scale == 1 ? "" : sprintf(" (%.3f%% at rest, the cost of polling scaled by %.3f to the default)", base, scale)
         printf "%-12s Lookout %.3f%% (limit %s%%)%s  WindowServer %s%% (all clients)  %s\n", label, app, limit, note, ws, verdict
         exit app < limit ? 0 : 1
     }' || failed=1
@@ -173,16 +179,20 @@ measure() {
 }
 
 ring_ws=
+rest_app=
 for edge in $edges; do
     measure rest "$edge"
     [ -z "$ring_ws" ] && ring_ws=$last_ws
+    [ -z "$rest_app" ] && rest_app=$last_app
     measure open "$edge" --open
 done
 
 # Polling with answers (304s) at rest: the app polls every 5 s here (`Store.cannedPollInterval`), the default is 60.
 scale=$(awk 'BEGIN { printf "%.4f", 5 / 60 }')
+baseline=$rest_app
 measure "polling" "${edges%% *}" --canned
 scale=1
+baseline=0
 
 # What the rings cost: the same bar at rest with no working session, WindowServer's share beside the first one's.
 scenario=busy
