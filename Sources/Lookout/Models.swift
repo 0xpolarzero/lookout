@@ -22,40 +22,6 @@ enum EventKind: String, Codable, CaseIterable, Identifiable {
         case .reviewRequested: "Review requested"
         }
     }
-
-    var toggleLabel: String {
-        switch self {
-        case .issueOpened: "Issues"
-        case .issueComment: "Issue comments"
-        case .prOpened: "Pull requests"
-        case .prComment: "PR comments"
-        case .reviewComment: "Review comments"
-        case .ciMain: "CI"
-        case .reviewRequested: "Review requests"
-        }
-    }
-
-    var tipDetail: String {
-        switch self {
-        case .issueOpened: "When someone opens an issue"
-        case .prOpened: "When someone opens a pull request"
-        case .ciMain: "Status of the default branch"
-        case .reviewRequested: "When your review is requested"
-        default: "Every comment in this repo"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .issueOpened: "smallcircle.filled.circle"
-        case .issueComment: "bubble.left.fill"
-        case .prOpened: "arrow.triangle.pull"
-        case .prComment: "bubble.right.fill"
-        case .reviewComment: "chevron.left.forwardslash.chevron.right"
-        case .ciMain: "checkmark.seal.fill"
-        case .reviewRequested: "eye.fill"
-        }
-    }
 }
 
 enum ItemState: String, Codable {
@@ -232,20 +198,6 @@ enum InboxFilter: String, CaseIterable {
         case .needsYou: "Needs you"
         case .bots: "Bots"
         case .done: "Done"
-        }
-    }
-}
-
-enum PanelTab {
-    case inbox, ci, agents, repos, settings
-
-    var title: String {
-        switch self {
-        case .inbox: "Inbox"
-        case .ci: "CI"
-        case .agents: "Sessions"
-        case .repos: "Repositories"
-        case .settings: "Settings"
         }
     }
 }

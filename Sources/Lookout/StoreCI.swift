@@ -131,11 +131,11 @@ extension Store {
         var answered = 0
         var asked = 0
         for repo in repos {
-            let state = status[repo.fullName]?.state ?? CIState.none
             if isMuted(repo.fullName, status: status, muted: muted) { continue }
             asked += 1
-            if status[repo.fullName] != nil { answered += 1 }
-            switch state {
+            let answer = status[repo.fullName]
+            if answer != nil { answered += 1 }
+            switch answer?.state ?? CIState.none {
             case .failure: failing += 1
             case .pending: running = true
             case .success: passing = true

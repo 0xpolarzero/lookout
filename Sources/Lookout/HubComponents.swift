@@ -22,8 +22,6 @@ extension View {
 
 enum CappedScrollSpace {
     static let name = "capped-content"
-    /// The scroll view's own frame, which the content's frame is read in to know how far it has scrolled.
-    static let viewport = "capped-viewport"
 
     /// The tallest height up to `cap` that ends on a row's bottom edge, when the cap falls inside a measured row (a
     /// row ends past it). A lazy list only measures the rows it has laid out: with none ending past the cap, the cut
@@ -105,17 +103,18 @@ private final class ScrollOffsetView: NSView {
     /// Clicks pass through to the content.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    deinit {
-        observer.map(NotificationCenter.default.removeObserver)
-        styleObserver.map(NotificationCenter.default.removeObserver)
-    }
+    deinit { stopObserving() }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
+    private func stopObserving() {
         observer.map(NotificationCenter.default.removeObserver)
         styleObserver.map(NotificationCenter.default.removeObserver)
         observer = nil
         styleObserver = nil
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopObserving()
         // Overlay scrollers whatever "Show scroll bars" says: a legacy one takes its width out of the rows and, over the rail,
         // moves the tiles off the bar's axis (DESIGN.md 5.3). The "+N below" cue says what the scroller would.
         enclosingScrollView?.scrollerStyle = .overlay
@@ -317,27 +316,6 @@ extension CappedScroll {
             // leave it short still.
             if height > short + 0.5 { lazyShort = nil } else if height < short - 0.5 { lazyShort = height }
         }
-    }
-}
-
-/// A row's actions on hover, the same for inbox items and sessions: icon buttons in a capsule laid over the row's
-/// right end (so showing them never changes the row's size).
-struct RowActions<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        HStack(spacing: 0) { content }
-            .padding(2)
-            .background(Capsule().fill(Theme.Fill.group))
-            .overlay(Capsule(style: .circular).strokeBorder(Theme.stroke))
-    }
-}
-
-extension AnyTransition {
-    /// Content of the expanded view: fades in once the shape has started to grow, and out at once on close.
-    static var hubReveal: AnyTransition {
-        .asymmetric(insertion: .opacity.animation(Theme.Motion.fade.delay(0.08)),
-                    removal: .opacity.animation(.easeIn(duration: 0.08)))
     }
 }
 

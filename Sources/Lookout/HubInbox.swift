@@ -139,8 +139,6 @@ extension Store {
 }
 
 extension LookoutHub {
-    // MARK: Inbox
-
     // MARK: Header
 
     /// 36pt: the tabs, then search and the menu (their room is kept when the list is empty); typing, or ⌘F, swaps
@@ -202,7 +200,7 @@ extension LookoutHub {
             Spacer(minLength: 0)
             if rows {
                 IconButton(symbol: "magnifyingglass", help: "Search", detail: "⌘F") { hub.beginSearch() }
-                inboxMenu
+                InboxMenu(store: store, hub: hub)
             } else {
                 // Their room, so the tabs and the right edge don't jump when the first item arrives.
                 Color.clear.frame(width: 2 * Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
@@ -210,8 +208,6 @@ extension LookoutHub {
         }
         .padding(.trailing, 3)
     }
-
-    private var inboxMenu: some View { InboxMenu(store: store, hub: hub) }
 
     var tabs: some View {
         Tabs(label: "Inbox filter", tabs: InboxFilter.allCases.map(tab), selection: hub.filter) { f in
@@ -310,10 +306,6 @@ extension LookoutHub {
         case .doneEmpty:
             EmptyBlock("Cleared items land here")
         }
-    }
-
-    func itemRow(_ item: InboxItem) -> some View {
-        InboxRow(item: item, store: store, ui: ui, hub: hub).capEdge()
     }
 }
 
