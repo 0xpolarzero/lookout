@@ -95,13 +95,27 @@ import Testing
 
     @Test func tokensMatchTheDesignTable() {
         // A few of the figures printed in DESIGN.md 3.2, so a changed token can't pass unnoticed.
-        let s = surfaces(Theme.Resolved())
+        let r = Theme.Resolved()
+        let s = surfaces(r)
         func value(_ color: Color, _ surface: String) -> Double { ratio(over(color, s[surface]!), s[surface]!) }
         #expect(abs(value(Theme.text, "bg") - 15.95) < 0.02)
-        #expect(abs(value(Theme.secondary, "bg") - 9.34) < 0.02)
-        #expect(abs(value(Theme.tertiary, "bg") - 6.73) < 0.02)
+        #expect(abs(value(r.secondary, "bg") - 9.34) < 0.02)
+        #expect(abs(value(r.tertiary, "bg") - 6.73) < 0.02)
         #expect(abs(value(Theme.accent, "selected") - 4.53) < 0.02)
         #expect(abs(value(Theme.red, "selected") - 5.12) < 0.02)
         #expect(abs(value(Theme.fieldBorder, "bg") - 3.11) < 0.02)
+    }
+
+    @Test(arguments: [false, true]) func inksDrawTheResolvedColours(contrast: Bool) {
+        // What the views draw (an Ink resolved where it's used) is what tokensOverTheirSurfaces certifies.
+        var environment = EnvironmentValues()
+        environment.resolved = Theme.Resolved(contrast: contrast)
+        let r = environment.resolved
+        #expect(Theme.secondary.resolve(in: environment) == r.secondary)
+        #expect(Theme.tertiary.resolve(in: environment) == r.tertiary)
+        #expect(Theme.stroke.resolve(in: environment) == r.stroke)
+        #expect(Theme.divider.resolve(in: environment) == r.divider)
+        // And Increase Contrast does change them.
+        #expect((Theme.Resolved(contrast: true).secondary == Theme.Resolved().secondary) == false)
     }
 }

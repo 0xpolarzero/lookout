@@ -8,7 +8,8 @@ import SwiftUI
 //   Colours   Theme.bg / rail / popover; text .93, secondary .70, tertiary .58 (a hint on a form is never tertiary);
 //             accent (blue: unread, interactive), accentText (links), amber (needs you), red (broken), green (update
 //             ready only), onTint (on amber/green fills), claude (Claude settings pane only); stroke, divider,
-//             fieldBorder, switchOff. In views that should follow Increase Contrast, read `@Environment(\.resolved)`.
+//             fieldBorder, switchOff. secondary, tertiary, stroke and divider are `Theme.Ink`s: they follow
+//             Increase Contrast wherever drawn; the rest of its set is read from `@Environment(\.resolved)`.
 //   Radius    Theme.Radius.hub 16 / row 10 (hub - inset; also banners and groups) / field 8 / tile 7 / small 4. All
 //             `.continuous`, concentric: use `Theme.Radius.shape(_)`.
 //   Fill      Theme.Fill.rest 0 / hover .07 (pointer only) / field .06 / tile .10 (tiles, avatars, bordered buttons) /
@@ -527,7 +528,7 @@ struct Tabs<ID: Hashable>: View {
         let id: ID
         var title: String
         var count: Int? = nil
-        var countTint: Color = Theme.tertiary
+        var countTint: AnyShapeStyle = AnyShapeStyle(Theme.tertiary)
         /// Shown as the system tooltip.
         var help: String? = nil
     }
@@ -582,7 +583,7 @@ struct Tabs<ID: Hashable>: View {
 /// trailing slots per section, so nothing in the header jumps.
 struct SectionHeader<Trailing: View>: View {
     let title: String
-    var status: (text: String, color: Color)? = nil
+    var status: (text: String, color: AnyShapeStyle)? = nil
     /// This section is the focused one: `esc` shows beside the title, the chevron points back.
     var focused = false
     /// What the chevron's tooltip says: "Expand Inbox", or "Back to all sections".
@@ -628,7 +629,7 @@ struct SectionHeader<Trailing: View>: View {
 /// One thing the user should know, above a list or under a header: an icon, a sentence and up to two buttons.
 struct StatusBanner<Actions: View>: View {
     let symbol: String
-    var tint: Color = Theme.secondary
+    var tint: AnyShapeStyle = AnyShapeStyle(Theme.secondary)
     let message: String
     @ViewBuilder var actions: Actions
 
@@ -647,7 +648,7 @@ struct StatusBanner<Actions: View>: View {
 }
 
 extension StatusBanner where Actions == EmptyView {
-    init(symbol: String, tint: Color = Theme.secondary, message: String) {
+    init(symbol: String, tint: AnyShapeStyle = AnyShapeStyle(Theme.secondary), message: String) {
         self.init(symbol: symbol, tint: tint, message: message) { EmptyView() }
     }
 }
@@ -710,11 +711,10 @@ struct UndoLine: View {
 struct Hairline: View {
     var axis: Axis = .horizontal
     var inset: CGFloat = 0
-    @Environment(\.resolved) private var resolved
 
     var body: some View {
         Rectangle()
-            .fill(resolved.divider)
+            .fill(Theme.divider)
             .frame(width: axis == .vertical ? 1 : nil, height: axis == .horizontal ? 1 : nil)
             .padding(axis == .horizontal ? .horizontal : .vertical, inset)
     }

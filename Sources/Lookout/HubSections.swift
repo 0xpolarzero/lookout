@@ -28,7 +28,7 @@ extension LookoutHub {
     // MARK: Section headers
 
     /// A section's header: its title and status on the left, its actions on the right; 30pt tall.
-    func sectionHeader<Trailing: View>(_ title: String, status: [(String, Color)] = [],
+    func sectionHeader<Trailing: View>(_ title: String, status: [(String, AnyShapeStyle)] = [],
                                        @ViewBuilder trailing: () -> Trailing = { EmptyView() }) -> some View {
         HStack(spacing: 8) {
             Text(title).font(Theme.Typography.title).foregroundStyle(Theme.secondary).lineLimit(1)
@@ -60,12 +60,12 @@ extension LookoutHub {
     /// "Sessions", then what's waiting for you (amber) and what's done and unread (blue).
     var agentsHeader: some View {
         let counts = store.agentCounts
-        var status: [(String, Color)] = []
-        if counts.blocked > 0 { status.append(("\(counts.blocked) waiting", Theme.amber)) }
-        if counts.done > 0 { status.append(("\(counts.done) done", Theme.accent)) }
+        var status: [(String, AnyShapeStyle)] = []
+        if counts.blocked > 0 { status.append(("\(counts.blocked) waiting", AnyShapeStyle(Theme.amber))) }
+        if counts.done > 0 { status.append(("\(counts.done) done", AnyShapeStyle(Theme.accent))) }
         // Claude's files missing or unreadable: the notice under the header says so; this stays when the list is shrunk.
         switch store.claudeLink {
-        case .missing, .unreadable: status.append(("!", Theme.red))
+        case .missing, .unreadable: status.append(("!", AnyShapeStyle(Theme.red)))
         default: break
         }
         return sectionHeader("Sessions", status: status) { if showsDetail { focusButton(.agents) } }

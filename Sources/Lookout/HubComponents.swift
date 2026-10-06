@@ -282,7 +282,7 @@ private struct NewSessionTileLabel: View {
     var body: some View {
         Image(systemName: "plus")
             .font(Theme.Typography.glyph(size * 0.42, .bold))
-            .foregroundStyle(hover ? Theme.text : Theme.secondary)
+            .foregroundStyle(hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
             .frame(width: size, height: size)
     }
 }

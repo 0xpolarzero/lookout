@@ -381,7 +381,7 @@ private struct ControlsGearLabel: View {
     var body: some View {
         Image(systemName: "gearshape.fill")
             .font(Theme.Typography.glyph(13))
-            .foregroundStyle(hover || active ? Theme.text : Theme.tertiary)
+            .foregroundStyle(hover || active ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
             .frame(width: Theme.Metrics.iconHit, height: Theme.Metrics.iconHit)
     }
 }

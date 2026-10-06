@@ -109,7 +109,7 @@ extension LookoutHub {
     }
 
     private struct SyncState {
-        var color: Color
+        var color: AnyShapeStyle
         var text: String
         var title: String
         var detail: String?
@@ -120,35 +120,35 @@ extension LookoutHub {
     private func sync(now: Date) -> SyncState {
         let refresh = "Click to check now · \(store.shortcut(.refresh).display)"
         if let error = store.authError {
-            return SyncState(color: Theme.red, text: "Sign-in problem", title: "Can't sign in to GitHub",
+            return SyncState(color: AnyShapeStyle(Theme.red), text: "Sign-in problem", title: "Can't sign in to GitHub",
                              detail: error + "\nClick for Settings")
         }
         let failed = store.repoErrors.keys.sorted()
         if !failed.isEmpty {
-            return SyncState(color: Theme.amber, text: "\(plural(failed.count, "repo")) failed",
+            return SyncState(color: AnyShapeStyle(Theme.amber), text: "\(plural(failed.count, "repo")) failed",
                              title: "Some repositories didn't sync", detail: failed.joined(separator: "\n") + "\n" + refresh)
         }
         if store.isSyncing {
-            return SyncState(color: Theme.tertiary, text: "Checking…", title: "Checking GitHub",
+            return SyncState(color: AnyShapeStyle(Theme.tertiary), text: "Checking…", title: "Checking GitHub",
                              detail: "Repositories, CI and review requests", spinning: true)
         }
         guard let last = store.lastSync else {
-            return SyncState(color: Theme.tertiary, text: store.me == nil ? "Connecting…" : "Not checked yet",
+            return SyncState(color: AnyShapeStyle(Theme.tertiary), text: store.me == nil ? "Connecting…" : "Not checked yet",
                              title: "Connecting to GitHub", detail: nil)
         }
         let interval = store.settings.pollInterval
         let checked = "Last checked at \(last.formatted(date: .omitted, time: .shortened))"
         if now.timeIntervalSince(last) > interval * 3 {
-            return SyncState(color: Theme.amber, text: "Synced \(agoPhrase(last, now: now))", title: "Not syncing",
+            return SyncState(color: AnyShapeStyle(Theme.amber), text: "Synced \(agoPhrase(last, now: now))", title: "Not syncing",
                              detail: "\(checked) · check your connection or token\n" + refresh)
         }
         if store.isSnoozed, let until = store.settings.snoozeUntil {
-            return SyncState(color: Theme.secondary, text: "Snoozed until \(until.formatted(date: .omitted, time: .shortened))",
+            return SyncState(color: AnyShapeStyle(Theme.secondary), text: "Snoozed until \(until.formatted(date: .omitted, time: .shortened))",
                              title: "Notifications snoozed", detail: "No banners; the inbox keeps filling · resume in Settings",
                              symbol: "moon.fill")
         }
         let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))
-        return SyncState(color: Theme.tertiary, text: "Up to date", title: checked,
+        return SyncState(color: AnyShapeStyle(Theme.tertiary), text: "Up to date", title: checked,
                          detail: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n\(refresh)")
     }
 }

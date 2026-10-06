@@ -21,7 +21,7 @@ struct CompactItemRow: View {
     var body: some View {
         Button { store.open(item) } label: {
             HStack(alignment: .top, spacing: 9) {
-                Circle().fill(unread ? (low ? Theme.tertiary : Theme.amber) : .clear)
+                Circle().fill(unread ? (low ? AnyShapeStyle(Theme.tertiary) : AnyShapeStyle(Theme.amber)) : AnyShapeStyle(.clear))
                     .frame(width: 6, height: 6)
                     .padding(.top, 8)
                 ZStack(alignment: .bottomTrailing) {
@@ -184,7 +184,7 @@ private struct InboxCellLabel: View {
         let lit = needsYou > 0
         return Image(systemName: lit ? "tray.full.fill" : "tray.fill")
             .font(Theme.Typography.glyph(lit ? 13.5 : 15))
-            .foregroundStyle(lit ? Theme.onTint : hover ? Theme.text : Theme.secondary)
+            .foregroundStyle(lit ? AnyShapeStyle(Theme.onTint) : hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
             .frame(width: 28, height: 28)
             // Hover brightens the tile (or the tray), no box around it.
             .background(Tile.shape(28).fill(lit ? Theme.amber : hover ? Theme.Fill.hover : Theme.Fill.rest))
@@ -200,7 +200,7 @@ private struct InboxCellLabel: View {
         return nil
     }
 
-    private func count(_ n: Int, fill: Color, text: Color) -> some View {
+    private func count(_ n: Int, fill: Color, text: some ShapeStyle) -> some View {
         Text(n > 99 ? "99+" : "\(n)")
             .font(Theme.Typography.glyph(11, .bold).monospacedDigit())
             .contentTransition(.numericText(value: Double(n)))
@@ -300,7 +300,7 @@ extension LookoutHub {
         case .done: "What you marked Done · Back to inbox from here"
         }
         return Tabs.Tab(id: f, title: f.label, count: f == .done || unread == 0 ? nil : unread,
-                        countTint: f == .needsYou ? Theme.amber : Theme.tertiary, help: help)
+                        countTint: f == .needsYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.tertiary), help: help)
     }
 
     var emptyInbox: some View {

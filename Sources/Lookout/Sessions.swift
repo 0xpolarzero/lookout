@@ -10,7 +10,7 @@ struct WorkingText: View {
 
     var body: some View {
         Ticking { now in
-            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.secondary)
+            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
         }
     }
 }
@@ -280,12 +280,12 @@ private struct UpdateLabel: View {
         }
     }
 
-    private var tint: Color {
+    private var tint: AnyShapeStyle {
         switch updater.phase {
-        case .ready: Theme.green
-        case .failed: Theme.red
-        case .downloading: Theme.secondary
-        default: Theme.accent
+        case .ready: AnyShapeStyle(Theme.green)
+        case .failed: AnyShapeStyle(Theme.red)
+        case .downloading: AnyShapeStyle(Theme.secondary)
+        default: AnyShapeStyle(Theme.accent)
         }
     }
 }
@@ -487,7 +487,7 @@ private struct NewSessionLabel: View {
     var body: some View {
         HStack(spacing: 9) {
             if style != .detail { plus }
-            Text("New session").font(Theme.Typography.body).foregroundStyle(hover ? Theme.text : Theme.secondary)
+            Text("New session").font(Theme.Typography.body).foregroundStyle(hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
             Spacer(minLength: 4)
         }
         .padding(.leading, leading)
@@ -507,7 +507,7 @@ private struct NewSessionLabel: View {
         let size: CGFloat = style == .twoLines ? 24 : 18
         Image(systemName: "plus")
             .font(Theme.Typography.glyph(style == .twoLines ? 11 : 10, .bold))
-            .foregroundStyle(hover ? Theme.text : Theme.secondary)
+            .foregroundStyle(hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
             .frame(width: size, height: size)
             .background(Tile.shape(size).fill(hover ? Theme.Fill.selected : Theme.Fill.field))
     }
@@ -618,11 +618,11 @@ struct ClaudeLinkStatus: View {
     let store: Store
 
     var body: some View {
-        let (color, text, detail): (Color, String, String) = switch store.claudeLink {
-        case .ok where Claude.isRunning: (Theme.tertiary, "Synced with Claude", "Updates as the Claude app writes its session files")
-        case .ok, .off: (Theme.tertiary, "Claude isn't running", "Sessions update again when the app is open")
-        case .missing: (Theme.red, "Claude's sessions not found", "Open the Claude desktop app once")
-        case .unreadable: (Theme.red, "Can't read Claude's sessions", "The app's session format changed")
+        let (color, text, detail): (AnyShapeStyle, String, String) = switch store.claudeLink {
+        case .ok where Claude.isRunning: (AnyShapeStyle(Theme.tertiary), "Synced with Claude", "Updates as the Claude app writes its session files")
+        case .ok, .off: (AnyShapeStyle(Theme.tertiary), "Claude isn't running", "Sessions update again when the app is open")
+        case .missing: (AnyShapeStyle(Theme.red), "Claude's sessions not found", "Open the Claude desktop app once")
+        case .unreadable: (AnyShapeStyle(Theme.red), "Can't read Claude's sessions", "The app's session format changed")
         }
         Circle().fill(color).frame(width: 6, height: 6)
         Text(text).tip(text, detail)

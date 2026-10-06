@@ -35,7 +35,7 @@ struct SettingsView: View {
                     Text(store.me.map { "@\($0.login)" } ?? "Not connected").font(Theme.Typography.title)
                     Text(store.tokenSource.map { "Token from \($0.rawValue)" } ?? (store.authError ?? ""))
                         .font(Theme.Typography.meta)
-                        .foregroundStyle(store.authError == nil ? Theme.secondary : Theme.red)
+                        .foregroundStyle(store.authError == nil ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(Theme.red))
                         .lineLimit(2)
                 }
                 Spacer()
@@ -290,11 +290,11 @@ struct SettingsView: View {
         }
     }
 
-    private var updateStatusColor: Color {
+    private var updateStatusColor: AnyShapeStyle {
         switch store.updater.phase {
-        case .failed: Theme.red
-        case .available, .ready: Theme.accentText
-        default: store.updater.checkError == nil ? Theme.secondary : Theme.red
+        case .failed: AnyShapeStyle(Theme.red)
+        case .available, .ready: AnyShapeStyle(Theme.accentText)
+        default: store.updater.checkError == nil ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(Theme.red)
         }
     }
 

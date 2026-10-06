@@ -178,12 +178,12 @@ struct AgentRow: Identifiable, Hashable {
     /// "3 running": what's left in the background, after the status.
     var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
 
-    var statusColor: Color {
+    var statusColor: AnyShapeStyle {
         switch status {
-        case .running: Theme.secondary
-        case .blocked: entry.unread || waitsForYou ? Theme.amber : Theme.secondary
-        case .finished: Theme.accent
-        case .idle: Theme.tertiary
+        case .running: AnyShapeStyle(Theme.secondary)
+        case .blocked: entry.unread || waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary)
+        case .finished: AnyShapeStyle(Theme.accent)
+        case .idle: AnyShapeStyle(Theme.tertiary)
         }
     }
 }

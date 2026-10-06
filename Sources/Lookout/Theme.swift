@@ -11,8 +11,8 @@ enum Theme {
     /// Tooltip bubbles and menus, a step above `bg` (#2B2B2D).
     static let popover = Color(red: 0.169, green: 0.169, blue: 0.176)
     /// The hub's outline: decorative, exempt from 3:1.
-    static let stroke = Color.white.opacity(0.12)
-    static let divider = Color.white.opacity(0.08)
+    static let stroke = Ink(\.stroke)
+    static let divider = Ink(\.divider)
     /// Field and bordered-button outlines (3.11:1).
     static let fieldBorder = Color.white.opacity(0.34)
     /// A switch's track when off (with a `fieldBorder` outline).
@@ -21,9 +21,9 @@ enum Theme {
     /// Titles, rows (read or not) and values: 15.95:1.
     static let text = Color.white.opacity(0.93)
     /// Summaries, ages, status words, hints, form details: 9.34:1.
-    static let secondary = Color.white.opacity(0.70)
+    static let secondary = Ink(\.secondary)
     /// The meta line, placeholders, quiet glyphs: 6.73:1. Never a hint on a form.
-    static let tertiary = Color.white.opacity(0.58)
+    static let tertiary = Ink(\.tertiary)
 
     /// Three hues, one meaning each: amber needs you, red is broken, blue is unread or interactive.
     static let accent = Color(red: 0.40, green: 0.58, blue: 1.0)
@@ -50,17 +50,27 @@ enum Theme {
 
     // MARK: Resolved
 
+    /// A token that follows Increase Contrast by itself: it takes its value from `\.resolved` wherever it is drawn
+    /// (`foregroundStyle`, `fill`, `strokeBorder`), so a view can't forget to. Use it where SwiftUI wants a
+    /// `ShapeStyle`; `AnyShapeStyle` carries it through a property that used to be a `Color`.
+    struct Ink: ShapeStyle {
+        let token: KeyPath<Theme.Resolved, Color> & Sendable
+        init(_ token: KeyPath<Theme.Resolved, Color> & Sendable) { self.token = token }
+
+        func resolve(in environment: EnvironmentValues) -> Color { environment.resolved[keyPath: token] }
+    }
+
     /// Increase Contrast and Differentiate Without Colour, read from the system once at the hub's root (see
-    /// `themeResolved()`) and handed down as `\.resolved`: views read this, never the two settings themselves. Plain
+    /// `themeResolved()`) and handed down as `\.resolved`: views read this (or draw an `Ink`), never the two settings themselves. Plain
     /// values, so the tokens' Increase Contrast set can be tested.
     struct Resolved: Equatable {
         var contrast = false
         var differentiate = false
 
-        var stroke: Color { contrast ? Color.white.opacity(0.28) : Theme.stroke }
-        var divider: Color { contrast ? Color.white.opacity(0.20) : Theme.divider }
-        var secondary: Color { contrast ? Color.white.opacity(0.86) : Theme.secondary }
-        var tertiary: Color { contrast ? Color.white.opacity(0.80) : Theme.tertiary }
+        var stroke: Color { Color.white.opacity(contrast ? 0.28 : 0.12) }
+        var divider: Color { Color.white.opacity(contrast ? 0.20 : 0.08) }
+        var secondary: Color { Color.white.opacity(contrast ? 0.86 : 0.70) }
+        var tertiary: Color { Color.white.opacity(contrast ? 0.80 : 0.58) }
         /// `red` as text on a fill (a chip's check count): lighter under Increase Contrast, whose ×1.6 fills would take
         /// `Theme.red` below 4.5:1 once pressed. Glyphs and text on the page keep `Theme.red`.
         var red: Color { contrast ? Color(red: 1.0, green: 0.66, blue: 0.64) : Theme.red }

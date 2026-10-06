@@ -80,7 +80,7 @@ extension LookoutHub {
     /// CI's section header: "CI" and how it's going, worst first.
     var ciHeader: some View {
         // Shrunk (another section focused), its lines are gone: every state's count, in its colour.
-        let status: [(String, Color)] = shrunk(.ci)
+        let status: [(String, AnyShapeStyle)] = shrunk(.ci)
             ? Self.ciOrder.compactMap { state in
                 let n = ciRepos(listedIn: state).count
                 return n == 0 ? nil : ("\(n) \(state.label)", state.color)
@@ -90,15 +90,15 @@ extension LookoutHub {
     }
 
     /// "2 failing" in red; "1 running" while nothing fails but something runs; "all passing" once everything has.
-    var ciStatus: (String, Color)? {
+    var ciStatus: (String, AnyShapeStyle)? {
         let failing = ciRepos(listedIn: .failure).count
         let running = ciRepos(listedIn: .pending).count
         let passing = ciRepos(listedIn: .success).count
-        if failing > 0 { return ("\(failing) failing", Theme.red) }
-        if running > 0 { return ("\(running) running", Theme.secondary) }
+        if failing > 0 { return ("\(failing) failing", AnyShapeStyle(Theme.red)) }
+        if running > 0 { return ("\(running) running", AnyShapeStyle(Theme.secondary)) }
         // "All" only when every repo shown has passed; some without a run yet make it a count.
-        if passing > 0 { return (ciRepos(listedIn: CIState.none).isEmpty ? "all passing" : "\(passing) passing", Theme.tertiary) }
-        return store.ciRepos.isEmpty ? nil : ("no runs", Theme.tertiary)
+        if passing > 0 { return (ciRepos(listedIn: CIState.none).isEmpty ? "all passing" : "\(passing) passing", AnyShapeStyle(Theme.tertiary)) }
+        return store.ciRepos.isEmpty ? nil : ("no runs", AnyShapeStyle(Theme.tertiary))
     }
 
     /// The number of repos in a CI state, beside its line, after the state's own silhouette; hovering lists them.
@@ -108,7 +108,7 @@ extension LookoutHub {
             Image(systemName: state.countSymbol).font(Theme.Typography.glyph(10))
             Text("\(n)").font(Theme.Typography.numeral).contentTransition(.numericText(value: Double(n)))
         }
-        .foregroundStyle(n == 0 ? Theme.tertiary : state.color)
+        .foregroundStyle(n == 0 ? AnyShapeStyle(Theme.tertiary) : state.color)
         .frame(width: 36, height: Theme.Metrics.line)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
@@ -123,7 +123,7 @@ extension LookoutHub {
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(state == CIState.none ? "No runs" : state.title)
                 .font(Theme.Typography.numeral)
-                .foregroundStyle(repos.isEmpty ? Theme.tertiary : state.color)
+                .foregroundStyle(repos.isEmpty ? AnyShapeStyle(Theme.tertiary) : state.color)
                 .frame(width: 52, alignment: .leading)
             if repos.isEmpty {
                 Text("—").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)

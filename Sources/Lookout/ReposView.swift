@@ -211,7 +211,7 @@ struct RepoCard: View {
         .motion(Theme.Motion.hover, value: hover)
         .overlay(
             Theme.Radius.shape(Theme.Radius.row)
-                .strokeBorder(dropTarget ? Theme.accent : Theme.stroke, lineWidth: dropTarget ? 1.5 : 1)
+                .strokeBorder(dropTarget ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.stroke), lineWidth: dropTarget ? 1.5 : 1)
         )
         .onHover { hover = $0 }
         // Screenshots target one badge as "owner/repo|Tooltip title"; only that card shows it.
@@ -322,8 +322,8 @@ private struct BadgeLabel: View {
     var body: some View {
         Image(systemName: symbol)
             .font(Theme.Typography.glyph(10.5))
-            .foregroundStyle(on ? color : Theme.tertiary.opacity(hover ? 1 : 0.7))
+            .foregroundStyle(on ? AnyShapeStyle(color) : AnyShapeStyle(Theme.tertiary.opacity(hover ? 1 : 0.7)))
             .frame(width: 24, height: 24)
-            .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(on ? color.opacity(0.25) : Theme.stroke))
+            .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(on ? AnyShapeStyle(color.opacity(0.25)) : AnyShapeStyle(Theme.stroke)))
     }
 }

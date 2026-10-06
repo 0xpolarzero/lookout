@@ -125,12 +125,12 @@ struct InboxItem: Codable, Identifiable, Hashable {
 enum CIState: String, Codable {
     case success, failure, pending, none
 
-    var color: Color {
+    var color: AnyShapeStyle {
         switch self {
-        case .success: Theme.tertiary
-        case .failure: Theme.red
-        case .pending: Theme.secondary
-        case .none: Theme.tertiary
+        case .success: AnyShapeStyle(Theme.tertiary)
+        case .failure: AnyShapeStyle(Theme.red)
+        case .pending: AnyShapeStyle(Theme.secondary)
+        case .none: AnyShapeStyle(Theme.tertiary)
         }
     }
 
