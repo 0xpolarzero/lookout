@@ -944,6 +944,18 @@ import Testing
         #expect(!changed)
     }
 
+    @Test(arguments: [false, true]) func theRateLimitCountingDownLeavesTheHubsBodyAlone(pinned: Bool) {
+        // GitHub's counter moves with every answer (and with gh's and other tools' own calls): only running out is news.
+        store.rateRemaining = 4000
+        let changed = bodyChanges(pinned: pinned) {
+            store.rateRemaining = 3990
+            store.rateResetsAt = Date().addingTimeInterval(600)
+        }
+        #expect(!changed)
+        // (The banner it brings is the kept-open hub's.)
+        if pinned { #expect(bodyChanges(pinned: true) { store.rateRemaining = 0 }) }
+    }
+
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
         #expect(bodyChanges(pinned: true) { store.items = [] })
     }

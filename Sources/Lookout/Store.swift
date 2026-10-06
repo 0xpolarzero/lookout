@@ -99,7 +99,12 @@ final class Store {
     var reviewRequestsIncomplete = false
     var isSyncing = false
     var lastSync: Date?
-    var rateRemaining: Int?
+    var rateRemaining: Int? {
+        didSet { if rateLimited != (rateRemaining == 0) { rateLimited = rateRemaining == 0 } }
+    }
+    /// The rate limit is used up. What the hub's body reads of `rateRemaining`, which moves with every answer GitHub gives
+    /// (this tool's or any other's using the account): the body redraws when this flips, not for the count.
+    private(set) var rateLimited = false
     /// When the GitHub rate limit resets, as of the last sync.
     var rateResetsAt: Date?
     var suggestions: [String] = []

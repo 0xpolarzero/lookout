@@ -119,7 +119,7 @@ extension Store {
         switch filter {
         case .needsYou:
             // Every source checked: the repositories (and the quota they need) and the review-request search.
-            let healthy = repoErrors.isEmpty && rateRemaining != 0 && !reviewRequestsFailing && !reviewRequestsPartial
+            let healthy = repoErrors.isEmpty && !rateLimited && !reviewRequestsFailing && !reviewRequestsPartial
                 && !syncIsStale(now: now)
             return healthy ? .caughtUp : .nothingNew
         case .bots: return .botsQuiet
@@ -131,7 +131,7 @@ extension Store {
     func inboxNotice(now: Date = Date()) -> InboxNotice? {
         guard authError == nil, !repos.isEmpty else { return nil }
         if !repoErrors.isEmpty { return .reposFailed(repoErrors.count) }
-        if rateRemaining == 0 { return .rateLimited(until: rateResetsAt.flatMap { $0 > now ? $0 : nil }) }
+        if rateLimited { return .rateLimited(until: rateResetsAt.flatMap { $0 > now ? $0 : nil }) }
         if reviewRequestsFailing { return .reviewRequestsFailed }
         if isSnoozed, let until = settings.snoozeUntil { return .snoozed(until: until) }
         return nil
