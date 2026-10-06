@@ -314,7 +314,12 @@ struct LookoutHub: View {
             .keyboardShortcut(",", modifiers: .command)
         Button { hub.go(.repos) } label: { Label("Repositories…", systemImage: "books.vertical") }
         if store.updater.isRelease {
-            Button { Task { await store.updater.update(manual: true) } } label: {
+            // Settings' update row says what the check finds (checking, up to date, a failure); the bar has no room to.
+            Button {
+                hub.settingsPane = .general
+                hub.go(.settings)
+                Task { await store.updater.update(manual: true) }
+            } label: {
                 Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
             }
         }

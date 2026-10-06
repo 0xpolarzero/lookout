@@ -41,6 +41,13 @@ final class Updater {
     /// Why the last check failed (only surfaced when you asked for it).
     private(set) var checkError: String?
 
+    /// The failure there is to show, if any: a download that failed, or a check that did. Settings' row draws it and
+    /// the hub says it, from wherever the check was asked for.
+    var shownError: String? {
+        if case .failed(let message) = phase { return message }
+        return phase == .idle ? checkError : nil
+    }
+
     /// Asked before each automatic check, and whether a found version was skipped.
     @ObservationIgnored var automatic: () -> Bool = { true }
     @ObservationIgnored var skipped: () -> String? = { nil }

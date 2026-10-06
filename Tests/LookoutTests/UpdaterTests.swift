@@ -16,4 +16,12 @@ import Testing
         // Tests don't run from a release bundle.
         #expect(!Updater().isRelease)
     }
+
+    @MainActor @Test func aFailedDownloadIsTheErrorTheHubSaysAndAnIdleOneHasNone() {
+        let updater = Updater()
+        updater.preview(.idle)
+        #expect(updater.shownError == nil)
+        updater.preview(.failed("The download didn't finish"))
+        #expect(updater.shownError == "The download didn't finish")
+    }
 }

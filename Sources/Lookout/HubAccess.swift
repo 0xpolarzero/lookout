@@ -151,6 +151,8 @@ struct HubAnnouncer: View {
                 }
             }
             .onChange(of: store.ciStates) { old, _ in ciChanged(from: old) }
+            // A failed update check or download is said wherever it was asked for: Settings' row is not always on screen.
+            .onChange(of: store.updater.shownError) { _, error in if let error { Announce.say(error) } }
             .onChange(of: store.claudeLink) { _, link in
                 guard store.agents.enabled, hub.expanded, link == .missing || link == .unreadable else { return }
                 let line = ClaudeLinkStatus.describe(link)
