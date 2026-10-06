@@ -743,8 +743,11 @@ extension Store {
             $0.hiddenAt = $0.seen
         }
         let title = claudeSessions[id]?.title ?? "session"
+        let after = agents.entries.first { $0.id == id }
         registerUndo("Hidden \u{201C}\(title)\u{201D}", in: .agents) { [weak self] in
+            // Only while it is as Hide left it: a Keep since (found through search) is newer than what is being taken back.
             self?.mutateAgent(id) {
+                guard $0.kept == after?.kept, $0.hiddenAt == after?.hiddenAt else { return }
                 $0.kept = before.kept
                 $0.hiddenAt = before.hiddenAt
             }

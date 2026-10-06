@@ -113,6 +113,19 @@ import Testing
         #expect(s.agentRows.pending.map(\.id) == ["a"])
     }
 
+    @Test func undoingAHideDoesNotReverseAKeepMadeSince() {
+        let s = store([session("a")])
+        s.dismissAgent("a")
+        s.keepAgent("a")
+        #expect(s.undoStack.undo())
+        #expect(s.agentRows.kept.map(\.id) == ["a"])
+        // Left as Hide made it, undo brings back what it hid.
+        let t = store([session("a")])
+        t.dismissAgent("a")
+        #expect(t.undoStack.undo())
+        #expect(t.agentRows.pending.map(\.id) == ["a"])
+    }
+
     @Test func archivedSessionsLeave() {
         let s = store([session("a")])
         s.keepAgent("a")
