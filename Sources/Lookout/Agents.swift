@@ -154,6 +154,8 @@ struct AgentRow: Identifiable, Hashable {
         return summaryText
     }
 
+    var headlineText: String { String(headline.characters) }
+
     /// For VoiceOver: "waiting, lcu, 2 minutes", and "3 running" for what a finished turn left behind.
     func spokenValue(now: Date = Date()) -> String {
         let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
@@ -166,9 +168,8 @@ struct AgentRow: Identifiable, Hashable {
     /// For VoiceOver, after the value: the question or summary, then everything it left running by name (the row
     /// shows the first and a count).
     var spokenHint: String {
-        let said = String(headline.characters)
         let running = tasks.isEmpty ? "" : "Running: " + tasks.map(\.title).joined(separator: ", ") + "."
-        return [said, running].filter { !$0.isEmpty }.joined(separator: " ")
+        return [headlineText, running].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     static func spokenAge(_ t: TimeInterval) -> String {
@@ -778,7 +779,6 @@ extension Store {
         neighbour(of: id, step, frozen: frozen, expanded: expanded) != nil
     }
 
-    /// One place up (-1) or down (+1) within its project: the two trade places as the list shows them.
     /// Which row lands on which one's place for `id` and its neighbour to trade places in the list. The later one takes the
     /// earlier one's place: with rows between them in the order that the list doesn't show (a late waiter took the place of one
     /// it had cut), the row shown behind goes ahead, and both stay on the screen, which the earlier one moved behind them would not.
@@ -786,6 +786,7 @@ extension Store {
         neighbour(of: id, step, frozen: frozen, expanded: expanded).map { step > 0 ? ($0, id) : (id, $0) }
     }
 
+    /// One place up (-1) or down (+1) within its project: the two trade places as the list shows them.
     func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
         guard let (mover, target) = trade(id, step, frozen: frozen, expanded: expanded) else { return }
         moveAgent(mover, onto: target)

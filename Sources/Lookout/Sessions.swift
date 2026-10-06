@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 // Sessions in the hub: the list (groups, rows, "+N more", the New session row), a session's menus and label
-// editor; then the update button, the inbox item menu and the status lines the hub also uses.
+// editor, and the status lines the hub also uses.
 
 // MARK: - The list
 
@@ -69,6 +69,13 @@ struct RailRow<Tile: View, Content: View>: View {
     }
 }
 
+private extension View {
+    /// The hub's own inset on the side away from the tile.
+    func awayFromRail(_ rail: HorizontalEdge?, _ inset: CGFloat) -> some View {
+        padding(rail == .leading ? .trailing : .leading, inset)
+    }
+}
+
 /// The groups of the sessions list under one another, or (searching) the sessions that match, flat. Rows mark their
 /// bottom edge for `CappedScroll` and their id for scrolling to them. A peek (`peekCap`) lists whole groups and rows
 /// up to that height, then "+N more", and never scrolls.
@@ -105,7 +112,7 @@ struct SessionsList: View {
                 }
             }
         }
-        .padding(rail == .leading ? .trailing : .leading, inset)
+        .awayFromRail(rail, inset)
         .listMotion(value: store.agentsRevision)
     }
 
@@ -157,12 +164,12 @@ struct SessionsScroll: View {
                             end: searching ? matches.last.map { "a:" + $0.id } : listed.hidden > 0 ? "s:more" : listed.groups.last?.rows.last.map { "a:" + $0.id },
                             top: searching ? matches.first.map { "a:" + $0.id } : "s:top",
                             viewport: viewport, reach: reach, hub: hub, rail: rail)
-                    .padding(rail == .leading ? .trailing : .leading, inset)
+                    .awayFromRail(rail, inset)
             } else if cut {
                 let more = SessionGroup.below(listed.groups, hidden: listed.hidden, reach: viewport)
                 MoreSessionsRow(hidden: more, waiting: SessionGroup.waitingBelow(listed.groups, reach: viewport), hub: hub, rail: rail,
                                 pickable: false, action: showAll)
-                    .padding(rail == .leading ? .trailing : .leading, inset)
+                    .awayFromRail(rail, inset)
             }
         }
     }
@@ -542,7 +549,7 @@ struct SessionRow: View {
             }
         }
         .help(help)
-        .tip(row.session.title, tipDetail, focused: picked, hover: false)
+        .tip(row.session.title, Self.tipDetail(row), focused: picked, hover: false)
         .sessionMenu(row, store, hub)
         .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
@@ -600,10 +607,8 @@ struct SessionRow: View {
         let text = Text(row.headline).foregroundStyle(Theme.secondary)
         guard placement.namesProject else { return text }
         let project = Text(row.projectName).foregroundStyle(Theme.tertiary)
-        return plainHeadline.isEmpty ? project : project + Text(" · ").foregroundStyle(Theme.tertiary) + text
+        return row.headlineText.isEmpty ? project : project + Text(" · ").foregroundStyle(Theme.tertiary) + text
     }
-
-    private var plainHeadline: String { String(row.headline.characters) }
 
     /// The first thing it left running, in full, and how many more there are; the whole list on hover.
     private func taskLine(_ first: ClaudeTask) -> some View {
@@ -637,11 +642,8 @@ struct SessionRow: View {
 
     /// What the row the keyboard picked says under the title: the question or summary, then everything it left running (the
     /// row's line has the first, and a count).
-    private var tipDetail: String? { Self.tipDetail(row) }
-
     static func tipDetail(_ row: AgentRow) -> String? {
-        let headline = String(row.headline.characters)
-        let lines = (headline.isEmpty ? [] : [headline]) + row.tasks.map(\.title)
+        let lines = (row.headlineText.isEmpty ? [] : [row.headlineText]) + row.tasks.map(\.title)
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
@@ -756,7 +758,7 @@ struct NewSessionRow: View {
         .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
         .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset) - 6) }
         .onHover { hovering = $0 }
-        .padding(rail == .leading ? .trailing : .leading, inset)
+        .awayFromRail(rail, inset)
         .onChange(of: hub.projectsMenuRequest) { _, _ in presentProjects() }
     }
 
@@ -767,7 +769,7 @@ struct NewSessionRow: View {
                 .font(Theme.Typography.glyph(11, .semibold))
                 .foregroundStyle(Theme.secondary)
                 .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
-                // The icon buttons' own 28pt to hit, drawn as it was.
+                // The icon buttons' own 28pt hit area.
                 .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
         }
         .buttonStyle(.plain)

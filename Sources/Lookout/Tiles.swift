@@ -16,16 +16,14 @@ struct TileMarks: Equatable {
 
 extension AgentRow {
     var tileMarks: TileMarks {
-        let waiting = waitsForYou || (!session.running && unread && session.summary?.blocked == true)
-        // Never while it waits for you, however it waits: what a finished question left running behind it is not work
+        // Never a ring while it waits for you, however it waits: what a finished question left running behind it is not work
         // until you have read it (then the tile is not amber any more, and the ring says what is still going).
-        return TileMarks(waiting: waiting, working: !waiting && (session.running || !tasks.isEmpty), unread: unread && !waiting)
+        TileMarks(waiting: isWaiting, working: !isWaiting && (session.running || !tasks.isEmpty), unread: unread && !isWaiting)
     }
 
     /// "waiting for you", "working", "finished, unread": the state as VoiceOver says it, never colour alone.
     var tileState: String {
-        let marks = tileMarks
-        if marks.waiting { return "waiting for you" }
+        if isWaiting { return "waiting for you" }
         if session.running { return "working" }
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
         if unread { return "finished, unread" + running }
@@ -35,21 +33,13 @@ extension AgentRow {
 
     /// What VoiceOver reads after the title: "waiting for you, lcu, 4 minutes".
     func tileValue(now: Date = Date()) -> String {
-        "\(tileState), \(projectName), \(Self.spoken(now.timeIntervalSince(session.lastActivity)))"
+        "\(tileState), \(projectName), \(Self.spokenAge(now.timeIntervalSince(session.lastActivity)))"
     }
 
     /// The question it is stopped on, else what it said last: the hint under the value.
     var tileHint: String {
         let said = (waitsForYou ? activity?.text : nil) ?? session.summary?.detail
         return said.flatMap { $0.isEmpty ? nil : $0 } ?? "Opens it in Claude"
-    }
-
-    private static func spoken(_ seconds: TimeInterval) -> String {
-        let s = max(0, Int(seconds))
-        if s < 60 { return "just now" }
-        if s < 3600 { return plural(s / 60, "minute") }
-        if s < 86400 { return plural(s / 3600, "hour") }
-        return plural(s / 86400, "day")
     }
 }
 
@@ -67,6 +57,7 @@ struct StatusTile: View {
     @Environment(\.resolved) private var resolved
 
     var body: some View {
+        let size = Theme.Metrics.tile
         let shape = Tile.shape(size)
         face
             .foregroundStyle(marks.waiting ? Theme.onTint : Theme.text)
@@ -84,7 +75,7 @@ struct StatusTile: View {
     @ViewBuilder private var face: some View {
         if let symbol {
             Image(systemName: symbol).font(Theme.Typography.glyph(12)).symbolRenderingMode(.monochrome)
-        } else if label.unicodeScalars.first.map({ $0.properties.isEmoji && $0.value > 0xFF }) == true {
+        } else if AgentLabel.isEmoji(label) {
             Text(label).font(.system(size: 14)).lineLimit(1)
         } else {
             Text(label).font(Theme.Typography.tile).lineLimit(1)
