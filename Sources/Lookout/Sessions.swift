@@ -421,17 +421,20 @@ struct MoreSessionsRow: View {
     var pickable = true
     /// How many of the sessions it stands for wait for you: said in amber, so a count never hides blocked work.
     var waiting = 0
+    /// How many sessions the "+N" tile in the rail beside it says: the row that stands for the sessions the bar's own "+N"
+    /// stands for. The cue rows ("+N below", "Back to top") have no tile.
+    var tileCount: Int?
     let action: () -> Void
     @State private var hovering = false
     @FocusState private var focused: Bool
 
     init(hidden: Int, waiting: Int = 0, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, action: @escaping () -> Void) {
         self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hint: "Shows them", hub: hub, rail: rail,
-                  pickable: pickable, waiting: waiting, action: action)
+                  pickable: pickable, waiting: waiting, tileCount: hidden, action: action)
     }
 
     init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, waiting: Int = 0,
-         action: @escaping () -> Void) {
+         tileCount: Int? = nil, action: @escaping () -> Void) {
         self.label = label
         self.spoken = spoken
         self.hint = hint
@@ -439,6 +442,7 @@ struct MoreSessionsRow: View {
         self.rail = rail
         self.pickable = pickable
         self.waiting = waiting
+        self.tileCount = tileCount
         self.action = action
     }
 
@@ -446,7 +450,12 @@ struct MoreSessionsRow: View {
         let picked = pickable && hub.selected("s:more")
         Button(action: action) {
             RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
-                    picked: picked, tile: { Color.clear }) {
+                    picked: picked, tile: {
+                        // Clear underneath, so the rail's slot is kept where there is no tile.
+                        Color.clear.overlay {
+                            if let tileCount { OverflowTile(count: tileCount, lit: waiting > 0, hovering: hovering || picked) }
+                        }
+                    }) {
                 HStack(spacing: Theme.Space.md) {
                     Text(label).font(Theme.Typography.control).foregroundStyle(Theme.secondary)
                     Spacer(minLength: 0)

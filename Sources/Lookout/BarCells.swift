@@ -331,27 +331,28 @@ struct MoreSessionsCell: View {
     var body: some View {
         BarCell(axis: axis, name: plural(count, "more session"), value: waiting > 0 ? "\(waiting) waiting for you" : "",
                 hint: "Shows the sessions", show: show, action: show) { hovering in
-            Face(count: count, lit: waiting > 0, hovering: hovering)
+            OverflowTile(count: count, lit: waiting > 0, hovering: hovering)
         }
     }
+}
 
-    private struct Face: View {
-        let count: Int
-        let lit: Bool
-        let hovering: Bool
-        @Environment(\.resolved) private var resolved
+/// The "+N" tile: on the bar, and in the rail beside the "+N more" row of a list that has one.
+struct OverflowTile: View {
+    let count: Int
+    let lit: Bool
+    let hovering: Bool
+    @Environment(\.resolved) private var resolved
 
-        var body: some View {
-            let shape = Tile.shape(Theme.Metrics.tile)
-            Text("+\(count)")
-                .font(Theme.Typography.numeral)
-                .foregroundStyle(lit ? Theme.onTint : Theme.text)
-                .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
-                .background(shape.fill(lit ? Theme.amber : resolved.fill(hovering ? Theme.Fill.selected : Theme.Fill.tile)))
-                // As on the waiting tile: a dark outline for an eye that can't tell amber from grey.
-                .overlay { if resolved.differentiate, lit { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
-                .brightness(lit && hovering ? 0.06 : 0)
-        }
+    var body: some View {
+        let shape = Tile.shape(Theme.Metrics.tile)
+        Text("+\(count)")
+            .font(Theme.Typography.numeral)
+            .foregroundStyle(lit ? Theme.onTint : Theme.text)
+            .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
+            .background(shape.fill(lit ? Theme.amber : resolved.fill(hovering ? Theme.Fill.selected : Theme.Fill.tile)))
+            // As on the waiting tile: a dark outline for an eye that can't tell amber from grey.
+            .overlay { if resolved.differentiate, lit { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
+            .brightness(lit && hovering ? 0.06 : 0)
     }
 }
 
