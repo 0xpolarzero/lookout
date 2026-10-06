@@ -388,3 +388,24 @@ import Testing
         #expect(LabelEditor.reset(.emoji, title: "CI failure diagnosis", folder: "microsandbox", hasIcon: true) == nil)
     }
 }
+
+/// The idle gate runs the real lifecycle on the demo's data (`--demo agents --lifecycle`): what the watchers read from the
+/// empty folder must not take the working sessions, and so the ring, away from what it measures.
+@MainActor
+@Suite struct DemoLifecycle {
+    @Test func aReadOfAnEmptyFolderLeavesTheDemosSessionsAndTheirRing() {
+        let store = Store()
+        Demo.populate(store, .agents)
+        let before = store.allAgentRows
+        #expect(before.contains { $0.tileMarks.working })
+        store.demoLifecycle = true
+        store.applyClaude(ClaudeSnapshot(link: .ok, sessions: [], appUnread: [], activity: [:], tasks: [:], stamp: store.claudeStamp))
+        #expect(store.allAgentRows.map(\.id) == before.map(\.id))
+        #expect(store.allAgentRows.contains { $0.tileMarks.working })
+        // Without the lifecycle, the same read is what removes them (a real, empty Claude folder).
+        let real = Store()
+        Demo.populate(real, .agents)
+        real.applyClaude(ClaudeSnapshot(link: .ok, sessions: [], appUnread: [], activity: [:], tasks: [:], stamp: real.claudeStamp))
+        #expect(real.allAgentRows.isEmpty)
+    }
+}

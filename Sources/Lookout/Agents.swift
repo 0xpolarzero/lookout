@@ -552,8 +552,13 @@ extension Store {
     }
 
     /// Takes a read of the app back onto the main thread; properties are only set when they changed.
-    private func applyClaude(_ snapshot: ClaudeSnapshot) {
+    func applyClaude(_ snapshot: ClaudeSnapshot) {
         guard agents.enabled, snapshot.stamp.generation == claudeStamp.generation else { return }
+        // The idle gate's run keeps the demo's sessions (and their ring): the read happened, and what it found is not theirs.
+        if demoLifecycle {
+            scheduleClaudeTick()
+            return
+        }
         // You changed something since this read was asked for: it could undo that, so read again instead.
         if snapshot.sessions != nil, snapshot.stamp.revision != claudeStamp.revision {
             refreshClaude()

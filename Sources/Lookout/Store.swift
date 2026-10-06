@@ -158,6 +158,8 @@ final class Store {
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?
     @ObservationIgnored private var dotsWatcher: FolderWatcher?
     @ObservationIgnored var claudeTimer: Timer?
+    /// `--demo --lifecycle`: the real watchers and reads run over an empty folder while the demo's sessions stay.
+    @ObservationIgnored var demoLifecycle = false
     @ObservationIgnored private var claudeObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var screensAsleep = false
     /// Parsed Markdown of session summaries (see `AgentRow.summaryText`).
@@ -213,8 +215,21 @@ final class Store {
     /// `LOOKOUT_CLAUDE_ROOT` names.
     func startLifecycle() {
         gh.transport = { _ in throw URLError(.notConnectedToInternet) }
+        demoLifecycle = true
         restartPolling()
         watchClaude()
+        // The first read of the empty folder would take the demo's sessions away, and the gate would be measuring a bar with
+        // no ring and no ticking rows. They are kept; what the watchers, the reads and the timer do is not skipped.
+        refreshClaude()
+        scheduleClaudeTick()
+        Task { @MainActor [weak self] in
+            // What the gate reads from stdout: that what it measures has working sessions on it.
+            try? await Task.sleep(for: .seconds(3))
+            guard let self else { return }
+            let rows = allAgentRows
+            let line = "lifecycle: sessions=\(rows.count) working=\(rows.filter { $0.tileMarks.working }.count)\n"
+            FileHandle.standardOutput.write(Data(line.utf8))
+        }
     }
 
     /// File events give near-instant updates: the sessions folder triggers a read of the sessions, the app's local
@@ -278,7 +293,7 @@ final class Store {
     /// message, and a background subagent that stopped writing is given up on. One timer, set after each read for the
     /// first moment something can expire (and none while the screens are asleep or nothing is running).
     func scheduleClaudeTick() {
-        guard agents.enabled, persists, !screensAsleep else {
+        guard agents.enabled, persists || demoLifecycle, !screensAsleep else {
             claudeTimer?.invalidate()
             claudeTimer = nil
             claudeDeadline = nil
