@@ -184,6 +184,9 @@ extension Store {
         let items: [InboxItem]
         let ci: CIStatus?
         let mutedCI: String?
+        /// What its conversations and its CI had failed at, which a poll would find again but not for a while.
+        let conversationError: String?
+        let ciError: String?
     }
 
     /// Stops watching, with an undo line and ⌘Z for 30 s that bring it all back.
@@ -192,7 +195,8 @@ extension Store {
         guard let index = repos.firstIndex(where: { $0.id == repo.id }) else { return nil }
         let stopped = StoppedRepo(repo: repos[index], index: index,
                                   items: items.filter { $0.repo == repo.fullName && $0.kind != .reviewRequested },
-                                  ci: ci[repo.fullName], mutedCI: mutedCI[repo.fullName])
+                                  ci: ci[repo.fullName], mutedCI: mutedCI[repo.fullName],
+                                  conversationError: conversationErrors[repo.fullName], ciError: ciErrors[repo.fullName])
         removeRepo(repo)
         registerUndo("Stopped watching \(repo.fullName)", in: .controls) { [self] in resumeWatching(stopped) }
         return stopped
@@ -205,6 +209,9 @@ extension Store {
         items.append(contentsOf: stopped.items.filter { !known.contains($0.id) })
         ci[stopped.repo.fullName] = stopped.ci
         mutedCI[stopped.repo.fullName] = stopped.mutedCI
+        conversationErrors[stopped.repo.fullName] = stopped.conversationError
+        ciErrors[stopped.repo.fullName] = stopped.ciError
+        publishHealth(stopped.repo.fullName)
         save()
     }
 
@@ -255,6 +262,7 @@ struct ReposView: View {
             ScrollView {
                 if store.repos.isEmpty {
                     EmptyBlock("Nothing watched yet", detail: "Watch your own repositories, or any public one you contribute to.")
+                        .frame(minHeight: Theme.Metrics.emptyBlock)
                         .padding(.top, Theme.Space.xl)
                 } else {
                     FormGroup(title: "Watching \(store.repos.count)") {

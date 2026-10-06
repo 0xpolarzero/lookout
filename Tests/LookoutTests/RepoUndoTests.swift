@@ -15,6 +15,19 @@ import Testing
         #expect(s.undoLast())
         #expect(s.repos.map(\.fullName) == ["a/one", "a/two"])
     }
+
+    @Test func undoingStopWatchingBringsItsSyncFailureBack() {
+        let s = Store.unsaved()
+        s.undoStack.announce = { _ in }
+        s.repos = [RepoConfig(fullName: "a/one")]
+        s.conversationErrors["a/one"] = "Not found (or no access)"
+        s.repoErrors["a/one"] = "Not found (or no access)"
+        s.stopWatching(s.repos[0])
+        #expect(s.repoErrors.isEmpty)
+        #expect(s.undoLast())
+        #expect(s.repoErrors["a/one"] == "Not found (or no access)")
+        #expect(s.syncFault(stale: false) == .partial)
+    }
 }
 
 @MainActor

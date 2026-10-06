@@ -101,8 +101,8 @@ final class Store {
     var authError: String?
     var repoErrors: [String: String] = [:]
     /// What a repository's conversations and its CI each failed at, apart: one succeeding says nothing of the other.
-    @ObservationIgnored private var conversationErrors: [String: String] = [:]
-    @ObservationIgnored private var ciErrors: [String: String] = [:]
+    @ObservationIgnored var conversationErrors: [String: String] = [:]
+    @ObservationIgnored var ciErrors: [String: String] = [:]
     /// Why the last search for review requests failed, if it did (a rate limit of its own bucket, say): the other
     /// source of the inbox, besides the repositories.
     var reviewRequestsError: String?
@@ -891,7 +891,7 @@ final class Store {
     }
 
     /// `repoErrors` is what the sources of a repository (its conversations, its CI) failed at, the conversations' first.
-    private func publishHealth(_ name: String) {
+    func publishHealth(_ name: String) {
         guard repos.contains(where: { $0.fullName == name }) else { return }
         let message = conversationErrors[name] ?? ciErrors[name]
         if repoErrors[name] != message { repoErrors[name] = message }
