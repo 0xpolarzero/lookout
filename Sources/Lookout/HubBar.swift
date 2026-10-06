@@ -92,8 +92,6 @@ extension LookoutHub {
         }
         .modifier(probe(.ci))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
-        // A search doesn't look in CI.
-        .opacity(searching ? 0.4 : 1)
         if store.agents.enabled {
             sectionDivider
             VStack(alignment: side, spacing: 0) { agentRowsView }
@@ -207,7 +205,6 @@ extension LookoutHub {
             .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
             .frame(maxHeight: .infinity)
             .modifier(probe(.ci))
-            .opacity(searching ? 0.4 : 1)
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {
