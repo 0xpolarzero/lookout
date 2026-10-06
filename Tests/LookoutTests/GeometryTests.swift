@@ -197,11 +197,11 @@ import Testing
 
     private nonisolated static let sides = [DockEdge.right, .left].flatMap { edge in [0.3, 0.7].map { (edge, $0) } }
 
-    @Test(arguments: sides)
-    func theInboxTileDoesNotMoveOnTheSides(edge: DockEdge, position: Double) {
-        let screen = CGSize(width: 1280, height: 800)
-        let (rest, open) = render(edge: edge, position: position, screen: screen)
-        #expect(rest.frame.minY == open.frame.minY, "\(edge) \(position): the hub starts at \(rest.frame.minY), kept open at \(open.frame.minY)")
+    /// The tile and the hub's start are where they were at rest, and the hub is on the screen.
+    private func expectTileStays(edge: DockEdge, position: Double, screen: CGSize, scenario: Demo.Scenario = .agents,
+                                 setup: ((Store) -> Void)? = nil) {
+        let (rest, open) = render(edge: edge, position: position, screen: screen, scenario: scenario, setup: setup)
+        #expect(abs(rest.frame.minY - open.frame.minY) < 0.5, "\(edge) \(position): the hub starts at \(rest.frame.minY), kept open at \(open.frame.minY)")
         let a = tile(rest, edge: edge, screen: screen)
         let b = tile(open, edge: edge, screen: screen)
         #expect(a != nil && b != nil, "\(edge): no inbox tile found")
@@ -209,6 +209,43 @@ import Testing
         // Compared by centre: the tile's own size is the bar's business.
         #expect(abs(a.midX - b.midX) < 0.5 && abs(a.midY - b.midY) < 0.5, "\(edge) \(position): tile at \(a), kept open at \(b)")
         expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(position)")
+    }
+
+    @Test(arguments: sides)
+    func theInboxTileDoesNotMoveOnTheSides(edge: DockEdge, position: Double) {
+        expectTileStays(edge: edge, position: position, screen: CGSize(width: 1280, height: 800))
+    }
+
+    /// Many inbox items, so the list is cut wherever the room is short.
+    private func longInbox(_ store: Store, count: Int = 30) {
+        let base = store.items
+        store.items += (0..<count).map { i in
+            var item = base[i % base.count]
+            item.id = "long-\(i)"
+            item.state = .unread
+            return item
+        }
+    }
+
+    private nonisolated static let lowSides: [(DockEdge, Double, CGFloat)] = [DockEdge.right, .left].flatMap { edge in
+        [0.7, 0.9].flatMap { position in [CGFloat(720), 800].map { (edge, position, $0) } }
+    }
+
+    @Test(arguments: lowSides)
+    func theInboxTileStaysWithSessionsOffAndNoCIOnALowBar(edge: DockEdge, position: Double, height: CGFloat) {
+        // The fixed parts are fewest here, so the lists' own minimum was what pushed the hub past the room under the bar.
+        expectTileStays(edge: edge, position: position, screen: CGSize(width: 1280, height: height), scenario: .noCI) {
+            $0.agents.enabled = false
+            longInbox($0, count: 8)
+        }
+    }
+
+    @Test(arguments: lowSides)
+    func theInboxTileStaysWithSessionsOffAndCIOnALowBar(edge: DockEdge, position: Double, height: CGFloat) {
+        expectTileStays(edge: edge, position: position, screen: CGSize(width: 1280, height: height)) {
+            $0.agents.enabled = false
+            longInbox($0, count: 8)
+        }
     }
 
     private nonisolated static let strips = [DockEdge.top, .bottom].flatMap { edge in [0.3, 0.5].map { (edge, $0) } }

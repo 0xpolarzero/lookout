@@ -34,32 +34,52 @@ extension LookoutHub {
         return sectionHeader("Inbox", status: needs > 0 ? [("\(needs) need you", AnyShapeStyle(Theme.amber))] : [])
     }
 
-    /// What the full view of the sides' lists may scroll within: what the screen's length leaves once the fixed parts
-    /// are laid out, the inbox first. A focused section takes all of it; shrunk ones are headers. Both lists end on a
-    /// whole row, so the sessions take whatever the inbox's rows leave, and the inbox what the sessions' don't need.
-    var caps: (inbox: CGFloat, agents: CGFloat) {
+    /// What the sides' full view takes besides its lists: its header and footer, the dividers, the update row, the padding
+    /// at both ends, and whatever each section keeps when it is not a list. `ciBody`: what the CI block takes under its
+    /// header (none when it is folded, shrunk or searched away).
+    private func fixedLength(ciBody: CGFloat) -> CGFloat {
         let pitch = Theme.Metrics.pitch
         let divider = 2 * Theme.Space.xs + 1
         let agents = store.agents.enabled
-        let inbox = !shrunk(.inbox)
         let sessions = agents && !shrunk(.agents)
         // The inbox's header, the footer and its divider, and the padding at both ends.
         var fixed = 2 * HubGeometry.lead + 2 * pitch + divider
-        if !searching { fixed += divider + pitch + (shrunk(.ci) ? 0 : max(ciHeight, pitch)) }
+        if !searching { fixed += divider + pitch + ciBody }
         if agents { fixed += divider + pitch + (sessions ? pitch + ClaudeNotice.room(store) : 0) }
         if store.updater.showsInPill { fixed += pitch }
-        // Never less than a row of each list: a hub that can't fit even that below where the bar rests is the one case
-        // `HubGeometry.along` moves.
+        return fixed
+    }
+
+    private var ciBodyHeight: CGFloat { max(ciHeight, Theme.Metrics.pitch) }
+
+    /// CI is only its header (its counts in it) where the room below the bar can't give each list a row after it: a
+    /// bar resting that low keeps the screen's end as the hub's, and the lists matter more than CI's lines.
+    var foldsCI: Bool {
+        let lists: CGFloat = store.agents.enabled ? 2 : 1
+        return !searching && hub.focus == nil && fullLength - fixedLength(ciBody: ciBodyHeight) < lists * Theme.Metrics.twoLineRow
+    }
+
+    /// Whether CI's lines show under its header.
+    var showsCIBody: Bool { !shrunk(.ci) && !foldsCI }
+
+    /// What the full view of the sides' lists may scroll within: what the screen's length leaves once the fixed parts
+    /// are laid out, the inbox first. A focused section takes all of it; shrunk ones are headers. Both lists end on a
+    /// whole row, so the sessions take whatever the inbox's rows leave, and the inbox what the sessions' don't need.
+    /// The length is the whole budget: with less than a row left a list is a short scroll, never a taller hub.
+    var caps: (inbox: CGFloat, agents: CGFloat) {
+        let agents = store.agents.enabled
+        let inbox = !shrunk(.inbox)
+        let sessions = agents && !shrunk(.agents)
         let row = Theme.Metrics.twoLineRow
-        let free = max(fullLength - fixed, 2 * row)
+        let free = max(fullLength - fixedLength(ciBody: showsCIBody ? ciBodyHeight : 0), 0)
         switch (inbox, sessions) {
         case (true, true):
             let share = free * 0.45
             let need = listHeights[.agents].map { min($0.content, share) } ?? share
-            let inboxCap = max(free - max(need, row), row)
+            let inboxCap = max(free - max(need, row), min(row, free))
             // Until the inbox is measured, it is taken to use all it may.
             let taken = min(listHeights[.inbox]?.shown ?? inboxCap, inboxCap)
-            return (inboxCap, max(free - taken, row))
+            return (inboxCap, max(free - taken, 0))
         case (true, false): return (free, 0)
         case (false, true): return (0, free)
         default: return (0, 0)
@@ -71,8 +91,10 @@ extension LookoutHub {
         if listHeights[section] != heights { listHeights[section] = heights }
     }
 
-    /// The cue under a cut list on the sides: on the text of its rows, beside the rail.
-    func sideCue(_ noun: String) -> MoreCue {
+    /// The cue under a cut list on the sides: on the text of its rows, beside the rail. None where the room is under a
+    /// row and its line (`cap`): there is no space to say anything in.
+    func sideCue(_ noun: String, cap: CGFloat) -> MoreCue? {
+        guard cap >= Theme.Metrics.twoLineRow + Theme.Metrics.pitch else { return nil }
         let rail = Self.cell, inset = Self.inset
         return MoreCue(noun: noun, insets: EdgeInsets(top: 0, leading: edge == .left ? rail : inset, bottom: 0,
                                                       trailing: edge == .left ? inset : rail))
@@ -140,7 +162,7 @@ extension LookoutHub {
                 VStack(alignment: .leading, spacing: 0) {
                     railRow(cell: { if !store.ciRepos.isEmpty { ciCell.frame(height: Theme.Metrics.pitch) } },
                             detail: { headerSlot(.ci) { ciHeader } })
-                    if !shrunk(.ci) { railRow(cell: { Color.clear }, detail: { ciColumn }) }
+                    if showsCIBody { railRow(cell: { Color.clear }, detail: { ciColumn }) }
                 }
                 .section("CI")
             }
@@ -172,7 +194,7 @@ extension LookoutHub {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.inbox, ListHeights(shown: $0, content: $0)) }
                 .onDisappear { record(.inbox, nil) }
         } else {
-            CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count), cue: sideCue("item"),
+            CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count), cue: sideCue("item", cap: cap),
                          onHeights: { record(.inbox, $0) }) {
                 AdaptiveStack(count: items.count, alignment: .leading, spacing: 1) {
                     ForEach(items) { item in
@@ -196,7 +218,7 @@ extension LookoutHub {
         if ClaudeNotice.room(store) > 0 {
             railRow(cell: { Color.clear }, detail: { ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding) })
         }
-        CappedScroll(cap: cap, hub: hub, cue: sideCue("session"), onHeights: { record(.agents, $0) }) {
+        CappedScroll(cap: cap, hub: hub, cue: sideCue("session", cap: cap), onHeights: { record(.agents, $0) }) {
             VStack(alignment: .leading, spacing: 0) {
                 let starts = projectStarts(rows.kept)
                 ForEach(rows.kept) { r in
