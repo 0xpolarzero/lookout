@@ -499,4 +499,19 @@ import Testing
         let listed = s.listedGroups(expanded: false, frozen: frozen)
         #expect(listed.groups.flatMap(\.rows).map(\.id).contains("n9"))
     }
+
+    // MARK: Review round 2
+
+    @Test func aSearchListsEverySessionThatMatches() {
+        let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
+        let hub = HubState()
+        hub.query = "Session"
+        #expect(s.hubSessions(hub).count == 12)
+        #expect(s.searchSessions("Session n11").map(\.id) == ["n11"])
+        // A waiting one past the eighth is found too, and reachable by the keys.
+        s.claudeActivity = ["n11": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["n11"]?.running = true
+        #expect(s.hubSessions(hub).map(\.id).contains("n11"))
+        #expect(s.hubTargets(hub).contains("a:n11"))
+    }
 }

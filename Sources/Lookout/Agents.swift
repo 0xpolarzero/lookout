@@ -490,8 +490,8 @@ extension Store {
     }
 
     /// Every session matching all the words (title or folder), best first: title starts with the query, kept ones,
-    /// then the most recent. For the switcher's type-to-find.
-    func searchSessions(_ query: String, limit: Int = 8) -> [AgentRow] {
+    /// then the most recent. For the switcher's type-to-find; the list scrolls, so none is left out (DESIGN.md 5.3).
+    func searchSessions(_ query: String) -> [AgentRow] {
         let words = query.lowercased().split(separator: " ").map(String.init)
         guard !words.isEmpty else { return [] }
         let labels = cache.labels
@@ -512,9 +512,7 @@ extension Store {
                 if ka != kb { return ka }
                 return a.0.lastActivity > b.0.lastActivity
             }
-            .map(\.0)
-            .prefix(limit)
-            .map { row($0, label: labels[$0.id]) }
+            .map { row($0.0, label: labels[$0.0.id]) }
     }
 
     var allAgentRows: [AgentRow] { cache.all }
