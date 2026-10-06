@@ -5,6 +5,13 @@ import SwiftUI
 // on the sides the inbox tile stays at the rail's top; along the top and bottom the strip's leading edge stays put and
 // the hub grows away from it.
 
+extension View {
+    /// A named group for VoiceOver (Inbox, CI, Sessions, Controls).
+    func section(_ name: String) -> some View {
+        accessibilityElement(children: .contain).accessibilityLabel(name)
+    }
+}
+
 extension LookoutHub {
     @ViewBuilder var openHub: some View {
         if edge.isHorizontal { openStripHub } else { openSideHub }
@@ -108,27 +115,36 @@ extension LookoutHub {
         let caps = caps
         return VStack(alignment: .leading, spacing: 0) {
             // Inbox: its header level with its cell, the tile where it is at rest.
-            railRow(cell: { openInboxCell }, detail: {
-                headerSlot(.inbox) { shrunk(.inbox) ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
-            })
-            if !shrunk(.inbox) { sideInbox(cap: caps.inbox) }
+            VStack(alignment: .leading, spacing: 0) {
+                railRow(cell: { openInboxCell }, detail: {
+                    headerSlot(.inbox) { shrunk(.inbox) ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
+                })
+                if !shrunk(.inbox) { sideInbox(cap: caps.inbox) }
+            }
+            .section("Inbox")
             if !searching {
                 openDivider
-                railRow(cell: { if !store.ciRepos.isEmpty { ciCell.frame(height: Theme.Metrics.pitch) } },
-                        detail: { headerSlot(.ci) { ciHeader } })
-                if !shrunk(.ci) { railRow(cell: { Color.clear }, detail: { ciColumn }) }
+                VStack(alignment: .leading, spacing: 0) {
+                    railRow(cell: { if !store.ciRepos.isEmpty { ciCell.frame(height: Theme.Metrics.pitch) } },
+                            detail: { headerSlot(.ci) { ciHeader } })
+                    if !shrunk(.ci) { railRow(cell: { Color.clear }, detail: { ciColumn }) }
+                }
+                .section("CI")
             }
             if store.agents.enabled {
                 openDivider
-                railRow(cell: { Color.clear.frame(height: Theme.Metrics.pitch) }, detail: { headerSlot(.agents) { agentsHeader } })
-                if !shrunk(.agents) { sideAgents(cap: caps.agents) }
+                VStack(alignment: .leading, spacing: 0) {
+                    railRow(cell: { Color.clear.frame(height: Theme.Metrics.pitch) }, detail: { headerSlot(.agents) { agentsHeader } })
+                    if !shrunk(.agents) { sideAgents(cap: caps.agents) }
+                }
+                .section("Sessions")
             }
             if store.updater.showsInPill {
                 railRow(cell: { UpdateButton(updater: store.updater, horizontal: false).frame(height: Theme.Metrics.pitch) },
                         detail: { Text(updateText).font(Theme.Typography.control).foregroundStyle(Theme.secondary).padding(.horizontal, Theme.Metrics.rowPadding) })
             }
             openDivider
-            railRow(cell: { settingsCell.frame(height: Theme.Metrics.pitch) }, detail: { footerRow })
+            railRow(cell: { settingsCell.frame(height: Theme.Metrics.pitch) }, detail: { footerRow }).section("Controls")
         }
         .padding(.vertical, HubGeometry.lead)
         .frame(width: Self.cell + Self.detail)
@@ -198,8 +214,8 @@ extension LookoutHub {
         let footer = footerRow
         return VStack(alignment: .leading, spacing: 0) {
             // The strip stays at the screen's edge and the hub grows away from it; the footer is the far end.
-            if edge == .bottom { footer; Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); strip }
-            else { strip; Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); footer }
+            if edge == .bottom { footer.section("Controls"); Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); strip }
+            else { strip; Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); footer.section("Controls") }
         }
         .padding(edge == .top ? .bottom : .top, HubGeometry.lead)
         .frame(width: width)
@@ -260,9 +276,9 @@ extension LookoutHub {
         return VStack(alignment: .leading, spacing: 0) {
             if edge == .bottom {
                 if !searching { ci; Hairline().padding(.vertical, Theme.Space.xs) }
-                stripInbox(cap: inboxCap)
+                stripInbox(cap: inboxCap).section("Inbox")
             } else {
-                stripInbox(cap: inboxCap)
+                stripInbox(cap: inboxCap).section("Inbox")
                 if !searching { Hairline().padding(.vertical, Theme.Space.xs); ci }
             }
         }
@@ -275,6 +291,7 @@ extension LookoutHub {
             if edge == .bottom { newSession; stripAgents(cap: cap) } else { stripAgents(cap: cap); newSession }
         }
         .padding(.horizontal, Self.inset)
+        .section("Sessions")
     }
 
     /// Focused: the section has the whole column, the others are their headers; along the bottom the other way up.
@@ -284,14 +301,15 @@ extension LookoutHub {
         let headers = Theme.Metrics.pitch * CGFloat((searching ? 0 : 1) + (agents ? 1 : 0))
         let inboxCap = max(room - headers - (focus == .ci ? max(ciHeight, 0) : 0) - (focus == .agents ? 0 : 0), 120)
         return VStack(alignment: .leading, spacing: 0) {
-            let inbox = Group { if !shrunk(.inbox) { stripInbox(cap: inboxCap) } }
-            let ci = Group { if !searching { headerSlot(.ci) { ciHeader }; if !shrunk(.ci) { ciColumn } } }
-            let sessions = Group {
+            let inbox = VStack(spacing: 0) { if !shrunk(.inbox) { stripInbox(cap: inboxCap) } }.section("Inbox")
+            let ci = VStack(spacing: 0) { if !searching { ciBlock } }
+            let sessions = VStack(alignment: .leading, spacing: 0) {
                 if agents {
                     headerSlot(.agents) { agentsHeader }
                     if !shrunk(.agents) { stripAgents(cap: max(room - headers, 120)); newSession }
                 }
             }
+            .section("Sessions")
             if edge == .bottom { sessions; ci; inbox } else { inbox; ci; sessions }
         }
         .padding(.horizontal, Self.inset)
@@ -302,6 +320,7 @@ extension LookoutHub {
             headerSlot(.ci) { ciHeader }
             if !shrunk(.ci) { ciColumn }
         }
+        .section("CI")
     }
 
     var newSession: some View {

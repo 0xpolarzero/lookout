@@ -190,7 +190,7 @@ struct LookoutHub: View {
                                  edge: edge, reveal: peek == nil ? 0 : 1)
         let out = expanded || pageOpen || peek != nil
         Group {
-            if showsDetail { openHub } else if pageOpen { pageHub } else { restHub }
+            if showsDetail { openHub } else { restHub }
         }
         .coordinateSpace(.named(Self.barSpace))
         // Only the bar at rest is measured (for the hover panels): nothing to redo while the full view changes.
@@ -240,34 +240,29 @@ struct LookoutHub: View {
 
     // MARK: At rest, and with a page
 
-    /// The bar alone: the column on the sides, the strip along the top and bottom.
+    /// The bar, and beside it (under it along the top and bottom) the page when one is open. The bar is the same view
+    /// either way: it is never dimmed and never rebuilt, and the page grows out of it.
     @ViewBuilder var restHub: some View {
-        if edge.isHorizontal { stripRow } else { barColumn }
+        if edge.isHorizontal {
+            // The strip and the page share one width, the strip at the leading end.
+            SharedWidthStack {
+                if edge == .bottom, pageOpen { stripPage }
+                stripRow.zIndex(1)
+                if edge == .top, pageOpen { stripPage }
+            }
+        } else {
+            HStack(alignment: .top, spacing: 0) {
+                if edge == .right, pageOpen { sidePage }
+                barColumn.zIndex(1)
+                if edge == .left, pageOpen { sidePage }
+            }
+        }
     }
 
     var stripRow: some View {
         HStack(alignment: .center, spacing: 0) { strip }
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: Self.cell)
-    }
-
-    /// The bar as at rest (never dimmed) and the page beside it, or under it along the top and bottom. The bar stays
-    /// where it is; the page grows out of it.
-    @ViewBuilder var pageHub: some View {
-        if edge.isHorizontal {
-            // The strip and the page share one width, the strip at the leading end.
-            SharedWidthStack {
-                if edge == .bottom { stripPage }
-                stripRow.zIndex(1)
-                if edge == .top { stripPage }
-            }
-        } else {
-            HStack(alignment: .top, spacing: 0) {
-                if edge == .right { sidePage }
-                barColumn.zIndex(1)
-                if edge == .left { sidePage }
-            }
-        }
     }
 
     var sidePage: some View {

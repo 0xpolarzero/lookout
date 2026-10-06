@@ -321,7 +321,8 @@ struct Shot {
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// 1280×720, every edge
-///   open-720, settings-720, repos-720, rest-sessions-12-720
+///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-agents-720,
+///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -392,6 +393,14 @@ enum PlaygroundShots {
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
         Shot.edges("repos-720") { $0.pinned = true; $0.page = .repos; $0.size = Shot.hd },
         Shot.edges("rest-sessions-12-720") { $0.scenario = .sessions12; $0.size = Shot.hd },
+        // The chrome on a 1280×720 screen: every peek, a focused section and the fullest views, on every edge.
+        Shot.edges("peek-inbox-720") { $0.section = .inbox; $0.size = Shot.hd },
+        Shot.edges("peek-ci-720") { $0.section = .ci; $0.size = Shot.hd },
+        Shot.edges("peek-agents-720") { $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd },
+        Shot.edges("peek-controls-720") { $0.section = .controls; $0.size = Shot.hd },
+        Shot.edges("focus-inbox-720") { $0.pinned = true; $0.focus = .inbox; $0.size = Shot.hd },
+        Shot.edges("open-sessions-12-720") { $0.pinned = true; $0.scenario = .sessions12; $0.size = Shot.hd },
+        Shot.edges("open-many-ci-720") { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
     ].flatMap { $0 }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.

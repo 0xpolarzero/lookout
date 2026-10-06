@@ -52,6 +52,12 @@ final class HubKeys {
             return true
         }
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
+        // ⌘1, ⌘2, ⌘3 give the Inbox, CI or Sessions all the room (again: back); ⌘0 gives every section its room back.
+        // By key position, so they hold on an AZERTY keyboard, where the digits are shifted.
+        if flags == .command, hub.expanded, hub.page == .main, let focus = Self.focusKey(event.keyCode) {
+            if let section = focus { hub.toggleFocus(section) } else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
+            return true
+        }
         guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
@@ -97,6 +103,17 @@ final class HubKeys {
             return true
         }
         return false
+    }
+
+    /// What a ⌘-digit asks of the section focus: a section, or nil for ⌘0. Outer nil: not a focus key.
+    private static func focusKey(_ keyCode: UInt16) -> HubSection?? {
+        switch Int(keyCode) {
+        case kVK_ANSI_1: .some(.inbox)
+        case kVK_ANSI_2: .some(.ci)
+        case kVK_ANSI_3: .some(.agents)
+        case kVK_ANSI_0: .some(nil)
+        default: nil
+        }
     }
 
     /// Every row the arrows walk through, top to bottom: inbox items, then sessions.

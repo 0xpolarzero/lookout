@@ -41,8 +41,6 @@ extension LookoutHub {
         .padding(.leading, Theme.Metrics.rowPadding)
         .padding(.trailing, Theme.Space.hair)
         .frame(height: Theme.Metrics.pitch)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Footer")
     }
 
     var pinButton: some View {
