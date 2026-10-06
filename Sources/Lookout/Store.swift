@@ -156,8 +156,10 @@ final class Store {
     /// What a check asks GitHub, replaced by the tests.
     @ObservationIgnored var ciFetch: ((RepoConfig) async throws -> CIStatus)?
     @ObservationIgnored var persists = true
-    /// While a shortcut is being recorded, the panel's key handler stands down.
-    @ObservationIgnored var isRecordingShortcut = false
+    /// The one recorder that is listening for keys, and how to stop it: another one starting stops it first, and while
+    /// there is one the panel's key handler and the global shortcuts stand down.
+    @ObservationIgnored var recorder: (action: ShortcutAction, stop: () -> Void)?
+    var isRecordingShortcut: Bool { recorder != nil }
     /// Registers a global shortcut system-wide; `false` when the system refuses it.
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Bool)?
     /// The system-wide shortcuts the system last refused to register (another app holds the key), by the key it refused:

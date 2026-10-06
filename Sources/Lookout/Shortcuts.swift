@@ -359,9 +359,10 @@ struct ShortcutRecorder: View {
     }
 
     private func start() {
+        store.recorder?.stop()
         error = nil
         recording = true
-        store.isRecordingShortcut = true
+        store.recorder = (action, stop)
         tap = ModifierTap()
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .otherMouseDown]) { event in
             if event.type == .otherMouseDown {
@@ -416,6 +417,6 @@ struct ShortcutRecorder: View {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         recording = false
-        store.isRecordingShortcut = false
+        if store.recorder?.action == action { store.recorder = nil }
     }
 }
