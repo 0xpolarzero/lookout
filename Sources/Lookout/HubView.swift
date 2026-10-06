@@ -140,7 +140,7 @@ final class HubState {
             if let selection, !isVisible(selection) { self.selection = nil; keyboardSelection = nil }
             // CI isn't drawn while there is a query, and the inbox, shrunk to its header, would hide the field it is typed in:
             // CI focused ends the search, whichever way it was focused (⌘2, its header, a bar cell).
-            if focus == .ci, !query.isEmpty || inbox.searchOpen { query = ""; inbox.endSearch() }
+            if focus == .ci, !query.isEmpty || inbox.searchOpen { endSearch() }
             if focus == .ci, oldValue != .ci {
                 passingBeforeFocus = ciPassingOpen
                 ciPassingOpen = true
@@ -149,6 +149,12 @@ final class HubState {
                 passingBeforeFocus = nil
             }
         }
+    }
+
+    /// The query and the field it is typed in, both: what closing the hub, by key or by leaving, and a focused CI end.
+    func endSearch() {
+        query = ""
+        inbox.endSearch()
     }
 
     /// Whether a section's rows show: all of them do, unless another section is the focused one.

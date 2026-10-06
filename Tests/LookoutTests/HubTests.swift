@@ -828,6 +828,13 @@ import Testing
         #expect(!hub.pinned)
     }
 
+    @Test func endingTheSearchEndsTheFieldAsWellAsTheQuery() {
+        hub.query = "swift"
+        hub.beginSearch()
+        hub.endSearch()
+        #expect(hub.query.isEmpty && !hub.inbox.searchOpen)
+    }
+
     @Test func escapeFromRepositoriesOpenedFromSettingsGoesBackToSettings() {
         hub.go(.settings)
         hub.go(.repos)

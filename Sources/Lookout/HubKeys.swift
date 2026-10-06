@@ -26,8 +26,7 @@ final class HubKeys {
     func close() {
         // Closing leaves any page: the hub opens on the main view next time.
         hub.go(.main)
-        hub.query = ""
-        hub.inbox.endSearch()
+        hub.endSearch()
         hub.keyboardSelection = nil
         hub.pinned = false
         hub.hovering = false

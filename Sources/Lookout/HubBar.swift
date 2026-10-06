@@ -102,8 +102,7 @@ extension LookoutHub {
     func openInbox() {
         withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
             hub.go(.main)
-            hub.query = ""
-            hub.inbox.endSearch()
+            hub.endSearch()
             hub.filter = .needsYou
             // The pick is a row of the inbox: another section's focus would fold it away and leave nothing to pick.
             if hub.focus != .inbox { hub.focus = nil }
