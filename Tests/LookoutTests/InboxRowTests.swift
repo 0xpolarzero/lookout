@@ -107,3 +107,44 @@ import Testing
         window.orderOut(nil)
     }
 }
+
+@MainActor
+@Suite struct InboxBodyBudget {
+    /// The body of an inbox with many rows, a banner and an undo line, in a column 400 wide given `cap` to stay within.
+    private func height(cap: CGFloat, banner: Bool, undo: Bool) -> CGFloat {
+        let store = Store()
+        store.persists = false
+        store.undoStack.announce = { _ in }
+        store.repos = [RepoConfig(fullName: "a/b")]
+        store.lastSync = Date()
+        store.items = (0..<18).map { i in
+            InboxItem(id: "\(i)", repo: "a/b", kind: .issueOpened, number: i, title: "Item \(i)", snippet: "", author: "x", avatar: nil,
+                      authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
+                      createdAt: Date().addingTimeInterval(-Double(i) * 60), state: .unread)
+        }
+        if banner { store.repoErrors = ["a/b": "Forbidden"] }
+        if undo { store.done(store.items[0]) }
+        let hub = HubState()
+        let view = LookoutHub(store: store, ui: UIState(), hub: hub, maxLength: 700).inboxBody(cap: cap).frame(width: 400)
+        let hosting = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 900), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
+        let h = hosting.fittingSize.height
+        window.contentView = nil
+        window.orderOut(nil)
+        return h
+    }
+
+    @Test func theBannerAndTheUndoLineComeOutOfTheListsRoom() {
+        let cap: CGFloat = 330
+        for (banner, undo) in [(false, false), (true, false), (false, true), (true, true)] {
+            let h = height(cap: cap, banner: banner, undo: undo)
+            #expect(h <= cap + 0.5, "banner \(banner), undo \(undo): \(h)")
+        }
+        // The list is not shrunk past what the extras take: it still fills whole rows of what is left.
+        #expect(height(cap: cap, banner: true, undo: true) > cap - InboxList.pitch)
+    }
+}

@@ -414,13 +414,11 @@ struct LookoutHub: View {
     /// Along the top and bottom, the lists scroll past this, so the view stays compact.
     static let listCap: CGFloat = 300
 
-    /// Along the top and bottom, a focused section across the whole width: the inbox in two columns.
+    /// Along the top and bottom, a focused section across the whole width: the inbox in one column.
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            inboxBody(cap: maxLength - Self.cell - 16 - 2 * 8)
-                .padding(.horizontal, Self.inset)
-                .padding(.vertical, 8)
+            focusedInbox(cap: maxLength - Self.cell - 16 - 2 * 8)
         case .ci:
             ciColumn
         default:

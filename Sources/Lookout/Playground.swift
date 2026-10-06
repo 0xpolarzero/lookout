@@ -323,7 +323,7 @@ struct Shot {
 ///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
 ///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none,
 ///   inbox-search-from-focus, inbox-many, inbox-peek-many,
-///   inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done,
+///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
@@ -439,6 +439,17 @@ enum PlaygroundShots {
         Shot.edges("inbox-peek", on: .rightAndTop) { $0.section = .inbox },
         Shot.edges("inbox-peek-done", on: .rightAndTop) { $0.section = .inbox; $0.filter = .done },
         Shot.edges("inbox-focus", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },
+        // The one column along the top, on a wide screen and with a banner and an undo line taking height from the list.
+        Shot.edges("inbox-focus-wide", on: [.top]) {
+            $0.pinned = true; $0.focus = .inbox; $0.scenario = .inboxMany; $0.size = CGSize(width: 2400, height: 820)
+        },
+        Shot.edges("inbox-focus-banner-undo", on: [.top]) {
+            $0.pinned = true; $0.focus = .inbox; $0.scenario = .inboxMany
+            $0.setup = { store, _, _ in
+                store.repoErrors = ["ziglang/zig": "Not found (or no access)"]
+                if let first = store.list(.needsYou).first { store.done(first) }
+            }
+        },
         Shot.edges("inbox-contrast", on: .rightAndTop) {
             $0.pinned = true; $0.selection = .firstNeedsYou; $0.environment = .contrast
         },

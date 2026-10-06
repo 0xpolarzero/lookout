@@ -336,6 +336,10 @@ extension LookoutHub {
     /// the undo line. `cap` is the height the list scrolls within; the caller pads the sides.
     func inboxBody(cap: CGFloat) -> some View {
         let notice = store.inboxNotice()
+        let undo = store.undoStack.visible(in: .inbox)
+        // The banner and the undo line come out of the room the list has, so the whole body stays within `cap`.
+        let listCap = cap - (notice == nil ? 0 : Theme.Metrics.banner + Theme.Space.xs)
+            - (undo == nil ? 0 : Theme.Metrics.undoLine + Theme.Space.xs)
         return VStack(spacing: Theme.Space.xs) {
             if let notice {
                 StatusBanner(symbol: notice.symbol, tint: notice.tint, message: notice.message) {
@@ -349,10 +353,10 @@ extension LookoutHub {
             if store.inboxReplacement != nil || items.isEmpty {
                 emptyInbox
             } else {
-                InboxList(items: items, cap: cap, listKey: listKey, scopeID: searching ? "search" : hub.filter.rawValue,
+                InboxList(items: items, cap: listCap, listKey: listKey, scopeID: searching ? "search" : hub.filter.rawValue,
                           store: store, ui: ui, hub: hub)
             }
-            if let undo = store.undoStack.visible(in: .inbox) {
+            if let undo {
                 UndoLine(message: undo.message) { store.undoLast() }
             }
         }
@@ -397,6 +401,19 @@ extension LookoutHub {
 
     func itemRow(_ item: InboxItem) -> some View {
         InboxRow(item: item, store: store, ui: ui, hub: hub).capEdge()
+    }
+
+    /// The widest the inbox gets when it is the one section shown along the top and bottom: a row's title and its age
+    /// stay within reach of each other.
+    static let focusedInboxWidth: CGFloat = 560
+
+    /// The inbox alone along the top and bottom: one column at the strip's leading edge, whatever the width.
+    func focusedInbox(cap: CGFloat) -> some View {
+        inboxBody(cap: cap)
+            .padding(.horizontal, Self.inset)
+            .padding(.vertical, 8)
+            .frame(maxWidth: Self.focusedInboxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
