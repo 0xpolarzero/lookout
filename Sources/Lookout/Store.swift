@@ -951,6 +951,21 @@ final class Store {
         if changed { items = all }
     }
 
+    /// Stores a repository's CI status. A mute is for the commit and the state it was made at: the same commit rerun,
+    /// now running or passing, lifts it just as a new commit does.
+    func ingestCI(_ status: CIStatus, for name: String) {
+        if mutedCI[name] != nil, ci[name]?.sha != status.sha || ci[name]?.state != status.state { mutedCI[name] = nil }
+        // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
+        ciCheckedAt[name] = status.checkedAt
+        if var old = ci[name] {
+            old.checkedAt = status.checkedAt
+            if old != status { ci[name] = status; save() }
+        } else {
+            ci[name] = status
+            save()
+        }
+    }
+
     private func syncCI(_ name: String) async throws {
         guard var repo = repos.first(where: { $0.fullName == name }), repo.events.contains(.ciMain) else { return }
         if repo.defaultBranch == nil {
@@ -995,15 +1010,7 @@ final class Store {
                               failing: failing, checkedAt: Date(),
                               title: actions.workflowRuns.first?.displayTitle,
                               updatedAt: latest.values.compactMap(\.updatedAt).max())
-        // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
-        ciCheckedAt[name] = status.checkedAt
-        if var old = ci[name] {
-            old.checkedAt = status.checkedAt
-            if old != status { ci[name] = status; save() }
-        } else {
-            ci[name] = status
-            save()
-        }
+        ingestCI(status, for: name)
 
         if previous == .success || previous == .pending, state == .failure {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",

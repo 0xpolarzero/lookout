@@ -90,6 +90,57 @@ import Testing
         #expect(summary(["a": status(.failure, sha: "s2"), "b": status(.success)], muted: ["o/a": "s1"]).worst == .failure)
     }
 
+    /// A store that has CI for `o/a` at `sha` in `state`, muted at that commit.
+    private func mutedStore(_ state: CIState, sha: String = "s1") -> Store {
+        let s = Store()
+        s.persists = false
+        s.repos = [RepoConfig(fullName: "o/a")]
+        s.ci = ["o/a": status(state, sha: sha)]
+        s.mutedCI = ["o/a": sha]
+        return s
+    }
+
+    @Test func aMuteSurvivesASyncThatChangesNothing() {
+        let s = mutedStore(.failure)
+        var again = status(.failure, sha: "s1")
+        again.checkedAt = now.addingTimeInterval(60)
+        s.ingestCI(again, for: "o/a")
+        #expect(s.mutedCI == ["o/a": "s1"])
+        #expect(CIBarSummary.make(repos: s.repos, status: s.ci, muted: s.mutedCI).muted == 1)
+    }
+
+    @Test func aMuteEndsWhenTheSameCommitChangesState() {
+        // The muted failure is rerun: running, or passing. Either is news the bar shows.
+        let s = mutedStore(.failure)
+        s.ingestCI(status(.pending, sha: "s1"), for: "o/a")
+        #expect(s.mutedCI.isEmpty)
+        let running = CIBarSummary.make(repos: s.repos, status: s.ci, muted: s.mutedCI)
+        #expect(running.worst == .pending)
+        #expect(running.open?.name == "a")
+        #expect(running.muted == 0)
+
+        let passing = mutedStore(.failure)
+        passing.ingestCI(status(.success, sha: "s1"), for: "o/a")
+        #expect(passing.mutedCI.isEmpty)
+        #expect(CIBarSummary.make(repos: passing.repos, status: passing.ci, muted: passing.mutedCI).passing == 1)
+
+        // Failing again on that commit is a change too, and a mute made then holds like the first.
+        let rerun = mutedStore(.pending)
+        rerun.ingestCI(status(.failure, sha: "s1"), for: "o/a")
+        #expect(rerun.mutedCI.isEmpty)
+        rerun.mutedCI["o/a"] = "s1"
+        #expect(CIBarSummary.make(repos: rerun.repos, status: rerun.ci, muted: rerun.mutedCI).failing == 0)
+    }
+
+    @Test func aMuteEndsWithANewCommitAndOnlyForItsOwnRepo() {
+        let s = mutedStore(.failure)
+        s.repos.append(RepoConfig(fullName: "o/b"))
+        s.ci["o/b"] = status(.failure, sha: "t1")
+        s.mutedCI["o/b"] = "t1"
+        s.ingestCI(status(.failure, sha: "s2"), for: "o/a")
+        #expect(s.mutedCI == ["o/b": "t1"])
+    }
+
     // MARK: Inbox cell
 
     @Test func inboxValueSaysWhatNeedsYouAndTheBots() {
