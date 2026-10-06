@@ -284,6 +284,12 @@ final class TipCenter {
         }
     }
 
+    /// Esc: the bubble goes and the pointer or the focus stays where it is (WCAG 1.4.13). A tip shows again only when the
+    /// pointer or the keyboard comes to a control anew, which asks for it.
+    func dismiss() {
+        if let id = current?.id { close(id) }
+    }
+
     /// The pointer is back on the control, or has reached the bubble.
     func hold(bubble: Bool) {
         leaving?.cancel()
@@ -335,7 +341,8 @@ private struct Tip: ViewModifier {
                 guard hover else { return }
                 if inside { center?.hold(bubble: false); schedule(after: Theme.Timing.tooltip) } else { pending?.cancel(); center?.leave(id) }
             }
-            .onChange(of: focused) { _, focused in
+            // `initial`: a row the keyboard picked before it was on screen has its tip too.
+            .onChange(of: focused, initial: true) { _, focused in
                 focused ? schedule(after: Theme.Timing.tooltipFocus) : hide()
             }
             .onDisappear { hide() }
@@ -371,7 +378,7 @@ enum TipPlacement {
         if let beside {
             let x = beside == .leading ? a.minX - size.width - 6 : a.maxX + 6
             let y = min(max(a.midY - size.height / 2, margin), max(margin, bounds.height - margin - size.height))
-            return CGPoint(x: max(x, margin), y: y)
+            return CGPoint(x: min(max(x, margin), max(margin, bounds.width - margin - size.width)), y: y)
         }
         let x = min(max(a.midX - size.width / 2, margin), max(margin, bounds.width - margin - size.width))
         let y = a.minY - size.height - 6 >= margin ? a.minY - size.height - 6 : a.maxY + 6
@@ -383,7 +390,13 @@ private struct TipBubble: View {
     let request: TipCenter.Request
     let center: TipCenter
     let bounds: CGSize
+    /// Tells the window where the bubble is, and the way to it from its control, as it moves.
+    let report: (CGRect) -> Void
     @State private var size = CGSize.zero
+
+    /// How wide the text may be: what the window leaves the bubble, and a sentence's worth at most. A long title wraps.
+    private var textLimit: CGFloat { min(max(bounds.width - 2 * Self.margin - 16, 80), 360) }
+    private static let margin: CGFloat = 8
 
     /// A key equivalent ("⌘,", "⌫", "Esc") rather than a sentence: it goes after the label, on one line.
     private var key: String? {
@@ -395,16 +408,16 @@ private struct TipBubble: View {
         Group {
             if let key {
                 HStack(spacing: Theme.Space.md) {
-                    Text(request.title).foregroundStyle(Theme.text)
+                    title
                     Text(key).foregroundStyle(Theme.secondary)
                 }
             } else {
                 VStack(alignment: .leading, spacing: Theme.Space.hair) {
-                    Text(request.title).foregroundStyle(Theme.text)
+                    title
                     if let detail = request.detail, !detail.isEmpty {
                         Text(detail)
                             .foregroundStyle(Theme.secondary)
-                            .frame(width: Self.width(of: detail), alignment: .leading)
+                            .frame(width: min(Self.width(of: detail), textLimit), alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -424,6 +437,19 @@ private struct TipBubble: View {
         .offset(placement)
         .opacity(size == .zero ? 0 : 1)
         .allowsHitTesting(size != .zero)
+        .onChange(of: region, initial: true) { _, region in report(region) }
+    }
+
+    private var title: some View {
+        Text(request.title).foregroundStyle(Theme.text)
+            .frame(maxWidth: textLimit, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The bubble and the gap between it and its control: where the pointer can be on its way to the bubble. Nothing until
+    /// the bubble is measured.
+    private var region: CGRect {
+        size == .zero ? .zero : request.anchor.union(CGRect(origin: TipPlacement.origin(anchor: request.anchor, size: size, bounds: bounds, beside: request.beside), size: size))
     }
 
     private var placement: CGSize {
@@ -452,8 +478,11 @@ extension EnvironmentValues {
 }
 
 private struct TipSpaceModifier: ViewModifier {
+    /// Where a bubble and the way to it are in this space, for a window that takes the mouse there (`.zero`: none).
+    let region: (CGRect) -> Void
     @State private var center = TipCenter()
     @State private var size = CGSize.zero
+    @State private var escapeID = UUID()
 
     func body(content: Content) -> some View {
         content
@@ -462,16 +491,22 @@ private struct TipSpaceModifier: ViewModifier {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
             .overlay(alignment: .topLeading) {
                 if let request = center.current {
-                    TipBubble(request: request, center: center, bounds: size)
+                    TipBubble(request: request, center: center, bounds: size, report: region)
                         .transition(.opacity.animation(Theme.Motion.hover))
                 }
             }
+            // An open tip is the first thing Esc closes, so it can be dismissed without moving the pointer or the focus.
+            .onChange(of: center.current?.id, initial: true) { _, id in
+                if id != nil { EscapeRoute.register(escapeID) { center.dismiss() } } else { EscapeRoute.unregister(escapeID); region(.zero) }
+            }
+            .onDisappear { EscapeRoute.unregister(escapeID); region(.zero) }
     }
 }
 
 extension View {
     /// Hosts tooltips for everything inside (use once, at the root of the panel).
-    func tipSpace() -> some View { modifier(TipSpaceModifier()) }
+    /// `region` hears where the bubble and the way to it lie (`.zero` when none is up).
+    func tipSpace(region: @escaping (CGRect) -> Void = { _ in }) -> some View { modifier(TipSpaceModifier(region: region)) }
 
     /// A tooltip for an icon-only control: `detail` is its key, or a short sentence. `focused` (the control's own
     /// focus) shows it after a second for keyboard users.

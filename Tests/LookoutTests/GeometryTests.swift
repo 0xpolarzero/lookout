@@ -545,6 +545,79 @@ private extension NSView {
     }
 }
 
+@MainActor
+@Suite(.serialized) struct TipBubbles {
+    /// Hosts a control with a tip of `title` shown at once in a window `width` wide, and where its bubble and the way to it end up.
+    private func region(title: String, detail: String? = nil, anchor: CGPoint, width: CGFloat = 500,
+                        thenEscape: Bool = false, focusedAtStart: Bool = false) async throws -> CGRect {
+        var seen = CGRect.zero
+        let control = Color.red.frame(width: 36, height: 36).tip(title, detail, focused: focusedAtStart, beside: anchor.x > width / 2 ? .leading : .trailing)
+            .position(anchor)
+            .frame(width: width, height: 400, alignment: .topLeading)
+            .environment(\.previewTip, focusedAtStart ? nil : title)
+            .tipSpace { seen = $0 }
+        let hosting = NSHostingView(rootView: control)
+        hosting.frame = CGRect(x: 0, y: 0, width: width, height: 400)
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        for _ in 0..<80 where seen == .zero {
+            try await Task.sleep(for: .milliseconds(50))
+            hosting.layoutSubtreeIfNeeded()
+        }
+        if thenEscape {
+            #expect(seen != .zero && EscapeRoute.run())
+            for _ in 0..<40 where seen != .zero { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        return seen
+    }
+
+    @Test func escapeDismissesAnOpenTipBeforeAnythingElse() async throws {
+        let region = try await region(title: "Settings", detail: "⌘,", anchor: CGPoint(x: 470, y: 120), thenEscape: true)
+        #expect(region == .zero)
+    }
+
+    @Test func aLongTitleWrapsInsideTheWindowInsteadOfRunningOutOfIt() async throws {
+        let title = String(repeating: "Pill overlaps the Dock when it is on the right and the display is scaled ", count: 4)
+        for anchor in [CGPoint(x: 470, y: 120), CGPoint(x: 30, y: 120)] {
+            let region = try await region(title: title, detail: "A detail line", anchor: anchor)
+            #expect(region != .zero && region.minX >= -0.5 && region.maxX <= 500.5, "\(anchor): \(region)")
+        }
+    }
+
+    @Test func aControlThatIsFocusedWhenItAppearsShowsItsTipToo() async throws {
+        // A row the keyboard picked before the list mounted: its focus never changes, it starts true.
+        let region = try await region(title: "Truncated question", detail: "The whole of it", anchor: CGPoint(x: 470, y: 120), focusedAtStart: true)
+        #expect(region != .zero)
+    }
+
+    @Test func aShortTitleIsNotWidenedOrWrapped() async throws {
+        let region = try await region(title: "Settings", detail: "⌘,", anchor: CGPoint(x: 470, y: 120))
+        // The cell, 6 pt, and a bubble of one line.
+        #expect(region.width < 36 + 6 + 110 && region.height <= 36 + 1, "\(region)")
+    }
+}
+
+/// Where the window takes the mouse (WCAG 1.4.13): the hub, a peek's panel, and a tooltip's bubble with the way to it.
+@Suite struct MouseRouting {
+    private let hub = CGRect(x: 954, y: 100, width: 46, height: 300)
+
+    @Test func aTipOutsideTheHubIsReachedThroughItsGap() {
+        let bubble = CGRect(x: 800, y: 150, width: 120, height: 30)
+        let region = hub.union(bubble).intersection(CGRect(x: 800, y: 150, width: 200, height: 36))
+        #expect(!HubGeometry.takesMouse(CGPoint(x: 850, y: 160), hub: hub, panel: nil, tip: nil))
+        #expect(HubGeometry.takesMouse(CGPoint(x: 850, y: 160), hub: hub, panel: nil, tip: region))
+        // Across the gap between the bubble and the cell.
+        #expect(HubGeometry.takesMouse(CGPoint(x: 935, y: 160), hub: hub, panel: nil, tip: region))
+        // Not beyond it.
+        #expect(!HubGeometry.takesMouse(CGPoint(x: 700, y: 160), hub: hub, panel: nil, tip: region))
+        #expect(HubGeometry.takesMouse(CGPoint(x: 970, y: 300), hub: hub, panel: nil, tip: nil))
+    }
+}
+
 /// WCAG 1.4.13: a tip that shows on hover stays while the pointer is on it, and while it crosses the gap to it.
 @MainActor
 @Suite struct TipHover {
@@ -575,6 +648,17 @@ private extension NSView {
         // Leaving the bubble closes it after the grace.
         center.releaseBubble(id)
         #expect(try await closes(center))
+    }
+
+    @Test func escapeClosesTheTipAndOnlyThatUntilTheNextVisit() {
+        let center = TipCenter()
+        let id = UUID()
+        center.present(request(id))
+        center.dismiss()
+        #expect(center.current == nil)
+        // Nothing shows it again by itself: only a control asking anew does.
+        center.present(request(id))
+        #expect(center.current?.id == id)
     }
 
     @Test func aPointerThatLeavesForGoodClosesItAndComingBackKeepsIt() async throws {

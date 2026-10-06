@@ -113,6 +113,9 @@ final class HubState {
 
     /// Where that section's panel is (in the hub's window), so the window takes the mouse there too.
     @ObservationIgnored var panelFrame: CGRect = .zero
+    /// A tooltip's bubble and the way to it from its control, in the window: the pointer on its way to it is still on the hub
+    /// (WCAG 1.4.13, hoverable), though it is outside the hub's own frame.
+    @ObservationIgnored var tipRegion: CGRect = .zero
 
     /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
     var expanded: Bool { pinned }

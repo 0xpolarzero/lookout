@@ -80,7 +80,7 @@ struct HubRoot: View {
         GeometryReader { geo in content(in: geo.size) }
             .coordinateSpace(.named(LookoutHub.rootSpace))
             // Tooltips are drawn over the whole window, outside the hub's clipped shape, so they're never cut off.
-            .tipSpace()
+            .tipSpace { hub.tipRegion = $0 }
     }
 
     /// The hub may take the screen's whole usable length less both insets, never a floor: it grows from the bar's
@@ -310,8 +310,8 @@ final class HubController {
     private func mouseMoved() {
         guard dragStart == nil else { return }
         let mouse = NSEvent.mouseLocation
-        let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(mouse)
-            || (hub.panelFrame != .zero && screenFrame(hub.panelFrame).insetBy(dx: -2, dy: -2).contains(mouse))
+        let inside = HubGeometry.takesMouse(mouse, hub: hubScreenFrame, panel: hub.panelFrame == .zero ? nil : screenFrame(hub.panelFrame),
+                                            tip: hub.tipRegion == .zero ? nil : screenFrame(hub.tipRegion))
         // A window-server call, so only when it changes.
         setAcceptsMouse(inside)
         if inside == hub.hovering {

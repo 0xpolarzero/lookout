@@ -106,4 +106,12 @@ enum HubGeometry {
     /// The first cell's centre, along the bar's axis from the hub's own start: the same at rest and kept open, which is
     /// why the inbox tile stays where it is.
     static var firstCellCenter: CGFloat { lead + Theme.Metrics.pitch / 2 }
+
+    /// Whether the window takes the mouse at `point` (screen coordinates): over the hub or the peek's panel, or over a
+    /// tooltip's bubble or the way to it, which lie outside both.
+    static func takesMouse(_ point: CGPoint, hub: CGRect, panel: CGRect?, tip: CGRect?) -> Bool {
+        hub.insetBy(dx: -1, dy: -1).contains(point)
+            || panel?.insetBy(dx: -2, dy: -2).contains(point) == true
+            || tip?.contains(point) == true
+    }
 }
