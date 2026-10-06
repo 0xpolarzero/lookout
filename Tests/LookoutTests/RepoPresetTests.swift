@@ -152,6 +152,30 @@ import Testing
         #expect(!s.repos[0].events.contains(.ciMain))
     }
 
+    @Test func undoingAPresetLeavesALaterCustomChoiceAlone() {
+        let s = store(RepoConfig(fullName: "a/one", allComments: true))
+        s.repoUndo.announce = { _ in }
+        s.changePreset(.forMe, on: s.repos[0])
+        // Issue comments were on under both presets; the preset did not touch them, so the undo must not either.
+        s.toggle(.issueComment, on: s.repos[0])
+        #expect(!s.repos[0].events.contains(.issueComment))
+        #expect(s.repoUndo.undo())
+        #expect(s.repos[0].events.isSuperset(of: [.issueOpened, .prOpened, .prComment, .reviewComment]))
+        #expect(!s.repos[0].events.contains(.issueComment))
+        #expect(s.repos[0].allComments)
+    }
+
+    @Test func undoingAPresetPutsBackTheFlagsItMovedEvenIfChosenAgainSince() {
+        let s = store(RepoConfig(fullName: "a/one", allComments: true))
+        s.repoUndo.announce = { _ in }
+        s.changePreset(.forMe, on: s.repos[0])
+        s.toggle(.prOpened, on: s.repos[0])
+        s.toggleAllComments(s.repos[0])
+        #expect(s.repos[0].allComments)
+        #expect(s.repoUndo.undo())
+        #expect(RepoPreset(s.repos[0]) == .everything)
+    }
+
     @Test func choosingThePresetAlreadyOnRegistersNoUndo() {
         let s = store(repo(RepoPreset.comments))
         s.repoUndo.announce = { _ in }

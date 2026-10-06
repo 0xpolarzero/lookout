@@ -151,14 +151,18 @@ extension Store {
         setPreset(preset, on: before)
         guard let after = repos.first(where: { $0.id == repo.id }),
               after.events != before.events || after.allComments != before.allComments else { return }
+        // The flags this change moved, and nothing else: a checkbox chosen since stays as it is when it is undone.
+        let moved = RepoPreset.kinds.filter { before.events.contains($0) != after.events.contains($0) }
+        let movedAllComments = after.allComments != before.allComments
         let now = Set(items.map(\.id))
         let removed = itemsBefore.filter { !now.contains($0.id) }
         let message = "\(repo.name): \(preset.title)" + (removed.isEmpty ? "" : ", \(plural(removed.count, "item")) removed")
         repoUndo.push(message, announcement: "\(repo.fullName) set to \(preset.title). Undo available") { [self] in
             guard let i = repos.firstIndex(where: { $0.id == before.id }) else { return }
-            // Only what a preset sets: CI (and anything else changed since) stays as it is now.
-            repos[i].events = repos[i].events.subtracting(RepoPreset.kinds).union(before.events.intersection(RepoPreset.kinds))
-            repos[i].allComments = before.allComments
+            for kind in moved {
+                if before.events.contains(kind) { repos[i].events.insert(kind) } else { repos[i].events.remove(kind) }
+            }
+            if movedAllComments { repos[i].allComments = before.allComments }
             let known = Set(items.map(\.id))
             items.append(contentsOf: removed.filter { !known.contains($0.id) })
             save()
