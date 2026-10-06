@@ -544,3 +544,41 @@ private extension NSView {
         #expect(kept.maxY <= bounds.height)
     }
 }
+
+/// WCAG 1.4.13: a tip that shows on hover stays while the pointer is on it, and while it crosses the gap to it.
+@MainActor
+@Suite struct TipHover {
+    private func request(_ id: UUID) -> TipCenter.Request {
+        TipCenter.Request(id: id, title: "Settings", detail: "⌘,", anchor: CGRect(x: 0, y: 0, width: 36, height: 36))
+    }
+
+    private let grace = Duration.milliseconds(120) + .milliseconds(80)
+
+    @Test func theTipOutlivesTheGapAndStaysWhileThePointerIsOnIt() async throws {
+        let center = TipCenter()
+        let id = UUID()
+        center.present(request(id))
+        // The pointer leaves the control and reaches the bubble within the grace: it stays.
+        center.leave(id)
+        center.hold(bubble: true)
+        try await Task.sleep(for: grace)
+        #expect(center.current?.id == id)
+        // Leaving the bubble closes it after the grace.
+        center.releaseBubble(id)
+        try await Task.sleep(for: grace)
+        #expect(center.current == nil)
+    }
+
+    @Test func aPointerThatLeavesForGoodClosesItAndComingBackKeepsIt() async throws {
+        let center = TipCenter()
+        let id = UUID()
+        center.present(request(id))
+        center.leave(id)
+        center.hold(bubble: false)
+        try await Task.sleep(for: grace)
+        #expect(center.current?.id == id)
+        center.leave(id)
+        try await Task.sleep(for: grace)
+        #expect(center.current == nil)
+    }
+}

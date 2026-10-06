@@ -255,10 +255,44 @@ final class TipCenter {
     /// Whether the next tip should skip its delay: another is showing, or one just closed.
     var chaining: Bool { current != nil || Date().timeIntervalSince(closedAt) < Theme.Timing.tipChain }
 
+    /// The pointer is over the bubble itself: it can be read, magnified and panned onto (WCAG 1.4.13, hoverable).
+    @ObservationIgnored private var overBubble = false
+    @ObservationIgnored private var leaving: Task<Void, Never>?
+
+    func present(_ request: Request) {
+        leaving?.cancel()
+        overBubble = false
+        current = request
+    }
+
     func close(_ id: UUID) {
         guard current?.id == id else { return }
+        leaving?.cancel()
+        overBubble = false
         current = nil
         closedAt = Date()
+    }
+
+    /// The pointer left the control or the bubble: the tip closes after the leave grace unless it is on the other by then,
+    /// so crossing the gap between them keeps it.
+    func leave(_ id: UUID) {
+        leaving?.cancel()
+        leaving = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Theme.Timing.leaveGrace)
+            guard !Task.isCancelled, let self, !overBubble else { return }
+            close(id)
+        }
+    }
+
+    /// The pointer is back on the control, or has reached the bubble.
+    func hold(bubble: Bool) {
+        leaving?.cancel()
+        if bubble { overBubble = true }
+    }
+
+    func releaseBubble(_ id: UUID) {
+        overBubble = false
+        leave(id)
     }
 }
 
@@ -299,7 +333,7 @@ private struct Tip: ViewModifier {
             }
             .onHover { inside in
                 guard hover else { return }
-                inside ? schedule(after: Theme.Timing.tooltip) : hide()
+                if inside { center?.hold(bubble: false); schedule(after: Theme.Timing.tooltip) } else { pending?.cancel(); center?.leave(id) }
             }
             .onChange(of: focused) { _, focused in
                 focused ? schedule(after: Theme.Timing.tooltipFocus) : hide()
@@ -324,7 +358,7 @@ private struct Tip: ViewModifier {
     }
 
     private func show() {
-        center?.current = TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor, beside: beside)
+        center?.present(TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor, beside: beside))
     }
 }
 
@@ -347,6 +381,7 @@ enum TipPlacement {
 
 private struct TipBubble: View {
     let request: TipCenter.Request
+    let center: TipCenter
     let bounds: CGSize
     @State private var size = CGSize.zero
 
@@ -383,9 +418,12 @@ private struct TipBubble: View {
         .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         .fixedSize()
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        // The bubble keeps itself open while the pointer is on it (it can be read and magnified), and closes a moment after
+        // the pointer leaves it. Invisible until it is measured, so it takes no pointer before then.
+        .onHover { inside in if inside { center.hold(bubble: true) } else { center.releaseBubble(request.id) } }
         .offset(placement)
         .opacity(size == .zero ? 0 : 1)
-        .allowsHitTesting(false)
+        .allowsHitTesting(size != .zero)
     }
 
     private var placement: CGSize {
@@ -424,7 +462,7 @@ private struct TipSpaceModifier: ViewModifier {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
             .overlay(alignment: .topLeading) {
                 if let request = center.current {
-                    TipBubble(request: request, bounds: size)
+                    TipBubble(request: request, center: center, bounds: size)
                         .transition(.opacity.animation(Theme.Motion.hover))
                 }
             }
