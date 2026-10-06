@@ -413,8 +413,10 @@ extension LookoutHub {
                 EmptyBlock("Checking GitHub…")
             case .caughtUp:
                 let bots = store.unreadCount(.bots)
-                EmptyBlock(title: "All caught up", detail: store.lastSync.map { "Checked \(agoPhrase($0))" }, symbol: "checkmark.circle") {
-                    if bots > 0 { InboxLink("\(bots) in Bots") { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = .bots } } }
+                Ticking(coarse: true) { now in
+                    EmptyBlock(title: "All caught up", detail: store.lastSync.map { "Checked \(agoPhrase($0, now: now))" }, symbol: "checkmark.circle") {
+                        if bots > 0 { InboxLink("\(bots) in Bots") { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = .bots } } }
+                    }
                 }
             case .nothingNew:
                 EmptyBlock("Nothing new")

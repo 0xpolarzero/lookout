@@ -122,7 +122,8 @@ struct ModifierTap {
 }
 
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case togglePanel, sessionSwitcher, openItem, toggleRead, discard, markAllRead, refresh, keepSession, removeSession
+    case togglePanel, sessionSwitcher, openItem, toggleRead, discard, markAllRead, refresh, keepSession, removeSession,
+         moveSessionUp, moveSessionDown
 
     var id: String { rawValue }
 
@@ -137,6 +138,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .sessionSwitcher: "Switch Claude session"
         case .keepSession: "Keep a session with new activity"
         case .removeSession: "Hide a session"
+        case .moveSessionUp: "Move a session up in its project"
+        case .moveSessionDown: "Move a session down in its project"
         }
     }
 
@@ -144,7 +147,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     var isGlobal: Bool { self == .togglePanel || self == .sessionSwitcher }
 
     /// Only meaningful with the Claude sessions extension on.
-    var isAgents: Bool { self == .sessionSwitcher || self == .keepSession || self == .removeSession }
+    var isAgents: Bool {
+        [.sessionSwitcher, .keepSession, .removeSession, .moveSessionUp, .moveSessionDown].contains(self)
+    }
 
     var defaultShortcut: Shortcut {
         switch self {
@@ -158,6 +163,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .keepSession: Shortcut(keyCode: UInt16(kVK_ANSI_K), modifiers: [.command])
         // ⌘⌫ rather than a bare ⌫: removing a session is easy to hit by accident and awkward to undo.
         case .removeSession: Shortcut(keyCode: UInt16(kVK_Delete), modifiers: [.command])
+        case .moveSessionUp: Shortcut(keyCode: UInt16(kVK_UpArrow), modifiers: [.option])
+        case .moveSessionDown: Shortcut(keyCode: UInt16(kVK_DownArrow), modifiers: [.option])
         }
     }
 }

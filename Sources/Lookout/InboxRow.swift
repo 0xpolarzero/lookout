@@ -131,10 +131,12 @@ struct InboxRow: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             // In Done, when it was cleared; elsewhere, when it arrived.
-            Text(shortAgo(isOpen ? item.createdAt : item.clearedAt ?? item.createdAt))
-                .font(Theme.Typography.numeral)
-                .foregroundStyle(Theme.secondary)
-                .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
+            Ticking(coarse: true) { now in
+                Text(shortAgo(isOpen ? item.createdAt : item.clearedAt ?? item.createdAt, now: now))
+                    .font(Theme.Typography.numeral)
+                    .foregroundStyle(Theme.secondary)
+                    .frame(width: Theme.Metrics.ageColumn, alignment: .trailing)
+            }
         }
     }
 

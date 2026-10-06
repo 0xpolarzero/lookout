@@ -214,11 +214,17 @@ extension LookoutHub {
     /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
     static let peekLine: CGFloat = Theme.Metrics.line
 
+    /// How tall a peek's list of sessions gets before it scrolls (the inbox's is the same).
+    static let peekListCap: CGFloat = 330
+
     /// A panel's width: the controls' is a small menu; along the top and bottom, CI's is its column's.
     func panelWidth(_ section: HubSection) -> CGFloat {
         switch section {
         case .controls: 250
         case .ci: edge.isHorizontal ? Self.ciWidth : Self.detail
+        // Its rows spend the tile column inside the panel (the bar's tile beside it is another): the text keeps the
+        // width it has kept open, where a waiting session's question fits.
+        case .agents: Self.detail + Theme.Metrics.bar
         default: Self.detail
         }
     }
@@ -243,31 +249,15 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                let rows = agentRows
-                agentsHeader.frame(height: Self.peekLine)
-                ClaudeNotice(store: store).padding(.horizontal, 8)
-                // By project and draggable, like the full view's.
-                let starts = projectStarts(rows.kept)
-                ForEach(rows.kept) { r in
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
-                        .sessionMenu(r, store)
-                        .modifier(GroupRule(on: starts.contains(r.id)))
-                        .modifier(AgentReorder(row: r, store: store))
-                }
-                if !rows.pending.isEmpty {
-                    pendingLabel(twoLines: false).frame(height: 14)
-                    ForEach(rows.pending) { r in
-                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
-                            .sessionMenu(r, store)
-                    }
-                }
-                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
+                sessionsPeekHeader
+                sessionsPeek(cap: Self.peekListCap)
+                newSessionRow(inset: 0)
             default:
                 // (The controls have their own panel.)
                 EmptyView()
             }
         }
-        .frame(width: Self.detail - 2 * Self.peekPad, alignment: .leading)
+        .frame(width: panelWidth(section) - 2 * Self.peekPad, alignment: .leading)
     }
 
     /// Under (or over) a strip segment: that section's header, then its content.
@@ -280,28 +270,22 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                agentsHeader.frame(height: Self.peekLine)
-                ClaudeNotice(store: store).padding(.horizontal, 8)
-                let rows = agentRows
-                CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        let starts = projectStarts(rows.kept)
-                        ForEach(rows.kept) { r in
-                            if starts.contains(r.id) { groupDivider }
-                            twoLineRow(r).modifier(AgentReorder(row: r, store: store))
-                        }
-                        if !rows.pending.isEmpty {
-                            pendingLabel(twoLines: true).padding(.top, 6).padding(.bottom, 2)
-                            ForEach(rows.pending) { twoLineRow($0) }
-                        }
-                    }
-                }
-                NewSessionRow(store: store, style: .twoLines)
+                sessionsPeekHeader
+                sessionsPeek(cap: Self.peekListCap)
+                newSessionRow(inset: 0)
             default:
                 EmptyView()
             }
         }
-        .frame(width: (section == .ci ? Self.ciWidth : Self.detail) - 2 * Self.peekPad, alignment: .leading)
+        .frame(width: panelWidth(section) - 2 * Self.peekPad, alignment: .leading)
+    }
+
+    /// The sessions' header and notice over their rows: indented by the tile column where it is leading, so the header,
+    /// the groups and the rows' text start at one x (on the right edge the tile is trailing and nothing moves).
+    @ViewBuilder var sessionsPeekHeader: some View {
+        let indent = railSide == .leading ? Theme.Metrics.bar : 0
+        agentsHeader.frame(height: Self.peekLine).padding(.leading, indent)
+        ClaudeNotice(store: store).padding(.leading, indent + 8).padding(.trailing, 8)
     }
 
     /// The bar's last cell at rest: a gear. Hovering shows the controls; a click goes to Settings.

@@ -133,20 +133,14 @@ struct AgentRow: Identifiable, Hashable {
         return entry.unread ? .finished : .idle
     }
 
+    /// Needs you: stopped mid-turn on a question, or finished on one you haven't read yet.
+    var isWaiting: Bool { waitsForYou || (!session.running && unread && session.summary?.blocked == true) }
+
     /// What the strip shows: amber waiting, blue done and unread, grey otherwise.
     var tint: Color? {
         if waitsForYou { return Theme.amber }
         guard !session.running, entry.unread else { return nil }
         return session.summary?.blocked == true ? Theme.amber : Theme.accent
-    }
-
-    /// When the running turn began, if known.
-    var workingSince: Date? { session.lastUserMessage ?? activity?.since }
-
-    /// "Running swift test · 3m" while working: the current step, and how long the turn has run.
-    func workingText(now: Date = Date()) -> String {
-        let elapsed = Self.duration(now.timeIntervalSince(workingSince ?? now))
-        return "\(activity?.text ?? "Working") · \(elapsed)"
     }
 
     static func duration(_ t: TimeInterval) -> String {
@@ -156,20 +150,7 @@ struct AgentRow: Identifiable, Hashable {
         return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
-    /// The status in words; finished and idle count their age from `now`.
-    func statusText(now: Date = Date()) -> String {
-        switch status {
-        case .running: "working"
-        case .blocked: "waiting"
-        case .finished: shortAgo(session.lastActivity, now: now) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity, now: now))"
-        case .idle: shortAgo(session.lastActivity, now: now)
-        }
-    }
-
-    /// Whether `statusText` changes with time: only the ones that say how long ago.
-    var statusHasAge: Bool { status == .finished || status == .idle }
-
-    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / done / new activity.
+    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / finished / new activity.
     var stateName: String {
         // A session with new activity keeps what it left running: "new activity, 2 running".
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
@@ -177,21 +158,120 @@ struct AgentRow: Identifiable, Hashable {
         switch status {
         case .blocked: return "waiting"
         case .running: return "working"
-        case .finished: return (unread ? "done, unread" : "done") + running
+        case .finished: return (unread ? "finished, unread" : "finished") + running
         case .idle: return (pending ? "new activity" : "idle") + running
         }
     }
 
-    /// "3 running": what's left in the background, after the status.
-    var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
+    /// When the running turn began, if known.
+    var workingSince: Date? { session.lastUserMessage ?? activity?.since }
 
-    var statusColor: AnyShapeStyle {
-        switch status {
-        case .running: AnyShapeStyle(Theme.secondary)
-        case .blocked: entry.unread || waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary)
-        case .finished: AnyShapeStyle(Theme.accent)
-        case .idle: AnyShapeStyle(Theme.tertiary)
+    /// How long the turn has been going.
+    func elapsed(now: Date = Date()) -> String {
+        Self.duration(now.timeIntervalSince(workingSince ?? now))
+    }
+
+    /// The status column of a row: "Waiting", "Working 2m", "Finished 4m".
+    func statusLabel(now: Date = Date()) -> String {
+        if isWaiting { return "Waiting" }
+        if session.running { return "Working \(elapsed(now: now))" }
+        return "Finished \(shortAgo(session.lastActivity, now: now))"
+    }
+
+    /// The one thing that matters now: the question it is blocked on, what it is doing while it works, else the
+    /// turn's summary.
+    var headline: AttributedString {
+        if session.running { return AttributedString(activity?.text ?? "Working") }
+        return summaryText
+    }
+
+    /// For VoiceOver: "waiting, lcu, 2 minutes", and "3 running" for what a finished turn left behind.
+    func spokenValue(now: Date = Date()) -> String {
+        let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
+        let age = Self.spokenAge(now.timeIntervalSince(session.running ? session.lastUserMessage ?? session.lastActivity : session.lastActivity))
+        var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), session.folderName, age]
+        if !tasks.isEmpty { parts.append("\(tasks.count) running") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// For VoiceOver, after the value: the question or summary, then everything it left running by name (the row
+    /// shows the first and a count).
+    var spokenHint: String {
+        let said = String(headline.characters)
+        let running = tasks.isEmpty ? "" : "Running: " + tasks.map(\.title).joined(separator: ", ") + "."
+        return [said, running].filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    static func spokenAge(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t))
+        if s < 60 { return "just now" }
+        let (n, unit) = s < 3600 ? (s / 60, "minute") : s < 86400 ? (s / 3600, "hour") : (s / 86400, "day")
+        return plural(n, unit)
+    }
+}
+
+// MARK: - Groups
+
+/// A run of rows under one header in the sessions list.
+struct SessionGroup: Identifiable {
+    enum Kind: Hashable {
+        /// Every session that needs you, whichever project it is in.
+        case waiting
+        /// A project's kept sessions; "" is scratch chats.
+        case project(String)
+        /// Sessions with new activity that you haven't kept.
+        case newActivity
+    }
+
+    var kind: Kind
+    /// The rows listed: a peek or New activity's cap leaves some out.
+    var rows: [AgentRow]
+    /// How many sessions the group has, however many of them are listed.
+    let total: Int
+
+    init(kind: Kind, rows: [AgentRow]) {
+        self.kind = kind
+        self.rows = rows
+        total = rows.count
+    }
+
+    var id: String {
+        switch kind {
+        case .waiting: "waiting"
+        case .project(let folder): "project:" + folder
+        case .newActivity: "new"
         }
+    }
+
+    var title: String {
+        switch kind {
+        case .waiting: "Waiting for you"
+        case .project: rows.first?.session.folderName ?? "Scratch"
+        case .newActivity: "New activity"
+        }
+    }
+
+    /// How many New activity rows show before "+N more".
+    static let newActivityCap = 8
+
+    /// The list's order, which the bar's tiles follow: Waiting for you (most recent first), the projects in your
+    /// order (the order their first kept session is listed in, so a group doesn't move when one of its sessions starts
+    /// waiting), Scratch, then New activity (most recent first). A waiting session is in the first group only.
+    static func build(kept: [AgentRow], pending: [AgentRow]) -> [SessionGroup] {
+        let waiting = (kept + pending).filter(\.isWaiting).sorted { $0.session.lastActivity > $1.session.lastActivity }
+        var folders: [String] = []
+        for row in kept where !folders.contains(row.session.folderKey) { folders.append(row.session.folderKey) }
+        // Scratch chats last of the projects, wherever the first one was kept.
+        folders = folders.filter { !$0.isEmpty } + folders.filter(\.isEmpty)
+        var out: [SessionGroup] = []
+        if !waiting.isEmpty { out.append(SessionGroup(kind: .waiting, rows: waiting)) }
+        for folder in folders {
+            let rows = kept.filter { $0.session.folderKey == folder && !$0.isWaiting }
+            if !rows.isEmpty { out.append(SessionGroup(kind: .project(folder), rows: rows)) }
+        }
+        let new = pending.filter { !$0.isWaiting }
+        if !new.isEmpty { out.append(SessionGroup(kind: .newActivity, rows: new)) }
+        return out
     }
 }
 
@@ -247,14 +327,17 @@ enum AgentLabel {
         return result
     }
 
+    /// Digits, # and * count as emoji in Unicode; real emoji are past Latin-1.
+    static func isEmoji(_ label: String) -> Bool {
+        guard let scalar = label.first?.unicodeScalars.first else { return false }
+        return scalar.properties.isEmoji && scalar.value > 0xFF
+    }
+
     /// Up to two characters, or one emoji.
     static func sanitize(_ input: String) -> String? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = trimmed.first else { return nil }
-        // Digits, # and * count as emoji in Unicode; real emoji are past Latin-1.
-        if let scalar = first.unicodeScalars.first, scalar.properties.isEmoji, scalar.value > 0xFF {
-            return String(first)
-        }
+        if isEmoji(String(first)) { return String(first) }
         let letters = String(trimmed.filter { !$0.isWhitespace }.prefix(2))
         return letters.isEmpty ? nil : letters.uppercased()
     }
@@ -266,6 +349,7 @@ enum AgentLabel {
 struct AgentCache {
     var rows: (kept: [AgentRow], pending: [AgentRow])
     var all: [AgentRow]
+    var groups: [SessionGroup]
     var counts: (blocked: Int, done: Int)
     var folders: [String]
     var entries: [String: AgentEntry]
@@ -318,7 +402,7 @@ extension Store {
         for row in allRows where !row.session.folderKey.isEmpty && !folders.contains(row.session.folderKey) {
             folders.append(row.session.folderKey)
         }
-        return AgentCache(rows: (keptRows, pendingRows), all: allRows,
+        return AgentCache(rows: (keptRows, pendingRows), all: allRows, groups: SessionGroup.build(kept: keptRows, pending: pendingRows),
                           counts: (blocked + allRows.filter(\.waitsForYou).count, unread.count - blocked),
                           folders: folders, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
@@ -356,17 +440,17 @@ extension Store {
         return Theme.projectColors[i % Theme.projectColors.count]
     }
 
-    /// Kept sessions split by project, for the strip's gaps and the Agents tab's headers.
-    func groups(_ rows: [AgentRow]) -> [[AgentRow]] {
-        var out: [[AgentRow]] = []
-        for row in rows {
-            if let last = out.last?.last, last.session.folderKey == row.session.folderKey {
-                out[out.count - 1].append(row)
-            } else {
-                out.append([row])
-            }
+    /// The sessions list in its order: every group, whole (see `SessionGroup.build`).
+    var sessionGroups: [SessionGroup] { cache.groups }
+
+    /// The groups as the hub lists them: New activity cut to its cap unless `expanded`, and how many that hid.
+    func listedGroups(expanded: Bool) -> (groups: [SessionGroup], hidden: Int) {
+        var groups = cache.groups, hidden = 0
+        if !expanded, let i = groups.firstIndex(where: { $0.kind == .newActivity }), groups[i].rows.count > SessionGroup.newActivityCap {
+            hidden = groups[i].rows.count - SessionGroup.newActivityCap
+            groups[i].rows = Array(groups[i].rows.prefix(SessionGroup.newActivityCap))
         }
-        return out
+        return (groups, hidden)
     }
 
     func setProjectColor(_ folder: String, _ index: Int) {
@@ -408,6 +492,16 @@ extension Store {
 
     /// Projects with a session in your list or pending, in the order they're listed: where a new session can start.
     var agentFolders: [String] { cache.folders }
+
+    /// Every project a session has been seen in, the one with the most recent session first: where New session offers
+    /// to start one.
+    var recentFolders: [String] {
+        var latest: [String: Date] = [:]
+        for session in claudeSessions.values where !session.folderKey.isEmpty {
+            latest[session.folderKey] = max(latest[session.folderKey] ?? .distantPast, session.lastActivity)
+        }
+        return latest.keys.sorted { latest[$0]! != latest[$1]! ? latest[$0]! > latest[$1]! : $0 < $1 }
+    }
 
     var knownFolders: [String] {
         Array(Set(claudeSessions.values.map(\.folderKey))).sorted { a, b in
@@ -589,17 +683,56 @@ extension Store {
     }
 
     /// Pending: hidden until its next activity. Kept: leaves your list (and comes back as pending on new activity).
+    /// Offers an undo.
     func dismissAgent(_ id: String) {
+        guard let before = agents.entries.first(where: { $0.id == id }) else { return }
         mutateAgent(id) {
             $0.kept = false
             $0.hiddenAt = $0.seen
         }
+        let title = claudeSessions[id]?.title ?? "session"
+        registerUndo("Hidden \u{201C}\(title)\u{201D}", in: .agents) { [weak self] in
+            self?.mutateAgent(id) {
+                $0.kept = before.kept
+                $0.hiddenAt = before.hiddenAt
+            }
+        }
     }
 
+    /// Keeps every session under New activity, in the order they are listed, the ones its list cuts to "+N more"
+    /// too. A pending session promoted to Waiting for you isn't under it, so it stays as it was. The ids are taken
+    /// first: keeping one rebuilds the groups.
+    func keepAllAgents() {
+        let ids = cache.groups.first { $0.kind == .newActivity }?.rows.map(\.id) ?? []
+        for id in ids { keepAgent(id) }
+    }
+
+    /// Reordering stays within a project: dropping on another project's session does nothing. The project's sessions
+    /// trade places among the slots they already hold, so the projects keep their own order.
     func moveAgent(_ id: String, onto target: String) {
-        guard id != target, let from = agents.entries.firstIndex(where: { $0.id == id }),
-              let to = agents.entries.firstIndex(where: { $0.id == target }) else { return }
-        agents.entries.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        guard id != target, let folder = claudeSessions[id]?.folderKey, claudeSessions[target]?.folderKey == folder else { return }
+        let slots = agents.entries.indices.filter { agents.entries[$0].kept && claudeSessions[agents.entries[$0].id]?.folderKey == folder }
+        var order = slots.map { agents.entries[$0] }
+        guard let from = order.firstIndex(where: { $0.id == id }), let to = order.firstIndex(where: { $0.id == target }) else { return }
+        order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        for (slot, entry) in zip(slots, order) { agents.entries[slot] = entry }
+    }
+
+    /// The session above (-1) or below (+1) this one in its project's group, if it has one: what Move up and Move down
+    /// swap with.
+    private func neighbour(of id: String, _ step: Int) -> String? {
+        guard let group = cache.groups.first(where: { g in
+            if case .project = g.kind { return g.rows.contains { $0.id == id } }
+            return false
+        }), let i = group.rows.firstIndex(where: { $0.id == id }), group.rows.indices.contains(i + step) else { return nil }
+        return group.rows[i + step].id
+    }
+
+    func canMoveAgent(_ id: String, by step: Int) -> Bool { neighbour(of: id, step) != nil }
+
+    /// One place up (-1) or down (+1) within its project.
+    func moveAgent(_ id: String, by step: Int) {
+        if let target = neighbour(of: id, step) { moveAgent(id, onto: target) }
     }
 
     // MARK: Icons (Jev)
@@ -657,8 +790,13 @@ extension Store {
         }
     }
 
-    /// Replaces a session's icon (the old one is never offered again for it).
+    /// Whether icons can be picked now: on, with a key. Without that a session keeps the icon it has, but can't get another.
+    var canPickIcons: Bool { agents.enabled && agents.iconsEnabled && hasTypesafeKey }
+
+    /// Replaces a session's icon (the old one is never offered again for it). Not while nothing could pick the next:
+    /// the session would be left with none.
     func repickIcon(_ id: String) {
+        guard canPickIcons else { return }
         mutateAgent(id) {
             if let icon = $0.icon { $0.rejectedIcons = ($0.rejectedIcons ?? []) + [icon] }
             $0.icon = nil
@@ -694,6 +832,13 @@ extension Store {
     func setFolderMuted(_ folder: String, _ muted: Bool) {
         agents.mutedFolders.removeAll { $0 == folder }
         if muted { agents.mutedFolders.append(folder) }
+    }
+
+    /// Mutes a project from its menu: its sessions stop arriving as new activity. Offers an undo.
+    func muteFolder(_ folder: String) {
+        setFolderMuted(folder, true)
+        let name = folder.isEmpty ? "Scratch" : URL(fileURLWithPath: folder).lastPathComponent
+        registerUndo("Muted \(name)", in: .agents) { [weak self] in self?.setFolderMuted(folder, false) }
     }
 
     func setAgentsEnabled(_ on: Bool) {

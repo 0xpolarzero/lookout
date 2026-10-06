@@ -46,6 +46,11 @@ final class HubState {
     var query = ""
     /// The inbox header's search field and scroll state (see HubInbox.swift).
     let inbox = InboxState()
+    /// New activity shows all its rows, not the first few and "+N more".
+    var sessionsExpanded = false
+    /// Asks New session to open its menu of projects (→ on that row); a new request every time.
+    private(set) var projectsMenuRequest = 0
+    func openProjectsMenu() { projectsMenuRequest += 1 }
     /// Which way the last page change went, so pages slide in from the side you're heading to.
     var forward = true
     /// The page you came from, so going back retraces your steps (Repositories opened from Settings goes back
@@ -88,7 +93,9 @@ final class HubState {
     /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
     var expanded: Bool { pinned }
     /// In the full view, the section given all the room it needs; the others shrink to their header (and counts).
-    var focus: HubSection?
+    var focus: HubSection? {
+        didSet { if focus != oldValue { rehomeSelection() } }
+    }
 
     /// Settings and Repositories pin the view, so it stays put while you type or drag; back on the main view,
     /// the pin is what it was before.
@@ -283,8 +290,9 @@ struct LookoutHub: View {
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
         let free = max(160, maxLength - 360 - ciSpace)
         guard store.agents.enabled else { return (free, 0) }
-        // Whole 36pt session rows, so the last one showing is never cut through its tile.
-        let agents = max(2, (free * 0.45 / 36).rounded(.down)) * 36
+        // Room for three sessions, their headers and "Show all" where there is any to spare (the list itself stops on a
+        // whole row, and is no taller than it is), but never all of it: the inbox keeps a row.
+        let agents = SessionGroup.share(of: free)
         return (free - agents, agents)
     }
 
@@ -353,48 +361,20 @@ struct LookoutHub: View {
         Hairline(axis: .vertical, inset: 12)
     }
 
-    /// The sessions along the top and bottom: one per line, read top to bottom like the inbox beside them.
+    /// The sessions along the top and bottom: the same rows as beside the bar, the tile on the leading side.
     var agentsColumn: some View {
-        let rows = agentRows
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
             if noSessionsMatch { noSessionsLine.padding(.horizontal, Self.inset).padding(.top, 8) }
-            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count)) {
-                // Your sessions by project, a line between projects; then the pending ones, labelled.
-                AdaptiveStack(count: rows.kept.count + rows.pending.count, alignment: .leading, spacing: 0) {
-                    let starts = projectStarts(rows.kept)
-                    ForEach(rows.kept) { r in
-                        if starts.contains(r.id) { groupDivider }
-                        twoLineRow(r).modifier(AgentReorder(row: r, store: store))
-                    }
-                    if !rows.pending.isEmpty {
-                        if !rows.kept.isEmpty { groupDivider }
-                        pendingLabel(twoLines: true).padding(.bottom, 4)
-                        ForEach(rows.pending) { twoLineRow($0) }
-                    }
-                }
-                .padding(.horizontal, Self.inset)
-                .padding(.top, 8)
-            }
-            // At the bottom, whatever height the column gets; a line keeps a row the list cuts off from running into
-            // the new session row.
+            // Focused, the list has the screen's height before it scrolls.
+            sessionsScroll(cap: min(maxLength - Self.cell - 60, hub.focus == .agents ? .infinity : Self.listCap + 90)).padding(.top, 8)
+            // At the bottom, whatever height the column gets.
             Spacer(minLength: 0)
             Hairline(inset: Self.inset + 10).padding(.bottom, Theme.Space.xs)
-            NewSessionRow(store: store, style: .twoLines)
-                .padding(.horizontal, Self.inset)
-                .padding(.bottom, 8)
+            newSessionRow().padding(.bottom, 8)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    func twoLineRow(_ r: AgentRow) -> some View {
-        sessionBlock(r, twoLines: true).capEdge().id("a:" + r.id)
-    }
-
-    /// A line between one project's sessions and the next's.
-    var groupDivider: some View {
-        Hairline(inset: 10).padding(.vertical, Theme.Space.xs)
     }
 
     // MARK: Focus
@@ -446,11 +426,6 @@ struct LookoutHub: View {
                           detail: focused ? "Esc" : "The other sections shrink to their counts") {
             withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = focused ? nil : section }
         }
-    }
-
-    /// A session in the full view (see `SessionBlock`).
-    func sessionBlock(_ r: AgentRow, twoLines: Bool) -> some View {
-        SessionBlock(row: r, twoLines: twoLines, store: store, ui: ui, hub: hub)
     }
 }
 
@@ -518,30 +493,6 @@ private struct CapHeightLayout: Layout {
     }
 }
 
-
-/// Your sessions in the hub can be dragged onto one another to reorder them (pending ones can't).
-struct AgentReorder: ViewModifier {
-    let row: AgentRow
-    let store: Store
-    @State private var target = false
-
-    func body(content: Content) -> some View {
-        content
-            .modifier(Reorderable(row: row, store: store, dropTarget: $target))
-            .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
-    }
-}
-
-/// A line along a row's top edge, taking no room of its own: between projects, the rows stay level with the bar's tiles.
-struct GroupRule: ViewModifier {
-    let on: Bool
-
-    func body(content: Content) -> some View {
-        content.overlay(alignment: .top) {
-            if on { Hairline(inset: 8) }
-        }
-    }
-}
 
 /// Under the Sessions header: Claude's session files missing or unreadable (nothing when all is well).
 struct ClaudeNotice: View {

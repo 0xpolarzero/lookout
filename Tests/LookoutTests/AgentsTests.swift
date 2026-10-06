@@ -29,13 +29,10 @@ import Testing
     private func entry(_ s: Store, _ id: String) -> AgentEntry? { s.agents.entries.first { $0.id == id } }
 
     @Test func statusAgesFollowTheClockTheyAreGiven() {
-        let s = store([session("a", minutesAgo: 5), session("b", minutesAgo: 5, blocked: true)])
-        let rows = s.agentRows.pending + s.agentRows.kept
-        let idle = rows.first { $0.id == "a" }!, waiting = rows.first { $0.id == "b" }!
-        #expect(idle.statusHasAge && !waiting.statusHasAge)
-        #expect(idle.statusText(now: now) == "5m")
-        #expect(idle.statusText(now: now.addingTimeInterval(3600)) == "1h")
-        #expect(waiting.statusText(now: now.addingTimeInterval(3600)) == "waiting")
+        let s = store([session("a", minutesAgo: 5)])
+        let idle = (s.agentRows.pending + s.agentRows.kept).first { $0.id == "a" }!
+        #expect(idle.statusLabel(now: now) == "Finished 5m")
+        #expect(idle.statusLabel(now: now.addingTimeInterval(3600)) == "Finished 1h")
     }
 
     @Test func firstReadOffersRecentSessionsOnly() {
@@ -161,7 +158,7 @@ import Testing
         let s = store([session("a", folder: "/code/x"), session("b", folder: "/code/y"), session("c", folder: "/code/x")])
         for id in ["a", "b", "c"] { s.keepAgent(id) }
         #expect(s.agentRows.kept.map(\.id) == ["a", "c", "b"])
-        #expect(s.groups(s.agentRows.kept).map { $0.map(\.id) } == [["a", "c"], ["b"]])
+        #expect(s.sessionGroups.map { $0.rows.map(\.id) } == [["a", "c"], ["b"]])
         // Each project got its own colour.
         #expect(s.agents.folderColors["/code/x"] != s.agents.folderColors["/code/y"])
         #expect(s.agentRows.kept.first?.color != nil)
@@ -275,6 +272,12 @@ import Testing
                              "message": ["content": [["type": "tool_use", "name": "AskUserQuestion", "input": [:]]]]])
         #expect(Claude.activity(tail: Data((question + "\n").utf8))?.waitsForYou == true)
         #expect(running?.waitsForYou == false)
+        // What it asks is what the row says; the generic phrase only when the input has nothing to say.
+        #expect(Claude.activity(tail: Data((question + "\n").utf8))?.text == "Asking you a question")
+        #expect(Claude.describe(tool: "AskUserQuestion", input: ["questions": [["question": "Which tone should the notes take?"], ["question": "Second"]]])
+                == "Which tone should the notes take?")
+        #expect(Claude.describe(tool: "ExitPlanMode", input: ["plan": "\n## Ship the redesign\n\n1. Build it"]) == "Approve the plan: Ship the redesign")
+        #expect(Claude.describe(tool: "ExitPlanMode", input: [:]) == "Waiting for you to approve a plan")
         #expect(Claude.describe(tool: "Edit", input: ["file_path": "/a/b/PillView.swift"]) == "Editing PillView.swift")
         #expect(Claude.describe(tool: "mcp__lcu__js", input: [:]) == "Using lcu")
         #expect(Claude.describe(tool: "Bash", input: ["command": "git status --short"]) == "Running git status --short")

@@ -86,11 +86,10 @@ extension LookoutHub {
             EmptyView()
         } else if showsDetail {
             Group {
-                // The sessions scroll with their tiles, so each stays beside its row.
-                CappedScroll(cap: caps.agents, hub: hub) { sessionRows }
-                    .frame(width: Self.cell + Self.detail)
+                // The tiles are part of the rows: each session's sits in the rail beside its text.
+                sessionsScroll(cap: caps.agents).frame(width: Self.cell + Self.detail)
                 if noSessionsMatch { row(cell: { EmptyView() }, detail: { noSessionsLine }) }
-                row(cell: { newSessionCell }, detail: { newSessionDetail })
+                newSessionRow().frame(width: Self.cell + Self.detail)
             }
             .transition(.hubReveal)
         } else {
@@ -98,46 +97,16 @@ extension LookoutHub {
         }
     }
 
+    /// The sessions' tiles at rest; kept open, the list draws them (see `SessionRow`).
     @ViewBuilder var sessionRows: some View {
         let rows = agentRows
         VStack(alignment: side, spacing: 0) {
-            // By project, a line between projects, and draggable onto one another, as along the top and bottom.
-            let starts = projectStarts(rows.kept)
-            ForEach(rows.kept) { r in
-                // Its first line level with the tile; what it did, or what it left running, under it.
-                row(alignment: .top, cell: { tile(r, size: 26) }, detail: { sessionBlock(r, twoLines: false) })
-                    .modifier(ReorderIf(enabled: showsDetail, row: r, store: store))
-                    .modifier(GroupRule(on: showsDetail && starts.contains(r.id)))
-                    .capEdge()
-                    .id("a:" + r.id)
-            }
+            ForEach(rows.kept) { r in row(alignment: .top, cell: { tile(r, size: 26) }, detail: { EmptyView() }).id("a:" + r.id) }
             if !rows.pending.isEmpty {
-                row(cell: { Capsule().fill(Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: 14) },
-                    detail: { pendingLabel(twoLines: false) })
-                ForEach(rows.pending) { r in
-                    row(alignment: .top, cell: { tile(r, size: 22) }, detail: { sessionBlock(r, twoLines: false) })
-                        .capEdge()
-                        .id("a:" + r.id)
-                }
+                row(cell: { Capsule().fill(Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: 14) }, detail: { EmptyView() })
+                ForEach(rows.pending) { r in row(alignment: .top, cell: { tile(r, size: 22) }, detail: { EmptyView() }).id("a:" + r.id) }
             }
         }
-    }
-
-    /// The kept sessions that begin a project's run after the first (none when searching): a line goes above each.
-    /// Rows stay keyed by their own session, so reordering never rebuilds them.
-    func projectStarts(_ kept: [AgentRow]) -> Set<String> {
-        guard !searching else { return [] }
-        var starts: Set<String> = []
-        for (prev, next) in zip(kept, kept.dropFirst()) where prev.session.folderKey != next.session.folderKey {
-            starts.insert(next.id)
-        }
-        return starts
-    }
-
-    /// "New activity", aligned with the text of the rows under it (two-line rows pad 10, one-line 8).
-    func pendingLabel(twoLines: Bool) -> some View {
-        Text("New activity").font(Theme.Typography.label).foregroundStyle(Theme.secondary)
-            .padding(.leading, twoLines ? 10 : 8)
     }
 
     /// Across the whole view when expanded; a short rule centred in the bar at rest.

@@ -633,6 +633,8 @@ struct Tabs<ID: Hashable>: View {
 struct SectionHeader<Trailing: View>: View {
     let title: String
     var status: (text: String, color: AnyShapeStyle)? = nil
+    /// Makes the status a button ("1 waiting" picks the first one).
+    var statusAction: (() -> Void)? = nil
     /// This section is the focused one: `esc` shows beside the title, the chevron points back.
     var focused = false
     /// What the tooltip and VoiceOver say: "Expand Inbox", or "Back to all sections".
@@ -645,17 +647,17 @@ struct SectionHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.md) {
+            // What is drawn over the button doesn't take its clicks; the trailing actions and a status button do.
+            Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+                .allowsHitTesting(false)
+            if let status {
+                statusLabel(status).transition(.opacity)
+            }
             Group {
-                Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
-                if let status {
-                    Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
-                        .transition(.opacity)
-                }
                 if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
                 Spacer(minLength: 0)
             }
-            // What is drawn over the button doesn't take its clicks; the trailing actions do.
             .allowsHitTesting(false)
             trailing
             if onFocus != nil {
@@ -687,6 +689,19 @@ struct SectionHeader<Trailing: View>: View {
             .reportsControlFocus(keyboardFocus)
             .tip(expandHelp, focused: keyboardFocus)
             .accessibilityLabel(expandHelp)
+    }
+}
+
+extension SectionHeader {
+    @ViewBuilder fileprivate func statusLabel(_ status: (text: String, color: AnyShapeStyle)) -> some View {
+        let text = Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
+        if let statusAction {
+            Button(action: statusAction) { text.frame(minHeight: Theme.Metrics.iconButton).contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .focusRing(Theme.Radius.small)
+        } else {
+            text.allowsHitTesting(false)
+        }
     }
 }
 

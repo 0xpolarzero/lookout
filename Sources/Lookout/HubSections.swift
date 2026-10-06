@@ -57,25 +57,6 @@ extension LookoutHub {
             .accessibilityLabel("Sessions")
     }
 
-    /// "Sessions", then what's waiting for you (amber) and what's done and unread (blue); searching, how many were found
-    /// (as the Inbox group's label counts), and nothing when neither group found any.
-    var agentsHeader: some View {
-        let counts = store.agentCounts
-        var status: [(String, AnyShapeStyle)] = []
-        if searching {
-            if !searchFoundNothing { status.append(("\(store.hubSessions(hub).count)", AnyShapeStyle(Theme.secondary))) }
-        } else {
-            if counts.blocked > 0 { status.append(("\(counts.blocked) waiting", AnyShapeStyle(Theme.amber))) }
-            if counts.done > 0 { status.append(("\(counts.done) done", AnyShapeStyle(Theme.accent))) }
-        }
-        // Claude's files missing or unreadable: the notice under the header says so; this stays when the list is shrunk.
-        switch store.claudeLink {
-        case .missing, .unreadable: status.append(("!", AnyShapeStyle(Theme.red)))
-        default: break
-        }
-        return sectionHeader("Sessions", status: status) { if showsDetail { focusButton(.agents) } }
-    }
-
     /// A session's tile in the bar; opens it in Claude.
     func tile(_ r: AgentRow, size: CGFloat) -> some View {
         BarTile(row: r, size: size, store: store, ui: ui, hub: hub)
@@ -86,7 +67,4 @@ extension LookoutHub {
         NewSessionTile(size: Theme.Metrics.tile) { store.startScratchSession() }
             .frame(height: Theme.Metrics.pitch)
     }
-
-    /// Beside the "+": the label and the projects to start a session in.
-    var newSessionDetail: some View { NewSessionRow(store: store, style: .detail) }
 }
