@@ -382,6 +382,8 @@ struct SettingsView: View {
                 Text(updateStatus(now)).foregroundStyle(updateStatusColor)
             }
         })
+        // A failure is said when it appears, as the other errors of a form are.
+        .onChange(of: updateError) { _, now in if let now { Announce.say(now) } }
         if updater.isRelease {
             FormDivider()
             FormToggle(label: "Check for updates automatically", isOn: Binding(
@@ -428,6 +430,12 @@ struct SettingsView: View {
             guard let last = updater.lastCheck else { return "Not checked yet" }
             return "Up to date · checked \(agoPhrase(last, now: now))"
         }
+    }
+
+    /// The failure the update row shows, if it shows one: a download that failed, or a check that did.
+    private var updateError: String? {
+        if case .failed(let message) = store.updater.phase { return message }
+        return store.updater.phase == .idle ? store.updater.checkError : nil
     }
 
     private var updateStatusColor: AnyShapeStyle {
