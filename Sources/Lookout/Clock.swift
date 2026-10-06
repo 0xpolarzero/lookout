@@ -78,12 +78,17 @@ final class Clock {
     private func update() {
         let rate = asleep || !windowVisible() ? nil : needed
         guard rate?.interval != interval else { return }
+        let wasStopped = interval == nil
         timer?.invalidate()
         timer = nil
         interval = rate?.interval
         guard let rate else { return }
-        now = date()
-        minute = now
+        // Started again after a stop: what labels hold is as old as the stop. Going between a second's pace and 30 seconds'
+        // changes nothing they read (each label's own start has set its own), and would redraw every one of them.
+        if wasStopped {
+            now = date()
+            minute = now
+        }
         ticks = 0
         let t = Timer(timeInterval: rate.interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -94,7 +99,7 @@ final class Clock {
         timer = t
     }
 
-    private func tick() {
+    func tick() {
         guard let interval else { return }
         let date = date()
         if interval == Rate.second.interval { now = date }
@@ -113,14 +118,24 @@ extension NSWindow {
 
 /// What one `Ticking` view asks of the clock: its rate, held only while the view is on screen and drawn, so a label
 /// scrolled out of its list, in a window that is covered, or hidden, never keeps the timer running.
-@MainActor
+@MainActor @Observable
 final class ClockClaim {
-    private var clock: Clock?
-    private var held: Clock.Rate?
+    @ObservationIgnored private var clock: Clock?
+    @ObservationIgnored private var held: Clock.Rate?
     /// What the label needs; nil when it has left the hierarchy.
-    var rate: Clock.Rate? { didSet { sync() } }
-    var onScreen = false { didSet { sync() } }
-    var hidden = false { didSet { sync() } }
+    @ObservationIgnored var rate: Clock.Rate? { didSet { sync() } }
+    @ObservationIgnored var onScreen = false {
+        didSet {
+            sync()
+            if onScreen != oldValue { announceChange() }
+        }
+    }
+    @ObservationIgnored var hidden = false { didSet { sync() } }
+    /// The time the label last drew, which it keeps while it is off screen.
+    @ObservationIgnored var drawn: Date?
+    /// Counts the times it came on screen or left it, for the label to be redrawn then (and not at every tick while it is away).
+    private(set) var visibility = 0
+    @ObservationIgnored private var announcing = false
 
     func start(on clock: Clock, rate: Clock.Rate, hidden: Bool) {
         self.clock = clock
@@ -135,6 +150,16 @@ final class ClockClaim {
         if let wanted { clock.retain(wanted) }
         if let held { clock.release(held) }
         held = wanted
+    }
+
+    /// Said after the view update that found it out: it is not a state to change while the views are being updated.
+    private func announceChange() {
+        guard !announcing else { return }
+        announcing = true
+        DispatchQueue.main.async { [self] in
+            announcing = false
+            visibility &+= 1
+        }
     }
 }
 
@@ -178,10 +203,19 @@ struct Ticking<Content: View>: View {
     var body: some View {
         let clock = environmentClock ?? .shared
         let rate = rate
-        // The clock's time is the one that ticks; a stopped clock's is old, and a label that has just appeared reads the
-        // system's date for its first frame.
-        let ticked = rate == .second ? clock.now : clock.minute
-        content(clock.interval == nil ? Date() : ticked)
+        // A label reads the clock only while it is on screen: one scrolled away keeps what it drew and is not redrawn by the
+        // ticks, and is redrawn (`visibility`) with the current time when it comes back.
+        _ = claim.visibility
+        let date: Date
+        if !claim.onScreen {
+            date = claim.drawn ?? Date()
+        } else {
+            // The clock's time is the one that ticks; a stopped clock's is old, and a label that has just appeared reads the
+            // system's date for its first frame.
+            date = clock.interval == nil ? Date() : rate == .second ? clock.now : clock.minute
+        }
+        claim.drawn = date
+        return content(date)
             .background(OnScreen(showing: clock.showing) { claim.onScreen = $0 })
             .onAppear { claim.start(on: clock, rate: rate, hidden: hidden) }
             .onChange(of: rate) { claim.rate = rate }
@@ -194,6 +228,37 @@ struct Ticking<Content: View>: View {
         if let start { return Date().timeIntervalSince(start) < 60 ? .second : .minute }
         return coarse ? .minute : .second
     }
+}
+
+private struct SpokenTime<Result: View>: ViewModifier {
+    let since: Date?
+    let speak: (Content, Date) -> Result
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if voiceOver {
+            // Only this redraws at a tick (the row it speaks for is `content`, which is not re-evaluated).
+            Ticking(since: since) { speak(content, $0) }
+        } else {
+            speak(content, Date())
+        }
+    }
+}
+
+extension View {
+    /// What a screen reader says about a time on this view (`speak` puts it in the accessibility label or value, from `now`).
+    /// It follows the clock only while VoiceOver is on, and from a view of its own: a tick redraws this, not the view, whose
+    /// age shown (`Ticking` round the text alone) and said still come from the one clock. `since`: as `Ticking(since:)`.
+    func spokenTime<Result: View>(since: Date? = nil, _ speak: @escaping (SpokenTimeContent, Date) -> Result) -> some View {
+        modifier(SpokenTime(since: since, speak: { content, now in speak(SpokenTimeContent(content), now) }))
+    }
+}
+
+/// The view a time is spoken for, as `View.spokenTime` hands it to its closure.
+struct SpokenTimeContent: View {
+    private let content: AnyView
+    init<Content: View>(_ content: Content) { self.content = AnyView(content) }
+    var body: some View { content }
 }
 
 /// Reports whether the view behind it is on screen: its window is showing, and it is not clipped out of a scroll

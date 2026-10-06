@@ -57,6 +57,26 @@ import Testing
         #expect(!changed.value && clock.minute == first)
     }
 
+    @Test func goingBetweenASecondsPaceAndThirtyRedrawsNoMinuteLabel() {
+        var date = Date(timeIntervalSince1970: 2_000_000_000)
+        let clock = Clock(observing: false, windowVisible: { true }, date: { date })
+        clock.retain(.minute)
+        let first = clock.minute
+        date.addTimeInterval(7)
+        // A working row scrolls in (a seconds label starts) and out again: the timer changes pace twice, and the ages, which
+        // read `minute`, are told nothing either time.
+        let changed = Flag()
+        withObservationTracking { _ = clock.minute } onChange: { changed.set() }
+        clock.retain(.second)
+        #expect(clock.interval == 1)
+        clock.release(.second)
+        #expect(clock.interval == 30 && !changed.value && clock.minute == first)
+        // Started again after a stop, the clock does bring them up to date.
+        clock.release(.minute)
+        clock.retain(.minute)
+        #expect(clock.minute == date)
+    }
+
     @Test func extraReleasesDoNotGoNegative() {
         let clock = clock()
         clock.release(.second)
@@ -178,6 +198,57 @@ import Testing
         clip.scroll(to: NSPoint(x: 0, y: toBottom ? bottom : top))
         scrollView.reflectScrolledClipView(clip)
         settle(scrollView)
+    }
+
+    /// How many times each label's content was evaluated.
+    private final class Evaluations {
+        var top = 0
+        var bottom = 0
+    }
+
+    private struct Counted: View {
+        let counts: Evaluations
+        var body: some View {
+            ScrollView {
+                VStack(spacing: 0) {
+                    Ticking(coarse: true) { _ in
+                        let _ = counts.top += 1
+                        Text("top").frame(height: 40)
+                    }
+                    Color.clear.frame(height: 800)
+                    Ticking(coarse: true) { _ in
+                        let _ = counts.bottom += 1
+                        Text("bottom").frame(height: 40)
+                    }
+                }
+            }
+            .frame(width: 200, height: 120)
+        }
+    }
+
+    @Test func aTickRedrawsTheLabelsOnScreenAndNotThoseScrolledAway() async throws {
+        // The ages of a long list: a minute's tick rebuilds the ones that can be seen, not every row.
+        var date = Date(timeIntervalSince1970: 2_000_000_000)
+        let clock = Clock(observing: false, windowVisible: { true }, showing: { _ in true }, date: { date })
+        let counts = Evaluations()
+        let hosting = NSHostingView(rootView: Counted(counts: counts).environment(\.clock, clock))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        // The label that found itself on screen is redrawn once, from the clock, a moment after the update that found out.
+        try await Task.sleep(for: .milliseconds(300))
+        settle(hosting)
+        #expect(clock.interval == 30)
+        let (top, bottom) = (counts.top, counts.bottom)
+        date.addTimeInterval(30)
+        clock.tick()
+        try await Task.sleep(for: .milliseconds(200))
+        settle(hosting)
+        #expect(counts.top > top, "the label in view is redrawn by the tick")
+        #expect(counts.bottom == bottom, "the label scrolled away is not")
+        window.contentView = nil
+        window.orderOut(nil)
     }
 
     @Test func scrollingTheSecondsLabelOutOfViewDowngradesTheTimer() {
