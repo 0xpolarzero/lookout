@@ -94,7 +94,8 @@ extension Store {
         let message = "\(repo.name): \(preset.title)" + (removed.isEmpty ? "" : ", \(plural(removed.count, "item")) removed")
         repoUndo.push(message, announcement: "\(repo.fullName) set to \(preset.title). Undo available") { [self] in
             guard let i = repos.firstIndex(where: { $0.id == before.id }) else { return }
-            repos[i].events = before.events
+            // Only what a preset sets: CI (and anything else changed since) stays as it is now.
+            repos[i].events = repos[i].events.subtracting(RepoPreset.kinds).union(before.events.intersection(RepoPreset.kinds))
             repos[i].allComments = before.allComments
             let known = Set(items.map(\.id))
             items.append(contentsOf: removed.filter { !known.contains($0.id) })

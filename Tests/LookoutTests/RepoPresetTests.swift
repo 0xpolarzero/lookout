@@ -138,6 +138,20 @@ import Testing
         #expect(Set(s.items.map(\.id)) == ["mine", "other"])
     }
 
+    @Test func undoingAPresetLeavesLaterCIChangesAlone() {
+        var repo = RepoConfig(fullName: "a/one", allComments: true)
+        repo.events.insert(.ciMain)
+        let s = store(repo)
+        s.repoUndo.announce = { _ in }
+        s.changePreset(.forMe, on: s.repos[0])
+        // CI has its own switch: turning it off afterwards is not part of what the undo takes back.
+        s.toggle(.ciMain, on: s.repos[0])
+        #expect(!s.repos[0].events.contains(.ciMain))
+        #expect(s.repoUndo.undo())
+        #expect(RepoPreset(s.repos[0]) == .everything)
+        #expect(!s.repos[0].events.contains(.ciMain))
+    }
+
     @Test func choosingThePresetAlreadyOnRegistersNoUndo() {
         let s = store(repo(RepoPreset.comments))
         s.repoUndo.announce = { _ in }
