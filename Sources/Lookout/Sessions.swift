@@ -817,7 +817,7 @@ extension HubState {
     /// "+N more" opens the rest of New activity and scrolls to its first row. A keyboard pick moves there with it (the
     /// "+N more" row is gone), so the arrows go on from the rows just revealed.
     func expandSessions(in store: Store, ui: UIState) {
-        let revealed = store.firstHiddenSession
+        let revealed = store.firstHiddenSession(self)
         let picked = selection == "s:more"
         LookoutHub.animate {
             sessionsExpanded = true
@@ -852,9 +852,7 @@ extension Store {
     }
 
     /// The first session "+N more" is hiding.
-    var firstHiddenSession: String? {
-        sessionGroups.flatMap(\.rows).dropFirst(listedGroups(expanded: false).groups.reduce(0) { $0 + $1.rows.count }).first?.id
-    }
+    func firstHiddenSession(_ hub: HubState) -> String? { listedGroups(expanded: false, frozen: hub.frozenSessions).hiddenIDs.first }
 
     /// What the keys can pick after the session rows: "+N more" while the list is cut, then New session.
     func sessionExtraTargets(_ hub: HubState) -> [String] {

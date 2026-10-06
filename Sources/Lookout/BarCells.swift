@@ -414,13 +414,7 @@ enum BarSessions {
     /// the "+N" cell included: what goes is the last of the others, and only when they are gone, the last waiting one.
     /// One session over would be a "+1" in the place of its own tile: it shows instead, room allowing.
     static func arrange(_ slots: [Slot], frozen: [Slot]?, room: CGFloat = .infinity) -> (shown: [Slot], hidden: [Slot]) {
-        var ordered = slots
-        if let frozen {
-            let now = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let known = Set(frozen.map(\.id))
-            ordered = frozen.compactMap { old in now[old.id].map { Slot(id: old.id, group: old.group, waiting: $0.waiting) } }
-                + slots.filter { !known.contains($0.id) }
-        }
+        let ordered = inOrder(slots, frozen: frozen)
         let limit = SessionCap.shown(total: ordered.count, waiting: ordered.filter(\.waiting).count)
         var shown = ordered.enumerated().filter { $0.offset < limit || $0.element.waiting }.map(\.element)
         if let frozen {
@@ -441,6 +435,16 @@ enum BarSessions {
         if ordered.count - shown.count == 1, length(ordered, more: false) <= room { shown = ordered }
         let ids = Set(shown.map(\.id))
         return (shown, ordered.filter { !ids.contains($0.id) })
+    }
+
+    /// `slots` in the frozen order, each in the group it had (those still there, then any new ones as they are); whether
+    /// a session waits is as it is now. The whole sequence: what the focused lists show, and what `arrange` cuts.
+    static func inOrder(_ slots: [Slot], frozen: [Slot]?) -> [Slot] {
+        guard let frozen else { return slots }
+        let now = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let known = Set(frozen.map(\.id))
+        return frozen.compactMap { old in now[old.id].map { Slot(id: old.id, group: old.group, waiting: $0.waiting) } }
+            + slots.filter { !known.contains($0.id) }
     }
 
     /// What the tiles take along the bar, with their gaps, and the "+N" cell when there is one.

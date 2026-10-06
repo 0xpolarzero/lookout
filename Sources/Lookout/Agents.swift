@@ -233,10 +233,15 @@ struct SessionGroup: Identifiable {
     /// How many sessions the group has, however many of them are listed.
     let total: Int
 
-    init(kind: Kind, rows: [AgentRow]) {
+    init(kind: Kind, rows: [AgentRow], total: Int? = nil) {
         self.kind = kind
         self.rows = rows
-        total = rows.count
+        self.total = total ?? rows.count
+    }
+
+    /// The kind a group's `id` names (a frozen group may be one the live list no longer has).
+    static func kind(ofID id: String) -> Kind {
+        id == "waiting" ? .waiting : id == "new" ? .newActivity : .project(String(id.dropFirst("project:".count)))
     }
 
     var id: String {
@@ -440,49 +445,36 @@ extension Store {
     var sessionGroups: [SessionGroup] { cache.groups }
 
     /// The groups as the hub lists them: cut to `SessionCap` (from the end, so New activity goes first) unless
-    /// `expanded`, and how many that hid. `frozen`: the order and groups the bar's tiles are held in while the pointer is
+    /// `expanded`, and the sessions that hid. `frozen`: the order and groups the bar's tiles are held in while the pointer is
     /// over the hub, so a row doesn't move away from its tile; a session's own marks (waiting, working) are as they are.
-    /// A waiting session is never cut, wherever the freeze puts it.
-    func listedGroups(expanded: Bool, frozen: [BarSessions.Slot]? = nil) -> (groups: [SessionGroup], hidden: Int) {
-        var groups = frozen.map { regrouped(cache.groups, as: $0) } ?? cache.groups
-        guard !expanded else { return (groups, 0) }
-        let total = groups.reduce(0) { $0 + $1.rows.count }
-        let waiting = groups.reduce(0) { $0 + $1.rows.filter(\.isWaiting).count }
-        var room = SessionCap.shown(total: total, waiting: waiting)
-        for i in groups.indices {
-            groups[i].rows = groups[i].rows.filter { row in
-                defer { room -= 1 }
-                return room > 0 || row.isWaiting
-            }
+    /// The cut is the bar's own (`BarSessions.arrange`, with no limit of room), so a session that began waiting under the
+    /// freeze takes the same tile's place in the list, and the two say the same sessions and the same number are left out.
+    func listedGroups(expanded: Bool, frozen: [BarSessions.Slot]? = nil) -> (groups: [SessionGroup], hidden: Int, hiddenIDs: [String]) {
+        let live = cache.groups
+        let slots = BarSessions.slots(groups: live)
+        let (shown, hidden) = expanded ? (BarSessions.inOrder(slots, frozen: frozen), []) : BarSessions.arrange(slots, frozen: frozen)
+        var rows: [String: AgentRow] = [:]
+        for group in live { for row in group.rows { rows[row.id] = row } }
+        let kinds = Dictionary(live.map { ($0.id, $0.kind) }, uniquingKeysWith: { first, _ in first })
+        var members: [String: [AgentRow]] = [:]
+        var order: [String] = []
+        for slot in shown {
+            guard let row = rows[slot.id] else { continue }
+            if members[slot.group] == nil { order.append(slot.group) }
+            members[slot.group, default: []].append(row)
         }
-        groups.removeAll { $0.rows.isEmpty }
-        return (groups, total - groups.reduce(0) { $0 + $1.rows.count })
+        // A group is whole before it is counted: its total is every session in it, listed or not.
+        var totals: [String: Int] = [:]
+        for slot in shown + hidden { totals[slot.group, default: 0] += 1 }
+        let groups = order.map { id in
+            SessionGroup(kind: kinds[id] ?? SessionGroup.kind(ofID: id), rows: members[id] ?? [], total: totals[id] ?? 0)
+        }
+        return (groups, hidden.count, hidden.map(\.id))
     }
 
     /// `listedGroups` as `hub` has it: all of them when it asks for them, in the order the pointer found.
-    func listedGroups(_ hub: HubState) -> (groups: [SessionGroup], hidden: Int) {
+    func listedGroups(_ hub: HubState) -> (groups: [SessionGroup], hidden: Int, hiddenIDs: [String]) {
         listedGroups(expanded: hub.listsAllSessions, frozen: hub.frozenSessions)
-    }
-
-    /// `live`'s rows in the order and groups `frozen` has them (the sessions still there), then any new ones where they are.
-    private func regrouped(_ live: [SessionGroup], as frozen: [BarSessions.Slot]) -> [SessionGroup] {
-        var rows: [String: AgentRow] = [:]
-        var liveGroup: [String: String] = [:]
-        for group in live { for row in group.rows { rows[row.id] = row; liveGroup[row.id] = group.id } }
-        var kinds = Dictionary(live.map { ($0.id, $0.kind) }, uniquingKeysWith: { first, _ in first })
-        var out: [SessionGroup] = []
-        var index: [String: Int] = [:]
-        func place(_ row: AgentRow, in group: String) {
-            if let i = index[group] { out[i].rows.append(row); return }
-            let kind = kinds[group] ?? (group == "waiting" ? .waiting : group == "new" ? .newActivity : .project(String(group.dropFirst("project:".count))))
-            kinds[group] = kind
-            index[group] = out.count
-            out.append(SessionGroup(kind: kind, rows: [row]))
-        }
-        var placed = Set<String>()
-        for slot in frozen { if let row = rows[slot.id], placed.insert(slot.id).inserted { place(row, in: slot.group) } }
-        for group in live { for row in group.rows where placed.insert(row.id).inserted { place(row, in: group.id) } }
-        return out
     }
 
     func setProjectColor(_ folder: String, _ index: Int) {

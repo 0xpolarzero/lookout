@@ -514,4 +514,28 @@ import Testing
         #expect(s.hubSessions(hub).map(\.id).contains("n11"))
         #expect(s.hubTargets(hub).contains("a:n11"))
     }
+
+    @Test func aFrozenGroupCountsEverySessionItHolds() {
+        let s = store((1...5).map { session("x\($0)", folder: "/code/x") } + [session("y1", folder: "/code/y")],
+                      kept: ["x1", "x2", "x3", "x4", "x5", "y1"])
+        let listed = s.listedGroups(expanded: false, frozen: s.barSlots)
+        #expect(listed.groups.map(\.total) == [5, 1])
+        #expect(listed.groups.map { $0.rows.count } == [5, 1])
+    }
+
+    @Test func aLateWaiterIsTheSameTileInTheBarAndTheList() {
+        // Ten new sessions frozen in order; the ninth then asks something. The bar puts it in the last other tile's place, and
+        // the list says the same, with the same number left out (DESIGN.md 10.4).
+        let s = store((0..<10).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
+        let frozen = s.barSlots
+        s.claudeActivity = ["n9": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["n9"]?.running = true
+        let bar = BarSessions.arrange(s.barSlots, frozen: frozen)
+        let list = s.listedGroups(expanded: false, frozen: frozen)
+        #expect(list.groups.flatMap(\.rows).map(\.id) == bar.shown.map(\.id))
+        #expect(list.hidden == bar.hidden.count && list.hiddenIDs == bar.hidden.map(\.id))
+        #expect(bar.shown.count == 8 && list.groups.flatMap(\.rows).map(\.id).contains("n9"))
+        // Focused, the list is whole.
+        #expect(s.listedGroups(expanded: true, frozen: frozen).groups.flatMap(\.rows).count == 10)
+    }
 }
