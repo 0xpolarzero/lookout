@@ -468,11 +468,21 @@ struct RepoRow: View {
     var body: some View {
         let twoLines = failure != nil || shown == .custom
         VStack(alignment: .leading, spacing: 0) {
-            // The controls keep their width, the same on every row; the name gives way, in the middle.
-            HStack(spacing: Theme.Space.md) {
-                name
-                Spacer(minLength: 0)
-                controls
+            // The controls keep their width, the same on every row. A name that does not fit beside them takes a line of its
+            // own (the middle gives way only when it does not fit there either).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.md) {
+                    name.fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    controls
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    name.frame(height: Self.line + Theme.Space.md, alignment: .bottom)
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        controls
+                    }
+                }
             }
             .frame(minHeight: twoLines ? Self.firstLine : Theme.Metrics.formRow)
             if let failure { failureLine(failure) }
