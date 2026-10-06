@@ -71,6 +71,45 @@ import Testing
         #expect(s.pulse == pulse)
     }
 
+    private func ciAnswer(_ sha: String) -> CIStatus {
+        CIStatus(state: .success, branch: "main", sha: sha, url: nil, failing: [], checkedAt: Date(), title: nil, updatedAt: Date())
+    }
+
+    @Test func aCIChecksOwnFailureIsInTheHealthAndSoIsItsRecovery() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.repos = [RepoConfig(fullName: "a/x")]
+        nonisolated(unsafe) var offline = true
+        let answer = ciAnswer("s1")
+        s.ciFetch = { _ in
+            if offline { throw GitHubError(message: "The Internet connection appears to be offline") }
+            return answer
+        }
+        // Check now with no network: the repository is not healthy.
+        await s.checkCI("a/x")
+        #expect(s.repoErrors["a/x"] == "The Internet connection appears to be offline" && s.syncFault(stale: false) == .partial)
+        // A retry that gets through clears it, without waiting for the next poll.
+        offline = false
+        await s.checkCI("a/x")
+        #expect(s.repoErrors.isEmpty && s.syncFault(stale: false) == nil)
+    }
+
+    @Test func aCIThatAnswersDoesNotClearTheConversationsFailure() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.settings.reviewRequests = false
+        s.repos = [RepoConfig(fullName: "a/x")]
+        let answer = ciAnswer("s1")
+        s.ciFetch = { _ in answer }
+        s.gh.transport = { _ in SyncHealth.reply(500, #"{"message": "Server error"}"#) }
+        await s.pollAll()
+        #expect(s.repoErrors["a/x"] != nil)
+        await s.checkCI("a/x")
+        #expect(s.repoErrors["a/x"] != nil)
+    }
+
     @Test func aLaterReviewPageFailingKeepsTheRequestsAlreadyFetched() async {
         let s = Store()
         s.persists = false

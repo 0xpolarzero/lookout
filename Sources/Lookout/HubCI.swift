@@ -35,7 +35,7 @@ extension Store {
     /// Checks one repo's CI now, not everything.
     func checkCINow(_ repo: RepoConfig) {
         let name = repo.fullName
-        Task { try? await syncCI(name) }
+        Task { await checkCI(name) }
     }
 }
 

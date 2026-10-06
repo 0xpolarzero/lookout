@@ -92,6 +92,9 @@ final class Store {
     var tokenSource: TokenSource?
     var authError: String?
     var repoErrors: [String: String] = [:]
+    /// What a repository's conversations and its CI each failed at, apart: one succeeding says nothing of the other.
+    @ObservationIgnored private var conversationErrors: [String: String] = [:]
+    @ObservationIgnored private var ciErrors: [String: String] = [:]
     /// Why the last search for review requests failed, if it did (a rate limit of its own bucket, say): the other
     /// source of the inbox, besides the repositories.
     var reviewRequestsError: String?
@@ -722,6 +725,8 @@ final class Store {
         ci[repo.fullName] = nil
         mutedCI[repo.fullName] = nil
         // Polls never visit it again, so its fault would outlive it (the gear's badge, the banner, Settings).
+        conversationErrors[repo.fullName] = nil
+        ciErrors[repo.fullName] = nil
         repoErrors[repo.fullName] = nil
         endCIChecks(repo.fullName)
         save()
@@ -732,14 +737,19 @@ final class Store {
         if repos[i].events.contains(kind) {
             repos[i].events.remove(kind)
             removeItems { $0.repo == repo.fullName && $0.kind == kind }
-            if kind == .ciMain { endCIChecks(repo.fullName) }
+            if kind == .ciMain {
+                endCIChecks(repo.fullName)
+                // CI is not watched any more: what it failed at is no fault of the repository's.
+                ciErrors[repo.fullName] = nil
+                publishHealth(repo.fullName)
+            }
         } else {
             repos[i].events.insert(kind)
         }
         save()
         if kind == .ciMain && repos[i].events.contains(kind) {
             let name = repo.fullName
-            Task { try? await syncCI(name) }
+            Task { await checkCI(name) }
         }
     }
 
@@ -814,16 +824,28 @@ final class Store {
         } catch {
             failure = error
         }
-        // CI has endpoints of its own: conversations failing doesn't keep it from being checked.
-        do { try await syncCI(name) } catch { failure = failure ?? error }
         // A request that outlived the repository's removal has nobody to tell.
+        if repos.contains(where: { $0.fullName == name }) { conversationErrors[name] = failure?.localizedDescription }
+        // CI has endpoints of its own: conversations failing doesn't keep it from being checked.
+        await checkCI(name)
+    }
+
+    /// Checks one repository's CI and keeps what went wrong in its sync health, as the poll does: a check that fails is a
+    /// fault, and one that succeeds clears its own, whichever asked (the poll, a switch turned on, Check now). The
+    /// conversations' failure, if there is one, stays.
+    func checkCI(_ name: String) async {
+        var failure: String?
+        do { try await syncCI(name) } catch { failure = error.localizedDescription }
         guard repos.contains(where: { $0.fullName == name }) else { return }
-        if let failure {
-            let message = failure.localizedDescription
-            if repoErrors[name] != message { repoErrors[name] = message }
-        } else if repoErrors[name] != nil {
-            repoErrors[name] = nil
-        }
+        ciErrors[name] = failure
+        publishHealth(name)
+    }
+
+    /// `repoErrors` is what the sources of a repository (its conversations, its CI) failed at, the conversations' first.
+    private func publishHealth(_ name: String) {
+        guard repos.contains(where: { $0.fullName == name }) else { return }
+        let message = conversationErrors[name] ?? ciErrors[name]
+        if repoErrors[name] != message { repoErrors[name] = message }
     }
 
     func updateRepo(_ name: String, _ f: (inout RepoConfig) -> Void) {
@@ -911,6 +933,9 @@ final class Store {
         let reviewNumbers = Set(added.filter { $0.kind == .reviewComment }.map(\.number))
         let info: [Int: ThreadInfo]? = needInfo.isEmpty ? [:]
             : try? await fetchThreads(name, Array(needInfo), participation: true, reviewThreads: reviewNumbers, me: me)
+        // The repository may have been stopped, or set to follow something else, while the answers were out: nothing of
+        // them is kept, counted or told (the cursors stay, so a repository that is still watched asks again).
+        guard isCurrent(repo) else { return }
         // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
         // Always evaluated (and remembered), so switching All comments off later can prune what isn't for me.
         // If the lookup failed, keep everything rather than silently dropping something addressed to me.
@@ -933,9 +958,6 @@ final class Store {
             var changed = false
             for reply in myReplies {
                 for i in all.indices where all[i].repo == name && all[i].number == reply.number
-        // The repository may have been stopped, or set to follow something else, while the answers were out: nothing of
-        // them is kept, counted or told (the cursors stay, so a repository that is still watched asks again).
-        guard isCurrent(repo) else { return }
                     && all[i].state.isOpen && all[i].createdAt < reply.at {
                     if let root = reply.root {
                         if all[i].threadRoot == root { all[i].state = .addressed; changed = true }
@@ -949,6 +971,13 @@ final class Store {
         }
 
         announce(added.filter { $0.state == .unread && $0.createdAt > repo.addedAt })
+    }
+
+    /// Whether `repo`, as an answer was asked for it, is still what is watched: not stopped (nor stopped and watched again), and
+    /// following the same events.
+    private func isCurrent(_ repo: RepoConfig) -> Bool {
+        guard let now = repos.first(where: { $0.fullName == repo.fullName }) else { return false }
+        return now.addedAt == repo.addedAt && now.events == repo.events && now.allComments == repo.allComments
     }
 
     struct ThreadInfo {
@@ -973,13 +1002,6 @@ final class Store {
                 pr += " reviewThreads(last: 60) { nodes { comments(first: 50) { nodes { databaseId author { login } createdAt } } } }"
             }
             q += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { \(common) } ... on PullRequest { \(pr) } }"
-    /// Whether `repo`, as an answer was asked for it, is still what is watched: not stopped (nor stopped and watched again), and
-    /// following the same events.
-    private func isCurrent(_ repo: RepoConfig) -> Bool {
-        guard let now = repos.first(where: { $0.fullName == repo.fullName }) else { return false }
-        return now.addedAt == repo.addedAt && now.events == repo.events && now.allComments == repo.allComments
-    }
-
         }
         q += " } }"
         let json = try await gh.graphql(q)
