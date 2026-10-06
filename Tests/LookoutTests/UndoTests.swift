@@ -181,6 +181,21 @@ final class Sleeper {
         #expect(s.items.first { $0.id == "rr#1" }?.state == .addressed)
     }
 
+    @Test func aRequestListedAgainAfterItWasAddressedReturnsToNeedsYou() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        s.discard(s.items[1])
+        s.applyReviewRequests([], complete: true)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .addressed)
+        let pulse = s.pulse
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
+        #expect(s.pulse == pulse + 1)
+        // The one dismissed while it stayed outstanding is still in Done.
+        #expect(s.items.first { $0.id == "rr#2" }?.state == .discarded)
+    }
+
     @Test func aSuppressionEndsOnceTheSearchListedEverythingWithoutIt() {
         let s = store([])
         s.settings.didInitialReviewSync = true

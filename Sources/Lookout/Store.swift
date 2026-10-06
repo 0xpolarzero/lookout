@@ -1177,7 +1177,15 @@ final class Store {
         for pr in found {
             let id = "rr#\(pr.id)"
             current.insert(id)
-            guard !items.contains(where: { $0.id == id }), !droppedRequests.contains(id), let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
+            if let i = items.firstIndex(where: { $0.id == id }) {
+                // Addressed means it left GitHub's list (a dismissal is `.discarded`): listed again, someone asked once more.
+                guard items[i].state == .addressed else { continue }
+                items[i].state = .unread
+                items[i].createdAt = Date()
+                added.append(items[i])
+                continue
+            }
+            guard !droppedRequests.contains(id), let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
             let backlog = first || baseline.map { pr.updatedAt <= $0 } == true
             let item = InboxItem(
                 id: id, repo: repoName(from: repoURL), kind: .reviewRequested, number: pr.number, title: pr.title,
