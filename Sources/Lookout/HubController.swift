@@ -58,7 +58,6 @@ private struct EdgeLayout: Layout {
     let edge: DockEdge
     let position: Double
     let restLength: CGFloat
-    private let inset = Theme.Metrics.inset
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -67,18 +66,7 @@ private struct EdgeLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let hub = subviews.first else { return }
         let size = hub.sizeThatFits(.unspecified)
-        func along(_ length: CGFloat, _ own: CGFloat) -> CGFloat {
-            // From where the bar starts at rest, so the bar never moves as the view opens or a divider is dragged.
-            let start = length * position - restLength / 2
-            return min(max(start, inset), length - own - inset)
-        }
-        let origin = switch edge {
-        case .right: CGPoint(x: bounds.maxX - size.width, y: bounds.minY + along(bounds.height, size.height))
-        case .left: CGPoint(x: bounds.minX, y: bounds.minY + along(bounds.height, size.height))
-        case .top: CGPoint(x: bounds.minX + along(bounds.width, size.width), y: bounds.minY)
-        case .bottom: CGPoint(x: bounds.minX + along(bounds.width, size.width), y: bounds.maxY - size.height)
-        }
-        hub.place(at: origin, proposal: .unspecified)
+        hub.place(at: HubGeometry.origin(edge: edge, position: position, restLength: restLength, size: size, in: bounds), proposal: .unspecified)
     }
 }
 
@@ -87,7 +75,6 @@ struct HubRoot: View {
     let ui: UIState
     let hub: HubState
     let layout: HubLayout
-    var maxLength: CGFloat
 
     var body: some View {
         GeometryReader { geo in content(in: geo.size) }
@@ -96,17 +83,23 @@ struct HubRoot: View {
             .tipSpace()
     }
 
-    /// On the sides the view grows down from the bar, into the room below it, so the bar doesn't move as it opens;
-    /// it only moves up when there's too little room below.
+    /// The hub may take the screen's whole usable length less both insets, never a floor: it grows from the bar's
+    /// place and only the screen's end moves it (see `HubGeometry.along`).
     private func length(in size: CGSize) -> CGFloat {
-        guard !ui.edge.isHorizontal else { return maxLength }
-        let position = store.settings.centerPill == true ? 0.5 : ui.position
-        let top = min(max(size.height * position - layout.restLength / 2, 6), size.height - layout.restLength - 6)
-        return min(maxLength, max(size.height - top - 12, 560))
+        HubGeometry.maxLength(visibleHeight: size.height)
     }
 
+    /// On the sides the full view stays below the bar's rest anchor, so the inbox tile never moves.
+    private func openLength(in size: CGSize) -> CGFloat? {
+        guard !ui.edge.isHorizontal, layout.restLength > 0 else { return nil }
+        return HubGeometry.sideLength(visibleHeight: size.height, position: HubRoot.position(ui, store), restLength: layout.restLength)
+    }
+
+    /// Where along its edge the bar rests: centred when the setting says so.
+    static func position(_ ui: UIState, _ store: Store) -> Double { store.settings.centerPill == true ? 0.5 : ui.position }
+
     @ViewBuilder private func content(in size: CGSize) -> some View {
-        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), maxWidth: size.width,
+        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), openLength: openLength(in: size), maxWidth: size.width,
                               barLength: (ui.edge.isHorizontal ? size.width : size.height) - 12)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
@@ -120,7 +113,7 @@ struct HubRoot: View {
             if layout.floating {
                 view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                EdgeLayout(edge: ui.edge, position: store.settings.centerPill == true ? 0.5 : ui.position,
+                EdgeLayout(edge: ui.edge, position: Self.position(ui, store),
                            restLength: layout.restLength) { view }
                     .motion(hub.expanded ? LookoutHub.opening : LookoutHub.closing, value: hub.expanded)
             }
@@ -147,6 +140,7 @@ final class HubController {
     /// Whether the hub was last reported to the store as visible beyond the bare bar.
     private var reportedOpen = false
     private var lastPinned = false
+    private var lastMenuKeys = false
     /// The app that had focus before the hub took it, to hand it back.
     private var previousApp: NSRunningApplication?
     private var dragStart: (mouse: NSPoint, origin: NSPoint)?
@@ -164,9 +158,11 @@ final class HubController {
         screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
         window = PillPanel(size: NSSize(width: 100, height: 100))
         window.allowsKey = true
+        // The root accessibility container's name (VoiceOver reads the window's title first).
+        window.title = "Lookout"
         window.acceptsMouseMovedEvents = true
         window.ignoresMouseEvents = true
-        host = NSHostingView(rootView: HubRoot(store: store, ui: ui, hub: hub, layout: layout, maxLength: 600))
+        host = NSHostingView(rootView: HubRoot(store: store, ui: ui, hub: hub, layout: layout))
         host.sizingOptions = []
         host.appearance = NSAppearance(named: .darkAqua)
         window.contentView = host
@@ -201,26 +197,23 @@ final class HubController {
 
     // MARK: Window
 
-    /// The window along the edge, deep enough for the expanded hub and its shadow.
-    private func dockFrame() -> (NSRect, CGFloat) {
+    /// The window along the edge, as deep as the hub and its shadow can be: the screen's usable area (below the menu
+    /// bar, clear of the Dock) along its length, and across it the sides' widest hub or the whole width.
+    private func dockFrame() -> NSRect {
         let vf = screen.visibleFrame
         switch ui.edge {
         case .right, .left:
             let depth = LookoutHub.cell + LookoutHub.detail + 40
-            let x = ui.edge == .right ? vf.maxX - depth : vf.minX
-            return (NSRect(x: x, y: vf.minY, width: depth, height: vf.height), vf.height - 12)
+            return NSRect(x: ui.edge == .right ? vf.maxX - depth : vf.minX, y: vf.minY, width: depth, height: vf.height)
         case .top, .bottom:
-            let depth = min(vf.height, 780)
-            let y = ui.edge == .top ? vf.maxY - depth : vf.minY
-            return (NSRect(x: vf.minX, y: y, width: vf.width, height: depth), depth - 40)
+            return NSRect(x: vf.minX, y: vf.minY, width: vf.width, height: vf.height)
         }
     }
 
     private func dock() {
-        let (frame, maxLength) = dockFrame()
         layout.floating = false
-        host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout, maxLength: maxLength)
-        window.setFrame(frame, display: true)
+        host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout)
+        window.setFrame(dockFrame(), display: true)
         syncTrigger()
     }
 
@@ -320,9 +313,7 @@ final class HubController {
             self.hub.hovering = inside
             if !inside {
                 self.hub.cancelDwell()
-                self.hub.section = nil
-                self.hub.quiet = false
-                self.closedByLeaving()
+                if self.hub.closePeek() { self.closedByLeaving() }
             }
         }
     }
@@ -391,6 +382,7 @@ final class HubController {
             _ = ui.edge
             _ = hub.section
             _ = hub.quiet
+            _ = hub.menuKeys
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -402,6 +394,12 @@ final class HubController {
                     self.takeFocus()
                 } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
                     self.giveFocusBack()
+                }
+                // The controls menu, asked for by VoiceOver or a key, takes the keyboard while it is up.
+                if self.hub.menuKeys != self.lastMenuKeys {
+                    self.lastMenuKeys = self.hub.menuKeys
+                    if self.hub.menuKeys, !self.window.isKeyWindow { self.takeFocus() }
+                    else if !self.hub.menuKeys, !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow { self.giveFocusBack() }
                 }
                 self.mouseMoved()
                 self.reportOpen()
@@ -514,8 +512,8 @@ final class HubController {
 
     /// Where the bar rests on its edge: the same place `EdgeLayout` puts it once docked.
     private func restFrame(size: NSSize, in vf: NSRect) -> NSRect {
-        let position = store.settings.centerPill == true ? 0.5 : ui.position
-        let (dock, _) = dockFrame()
+        let position = HubRoot.position(ui, store)
+        let dock = dockFrame()
         let inset: CGFloat = 6
         switch ui.edge {
         case .right, .left:

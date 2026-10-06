@@ -1,8 +1,7 @@
 import SwiftUI
 
-// Hovering a section of the bar opens just that section beside it, in a panel lined up with its cells. The bar
-// itself never moves, so what you're pointing at stays under the pointer. The whole view (every section at once)
-// is the pinned one.
+// Hovering a section of the bar opens just that section beside it, in a panel joined to the bar. The bar itself never
+// moves, so what you're pointing at stays under the pointer. The whole view (every section at once) is the kept-open one.
 
 enum HubSection: Hashable {
     case inbox, ci, agents, controls
@@ -15,6 +14,47 @@ enum HubSection: Hashable {
         case .agents: "Sessions"
         case .controls: "Controls"
         }
+    }
+}
+
+/// The controls menu's rows, top to bottom (DESIGN.md 5.7): what its view draws and its keys walk.
+enum ControlsRow: CaseIterable {
+    case keepOpen, repositories, settings, sync
+
+    /// The rows the menu lists: while sign-in is the fault its line opens Settings, so there is nothing to sync.
+    @MainActor static func listed(_ store: Store) -> [ControlsRow] { allCases.filter { $0 != .sync || store.authError == nil } }
+}
+
+extension HubState {
+    /// Opens the controls peek for the keyboard and VoiceOver: first row highlighted, the keys acting on it.
+    func showControls() {
+        quiet = false
+        cancelDwell()
+        section = .controls
+        menuPick = .keepOpen
+        menuKeys = true
+    }
+
+    /// The pointer is gone: the panel closes. Not the controls menu the keyboard asked for, which has the keys and stays
+    /// up wherever the pointer is until Esc or a row closes it. Returns whether it closed.
+    @discardableResult
+    func closePeek() -> Bool {
+        guard !menuKeys else { return false }
+        section = nil
+        quiet = false
+        return true
+    }
+
+    /// Does what a row of the controls menu says.
+    func perform(_ row: ControlsRow, store: Store) {
+        switch row {
+        case .keepOpen: LookoutHub.animate(LookoutHub.opening) { pinned = true }
+        case .repositories: go(.repos)
+        case .settings: go(.settings)
+        case .sync: if !store.isSyncing { store.refreshNow() }
+        }
+        // A page or the full view takes over; syncing leaves the menu as it is.
+        if row != .sync { menuKeys = false }
     }
 }
 
@@ -40,6 +80,12 @@ struct SectionProbe: ViewModifier {
     }
 }
 
+/// A panel as drawn: where it is (in the bar's coordinates, outside the bar), and its corners.
+struct PanelGeometry: Equatable {
+    var rect: CGRect
+    var radii: RectangleCornerRadii
+}
+
 extension LookoutHub {
     static let barSpace = "hub-bar"
     /// Between the bar and a section's panel: none, so the pointer never falls between them.
@@ -49,8 +95,8 @@ extension LookoutHub {
         SectionProbe(section: section, hub: hub, frames: $sectionFrames)
     }
 
-    /// The hovered section, when the whole view isn't open.
-    var peeking: HubSection? { expanded || hub.quiet ? nil : hub.section }
+    /// The hovered section, when the whole view isn't open (nor a page).
+    var peeking: HubSection? { hub.expanded || hub.quiet ? nil : hub.section }
 
     /// Where a panel sits along the bar: from `start`, `length` long (both along the bar's edge), and which of the
     /// bar's ends it reaches.
@@ -84,9 +130,12 @@ extension LookoutHub {
             if start < Self.peekSnap { start = 0 }
             if length <= bar, bar - (start + length) < Self.peekSnap { start = bar - length }
         } else {
-            // Its lines stay level with their cells, so it only moves at the ends: it grows to meet the bar's
+            // Its header stays level with its first cell, so it only moves at the ends: it grows to meet the bar's
             // bottom if it ends close to it.
-            start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - Self.peekPad - Self.peekLead(section), 0)
+            start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - HubGeometry.lead, 0)
+            // A low cell leaves less room below it than a row and its "+N more" need with the header: the panel moves up
+            // by what would hang past the screen's end.
+            start = HubGeometry.peekStart(start, length: length, reach: maxLength + HubGeometry.inset - hubTop)
             let short = bar - (start + length)
             if short >= 0, short < Self.peekSnap { length = bar - start }
         }
@@ -94,32 +143,77 @@ extension LookoutHub {
         return Placement(start: start, length: length, atStart: start <= 0.5, atEnd: end >= bar - 0.5, pastEnd: end > bar + 0.5)
     }
 
-    /// The panel for the hovered section, placed beside (or under) its cells in the bar.
+    /// The current panel's place, for the bar's own outline.
+    var currentPlacement: Placement? {
+        guard let section = peeking, let frame = sectionFrames[section] else { return nil }
+        return placement(section, frame)
+    }
+
+    /// The hovered section's panel as drawn, once it is measured and placed.
+    var peekGeometry: PanelGeometry? {
+        guard let section = peeking, let size = peekSizes[section], let place = currentPlacement else { return nil }
+        let w = panelWidth(section)
+        let h = edge.isHorizontal ? size.height : place.length
+        let rect = switch edge {
+        case .right: CGRect(x: -(w + Self.peekGap), y: place.start, width: w, height: h)
+        case .left: CGRect(x: barSize.width + Self.peekGap, y: place.start, width: w, height: h)
+        case .top: CGRect(x: place.start, y: barSize.height + Self.peekGap, width: w, height: h)
+        case .bottom: CGRect(x: place.start, y: -(h + Self.peekGap), width: w, height: h)
+        }
+        return PanelGeometry(rect: rect, radii: panelRadii(place))
+    }
+
+    /// The bar's corners: square where a panel is flush with (or runs past) that end of the bar.
+    func barRadii(_ place: Placement?) -> RectangleCornerRadii {
+        let r = Theme.Radius.hub
+        let start: CGFloat = place?.atStart == true ? 0 : r
+        let end: CGFloat = place?.atEnd == true ? 0 : r
+        return switch edge {
+        case .right: RectangleCornerRadii(topLeading: start, bottomLeading: end)
+        case .left: RectangleCornerRadii(bottomTrailing: end, topTrailing: start)
+        case .top: RectangleCornerRadii(bottomLeading: start, bottomTrailing: end)
+        case .bottom: RectangleCornerRadii(topLeading: start, topTrailing: end)
+        }
+    }
+
+    /// A panel's corners: square where it meets the bar, rounded elsewhere, and rounded on the bar's side too where it
+    /// runs on past the bar's end.
+    func panelRadii(_ place: Placement) -> RectangleCornerRadii {
+        let r = Theme.Radius.hub
+        let past: CGFloat = place.pastEnd ? r : 0
+        return switch edge {
+        case .right: RectangleCornerRadii(topLeading: r, bottomLeading: r, bottomTrailing: past)
+        case .left: RectangleCornerRadii(bottomLeading: past, bottomTrailing: r, topTrailing: r)
+        case .top: RectangleCornerRadii(bottomLeading: r, bottomTrailing: r, topTrailing: past)
+        case .bottom: RectangleCornerRadii(topLeading: r, bottomTrailing: past, topTrailing: r)
+        }
+    }
+
+    /// The bar's outline as a clip for what is drawn inside it.
+    var barOutline: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(cornerRadii: barRadii(currentPlacement), style: .continuous)
+    }
+
+    /// The panel for the hovered section, measured and placed beside (or under) its cells in the bar.
     @ViewBuilder var peekPanel: some View {
-        if let section = peeking, let frame = sectionFrames[section] {
-            let place = placement(section, frame)
-            let shape = panelShape(place)
-            let panel = peekContent(section)
+        if let section = peeking, sectionFrames[section] != nil {
+            let geometry = peekGeometry
+            let rect = geometry?.rect ?? .zero
+            peekContent(section)
                 // The section is part of what's observed: an equal size on switching must still fill that section's entry.
                 .onGeometryChange(for: PeekMeasure.self) { PeekMeasure(section: section, size: $0.size) } action: {
                     if peekSizes[$0.section] != $0.size { peekSizes[$0.section] = $0.size }
                 }
-                .frame(height: edge.isHorizontal ? nil : place?.length, alignment: .top)
-                .background(shape.fill(Theme.bg))
-                .overlay(shape.strokeBorder(Theme.stroke))
-                .clipShape(shape)
-                // No seam where it meets the bar: the two outlines there are painted over, so bar and panel read
-                // as one shape.
-                .overlay(alignment: seamAlignment) { seam(place) }
+                .frame(height: edge.isHorizontal ? nil : currentPlacement?.length, alignment: .top)
                 .fixedSize()
+                .clipShape(UnevenRoundedRectangle(cornerRadii: geometry?.radii ?? RectangleCornerRadii(), style: .continuous))
                 .onHover { overPanel = $0; hoverChanged() }
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.rootSpace)) } action: { hub.panelFrame = $0 }
                 .onDisappear { hub.panelFrame = .zero }
                 // Hidden until it's been measured and placed, so it never shows up in the wrong spot first.
-                .opacity(place == nil ? 0 : 1)
+                .opacity(geometry == nil ? 0 : 1)
                 .transition(peekTransition)
-            let o = peekOffset(section, place)
-            panel.offset(x: o.width, y: o.height)
+                .offset(x: rect.minX, y: rect.minY)
         }
     }
 
@@ -130,185 +224,127 @@ extension LookoutHub {
                                                y: edge == .top ? -d : edge == .bottom ? d : 0))
     }
 
-    /// Laid over the bar from its top-left (bottom-left on the bottom edge), then moved out beside it.
-    func peekOffset(_ section: HubSection, _ place: Placement?) -> CGSize {
-        let along = place?.start ?? 0
-        return switch edge {
-        case .right: CGSize(width: -(panelWidth(section) + Self.peekGap), height: along)
-        case .left: CGSize(width: Self.cell + Self.peekGap, height: along)
-        case .top: CGSize(width: along, height: Self.cell + Self.peekGap)
-        case .bottom: CGSize(width: along, height: -(Self.cell + Self.peekGap))
-        }
-    }
+    // MARK: Content
 
-    /// The open panel's outline with its shadow, in the layer behind the bar and panel.
-    @ViewBuilder var peekShadow: some View {
-        if let section = peeking, let frame = sectionFrames[section], let place = placement(section, frame),
-           let size = peekSizes[section] {
-            let o = peekOffset(section, place)
-            Color.clear
-                .frame(width: panelWidth(section), height: edge.isHorizontal ? size.height : place.length)
-                .background { panelShape(place).fill(Theme.bg).shadow(color: .black.opacity(0.42), radius: 20, y: 7) }
-                .offset(x: o.width, y: o.height)
-                .transition(peekTransition)
-        }
-    }
+    /// Between rows and the panel's edge: the one outer inset, and along the bar the same lead as its first cell, so a
+    /// header sits level with the cell it belongs to.
+    static let peekPad: CGFloat = Theme.Metrics.inset
 
-    /// Where the panel hangs from: the bar's top-left, or its bottom-left on the bottom edge.
-    var peekAlignment: Alignment { edge == .bottom ? .bottomLeading : .topLeading }
-
-    /// The current panel's place, for the bar's own outline.
-    var currentPlacement: Placement? {
-        guard let section = peeking, let frame = sectionFrames[section] else { return nil }
-        return placement(section, frame)
-    }
-
-    var seamAlignment: Alignment {
-        switch edge {
-        case .right: .topTrailing
-        case .left: .topLeading
-        case .top: .topLeading
-        case .bottom: .bottomLeading
-        }
-    }
-
-    /// Paint over both outlines along what the panel shares with the bar (1pt into each), short of its ends so
-    /// the panel's own outline still meets the bar there; not past the bar's end, where the panel's edge is its own.
-    func seam(_ place: Placement?) -> some View {
-        let bar = edge.isHorizontal ? barSize.width : barSize.height
-        let shared = place.map { max(0, min($0.start + $0.length, bar) - $0.start - 2) } ?? 0
-        return Rectangle().fill(Theme.bg)
-            .frame(width: edge.isHorizontal ? shared : 2, height: edge.isHorizontal ? 2 : shared)
-            .offset(x: edge == .right ? 1 : edge == .left ? -1 : 1, y: edge == .top ? -1 : edge == .bottom ? 1 : 1)
-    }
-
-    /// The bar's outline: a corner goes square where a panel is flush with (or runs past) that end of the bar.
-    var barOutline: UnevenRoundedRectangle {
-        let r = Theme.Radius.hub
-        let place = currentPlacement
-        let start: CGFloat = place?.atStart == true ? 0 : r
-        let end: CGFloat = place?.atEnd == true ? 0 : r
-        return switch edge {
-        case .right: UnevenRoundedRectangle(topLeadingRadius: start, bottomLeadingRadius: end, style: .continuous)
-        case .left: UnevenRoundedRectangle(bottomTrailingRadius: end, topTrailingRadius: start, style: .continuous)
-        case .top: UnevenRoundedRectangle(bottomLeadingRadius: start, bottomTrailingRadius: end, style: .continuous)
-        case .bottom: UnevenRoundedRectangle(topLeadingRadius: start, topTrailingRadius: end, style: .continuous)
-        }
-    }
-
-    /// A panel against the bar: square where it meets the bar, rounded elsewhere, and rounded on the bar's side too
-    /// where it runs on past the bar's end.
-    func panelShape(_ place: Placement?) -> UnevenRoundedRectangle {
-        let r = Theme.Radius.hub
-        let past: CGFloat = place?.pastEnd == true ? r : 0
-        return switch edge {
-        case .right: UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: past, style: .continuous)
-        case .left: UnevenRoundedRectangle(bottomLeadingRadius: past, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous)
-        case .top: UnevenRoundedRectangle(bottomLeadingRadius: r, bottomTrailingRadius: r, topTrailingRadius: past, style: .continuous)
-        case .bottom: UnevenRoundedRectangle(topLeadingRadius: r, bottomTrailingRadius: past, topTrailingRadius: r, style: .continuous)
-        }
-    }
-
-    /// A panel's padding, all round; rows pad their own 8 inside it, so text starts 16pt from the panel's edge.
-    static let peekPad: CGFloat = Theme.Space.md
-    /// A section header's height, the same as a CI or agents cell in the bar, so the lines under it line up.
-    static let peekLine: CGFloat = Theme.Metrics.line
-    /// What a side panel has above its first cell's row: the sessions' header, which the bar has no cell for.
-    static func peekLead(_ section: HubSection) -> CGFloat { section == .agents ? peekLine : 0 }
-
-    /// How tall a peek's list of sessions gets before it scrolls (the inbox's is the same).
-    static let peekListCap: CGFloat = 330
-
-    /// A panel's width: the controls' is a small menu; along the top and bottom, CI's is its column's.
+    /// A panel's width (DESIGN.md 3.4), on every edge.
     func panelWidth(_ section: HubSection) -> CGFloat {
         switch section {
-        case .controls: 250
-        case .ci: edge.isHorizontal ? Self.ciWidth : Self.detail
-        // Its rows spend the tile column inside the panel (the bar's tile beside it is another): the text keeps the
-        // width it has kept open, where a waiting session's question fits.
-        case .agents: Self.detail + Theme.Metrics.bar
-        default: Self.detail
+        case .controls: 240
+        case .ci: 360
+        default: 400
         }
+    }
+
+    /// What the screen leaves a panel below (or above) the bar's end it hangs from: from where its header starts, which
+    /// is level with its section's first cell.
+    func peekRoom(_ section: HubSection) -> CGFloat {
+        guard !edge.isHorizontal else { return maxLength - Self.cell }
+        let start = section == .inbox ? 0 : max((sectionFrames[section]?.minY ?? 0) - HubGeometry.lead, 0)
+        return maxLength + HubGeometry.inset - hubTop - start
+    }
+
+    /// What a peek's rows may take (their "+N more" included): the room left by its padding and `fixed`, its header and
+    /// whatever else is always there. Never less than a whole row and the "+N more" under it: with less room than that
+    /// below its first cell, the panel moves up (`placement`) rather than the rows being cut through.
+    func peekCap(_ section: HubSection, fixed: CGFloat) -> CGFloat {
+        max(peekRoom(section) - 2 * HubGeometry.lead - fixed, Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
     }
 
     @ViewBuilder func peekContent(_ section: HubSection) -> some View {
-        Group {
-            if section == .controls { peekControls }
-            else if edge.isHorizontal { peekColumn(section) } else { peekRows(section) }
-        }
-        .padding(Self.peekPad)
-        .frame(width: panelWidth(section))
-    }
-
-    /// Beside the bar: the header level with the section's first cell, then one line per cell, as tall as the
-    /// cell (CI's states, the sessions); then whatever only the panel has (the inbox list, a new session).
-    @ViewBuilder func peekRows(_ section: HubSection) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             switch section {
-            case .inbox:
-                inboxHeader.frame(height: Self.peekLine)
-                peekInbox.padding(.top, 4)
-            case .ci:
-                peekCI
-            case .agents:
-                sessionsPeekHeader
-                sessionsPeek(cap: Self.peekListCap)
-                newSessionRow(inset: 0)
-            default:
-                // (The controls have their own panel.)
-                EmptyView()
+            case .inbox: peekInbox
+            case .ci: peekCI
+            case .agents: peekAgents
+            case .controls: peekControls
             }
         }
-        .frame(width: panelWidth(section) - 2 * Self.peekPad, alignment: .leading)
+        .padding(.horizontal, Self.peekPad)
+        .padding(.vertical, HubGeometry.lead)
+        .frame(width: panelWidth(section), alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(section.name)
     }
 
-    /// Under (or over) a strip segment: that section's header, then its content.
-    @ViewBuilder func peekColumn(_ section: HubSection) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            switch section {
-            case .inbox:
-                inboxHeader.frame(height: Self.peekLine)
-                peekInbox
-            case .ci:
-                peekCI
-            case .agents:
-                sessionsPeekHeader
-                sessionsPeek(cap: Self.peekListCap)
-                newSessionRow(inset: 0)
-            default:
-                EmptyView()
-            }
-        }
-        .frame(width: panelWidth(section) - 2 * Self.peekPad, alignment: .leading)
+    /// The inbox as the full view has it: its header, then its banner, rows (as many whole ones as fit, with "+N more") and
+    /// undo line.
+    @ViewBuilder var peekInbox: some View {
+        inboxHeader.frame(height: Theme.Metrics.pitch)
+        inboxBody(cap: peekCap(.inbox, fixed: Theme.Metrics.pitch))
+    }
+
+    /// CI: its header, then its rows, as many whole ones as fit and "+N more" under them, like the inbox and the sessions.
+    @ViewBuilder var peekCI: some View {
+        ciHeader.frame(height: Theme.Metrics.pitch)
+        ciRows(cap: peekCap(.ci, fixed: Theme.Metrics.pitch))
     }
 
     /// The sessions' header and notice over their rows: indented by the tile column where it is leading, so the header,
     /// the groups and the rows' text start at one x (on the right edge the tile is trailing and nothing moves).
     @ViewBuilder var sessionsPeekHeader: some View {
         let indent = railSide == .leading ? Theme.Metrics.bar : 0
-        agentsHeader.frame(height: Self.peekLine).padding(.leading, indent)
-        ClaudeNotice(store: store).padding(.leading, indent + 8).padding(.trailing, 8)
+        agentsHeader.frame(height: Theme.Metrics.pitch).padding(.leading, indent)
+        ClaudeNotice(store: store).padding(.leading, indent + Theme.Metrics.rowPadding).padding(.trailing, Theme.Metrics.rowPadding)
     }
 
-    /// The controls: how syncing is going, then keep open, repositories and settings, each with its key.
-    var peekControls: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            syncStatus.padding(.horizontal, 8).frame(height: Self.peekLine, alignment: .leading)
-            MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display) { hub.pinned = true }
-            MenuRow(symbol: "square.stack.3d.up", title: "Repositories", key: nil) { hub.go(.repos) }
-            MenuRow(symbol: "gearshape", title: "Settings", key: "⌘,") { hub.go(.settings) }
+    /// The sessions as the full view lists them, as many whole rows as fit, then New session.
+    @ViewBuilder var peekAgents: some View {
+        // Its header and the New session row are always there, and the notice when Claude's files are not.
+        let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store))
+        sessionsPeekHeader
+        if noSessionsMatch { noSessionsLine }
+        sessionsPeek(cap: cap)
+        newSessionRow(inset: 0)
+    }
+
+    /// "+N more" opens the full view, where every row is.
+    func keepOpen() {
+        withAnimation(Self.opening.resolved(reduce: reduce)) { hub.pinned = true }
+    }
+
+    // MARK: Controls
+
+    /// The controls (DESIGN.md 5.7): what the footer holds, as menu rows, then how syncing is going.
+    @ViewBuilder var peekControls: some View {
+        let picked = hub.menuKeys ? hub.menuPick : nil
+        MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display, picked: picked == .keepOpen) {
+            hub.perform(.keepOpen, store: store)
         }
-    }
-
-    /// The inbox list in a panel: scrolls once it's long.
-    @ViewBuilder var peekInbox: some View {
-        inboxBody(cap: 330)
-    }
-
-    /// CI in a panel: its header, then its rows.
-    @ViewBuilder var peekCI: some View {
-        ciHeader.frame(height: Self.peekLine)
-        ciRows
+        MenuRow(symbol: "books.vertical", title: "Repositories…", key: nil, picked: picked == .repositories) {
+            hub.perform(.repositories, store: store)
+        }
+        MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,", picked: picked == .settings) { hub.perform(.settings, store: store) }
+        Hairline().padding(.vertical, Theme.Space.xs)
+        syncLine { line in
+            HStack(spacing: Theme.Space.md) {
+                Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
+                Spacer(minLength: 0)
+                if !line.opensSettings {
+                    Button { store.refreshNow() } label: {
+                        HStack(spacing: Theme.Space.sm) {
+                            Text("Sync now").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                            Text(store.shortcut(.refresh).display).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)
+                        }
+                        .frame(minHeight: Theme.Metrics.iconButton)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focusRing(Theme.Radius.small)
+                    .disabled(store.isSyncing)
+                    .accessibilityLabel("Sync now")
+                }
+            }
+            .padding(.horizontal, Theme.Metrics.rowPadding)
+            .frame(height: Theme.Metrics.menuRow)
+            // Picked by the keys: the whole line is the row, as the other rows are.
+            .background(Theme.Radius.shape(Theme.Radius.field).fill(picked == .sync ? Theme.Fill.selected : Theme.Fill.rest))
+            .focusRing(Theme.Radius.field, isFocused: picked == .sync)
+            .help(line.help)
+        }
     }
 
     /// The pointer left the bar and its panel: close the panel (a moment later, so going from one to the other,
@@ -320,10 +356,48 @@ extension LookoutHub {
         hub.cancelDwell()
         peekLeave = Task { @MainActor in
             try? await Task.sleep(for: Theme.Timing.leaveGrace)
-            if !Task.isCancelled {
-                hub.section = nil
-                hub.quiet = false
+            if !Task.isCancelled { hub.closePeek() }
+        }
+    }
+}
+
+/// A list cut to the rows that fit whole, with "+N more" under it (never a fade, never a scroll). The rows mark
+/// themselves with `.capEdge()`; pass no more than `instantiated(cap)` of them: that many always cover the room.
+struct WholeRows<Content: View>: View {
+    /// How many rows the data has.
+    let total: Int
+    let cap: CGFloat
+    let noun: String
+    let onMore: () -> Void
+    @ViewBuilder let content: () -> Content
+    @State private var edges: [CGFloat] = []
+
+    /// A row is never shorter than a one-line row.
+    static func instantiated(_ cap: CGFloat) -> Int { Int(cap / Theme.Metrics.pitch) + 2 }
+
+    var body: some View {
+        // No rows, no list: nothing to measure, so nothing of the cap is kept for it.
+        if total > 0 { list }
+    }
+
+    @ViewBuilder private var list: some View {
+        // Nothing is cut before the rows are measured.
+        let measured = !edges.isEmpty
+        let fits = measured && edges.count >= total && (edges.last ?? 0) <= cap + 0.5
+        let limit = fits ? nil : edges.filter { $0 <= cap - Theme.Metrics.pitch + 0.5 }.max() ?? (measured ? 0 : cap)
+        let hidden = measured && !fits ? total - edges.filter { $0 <= (limit ?? cap) + 0.5 }.count : 0
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+                .coordinateSpace(.named(CappedScrollSpace.name))
+                .frame(height: limit, alignment: .top)
+                .clipped()
+            if hidden > 0 {
+                MoreRow(text: "+\(hidden) more", label: plural(hidden, "more " + noun), hint: "Keeps Lookout open to show them", action: onMore)
             }
+        }
+        .onPreferenceChange(CapEdges.self) { new in
+            let sorted = Array(Set(new.map { ($0 * 2).rounded() / 2 })).sorted()
+            if sorted != edges { edges = sorted }
         }
     }
 }

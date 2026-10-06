@@ -112,9 +112,6 @@ extension Theme {
     enum Metrics {
         /// One pitch on both axes: every bar cell (its tile centred), a section header, a one-line row, the footer.
         static let pitch: CGFloat = 36
-        /// The pitch before the redesign, still the height of the headers and one-line rows that haven't moved to
-        /// `pitch` yet.
-        static let line: CGFloat = 30
         /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
         static let bar: CGFloat = 46
         /// The one outer inset around the hub's pieces.
@@ -467,11 +464,14 @@ struct KeyCap: View {
 }
 
 /// A line of a menu-like panel, as in NSMenu: symbol column, label, the key that does the same as plain text.
+/// `picked` is the menu's own highlight, moved by the arrow keys: it fills like a pick and draws the focus ring.
 struct MenuRow: View {
     let symbol: String
     let title: String
     let key: String?
+    var picked = false
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) {
@@ -489,8 +489,10 @@ struct MenuRow: View {
             .frame(height: Theme.Metrics.menuRow)
             .contentShape(Rectangle())
         }
-        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.field), hover: Theme.Fill.selected))
-        .focusRing(Theme.Radius.field)
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.field), hover: Theme.Fill.selected, isActive: picked))
+        .focused($focused)
+        .focusRing(Theme.Radius.field, isFocused: focused || picked)
+        .reportsControlFocus(focused)
         .accessibilityLabel(title)
     }
 }

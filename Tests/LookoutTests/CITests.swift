@@ -163,7 +163,7 @@ import Testing
     }
 
     @Test func theBarsCountNeverNeedsMoreThanTwoCharacters() {
-        #expect([1, 9, 10, 15, 120].map(CICell.count) == ["1", "9", "9+", "9+", "9+"])
+        #expect([1, 9, 10, 15, 120].map(CIBarCell.count) == ["1", "9", "9+", "9+", "9+"])
     }
 
     @Test func rowsAreSpokenWithTheirNamesAndAges() {

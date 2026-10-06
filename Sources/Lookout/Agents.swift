@@ -150,19 +150,6 @@ struct AgentRow: Identifiable, Hashable {
         return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
-    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / finished / new activity.
-    var stateName: String {
-        // A session with new activity keeps what it left running: "new activity, 2 running".
-        let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
-        if pending && !unread && status != .running && status != .blocked { return "new activity" + running }
-        switch status {
-        case .blocked: return "waiting"
-        case .running: return "working"
-        case .finished: return (unread ? "finished, unread" : "finished") + running
-        case .idle: return (pending ? "new activity" : "idle") + running
-        }
-    }
-
     /// When the running turn began, if known.
     var workingSince: Date? { session.lastUserMessage ?? activity?.since }
 

@@ -16,7 +16,7 @@ struct PlaygroundView: View {
     /// The window's least size; screenshots at another size (1280×720) set their own.
     var minSize = CGSize(width: 1280, height: 820)
     @State private var behindClicks = 0
-    @State private var leaveTask: Task<Void, Never>?
+    @State private var layout = HubLayout()
 
     private let menuBar: CGFloat = 26
 
@@ -31,7 +31,7 @@ struct PlaygroundView: View {
                                       y: geo.size.height / 2 + (ui.edge == .top ? 120 : ui.edge == .bottom ? -120 : 0))
                 }
                 fakeMenuBar.frame(maxHeight: .infinity, alignment: .top)
-                docked(geo.size)
+                docked
                 if let toast = hub.toast {
                     Text(toast).font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -51,31 +51,11 @@ struct PlaygroundView: View {
         }
     }
 
-    @ViewBuilder private func docked(_ size: CGSize) -> some View {
-        let hubView = LookoutHub(store: store, ui: ui, hub: hub,
-                                 maxLength: ui.edge.isHorizontal ? size.height - menuBar - 80 : size.height - menuBar - 60,
-                                 maxWidth: size.width,
-                                 barLength: ui.edge.isHorizontal ? size.width - 12 : size.height - menuBar - 60)
-            .onHover(perform: hover)
-        switch ui.edge {
-        case .right: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.top, menuBar + 40)
-        case .left: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.top, menuBar + 40)
-        case .top: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, menuBar)
-        case .bottom: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        }
-    }
-
-    /// Opens at once; closes a moment after the mouse leaves, so crossing a gap doesn't flicker it shut.
-    private func hover(_ inside: Bool) {
-        leaveTask?.cancel()
-        if inside {
-            hub.hovering = true
-        } else {
-            leaveTask = Task {
-                try? await Task.sleep(for: .milliseconds(350))
-                if !Task.isCancelled { hub.hovering = false }
-            }
-        }
+    /// The hub as the app lays it out (`HubRoot`) in the room under the menu bar, so what the playground and the shots
+    /// show of where it sits, rest and open, is the app's own geometry.
+    private var docked: some View {
+        HubRoot(store: store, ui: ui, hub: hub, layout: layout)
+            .padding(.top, menuBar)
     }
 
     private var fakeMenuBar: some View {
@@ -231,6 +211,8 @@ extension [DockEdge] {
     static let all: [DockEdge] = [.right, .top, .left, .bottom]
     /// The side bar and the strip: where a state differs between them, and the two the old shots covered.
     static let rightAndTop: [DockEdge] = [.right, .top]
+    static let sides: [DockEdge] = [.right, .left]
+    static let strips: [DockEdge] = [.top, .bottom]
 }
 
 /// What a shot has picked, for the row actions and the keyboard pick to show.
@@ -260,6 +242,9 @@ struct Shot {
 
     var name: String
     var edge = DockEdge.right
+    /// Where the bar rests along its edge, as a fraction of its length (what the user's drag saves): a third of the way
+    /// leaves a side hub its full height and a strip its width, so rest and kept open compare directly.
+    var position = 0.3
     /// A sheet instead of the playground (the fields below that describe the hub are then ignored).
     var sheet: ShotSheet?
     /// The data (see `Demo.Scenario`).
@@ -308,9 +293,9 @@ struct Shot {
 /// Baseline, every edge
 ///   rest, open, settings, search, peek-inbox, peek-ci, peek-agents, peek-controls
 /// Baseline, right and top
-///   repos, tip, picked, focus-inbox, focus-agents
+///   repos, tip, picked (also left), focus-inbox, focus-agents (also left), peek-controls-keys (the menu VoiceOver asked for)
 /// Inbox, right and top
-///   open-bots, open-done, search-none, search-sessions, focus-ci
+///   open-bots, open-done, search-none, search-sessions, focus-ci (also left)
 /// Causes, open on right and top; at rest on every edge (the bar's own state)
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
 ///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
@@ -337,10 +322,16 @@ struct Shot {
 /// A page open: settings-sync-fault on right and top (the gear lit, with its badge)
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
+/// Position: `rest-`, `open-` plus
+///   low (0.7, on the sides), clamped (0.9) and centred (0.5, on the top and bottom); the other shots rest at 0.3
+/// 1280×720, every edge
+///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-ci-many-ci-720, peek-agents-720,
+///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
+///   peek-inbox-low-720, peek-ci-low-720 (sessions off), peek-agents-low-720 (bar at 0.9, on the sides)
+///   open-low-sessions-off-720, open-low-no-ci-720 (bar at 0.8, sessions off, on the sides)
 /// Working arc
 ///   arcs, arcs-contrast (the arc on tiles, no hub)
-/// 1280×720, every edge
-///   open-720, settings-720, repos-720, rest-sessions-12-720, open-sessions-12-720; on right and top
+/// 1280×720, every edge, plus on right and top
 ///   rest-sessions-waiting-20-720 and peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
 /// Frozen order, right and top
 ///   peek-agents-sessions-late-waiting (the twelfth of twelve starts to wait while the pointer holds the bar)
@@ -416,21 +407,25 @@ enum PlaygroundShots {
         Shot.edges("settings") { $0.pinned = true; $0.page = .settings },
         Shot.edges("repos", on: .rightAndTop) { $0.pinned = true; $0.page = .repos },
         Shot.edges("search") { $0.pinned = true; $0.query = "sand" },
+        // A page over a search: the query stays, and the bar is as bright as ever.
+        Shot.edges("settings-search", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.query = "sand" },
         Shot.edges("tip", on: .rightAndTop) { $0.pinned = true; $0.tip = "Settings" },
         Shot.edges("peek-inbox") { $0.section = .inbox },
         Shot.edges("peek-ci") { $0.section = .ci },
         Shot.edges("peek-agents") { $0.section = .agents },
         Shot.edges("peek-controls") { $0.section = .controls },
+        // Asked for by VoiceOver or a key: the first row is picked and the keys walk the rows.
+        Shot.edges("peek-controls-keys", on: .rightAndTop) { $0.section = .controls; $0.setup = { _, _, hub in hub.menuKeys = true } },
         // An inbox item and a session picked, their actions showing, to compare them.
-        Shot.edges("picked", on: .rightAndTop) { $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci" },
+        Shot.edges("picked", on: [.right, .left, .top]) { $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci" },
         Shot.edges("focus-inbox", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },
-        Shot.edges("focus-agents", on: .rightAndTop) { $0.pinned = true; $0.focus = .agents },
+        Shot.edges("focus-agents", on: [.right, .left, .top]) { $0.pinned = true; $0.focus = .agents },
         // Inbox.
         Shot.edges("open-bots", on: .rightAndTop) { $0.pinned = true; $0.filter = .bots },
         Shot.edges("open-done", on: .rightAndTop) { $0.pinned = true; $0.filter = .done },
         Shot.edges("search-none", on: .rightAndTop) { $0.pinned = true; $0.query = "zzzz" },
         Shot.edges("search-sessions", on: .rightAndTop) { $0.pinned = true; $0.query = "lcu" },
-        Shot.edges("focus-ci", on: .rightAndTop) { $0.pinned = true; $0.focus = .ci },
+        Shot.edges("focus-ci", on: [.right, .left, .top]) { $0.pinned = true; $0.focus = .ci },
         // Causes: why a list is empty or the sync is not healthy.
         causes.flatMap { slug, scenario in scenarioShots(slug, scenario) },
         Shot.edges("open-no-repos", on: .rightAndTop) { $0.pinned = true; $0.scenario = .empty },
@@ -517,6 +512,14 @@ enum PlaygroundShots {
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
         // The working arc.
         [Shot(name: "arcs", sheet: .arcs, size: Shot.arcs), Shot(name: "arcs-contrast", sheet: .arcs, size: Shot.arcs, environment: .contrast)],
+        // Where the bar rests, rest beside kept open: low on the sides it must not move; along the top and bottom a
+        // strip too near the end is moved by the least, and a centred one keeps its leading edge.
+        Shot.edges("rest-low", on: .sides) { $0.position = 0.7 },
+        Shot.edges("open-low", on: .sides) { $0.pinned = true; $0.position = 0.7 },
+        Shot.edges("rest-clamped", on: .strips) { $0.position = 0.9 },
+        Shot.edges("open-clamped", on: .strips) { $0.pinned = true; $0.position = 0.9 },
+        Shot.edges("rest-centred", on: .strips) { $0.position = 0.5 },
+        Shot.edges("open-centred", on: .strips) { $0.pinned = true; $0.position = 0.5 },
         // A 1280×720 screen.
         Shot.edges("open-720") { $0.pinned = true; $0.size = Shot.hd },
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
@@ -597,7 +600,6 @@ enum PlaygroundShots {
         Shot.edges("inbox-caught-up-contrast", on: .rightAndTop) {
             $0.pinned = true; $0.scenario = .needsYouEmpty; $0.environment = .contrast
         },
-        Shot.edges("open-sessions-12-720") { $0.pinned = true; $0.scenario = .sessions12; $0.size = Shot.hd },
         // More waiting than the screen has room for: the bar keeps Update and the gear, a "+N" holds the rest.
         Shot.edges("rest-sessions-waiting-20-720", on: .rightAndTop) { $0.scenario = .sessionsWaiting20; $0.size = Shot.hd },
         Shot.edges("peek-agents-sessions-waiting-20-720", on: .rightAndTop) {
@@ -713,6 +715,26 @@ enum PlaygroundShots {
         Shot.edges("repos-contrast", on: [.right]) {
             $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig"; $0.environment = .contrast
         },
+        // The chrome on a 1280×720 screen: every peek, a focused section and the fullest views, on every edge.
+        Shot.edges("peek-inbox-720") { $0.section = .inbox; $0.size = Shot.hd },
+        Shot.edges("peek-ci-720") { $0.section = .ci; $0.size = Shot.hd },
+        Shot.edges("peek-ci-many-ci-720") { $0.section = .ci; $0.scenario = .manyCI; $0.size = Shot.hd },
+        Shot.edges("peek-agents-720") { $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd },
+        Shot.edges("peek-controls-720") { $0.section = .controls; $0.size = Shot.hd },
+        Shot.edges("focus-inbox-720") { $0.pinned = true; $0.focus = .inbox; $0.size = Shot.hd },
+        // A bar low on the edge, with little room below its cells: each peek keeps whole rows, "+N more" and the screen.
+        Shot.edges("peek-ci-low-720", on: .sides) { $0.section = .ci; $0.scenario = .allPassing; $0.position = 0.9; $0.size = Shot.hd; $0.setup = { store, _, _ in store.agents.enabled = false } },
+        Shot.edges("peek-inbox-low-720", on: .sides) { $0.section = .inbox; $0.position = 0.9; $0.size = Shot.hd },
+        Shot.edges("peek-agents-low-720", on: .sides) { $0.section = .agents; $0.position = 0.9; $0.scenario = .sessions12; $0.size = Shot.hd },
+        // Nearly nothing below the bar: the hub keeps the screen's end as its own, CI folds to its header and the lists scroll.
+        Shot.edges("open-low-sessions-off-720", on: .sides) {
+            $0.pinned = true; $0.position = 0.8; $0.size = Shot.hd; $0.setup = { store, _, _ in store.agents.enabled = false }
+        },
+        Shot.edges("open-low-no-ci-720", on: .sides) {
+            $0.pinned = true; $0.position = 0.8; $0.scenario = .noCI; $0.size = Shot.hd; $0.setup = { store, _, _ in store.agents.enabled = false }
+        },
+        Shot.edges("open-sessions-12-720") { $0.pinned = true; $0.scenario = .sessions12; $0.size = Shot.hd },
+        Shot.edges("open-many-ci-720") { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
     ].flatMap { $0 }
 
     /// The General pane with the updater in a phase (a release, as the dev build is never one).
@@ -745,13 +767,14 @@ enum PlaygroundShots {
         Task {
             // Some at a time: every window is a live SwiftUI hierarchy, and a full set is too much to hold at once.
             for batch in stride(from: 0, to: shots.count, by: 10).map({ Array(shots[$0..<min($0 + 10, shots.count)]) }) {
-                let windows = batch.map { (name: $0.name, window: open($0)) }
-                try? await Task.sleep(for: .seconds(2.5))
-                for (name, window) in windows {
-                    if let png = bitmap(of: window)?.representation(using: .png, properties: [:]) {
-                        try? png.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
-                    }
-                    window.close()
+                let windows = batch.map { (name: $0.name, shown: open($0)) }
+                // As in the app, the bar rests (and is measured) before anything opens from it.
+                try? await Task.sleep(for: .seconds(0.8))
+                windows.forEach { $0.shown.open() }
+                try? await Task.sleep(for: .seconds(2))
+                for (name, shown) in windows {
+                    capture(shown.window, to: "\(dir)/\(name).png")
+                    shown.window.close()
                 }
             }
             print("\(shots.count) shots in \(dir)")
@@ -759,18 +782,16 @@ enum PlaygroundShots {
         }
     }
 
-    /// The shot's window, offscreen and showing.
-    static func open(_ shot: Shot) -> NSWindow {
+    /// The shot's window, offscreen and showing the bar at rest, and what opens it (kept open, a page, a focused section).
+    private static func open(_ shot: Shot) -> (window: NSWindow, open: () -> Void) {
         let store = Store()
         Demo.populate(store, shot.scenario)
         store.agents.expanded = true
         let ui = UIState(persists: false, edge: shot.edge)
+        ui.position = shot.position
         let hub = HubState()
-        hub.pinned = shot.pinned
-        hub.page = shot.page
         hub.query = shot.query
         hub.section = shot.section
-        hub.focus = shot.focus
         if let filter = shot.filter { hub.filter = filter }
         switch shot.selection {
         case .firstNeedsYou: hub.selection = store.list(.needsYou).first.map { "i:" + $0.id }
@@ -799,7 +820,10 @@ enum PlaygroundShots {
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
-        return window
+        return (window, {
+            if let pane = shot.preview.pane { hub.settingsPane = pane }
+            hub.pinned = shot.pinned; hub.page = shot.page; hub.focus = shot.focus
+        })
     }
 
     /// What the window shows, as pixels (tests read them too).
@@ -817,10 +841,13 @@ enum PlaygroundShots {
 
     /// One shot as pixels, for the tests that measure what the views draw (its window is closed again).
     static func render(_ shot: Shot) async -> NSBitmapImageRep? {
-        let window = open(shot)
-        defer { window.close() }
+        let shown = open(shot)
+        defer { shown.window.close() }
+        // As in the app: the bar rests before anything opens from it.
+        try? await Task.sleep(for: .seconds(0.8))
+        shown.open()
         try? await Task.sleep(for: .seconds(1.5))
-        return bitmap(of: window)
+        return bitmap(of: shown.window)
     }
 }
 
@@ -834,7 +861,7 @@ private struct ComponentSheet: View {
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) { rows; fills; controls; tabs; forms }
-            VStack(alignment: .leading, spacing: 12) { headers; banners; empties; undo }
+            VStack(alignment: .leading, spacing: 12) { headers; pageHeaders; banners; empties; undo }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -899,6 +926,7 @@ private struct ComponentSheet: View {
             .padding(Theme.Space.xs)
             MenuRow(symbol: "pin", title: "Keep open", key: "⌃⌥L") {}
             MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,") {}
+            MenuRow(symbol: "books.vertical", title: "Repositories… (picked)", key: nil, picked: true) {}
         }
     }
 
@@ -943,6 +971,17 @@ private struct ComponentSheet: View {
             SectionHeader(title: "Inbox", onFocus: {}) { IconButton(symbol: "magnifyingglass", help: "Search") {} }
             SectionHeader(title: "Sessions", status: ("1 waiting", AnyShapeStyle(Theme.amber)), onFocus: {}) { EmptyView() }
             SectionHeader(title: "CI", status: ("1 failing", AnyShapeStyle(Theme.red)), focused: true, onFocus: {}) { EmptyView() }
+        }
+    }
+
+    /// The page header's slot: a title, and Settings' four panes as tabs at the page's width, beside Done.
+    private var pageHeaders: some View {
+        group("Page header: a title, and the Settings panes in its slot") {
+            PageHeader(closes: "Repositories", onDone: {}) { PageTitle("Repositories") }
+            PageHeader(closes: "Settings", onDone: {}) {
+                Tabs(label: "Settings pane", tabs: ["General", "Notifications", "Shortcuts", "Claude"].enumerated().map { Tabs.Tab(id: $0.offset, title: $0.element) },
+                     selection: 1) { _ in }
+            }
         }
     }
 

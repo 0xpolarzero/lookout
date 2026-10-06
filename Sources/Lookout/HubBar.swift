@@ -1,173 +1,14 @@
 import AppKit
 import SwiftUI
 
-// The bar's own pieces: at rest, and beside a page, the same cells in the same order on every edge (`restBar`);
-// kept open, the rows of the full view beside the bar on the sides and the strip along the top and bottom, each
-// cell next to the content it stands for.
+// The bar's own pieces: at rest, and beside a page, the same cells in the same order on every edge (`restBar`). Kept
+// open, HubOpen.swift puts them beside the content they stand for.
 
 extension LookoutHub {
-    /// The bar column on the sides: the rows of the full view, else the rail of cells (as at rest, with a page
-    /// beside it: the cells are the same and never dimmed, the gear lit).
-    @ViewBuilder var barColumn: some View {
-        if showsDetail { openColumn } else { restBar }
-    }
-
-    /// The strip along the top and bottom: the full view's segments, else the same cells as at rest.
-    @ViewBuilder var strip: some View {
-        if showsDetail { openStrip } else { restBar }
-    }
-
-    /// The rows: the bar's cells on the screen side, their content beside them.
-    var openColumn: some View {
-        VStack(alignment: side, spacing: 0) {
-            VStack(alignment: side, spacing: 0) { mainRows }
-            // Last, settings and the footer. Dragging the line above them sizes the sessions' list.
-            sectionDivider
-            VStack(alignment: side, spacing: 0) {
-                row(cell: { settingsCell.padding(.vertical, 9) }, detail: { footerDetail })
-            }
-            .modifier(probe(.controls))
-        }
-        // Opaque, so the page sliding out from under it doesn't show through.
-        .background(Theme.bg)
-    }
-
-    /// One line of the expanded view: the bar's cell on the screen side, its content beside it. The cell always
-    /// takes its width, empty or not, so content lines up whether or not its row has something in the bar.
-    @ViewBuilder
-    func row<Cell: View, Detail: View>(alignment: VerticalAlignment = .center, @ViewBuilder cell: () -> Cell,
-                                       @ViewBuilder detail: () -> Detail) -> some View {
-        let slot = ZStack {
-            Color.clear.frame(width: Self.cell, height: 0)
-            cell()
-        }
-        .frame(width: Self.cell)
-        HStack(alignment: alignment, spacing: 0) {
-            if edge == .left { slot }
-            if showsDetail {
-                detail()
-                    // The one outer inset, against the rounded side; the bar's cells sit on the other.
-                    .padding(edge == .right ? .leading : .trailing, Self.inset)
-                    .frame(width: Self.detail, alignment: .leading)
-                    .transition(.hubReveal)
-            }
-            if edge == .right { slot }
-        }
-    }
-
-    @ViewBuilder var mainRows: some View {
-        // Inbox
-        VStack(alignment: side, spacing: 0) {
-            row(cell: { inboxIcon.padding(.top, 2).padding(.bottom, 4) }, detail: { inboxHeader.padding(.top, 6) })
-        }
-        .modifier(probe(.inbox))
-        if showsDetail && !shrunk(.inbox) {
-            row(cell: { EmptyView() }, detail: { inboxBody(cap: caps.inbox) }).padding(.bottom, 4)
-        }
-        sectionDivider
-        // CI: its cell in the bar beside the header, then its rows (none while searching, which doesn't look in CI).
-        VStack(alignment: side, spacing: 0) {
-            row(cell: { ciCell }, detail: { if showsCI { ciHeader } })
-            if showsCI && !shrunk(.ci) {
-                row(cell: { EmptyView() }, detail: { ciRows })
-                    .transition(.hubReveal)
-            }
-        }
-        .modifier(probe(.ci))
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
-        if store.agents.enabled {
-            sectionDivider
-            VStack(alignment: side, spacing: 0) { agentRowsView }
-                .modifier(probe(.agents))
-        }
-        if store.updater.showsInPill {
-            row(cell: { UpdateButton(updater: store.updater, horizontal: false).padding(.vertical, 4) },
-                detail: { Text(updateText).font(Theme.Typography.control).foregroundStyle(Theme.secondary).padding(.horizontal, 8) })
-                .transition(.opacity)
-        }
-    }
-
-    @ViewBuilder var agentRowsView: some View {
-        row(cell: { claudeMark }, detail: { agentsHeader })
-        if showsDetail { row(cell: { EmptyView() }, detail: { ClaudeNotice(store: store).padding(.horizontal, Theme.Space.md) }) }
-        if showsDetail && shrunk(.agents) {
-            EmptyView()
-        } else if showsDetail {
-            Group {
-                // The tiles are part of the rows: each session's sits in the rail beside its text.
-                sessionsScroll(cap: caps.agents).frame(width: Self.cell + Self.detail)
-                if noSessionsMatch { row(cell: { EmptyView() }, detail: { noSessionsLine }) }
-                newSessionRow().frame(width: Self.cell + Self.detail)
-            }
-            .transition(.hubReveal)
-        }
-    }
-
-    /// Across the whole view.
-    var sectionDivider: some View {
-        Hairline().frame(width: rowWidth).padding(.vertical, 4)
-    }
-
-    /// The bar along the top or bottom, kept open: each segment as wide as the column under it.
-    @ViewBuilder var openStrip: some View {
-        HStack(spacing: 8) {
-            inboxIcon
-            if !shrunk(.inbox) { inboxHeader.transition(.hubReveal) }
-            if shrunk(.inbox) { Spacer(minLength: 0); focusButton(.inbox) }
-        }
-        .padding(.leading, Self.inset + 1)
-        .padding(.trailing, Self.inset)
-        .frame(width: columnWidth(.inbox), alignment: .leading)
-        .frame(maxHeight: .infinity)
-        .modifier(probe(.inbox))
-        // Without CI there is no cell, so no segment (and no second divider beside it).
-        if !store.ciRepos.isEmpty {
-            stripDivider
-            // CI: its cell; the header only while another section is focused (else the column under it has one).
-            HStack(spacing: 8) {
-                ciCell
-                if showsCI && stripShowsCIHeader { ciHeader.transition(.hubReveal) }
-            }
-            .padding(.leading, Self.inset + 1)
-            .padding(.trailing, Self.inset)
-            .frame(width: columnWidth(.ci), alignment: .leading)
-            .frame(maxHeight: .infinity)
-            .modifier(probe(.ci))
-        }
-        if store.agents.enabled {
-            stripDivider
-            HStack(spacing: 8) {
-                claudeMark
-                agentsHeader.transition(.hubReveal)
-            }
-            // The asterisk over the column's session tiles (inset, the row's 10, half a 24pt tile).
-            .padding(.leading, Self.inset + 10 + 12 - 15)
-            .padding(.trailing, Self.inset)
-            .frame(width: columnWidth(.agents), alignment: .leading)
-            .frame(maxHeight: .infinity)
-            .modifier(probe(.agents))
-        }
-        Spacer(minLength: 0)
-        HStack(spacing: 0) {
-            // The rate limit shows here whatever's focused (the sync status itself is in the controls' panel).
-            RateNotice(store: store, fill: false).lineLimit(1).padding(.trailing, Self.inset)
-            stripDivider
-            HStack(spacing: 2) {
-                pinButton
-                reposButton
-                settingsCell
-            }
-            .padding(.horizontal, Self.inset + 2)
-            .transition(.hubReveal)
-            if store.updater.showsInPill {
-                stripDivider
-                UpdateButton(updater: store.updater, horizontal: true).padding(.horizontal, 6)
-            }
-        }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-            if stripTrailingWidth != width { stripTrailingWidth = width }
-        }
-    }
+    /// The bar column on the sides, and the strip along the top and bottom: the cells at rest (with a page beside it
+    /// too: the cells are the same and never dimmed, the gear lit). Kept open, `openHub` draws them with their sections.
+    var barColumn: some View { restBar }
+    var strip: some View { restBar }
 
     var updateText: String {
         let version = store.updater.release?.version ?? ""
@@ -178,10 +19,6 @@ extension LookoutHub {
         case .failed(let error): "Update failed · \(error)"
         default: "Lookout \(version) is available"
         }
-    }
-
-    var stripDivider: some View {
-        Hairline(axis: .vertical).frame(height: 22)
     }
 }
 

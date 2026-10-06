@@ -134,116 +134,8 @@ extension Store {
     }
 }
 
-/// The inbox in the bar: the tray, and under it (beside it along the top and bottom) one count. Amber for what
-/// needs you; the bots' count, grey, only when nothing does. Nothing sits on top of the icon.
-struct InboxCell: View {
-    let needsYou: Int
-    let bots: Int
-    let vertical: Bool
-    /// Off while the filter chips beside it already show the counts.
-    var showsCount = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) { InboxCellLabel(needsYou: needsYou, bots: bots, vertical: vertical, showsCount: showsCount) }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Inbox")
-            .accessibilityValue([needsYou > 0 ? "\(needsYou) need you" : nil, bots > 0 ? plural(bots, "bot item") : nil]
-                .compactMap { $0 }.joined(separator: ", "))
-            .accessibilityHint("Shows what needs you")
-            .motion(Theme.Motion.fade, value: needsYou)
-            .motion(Theme.Motion.fade, value: bots)
-            .motion(Theme.Motion.move, value: showsCount)
-    }
-}
-
-private struct InboxCellLabel: View {
-    let needsYou: Int
-    let bots: Int
-    let vertical: Bool
-    let showsCount: Bool
-    @State private var hover = false
-
-    var body: some View {
-        Group {
-            if vertical {
-                // Always as tall as icon + count, so the bar never shifts: the tray just slides to the middle.
-                ZStack(alignment: .top) {
-                    icon.offset(y: badge == nil ? 9 : 0)
-                    if let badge { badge.offset(y: 32) }
-                }
-                .frame(height: 47, alignment: .top)
-            } else {
-                HStack(spacing: 6) {
-                    icon
-                    if let badge { badge }
-                }
-                // Never squeezed by the tabs beside it.
-                .fixedSize()
-            }
-        }
-        .padding(.vertical, vertical ? 7 : 5)
-        .padding(.horizontal, vertical ? 4 : 7)
-        .frame(minWidth: vertical ? Theme.Metrics.pitch : nil)
-        .contentShape(Rectangle())
-        .onHover { hover = $0 }
-        .motion(Theme.Motion.hover, value: hover)
-    }
-
-    /// The tray; on a solid amber tile (like a session's) when something needs you, so it shows from afar.
-    private var icon: some View {
-        let lit = needsYou > 0
-        return Image(systemName: lit ? "tray.full.fill" : "tray.fill")
-            .font(Theme.Typography.glyph(lit ? 13.5 : 15))
-            .foregroundStyle(lit ? AnyShapeStyle(Theme.onTint) : hover ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
-            .frame(width: 28, height: 28)
-            // Hover brightens the tile (or the tray), no box around it.
-            .background(Tile.shape(28).fill(lit ? Theme.amber : hover ? Theme.Fill.hover : Theme.Fill.rest))
-            .brightness(lit && hover ? 0.06 : 0)
-            .motion(Theme.Motion.fade, value: lit)
-    }
-
-    private var badge: AnyView? {
-        guard showsCount else { return nil }
-        // The tile is already amber: the count beside it stays quiet.
-        if needsYou > 0 { return AnyView(count(needsYou, fill: Theme.Fill.selected, text: Theme.text)) }
-        if bots > 0 { return AnyView(count(bots, fill: Theme.Fill.hover, text: Theme.secondary)) }
-        return nil
-    }
-
-    private func count(_ n: Int, fill: Color, text: some ShapeStyle) -> some View {
-        Text(n > 99 ? "99+" : "\(n)")
-            .font(Theme.Typography.glyph(11, .bold).monospacedDigit())
-            .contentTransition(.numericText(value: Double(n)))
-            .foregroundStyle(text)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 18, minHeight: 15)
-            .background(Capsule().fill(fill))
-            .transition(.opacity)
-    }
-}
-
 extension LookoutHub {
     // MARK: Inbox
-
-    var inboxIcon: some View {
-        InboxCell(needsYou: store.unreadCount(.needsYou), bots: store.unreadCount(.bots), vertical: !edge.isHorizontal,
-                  showsCount: !(showsDetail && !shrunk(.inbox))) {
-            // Straight to what needs you, its newest item picked so the keys act on it at once.
-            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
-                hub.go(.main)
-                hub.query = ""
-                hub.inbox.endSearch()
-                hub.filter = .needsYou
-            }
-            if store.inboxReplacement == nil, let first = store.list(.needsYou).first {
-                hub.selection = "i:" + first.id
-                hub.requestScroll("i:" + first.id)
-                ui.drawerSelection = nil
-            }
-        }
-    }
-
 
     // MARK: Header
 
@@ -303,7 +195,6 @@ extension LookoutHub {
                 // Their room, so the tabs and the right edge don't jump when the first item arrives.
                 Color.clear.frame(width: 2 * Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
             }
-            if showsDetail { focusButton(.inbox) }
         }
         .padding(.trailing, 3)
     }
@@ -431,26 +322,6 @@ extension LookoutHub {
     func itemRow(_ item: InboxItem) -> some View {
         InboxRow(item: item, store: store, ui: ui, hub: hub).capEdge()
     }
-
-    /// The widest the inbox gets when it is the one section shown along the top and bottom: a row's title and its age
-    /// stay within reach of each other.
-    static let focusedInboxWidth: CGFloat = 560
-
-    /// The inbox alone along the top and bottom: one column at the strip's leading edge, whatever the width.
-    func focusedInbox(cap: CGFloat) -> some View {
-        inboxBody(cap: cap)
-            .padding(.horizontal, Self.inset)
-            .padding(.vertical, 8)
-            .frame(maxWidth: Self.focusedInboxWidth, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
-    var inboxColumn: some View {
-        inboxBody(cap: max(160, min(maxLength - Self.cell - (searching ? 0 : 150 + ciExtra), Self.listCap)))
-            .padding(.horizontal, Self.inset)
-            .padding(.vertical, 8)
-    }
 }
 
 extension InboxNotice {
@@ -501,7 +372,9 @@ struct InboxList: View {
         return max(0, count - Int(((max(0, offset) + shown + 1.5) / pitch).rounded(.down)))
     }
 
-    private var cut: Bool { Self.isCut(count: items.count, cap: cap) }
+    /// Cut short and with room for a row and the line that says so: with less, the list is a short scroll and nothing
+    /// more, so the body never takes more than it was given.
+    private var cut: Bool { Self.isCut(count: items.count, cap: cap) && cap >= Self.moreHeight + Self.pitch - 1 }
     private var rows: Int { Self.rowsFitting(cut ? cap - Self.moreHeight : cap) }
 
     var body: some View {
@@ -521,8 +394,7 @@ struct InboxList: View {
     }
 
     private var list: some View {
-        CappedScroll(cap: cut ? cap - Self.moreHeight : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count),
-                     fades: false, indicators: true) {
+        CappedScroll(cap: cut ? cap - Self.moreHeight : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
             AdaptiveStack(count: items.count, spacing: 1) {
                 ForEach(items) { item in
                     InboxRow(item: item, store: store, ui: ui, hub: hub, rotor: rotor).capEdge().id("i:" + item.id)

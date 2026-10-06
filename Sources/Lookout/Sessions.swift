@@ -135,7 +135,7 @@ struct SessionsScroll: View {
             && SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0) > cap + 0.5
         VStack(spacing: 0) {
             CappedScroll(cap: cut ? cap - Theme.Metrics.pitch : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count),
-                         fades: false, indicators: true, onReach: focused ? { reach.bottom = $0 } : nil) {
+                         onReach: focused ? { reach.bottom = $0 } : nil) {
                 SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
             }
             if cut && focused {
@@ -660,19 +660,6 @@ enum ProjectsMenu {
 }
 
 extension HubState {
-    /// Whether the row a key target ("i:" an inbox item, "c:" CI, "a:" a session, "s:" the list's own rows) is on
-    /// screen: a focused section shrinks the others to their headers.
-    func shows(_ target: String) -> Bool {
-        focus == nil || focus == (target.hasPrefix("i:") ? .inbox : target.hasPrefix("c:") ? .ci : .agents)
-    }
-
-    /// A pick on a row that focusing another section has hidden is let go: the arrows start over from the rows shown.
-    func rehomeSelection() {
-        guard let selection, !shows(selection) else { return }
-        self.selection = nil
-        keyboardSelection = nil
-    }
-
     /// Picks the first session waiting on you and scrolls to it. A search that left it out, or another section
     /// focused, would hide the row: both go first, so there is a row to scroll to.
     func pickFirstWaiting(in store: Store, ui: UIState) {
@@ -934,138 +921,7 @@ struct LabelEditor: View {
     }
 }
 
-// MARK: - Update, inbox menu, status lines
-
-/// A new release, fetched in the background: an icon that says what it is on hover; click to restart into it
-/// (or to download it, with a ring for progress, if that didn't happen on its own). Right-click for the release
-/// notes or to skip that version.
-struct UpdateButton: View {
-    let updater: Updater
-    let horizontal: Bool
-
-    var body: some View {
-        let version = updater.release?.version ?? ""
-        Button { updater.advance() } label: { UpdateLabel(updater: updater, horizontal: horizontal, version: version) }
-        .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover))
-        .accessibilityLabel(Self.label(updater.phase, version: version))
-        .accessibilityHint(tooltip(version).0)
-        .tip(tooltip(version).0, tooltip(version).1)
-        .contextMenu {
-            if let page = updater.release?.page {
-                Button("What's new in \(version)") { NSWorkspace.shared.open(page) }
-            }
-            Button("Skip \(version)") { updater.skip() }
-        }
-    }
-
-    /// The tooltip: what it is, and what a click does.
-    private func tooltip(_ version: String) -> (String, String?) {
-        switch updater.phase {
-        case .available: ("Lookout \(version) is available", "Click to download it · right-click for more")
-        case .downloading(let fraction): ("Downloading Lookout \(version)… \(Int(fraction * 100))%", nil)
-        case .ready: ("Lookout \(version) is ready", "Click to restart into it")
-        case .installing: ("Installing Lookout \(version)…", nil)
-        case .failed(let message): ("Update failed: \(message)", "Click to try again")
-        case .idle: ("", nil)
-        }
-    }
-
-    fileprivate static func label(_ phase: Updater.Phase, version: String) -> String {
-        switch phase {
-        case .downloading(let fraction): "\(Int(fraction * 100))%"
-        case .ready, .installing: "Restart to update"
-        case .failed: "Retry update"
-        default: "Update to \(version)"
-        }
-    }
-}
-
-/// The update button's face: its icon (a progress ring while downloading), and its name beside it on hover.
-private struct UpdateLabel: View {
-    let updater: Updater
-    let horizontal: Bool
-    let version: String
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ZStack {
-                if case .downloading(let fraction) = updater.phase {
-                    Circle().stroke(Theme.Fill.selected, lineWidth: 2).padding(3)
-                    Circle().trim(from: 0, to: max(0.03, fraction))
-                        .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .padding(3)
-                }
-                if updater.phase == .installing {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: symbol)
-                        .font(Theme.Typography.glyph(12, .bold))
-                        .foregroundStyle(tint)
-                }
-            }
-            .frame(width: 28, height: 28)
-            if horizontal && hover {
-                Text(UpdateButton.label(updater.phase, version: version))
-                    .font(Theme.Typography.title)
-                    .foregroundStyle(Theme.text)
-                    .padding(.trailing, 8)
-            }
-        }
-        .motion(Theme.Motion.hover, value: hover)
-    }
-
-    private var symbol: String {
-        switch updater.phase {
-        case .ready: "arrow.clockwise"
-        case .failed: "exclamationmark"
-        default: "arrow.down"
-        }
-    }
-
-    private var tint: AnyShapeStyle {
-        switch updater.phase {
-        case .ready: AnyShapeStyle(Theme.green)
-        case .failed: AnyShapeStyle(Theme.red)
-        case .downloading: AnyShapeStyle(Theme.secondary)
-        default: AnyShapeStyle(Theme.accent)
-        }
-    }
-}
-
-/// An inbox item's context menu: open, copy link, read state, done, treat as a bot.
-struct InboxItemMenu: View {
-    let item: InboxItem
-    let store: Store
-    /// Items already in the low-priority list offer "Stop treating as a bot" instead.
-    let low: Bool
-
-    var body: some View {
-        Button("Open on GitHub") { store.open(item) }
-        Button("Copy link") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.url.absoluteString, forType: .string)
-        }
-        Divider()
-        if item.state.isOpen {
-            Button(item.state == .unread ? "Mark as read" : "Mark as unread") {
-                item.state == .unread ? store.markRead(item) : store.markUnread(item)
-            }
-            Button("Done") { store.discard(item) }
-        } else {
-            Button("Back to inbox") { store.restore(item) }
-        }
-        Divider()
-        if !low {
-            Button("Treat @\(item.author) as a bot") { store.addBot(item.author) }
-        } else if store.settings.botHandles.contains(where: { $0.caseInsensitiveCompare(item.author) == .orderedSame }) {
-            Button("Stop treating @\(item.author) as a bot") {
-                store.settings.botHandles.removeAll { $0.caseInsensitiveCompare(item.author) == .orderedSame }
-            }
-        }
-    }
-}
+// MARK: - Status lines
 
 /// The Claude link's state as a dot and a line ("Synced with Claude", "Claude's sessions not found"…).
 struct ClaudeLinkStatus: View {

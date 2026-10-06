@@ -282,9 +282,6 @@ extension LookoutHub {
     /// While searching, the results are the inbox and the sessions: CI leaves the layout (it isn't dimmed).
     var showsCI: Bool { !searching }
 
-    /// The bar's CI cell: the worst state that isn't muted, and how many repos fail. Click opens that repo's checks.
-    var ciCell: some View { CICell(store: store) { hub.showCI(store, ui: ui) } }
-
     /// CI's section header: "CI", and one phrase only when something is not green.
     var ciHeader: some View {
         let focused = hub.focus == .ci
@@ -307,16 +304,16 @@ extension LookoutHub {
     }
 
     /// The rows under the header: one per failing or running repo, then the Passing row (open in place on request),
-    /// all in one list that scrolls within `ciCap`, ending between rows (each marks its edge). Without any CI, one
-    /// calm line with the way to turn it on.
-    var ciRows: some View {
+    /// all in one list that scrolls within `cap` (`ciCap` unless a panel says), ending between rows (each marks its
+    /// edge). Without any CI, one calm line with the way to turn it on.
+    func ciRows(cap: CGFloat? = nil) -> some View {
         let list = store.ciList
         return VStack(alignment: .leading, spacing: 0) {
             if list.isEmpty {
                 noCI
             } else {
                 staleLine
-                CappedScroll(cap: ciCap, hub: hub, fades: false, indicators: true) { ciListRows(list) }
+                CappedScroll(cap: cap ?? ciCap, hub: hub, cue: MoreCue(noun: "repository")) { ciListRows(list) }
             }
             if let undo = store.undoStack.visible(in: .ci) {
                 UndoLine(message: undo.message) { store.undoLast() }.padding(.top, Theme.Space.xs)
@@ -360,7 +357,7 @@ extension LookoutHub {
     }
 
     /// Nothing watched has CI on: one line aligned with the glyph column, and where to turn it on.
-    private var noCI: some View {
+    var noCI: some View {
         HStack(spacing: Theme.Space.sm) {
             Text("No CI configured").font(Theme.Typography.body).foregroundStyle(Theme.secondary).lineLimit(1)
             Text("·").foregroundStyle(Theme.tertiary).accessibilityHidden(true)
@@ -390,67 +387,6 @@ extension LookoutHub {
                         .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
                 }
             }
-        }
-    }
-
-    /// Along the top and bottom, and focused: its header, then the rows, in their own column (the strip's cell stays
-    /// above). While another section is focused the header is in the strip instead (`stripShowsCIHeader`).
-    var ciColumn: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showsCI {
-                ciHeader
-                ciRows
-            }
-        }
-        .padding(.horizontal, Self.inset)
-        .padding(.vertical, 6)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
-    }
-
-    /// The strip's CI segment names its section only when the column under it doesn't.
-    var stripShowsCIHeader: Bool { hub.focus != nil && hub.focus != .ci }
-}
-
-/// CI in the bar: one glyph, the worst state that isn't muted, centred on the bar's axis. The number of failing repos
-/// sits under it, only when some fail, and over two digits reads "9+": the glyph never moves with the count.
-struct CICell: View {
-    let store: Store
-    /// VoiceOver's "Show": the hub's own way into the section (the click opens a page in the browser instead).
-    let show: () -> Void
-    @Environment(\.resolved) private var resolved
-
-    /// What the cell shows of how many fail: the number, or "9+" so two digits never reach the screen's edge.
-    static func count(_ failing: Int) -> String { failing > 9 ? "9+" : "\(failing)" }
-
-    var body: some View {
-        if !store.ciRepos.isEmpty {
-            let worst = store.ciWorst
-            Button { store.openWorstChecks() } label: {
-                Image(systemName: worst.state.symbol)
-                    .font(Theme.Typography.glyph(16, worst.state == .failure ? .semibold : .regular))
-                    // Palette, so every layer takes a colour: with one style the outline circles (passing, no runs) drew
-                    // white. The failing octagon's cross (the first layer) is cut out of it, in the surface's own colour.
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(worst.state == .failure ? Theme.bg : worst.state.color(resolved), worst.state.color(resolved))
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: Theme.Metrics.pitch, height: Theme.Metrics.pitch)
-                    .overlay(alignment: .bottom) {
-                        if worst.failing > 0 {
-                            Text(Self.count(worst.failing)).font(Theme.Typography.numeral).foregroundStyle(Theme.red)
-                                .contentTransition(.numericText(value: Double(worst.failing)))
-                                .offset(y: 2)
-                        }
-                    }
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focusRing(Theme.Radius.tile)
-            .accessibilityLabel("CI")
-            .accessibilityValue(CISpeech.summary(store.ciList))
-            .accessibilityHint(store.ciOpensHelp)
-            .accessibilityAction(named: "Show", show)
-            .tip("CI", store.ciOpensHelp)
-            .motion(Theme.Motion.fade, value: worst)
         }
     }
 }

@@ -51,6 +51,7 @@ final class HubKeys {
             // A field or overlay with something open to cancel (a token, suggestions) takes Esc before the page does.
             if EscapeRoute.run() { return true }
             if editing { event.window?.makeFirstResponder(nil) }
+            else if hub.menuKeys, !hub.expanded { closeMenu() }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
             else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
@@ -73,6 +74,14 @@ final class HubKeys {
     /// The configured actions, and the typing that searches. False when the key is none of them.
     private func act(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool {
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
+        // ⌘1, ⌘2, ⌘3 give the Inbox, CI or Sessions all the room (again: back); ⌘0 gives every section its room back.
+        // By key position, so they hold on an AZERTY keyboard, where the digits are shifted.
+        if flags == .command, hub.expanded, hub.page == .main, let focus = Self.focusKey(event.keyCode) {
+            if let section = focus { hub.toggleFocus(section) } else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
+            rehome()
+            return true
+        }
+        if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
         guard hub.expanded, hub.page == .main else { return false }
         if flags == .command, event.charactersIgnoringModifiers == "f" {
             hub.beginSearch()
@@ -94,12 +103,13 @@ final class HubKeys {
             move(down: event.keyCode == 125, in: targets)
             return true
         }
-        // Not over rows the list isn't showing (a sign-in problem replaces it).
-        if shortcut == store.shortcut(.markAllRead) {
+        // Not over rows the list isn't showing (a sign-in problem replaces it, a focused section hides the inbox).
+        if shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) {
             if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }
             return true
         }
-        // Row commands act only on a row the lists show (a pick the search has since filtered out is not one).
+        // Row commands act only on a row the lists show: a pick the search has since filtered out, or one in a section
+        // that shrank, is not one.
         guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
@@ -142,16 +152,57 @@ final class HubKeys {
         return false
     }
 
+    /// The controls menu has the keyboard (DESIGN.md 4.7): ↑↓ walk its rows, Return or Space does the picked one.
+    private func menuKey(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags.isEmpty else { return false }
+        let rows = ControlsRow.listed(store)
+        switch Int(event.keyCode) {
+        case kVK_DownArrow, kVK_UpArrow:
+            // Round, as NSMenu's.
+            let i = rows.firstIndex(of: hub.menuPick) ?? 0
+            hub.menuPick = rows[(i + (Int(event.keyCode) == kVK_DownArrow ? 1 : rows.count - 1)) % rows.count]
+        case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space:
+            hub.perform(hub.menuPick, store: store)
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// Esc: the menu goes, and the keyboard goes back to where it was.
+    private func closeMenu() {
+        hub.section = nil
+        onClose()
+    }
+
+    /// What a ⌘-digit asks of the section focus: a section, or nil for ⌘0. Outer nil: not a focus key.
+    private static func focusKey(_ keyCode: UInt16) -> HubSection?? {
+        switch Int(keyCode) {
+        case kVK_ANSI_1: .some(.inbox)
+        case kVK_ANSI_2: .some(.ci)
+        case kVK_ANSI_3: .some(.agents)
+        case kVK_ANSI_0: .some(nil)
+        default: nil
+        }
+    }
+
     /// Every row the arrows walk through, top to bottom: inbox items, CI, then sessions, then the list's own rows; only
     /// those on screen (a focused section shrinks the others).
     func targets() -> [String] {
-        (store.hubTargets(hub) + store.sessionExtraTargets(hub)).filter(hub.shows)
+        (store.hubTargets(hub) + store.sessionExtraTargets(hub)).filter(hub.isVisible)
     }
 
     private func move(down: Bool, in targets: [String]) {
         let i = targets.firstIndex(of: hub.selection ?? "") ?? (down ? -1 : targets.count)
         let next = min(max(i + (down ? 1 : -1), 0), targets.count - 1)
         if targets.indices.contains(next) { select(targets[next]) }
+    }
+
+    /// After the focus moved by key: with the pick gone from view, the focused section's first row is the pick, so the
+    /// keys keep working where you are.
+    private func rehome() {
+        guard hub.selection == nil, hub.focus != nil, let first = targets().first else { return }
+        select(first)
     }
 
     /// A new search picks its first result, so ↩ opens it straight away.
