@@ -197,6 +197,8 @@ struct CappedScroll<Content: View>: View {
     var onHeights: ((ListHeights?) -> Void)?
     /// Told where the list is scrolled to, as the content's y at the viewport's bottom edge (a list that says how much is below).
     var onReach: ((CGFloat) -> Void)?
+    /// Told how far it has scrolled (the content's y at the viewport's top edge).
+    var onOffset: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
     @State private var height: CGFloat = 0
     @State private var viewport: CGFloat = 0
@@ -268,7 +270,7 @@ struct CappedScroll<Content: View>: View {
     /// Behind the content: where it has scrolled to, and (for the cue) a mark at the bottom of every row to scroll to.
     @ViewBuilder private var marks: some View {
         ZStack(alignment: .top) {
-            ScrollOffsetReader { track.offset = $0; reach() }.frame(width: 0, height: 0)
+            ScrollOffsetReader { track.offset = $0; reach(); onOffset?($0) }.frame(width: 0, height: 0)
             if cue != nil, !lazy {
                 let gaps = zip([0] + edges.dropLast(), edges).map { $1 - $0 }
                 VStack(spacing: 0) {

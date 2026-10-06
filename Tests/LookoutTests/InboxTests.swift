@@ -122,3 +122,41 @@ import Testing
         #expect(Store.pollInterval(base: 20, hubOpen: true, lowPower: false) == 20)
     }
 }
+
+/// DESIGN.md 5.4: the count of rows below and the header's hairline follow the list as it scrolls (a geometry preference
+/// is not sent again when a scroll view scrolls, so they read the scroll view's own offset).
+@MainActor
+@Suite struct InboxPaging {
+    private func scrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
+    }
+
+    @Test func scrollingToTheEndEmptiesTheCountBelowAndRaisesTheHairline() async throws {
+        let store = Store()
+        Demo.populate(store, .inboxMany)
+        let hub = HubState()
+        hub.pinned = true
+        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: .right), hub: hub, maxLength: 700, openLength: 700,
+                              maxWidth: 900, barLength: 700)
+            .frame(width: 900, height: 800, alignment: .topLeading)
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame.size = CGSize(width: 900, height: 800)
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        try await Task.sleep(for: .seconds(0.6))
+        #expect(hub.inbox.hiddenBelow > 0 && !hub.inbox.scrolled)
+        let scroll = try #require(scrollView(in: hosting))
+        let clip = scroll.contentView
+        let document = try #require(scroll.documentView)
+        let far = document.frame.height - clip.bounds.height
+        clip.scroll(to: NSPoint(x: 0, y: document.isFlipped ? far : 0))
+        scroll.reflectScrolledClipView(clip)
+        try await Task.sleep(for: .seconds(0.4))
+        #expect(hub.inbox.scrolled && hub.inbox.hiddenBelow == 0)
+    }
+}

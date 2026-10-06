@@ -370,8 +370,6 @@ struct InboxList: View {
     /// How far the list has scrolled: not state, so scrolling doesn't redraw the rows (only the count below does).
     @State private var scroll = ScrollBox()
 
-    private static let space = "inbox-list"
-
     /// Every row is one height (`twoLineRow`, a point apart), so what a cap shows is arithmetic, not measurement.
     static let spacing: CGFloat = 1
     static let pitch = Theme.Metrics.twoLineRow + spacing
@@ -432,37 +430,36 @@ struct InboxList: View {
                 }
             }
         }
+        .onAppear { refreshHidden() }
         .onChange(of: items.count) { refreshHidden() }
         .onChange(of: cap) { refreshHidden() }
     }
 
     private var list: some View {
-        CappedScroll(cap: cut ? cap - Self.moreHeight : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
+        CappedScroll(cap: cut ? cap - Self.moreHeight : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count),
+                     onOffset: scrolled(to:)) {
             AdaptiveStack(count: items.count, spacing: Self.spacing) {
                 ForEach(items) { item in
                     InboxRow(item: item, store: store, ui: ui, hub: hub, rotor: rotor).capEdge().id("i:" + item.id)
-                }
-            }
-            .background(alignment: .top) {
-                Color.clear.frame(height: 0).background {
-                    GeometryReader { Color.clear.preference(key: ScrollOffset.self, value: $0.frame(in: .named(Self.space)).minY) }
                 }
             }
             .id(scopeID)
             .transition(.opacity)
             .motion(Theme.Motion.fade, value: listKey)
         }
-        .coordinateSpace(.named(Self.space))
-        .onPreferenceChange(ScrollOffset.self) { offset in
-            let scrolled = offset < -1
-            if hub.inbox.scrolled != scrolled { hub.inbox.scrolled = scrolled }
-            scroll.offset = -offset
-            refreshHidden()
-        }
         .onDisappear { hub.inbox.scrolled = false; hub.inbox.hiddenBelow = 0 }
         .accessibilityRotor("Unread") {
             ForEach(items.filter { $0.state == .unread }) { AccessibilityRotorEntry(Text($0.title), id: $0.id, in: rotor) }
         }
+    }
+
+    /// Where the list has scrolled to, from its scroll view's own clip view: a geometry preference is not sent again as a
+    /// scroll moves, so the count of rows below and the hairline under the header would never follow it.
+    private func scrolled(to offset: CGFloat) {
+        let scrolled = offset > 1
+        if hub.inbox.scrolled != scrolled { hub.inbox.scrolled = scrolled }
+        scroll.offset = offset
+        refreshHidden()
     }
 
     private func refreshHidden() {
@@ -508,11 +505,6 @@ private struct InboxMoreRow: View {
         .accessibilityLabel(spoken)
         .accessibilityHint(hint)
     }
-}
-
-private struct ScrollOffset: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Search
