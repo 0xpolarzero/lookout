@@ -484,7 +484,7 @@ enum PlaygroundShots {
     }
 
     /// The shot's window, offscreen and showing.
-    private static func open(_ shot: Shot) -> NSWindow {
+    static func open(_ shot: Shot) -> NSWindow {
         let store = Store()
         Demo.populate(store, shot.scenario)
         store.agents.expanded = true
@@ -524,12 +524,17 @@ enum PlaygroundShots {
         return window
     }
 
-    private static func capture(_ window: NSWindow, to path: String) {
-        guard let view = window.contentView else { return }
+    /// What the window shows, as pixels (tests read them too).
+    static func bitmap(of window: NSWindow) -> NSBitmapImageRep? {
+        guard let view = window.contentView else { return nil }
         view.layoutSubtreeIfNeeded()
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        return rep
+    }
+
+    private static func capture(_ window: NSWindow, to path: String) {
+        try? bitmap(of: window)?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 }
 

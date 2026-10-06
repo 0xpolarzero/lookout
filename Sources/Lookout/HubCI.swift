@@ -129,7 +129,7 @@ struct CIRow: View {
             HStack(alignment: .top, spacing: Theme.Space.md) {
                 Image(systemName: entry.state.symbol)
                     .font(Theme.Typography.glyph(12))
-                    .foregroundStyle(entry.state == .failure ? AnyShapeStyle(resolved.red) : entry.state.color)
+                    .foregroundStyle(entry.state == .failure ? resolved.red : entry.state.color(resolved))
                     .frame(width: Theme.Metrics.dotSlot, height: 16)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Theme.Space.hair) {
@@ -414,6 +414,7 @@ extension LookoutHub {
 /// sits under it, only when some fail, and over two digits reads "9+": the glyph never moves with the count.
 struct CICell: View {
     let store: Store
+    @Environment(\.resolved) private var resolved
 
     /// What the cell shows of how many fail: the number, or "9+" so two digits never reach the screen's edge.
     static func count(_ failing: Int) -> String { failing > 9 ? "9+" : "\(failing)" }
@@ -424,7 +425,10 @@ struct CICell: View {
             Button { store.openWorstChecks() } label: {
                 Image(systemName: worst.state.symbol)
                     .font(Theme.Typography.glyph(16, worst.state == .failure ? .semibold : .regular))
-                    .foregroundStyle(worst.state.color)
+                    // Palette, so every layer takes a colour: with one style the outline circles (passing, no runs) drew
+                    // white. The failing octagon's cross (the first layer) is cut out of it, in the surface's own colour.
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(worst.state == .failure ? Theme.bg : worst.state.color(resolved), worst.state.color(resolved))
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: Theme.Metrics.pitch, height: Theme.Metrics.pitch)
                     .overlay(alignment: .bottom) {

@@ -127,12 +127,12 @@ struct InboxItem: Codable, Identifiable, Hashable {
 enum CIState: String, Codable {
     case success, failure, pending, none
 
-    var color: AnyShapeStyle {
+    /// The glyph's colour, concrete: some drawing paths (a symbol effect's content transition) lose a `Theme.Ink`.
+    func color(_ resolved: Theme.Resolved) -> Color {
         switch self {
-        case .success: AnyShapeStyle(Theme.tertiary)
-        case .failure: AnyShapeStyle(Theme.red)
-        case .pending: AnyShapeStyle(Theme.secondary)
-        case .none: AnyShapeStyle(Theme.tertiary)
+        case .success, .none: resolved.tertiary
+        case .failure: Theme.red
+        case .pending: resolved.secondary
         }
     }
 
