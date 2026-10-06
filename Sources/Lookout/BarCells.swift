@@ -71,8 +71,9 @@ struct CIBarCell: View {
     var body: some View {
         let worst = store.ciWorst
         let opens = store.ciOpensHelp
+        // VoiceOver's press keeps the hub open on CI, as the inbox's does; a click opens the checks (its panel is under the pointer).
         BarCell(axis: axis, name: "CI", value: CISpeech.summary(store.ciList), hint: opens, help: BarHelp(title: "CI", detail: opens),
-                show: show, action: { if store.ciWorstRepo != nil { store.openWorstChecks() } else { show() } }) { hovering in
+                show: show, press: show, action: { if store.ciWorstRepo != nil { store.openWorstChecks() } else { show() } }) { hovering in
             Face(worst: worst.state, failing: worst.failing, hovering: hovering)
         }
         .motion(Theme.Motion.fade, value: worst)

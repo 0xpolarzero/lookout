@@ -34,7 +34,8 @@ enum AccessibilityTree {
 
     /// The tree of a hub on `edge`, put in the state `configure` asks for once it is on screen.
     static func render(edge: DockEdge = .right, scenario: Demo.Scenario = .agents, size: CGSize = CGSize(width: 900, height: 800),
-                       openLength: CGFloat = 700, configure: (Store, HubState) -> Void = { _, _ in }) async throws -> AXNode {
+                       openLength: CGFloat = 700, pressing button: String? = nil,
+                       configure: (Store, HubState) -> Void = { _, _ in }) async throws -> AXNode {
         _ = enabled
         let store = Store()
         Demo.populate(store, scenario)
@@ -54,7 +55,22 @@ enum AccessibilityTree {
         configure(store, hub)
         try await Task.sleep(for: .seconds(0.7))
         hosting.layoutSubtreeIfNeeded()
+        // What VoiceOver's own activation does: the default action of the button of that name.
+        if let button, let target = find(button, in: hosting) {
+            _ = target.perform(NSSelectorFromString("accessibilityPerformPress"))
+            try await Task.sleep(for: .seconds(0.2))
+        }
         return node(hosting)
+    }
+
+    private static func find(_ label: String, in element: Any) -> NSObject? {
+        guard let object = element as? NSObject else { return nil }
+        if (object.value(forKey: "accessibilityRole") as? String) == "AXButton",
+           (object.value(forKey: "accessibilityLabel") as? String) == label { return object }
+        for child in (object.value(forKey: "accessibilityChildren") as? [Any]) ?? [] {
+            if let found = find(label, in: child) { return found }
+        }
+        return nil
     }
 
     private static func node(_ element: Any) -> AXNode {
@@ -256,6 +272,18 @@ enum AccessibilityTree {
         #expect(list.first("AXHeading", "Repositories") != nil)
         let repo = try #require(list.all.first { $0.label == "ziglang/zig" })
         #expect(Set(repo.actions) == ["Stop watching", "Move up", "Move down", "Toggle issues", "Toggle pull requests", "Toggle CI"])
+    }
+
+    @Test func voiceOversPressOnTheInboxCIAndASessionKeepsTheHubOpen() async throws {
+        for button in ["Inbox", "CI", "LCU update notifications"] {
+            for edge in [DockEdge.right, .top] {
+                nonisolated(unsafe) var pinned: HubState?
+                _ = try await AccessibilityTree.render(edge: edge, pressing: button) { _, hub in pinned = hub }
+                let hub = try #require(pinned)
+                // Not a click's own (the checks, or the session in Claude): the hub is kept open on the cell's section.
+                #expect(hub.pinned && hub.focus == nil, "\(button) on \(edge)")
+            }
+        }
     }
 
     @Test func theUpdateCellOffersItsMenuAsActions() async throws {
