@@ -588,50 +588,64 @@ struct Tabs<ID: Hashable>: View {
 // MARK: - Sections
 
 /// A section's header, 36pt: its title, one status phrase, then its actions. The whole header is the control that
-/// gives the section the room (click, or the key; the chevron only shows on hover or focus, as a hint). Reserve the
-/// trailing slots per section, so nothing in the header jumps.
+/// gives the section the room (a button behind it: click, Tab and Space, VoiceOver; the chevron only shows on hover or
+/// focus, as a hint). Reserve the trailing slots per section, so nothing in the header jumps.
 struct SectionHeader<Trailing: View>: View {
     let title: String
     var status: (text: String, color: AnyShapeStyle)? = nil
     /// This section is the focused one: `esc` shows beside the title, the chevron points back.
     var focused = false
-    /// What the chevron's tooltip says: "Expand Inbox", or "Back to all sections".
+    /// What the tooltip and VoiceOver say: "Expand Inbox", or "Back to all sections".
     var expandHelp = ""
     /// Click anywhere on the header; nil for a header that isn't a control.
     var onFocus: (() -> Void)? = nil
     @ViewBuilder var trailing: Trailing
     @State private var hovering = false
+    @FocusState private var keyboardFocus: Bool
 
     var body: some View {
         HStack(spacing: Theme.Space.md) {
-            Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
-            if let status {
-                Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
-                    .transition(.opacity)
+            Group {
+                Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                if let status {
+                    Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
+                        .transition(.opacity)
+                }
+                if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
+                Spacer(minLength: 0)
             }
-            if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
-            Spacer(minLength: 0)
+            // What is drawn over the button doesn't take its clicks; the trailing actions do.
+            .allowsHitTesting(false)
             trailing
             if onFocus != nil {
                 Image(systemName: focused ? "chevron.up" : "chevron.down")
                     .font(Theme.Typography.glyph(11, .semibold))
                     .foregroundStyle(Theme.tertiary)
                     .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
-                    .opacity(hovering || focused ? 1 : 0)
-                    .tip(expandHelp)
+                    .opacity(hovering || focused || keyboardFocus ? 1 : 0)
+                    .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
         .padding(.leading, Theme.Metrics.contentEdge - Theme.Metrics.inset)
         .padding(.trailing, Theme.Space.hair)
         .frame(minHeight: Theme.Metrics.pitch)
-        .contentShape(Rectangle())
+        .background { if let onFocus { activation(onFocus) } }
         .onHover { hovering = $0 }
-        .onTapGesture { onFocus?() }
         .motion(Theme.Motion.hover, value: hovering)
+        .motion(Theme.Motion.hover, value: keyboardFocus)
         .motion(Theme.Motion.fade, value: status?.text)
-        .accessibilityAction(named: "Focus") { onFocus?() }
+    }
+
+    /// The header's own button: no fill (the chevron is its hover cue), the shared ring when Tab lands on it.
+    private func activation(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Color.clear.contentShape(Rectangle()) }
+            .buttonStyle(.plain)
+            .focused($keyboardFocus)
+            .focusRing(Theme.Radius.row, inset: true, isFocused: keyboardFocus)
+            .tip(expandHelp, focused: keyboardFocus)
+            .accessibilityLabel(expandHelp)
     }
 }
 
