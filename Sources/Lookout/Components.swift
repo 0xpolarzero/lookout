@@ -588,7 +588,7 @@ struct SwitchStyle: ToggleStyle {
         private func track(on: Bool) -> some View {
             Capsule()
                 .fill(!enabled ? resolved.fill(Theme.Fill.field) : on ? Theme.accent : resolved.fill(Theme.switchOff))
-                .overlay(Capsule().strokeBorder(!enabled ? resolved.divider : on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
+                .overlay(Capsule(style: .circular).strokeBorder(!enabled ? resolved.divider : on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
                 .overlay(alignment: on ? .trailing : .leading) {
                     Circle().fill(enabled ? AnyShapeStyle(.white) : AnyShapeStyle(resolved.tertiary)).frame(width: 16, height: 16)
                         // White on the accent is 2.9:1, and the knob's side is the switch's state: a dark edge holds it (WCAG 1.4.11).
@@ -729,8 +729,9 @@ struct Tabs<ID: Hashable>: View {
                 .fixedSize()
             }
             .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover, active: Theme.Fill.tile, isActive: selected))
-            // The fill alone is 1.3:1 on the page: the selected tab is told apart by its outline too (WCAG 1.4.11).
-            .overlay { if selected { Capsule().strokeBorder(TabStyle.selectedOutline, lineWidth: resolved.borderWidth).allowsHitTesting(false) } }
+            // The fill alone is 1.3:1 on the page: the selected tab is told apart by its outline too (WCAG 1.4.11). A circular
+            // capsule: the continuous one's outline grew a flat stub at each end.
+            .overlay { if selected { Capsule(style: .circular).strokeBorder(TabStyle.selectedOutline, lineWidth: resolved.borderWidth).allowsHitTesting(false) } }
             .focusRing(Theme.Metrics.tab / 2)
             .help(tab.help ?? "")
             .accessibilityAddTraits(selected ? .isSelected : [])

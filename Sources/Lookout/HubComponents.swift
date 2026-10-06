@@ -329,7 +329,7 @@ struct RowActions<Content: View>: View {
         HStack(spacing: 0) { content }
             .padding(2)
             .background(Capsule().fill(Theme.Fill.group))
-            .overlay(Capsule().strokeBorder(Theme.stroke))
+            .overlay(Capsule(style: .circular).strokeBorder(Theme.stroke))
     }
 }
 
