@@ -287,63 +287,12 @@ struct Shot {
 /// whose name contains one of the substrings are rendered (all of them without any), so a change is checked in a few
 /// seconds: `.build/debug/Lookout --playground-shots /tmp/shots right-open`.
 ///
-/// Names are `<edge>-<state>`, the edge being right, top, left or bottom. "Every edge" is all four; "right and
-/// top" the two that stand for the sides and the strip.
-///
-/// Baseline, every edge
-///   rest, open, settings, search, peek-inbox, peek-ci, peek-agents, peek-controls
-/// Baseline, right and top
-///   peek-agents-hover (a row under the pointer, its tile ringed in the bar), repos, tip, picked (also left), focus-inbox, focus-agents (also left), peek-controls-keys (the menu VoiceOver asked for)
-/// Inbox, right and top
-///   open-bots, open-done, search-none, search-sessions, focus-ci (also left)
-/// Causes, open on right and top; at rest on every edge (the bar's own state)
-///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
-///   first-sync, sync-fault, review-requests-cut (`rest-` for the others than bots-empty, done-empty and no-repos);
-///   at rest, signed-out and first-sync show the bar's CI cell as "not checked" (a question mark, never the no-runs minus)
-/// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
-///   no-ci, all-passing, many-ci (15 repositories), ci-running, ci-no-runs; open-no-ci and open-all-passing also on the bottom edge
-/// Sessions: `rest-`, `open-`, `peek-agents-` plus
-///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
-///   sessions-12, sessions-waiting-10 (ten waiting: none folds into the +N), sessions-many-new (eleven under New activity); every edge for `peek-agents-`, `open-` and
-///   `focus-agents-`; `picked-sessions` (right and top: one picked with the keys, one under the pointer), `focus-agents-sessions-more` (tall screen, "+3 more" picked),
-///   `focus-agents-sessions-end` (scrolled to the end), `open-sessions-12-short` (a 560pt hub on the sides)
-/// Update: `rest-`, `open-` plus
-///   update-available, update-downloading, update-ready
-/// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y; Differentiate
-/// shows the waiting tile's outline, the one cue drawn so far)
-///   rest-contrast, rest-reduce-motion, rest-differentiate, rest-a11y on every edge;
-///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
-/// Inbox, right and top
-///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
-///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-review-requests-cut, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
-///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none, inbox-search-sessions, inbox-search-sessions-only,
-///   inbox-search-from-focus, inbox-search-focus-agents, inbox-many, inbox-peek-many,
-///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
-///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
-/// A page open: settings-sync-fault and settings-review-requests-cut on right and top (the gear lit, with its badge)
-/// Components
-///   components, components-contrast (each shared component in its states, no hub)
-/// Position: `rest-`, `open-` plus
-///   low (0.7, on the sides), clamped (0.9) and centred (0.5, on the top and bottom); the other shots rest at 0.3
-/// 1280×720, every edge
-///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-ci-many-ci-720, peek-agents-720,
-///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
-///   peek-inbox-low-720, peek-ci-low-720 (sessions off), peek-agents-low-720 (bar at 0.9, on the sides)
-///   open-low-sessions-off-720, open-low-no-ci-720 (bar at 0.8, sessions off, on the sides)
-/// Working ring
-///   rings, rings-contrast (the ring on tiles, no hub)
-/// 1280×720, every edge, plus on right and top
-///   rest-sessions-waiting-20-720 and peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
-/// Frozen order, right and top
-///   focus-agents-sessions-undo-720 and peek-agents-sessions-undo-720 (the undo line of a hidden session, in a short window)
-///   peek-agents-sessions-late-waiting (the twelfth of twelve starts to wait while the pointer holds the bar)
-/// Settings and Repositories, right edge
-///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
-///   settings-shortcuts-notice, settings-claude, settings-claude-off; repos (collapsed), repos-custom, repos-failure,
-///   repos-add, repos-add-error, repos-add-none, repos-undo, repos-empty, repos-contrast, repos-retry-focus, repos-drop
-/// Settings states the dev build and a healthy account never show, right edge
-///   settings-signed-out, settings-launch-error, settings-update-{idle,available,downloading,ready,failed},
-///   settings-notifications-off, settings-shortcuts-{recording,conflict,restore-refused}, settings-claude-{missing,key-saved}
+/// Names are `<edge>-<state>`, the edge being right, top, left or bottom. Every shot is one line of `catalog` below,
+/// under a comment saying what the group shows: the baseline (rest, open, a page, search, each peek and focus), the
+/// inbox, the causes that empty a list or break the sync, CI, sessions, the update cell, the accessibility settings,
+/// Settings and Repositories in each of their states, the shared components and the working ring (no hub), where the bar
+/// rests along its edge, and a 1280×720 screen. Most states are on the right edge and along the top, which stand for the
+/// sides and the strip; the baseline and the bar at rest are on all four.
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
