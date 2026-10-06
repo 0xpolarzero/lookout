@@ -27,8 +27,9 @@ extension ItemState {
 
     var doneSymbol: String {
         switch self {
-        case .addressed: "arrowshape.turn.up.left"
-        case .resolved: "checkmark.circle"
+        // Neither is the Restore button's arrow or the Done checkmark, which sit on the same row.
+        case .addressed: "bubble.left"
+        case .resolved: "checkmark.bubble"
         default: "checkmark"
         }
     }
@@ -137,25 +138,15 @@ struct InboxRow: View {
         }
     }
 
-    /// The kind's glyph and the meta line; then, for Addressed and Resolved, what became of it. The author matters
-    /// more than the rest: the state gives up its word, then goes, then the kind's word (its glyph stays) before the
-    /// author is cut. The action's room is always kept at the end (whether it shows or not), so what the line says
-    /// never changes under the pointer.
+    /// The kind's glyph and the meta line; then, for Addressed and Resolved, what became of it. The state is the
+    /// news, so it keeps its word: the kind's word goes first (its glyph stays), then the author is cut. The action's
+    /// room is always kept at the end (whether it shows or not), so what the line says never changes under the pointer.
     @ViewBuilder private var secondLine: some View {
         HStack(spacing: Theme.Space.xs) {
             glyph(item.kind.rowSymbol)
-            if let state = inlineState {
-                ViewThatFits(in: .horizontal) {
-                    meta(state: state, word: true)
-                    meta(state: state, word: false)
-                    meta(state: nil, word: false)
-                    meta(state: nil, word: false, kind: false)
-                }
-            } else {
-                ViewThatFits(in: .horizontal) {
-                    meta(state: nil, word: false)
-                    meta(state: nil, word: false, kind: false)
-                }
+            ViewThatFits(in: .horizontal) {
+                meta(kind: true)
+                meta(kind: false)
             }
         }
         .padding(.trailing, Theme.Metrics.iconButton + Theme.Space.xs)
@@ -166,17 +157,19 @@ struct InboxRow: View {
         Image(systemName: symbol).font(Theme.Typography.glyph(10, .regular)).frame(width: 12)
     }
 
-    private func meta(state: ItemState?, word: Bool, kind: Bool = true) -> some View {
+    private func meta(kind: Bool) -> some View {
         HStack(spacing: 0) {
             Text("\(item.repo.split(separator: "/").last ?? "")#\(item.number) · \(kind ? item.kind.label + " · " : "")@\(item.author)")
                 .lineLimit(1)
-            if let state {
-                Text(" · ")
+            if let state = inlineState {
+                Text(" · ").fixedSize()
                 HStack(spacing: Theme.Space.xs) {
                     glyph(state.doneSymbol)
-                    if word { Text(state.doneLabel).lineLimit(1) }
+                    Text(state.doneLabel).lineLimit(1)
                 }
                 .foregroundStyle(Theme.secondary)
+                .fixedSize()
+                .layoutPriority(1)
             }
         }
         .font(Theme.Typography.meta)
