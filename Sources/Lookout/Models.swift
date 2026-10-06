@@ -143,6 +143,16 @@ enum CIState: String, Codable {
         }
     }
 
+    /// A silhouette of its own beside a count, so the three read apart without their colours.
+    var countSymbol: String {
+        switch self {
+        case .failure: "xmark.octagon.fill"
+        case .pending: "circle.dashed"
+        case .success: "checkmark.circle"
+        case .none: "minus.circle"
+        }
+    }
+
     var title: String {
         switch self {
         case .success: "Passing"

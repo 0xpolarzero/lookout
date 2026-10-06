@@ -9,13 +9,14 @@ struct RepoChip: View {
     let status: CIStatus?
     let state: CIState
     let action: () -> Void
+    @Environment(\.resolved) private var resolved
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text(repo.name).font(Theme.Typography.control).foregroundStyle(Theme.text)
                 if state == .failure, let n = status?.failing.count, n > 0 {
-                    Text(plural(n, "check")).font(Theme.Typography.meta).foregroundStyle(Theme.red)
+                    Text(plural(n, "check")).font(Theme.Typography.meta).foregroundStyle(resolved.red)
                 }
             }
             .padding(.horizontal, 8)
@@ -100,17 +101,18 @@ extension LookoutHub {
         return store.ciRepos.isEmpty ? nil : ("no runs", Theme.tertiary)
     }
 
-    /// The number of repos in a CI state, beside its line; hovering lists them.
+    /// The number of repos in a CI state, beside its line, after the state's own silhouette; hovering lists them.
     func ciCount(_ state: CIState) -> some View {
         let n = ciRepos(listedIn: state).count
-        return Text("\(n)")
-            .font(Theme.Typography.numeral)
-            .foregroundStyle(n == 0 ? Theme.tertiary : state.color)
-            .contentTransition(.numericText(value: Double(n)))
-            .frame(width: 32, height: Theme.Metrics.line)
-            .contentShape(Rectangle())
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(n) \(state.label)")
+        return HStack(spacing: 3) {
+            Image(systemName: state.countSymbol).font(Theme.Typography.glyph(10))
+            Text("\(n)").font(Theme.Typography.numeral).contentTransition(.numericText(value: Double(n)))
+        }
+        .foregroundStyle(n == 0 ? Theme.tertiary : state.color)
+        .frame(width: 36, height: Theme.Metrics.line)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(n) \(state.label)")
     }
 
     /// The repos in a CI state, as chips that open their checks.
