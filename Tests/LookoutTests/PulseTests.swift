@@ -167,6 +167,13 @@ import Testing
         #expect(row(unread: true, tasks: [task]).tileMarks.working)
     }
 
+    @Test func aWorkingSessionSaysAloudThatItIsUnreadOnTheTileAndTheRow() {
+        // The ring and the dot are both drawn, so both are said.
+        let unread = row(running: true, unread: true), read = row(running: true)
+        #expect(unread.tileValue(now: now) == "working, unread, a, just now" && read.tileValue(now: now) == "working, a, just now")
+        #expect(unread.spokenValue(now: now) == "working, unread, a, just now" && read.spokenValue(now: now) == "working, a, just now")
+    }
+
     @Test func aFinishedTurnWithNothingRunningDoesNot() {
         #expect(!row().tileMarks.working)
         #expect(!row(unread: true).tileMarks.working)

@@ -21,12 +21,15 @@ extension AgentRow {
         TileMarks(waiting: isWaiting, working: !isWaiting && (session.running || !tasks.isEmpty), unread: unread && !isWaiting)
     }
 
-    /// "waiting for you", "working", "finished, unread": the state as VoiceOver says it, never colour alone.
+    /// What the dot says aloud, whatever the session is doing: a working session can be unread as well (both are drawn).
+    var unreadNote: String { unread && !isWaiting ? ", unread" : "" }
+
+    /// "waiting for you", "working, unread", "finished, unread": the state as VoiceOver says it, never colour alone.
     var tileState: String {
         if isWaiting { return "waiting for you" }
-        if session.running { return "working" }
+        if session.running { return "working" + unreadNote }
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
-        if unread { return "finished, unread" + running }
+        if unread { return "finished" + unreadNote + running }
         if !tasks.isEmpty { return "finished" + running }
         return pending ? "new activity" : "idle"
     }

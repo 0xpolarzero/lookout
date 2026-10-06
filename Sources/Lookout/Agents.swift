@@ -162,7 +162,7 @@ struct AgentRow: Identifiable, Hashable {
     func spokenValue(now: Date = Date()) -> String {
         let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
         let age = Self.spokenAge(now.timeIntervalSince(session.running ? workingSince ?? session.lastActivity : session.lastActivity))
-        var parts = [state + (unread && !isWaiting && !session.running ? ", unread" : ""), projectName, age]
+        var parts = [state + unreadNote, projectName, age]
         if !tasks.isEmpty { parts.append("\(tasks.count) running") }
         if hidden { parts.append("hidden") }
         return parts.joined(separator: ", ")
