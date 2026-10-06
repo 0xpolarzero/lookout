@@ -10,8 +10,9 @@ import SwiftUI
 /// view that is made again, or a loop that is removed and added back, joins the others where they are. The image is
 /// shared by every pulse that draws the same thing, and rendered again when `id` changes (pass every input the content
 /// depends on: anything not in `id` is not refreshed), when Increase Contrast or Differentiate Without Colour changes,
-/// when the size changes and when the backing scale changes. Held at `from` when Reduce Motion is on; shown at `from`,
-/// unpulsed, when `active` is false; the loop is stopped while the window is occluded.
+/// when the size changes and when the backing scale changes. Held at `rest` (fully opaque unless asked) when Reduce
+/// Motion is on or `active` is false, and in a snapshot, which does not run the loop; the loop is stopped while the
+/// window is occluded.
 ///
 /// `content` must be a concrete view, not a ViewModifier's `content` placeholder (ImageRenderer cannot draw that).
 struct Pulse<ID: Hashable, Content: View>: View {
@@ -20,6 +21,8 @@ struct Pulse<ID: Hashable, Content: View>: View {
     var to = Theme.Motion.heartbeat.to
     /// Seconds from `from` to `to`; the loop is there and back.
     var duration = Theme.Motion.heartbeat.period
+    /// What shows when it is not pulsing: Reduce Motion, `active` off. Not a dimmed value: state is never an opacity.
+    var rest = 1.0
     /// Everything the content depends on; the image is re-rendered when it changes.
     var id: ID
     @ViewBuilder var content: Content
@@ -32,7 +35,7 @@ struct Pulse<ID: Hashable, Content: View>: View {
         let rendered = AnyView(content.environment(\.colorScheme, colorScheme).environment(\.resolved, resolved))
         content.opacity(0).overlay {
             PulseLayer(
-                spec: PulseView.Spec(from: from, to: to, duration: duration),
+                spec: PulseView.Spec(from: from, to: to, duration: duration, rest: rest),
                 animated: active && !reduceMotion,
                 key: PulseKey(id: id, contrast: resolved.contrast, differentiate: resolved.differentiate), view: rendered)
             .allowsHitTesting(false)
@@ -77,6 +80,11 @@ final class PulseView: NSView {
         let from: Double
         let to: Double
         let duration: Double
+        let rest: Double
+
+        init(from: Double, to: Double, duration: Double, rest: Double = 1) {
+            self.from = from; self.to = to; self.duration = duration; self.rest = rest
+        }
 
         /// There and back.
         var cycle: Double { duration * 2 }
@@ -84,6 +92,8 @@ final class PulseView: NSView {
 
     private var spec: Spec?
     private var animated = false
+    /// Whether the window is on screen; a test says.
+    var windowShowing: (NSWindow) -> Bool = { $0.isShowing }
     private var observer: NSObjectProtocol?
     private var source: (key: PulseKey, view: AnyView)?
     private var rendered: (key: PulseKey, size: CGSize, scale: CGFloat)?
@@ -157,12 +167,12 @@ final class PulseView: NSView {
         ctx.restoreGState()
     }
 
-    fileprivate func set(_ spec: Spec, animated: Bool) {
+    func set(_ spec: Spec, animated: Bool) {
         let changed = self.spec != spec
         self.animated = animated
         self.spec = spec
         // The model value is what a snapshot draws, and what shows when the animation is off.
-        if layer?.opacity != Float(spec.from) { layer?.opacity = Float(spec.from) }
+        if layer?.opacity != Float(spec.rest) { layer?.opacity = Float(spec.rest) }
         if changed { layer?.removeAnimation(forKey: "pulse") }
         refresh()
     }
@@ -174,9 +184,9 @@ final class PulseView: NSView {
     }
 
     /// Runs the animation only while the window is on screen and visible; removes it otherwise.
-    private func refresh() {
+    func refresh() {
         guard let layer else { return }
-        guard animated, let spec, let window, window.occlusionState.contains(.visible) else {
+        guard animated, let spec, let window, windowShowing(window) else {
             layer.removeAnimation(forKey: "pulse")
             return
         }
