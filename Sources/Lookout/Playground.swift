@@ -244,6 +244,8 @@ enum ShotSelection {
 enum ShotSheet {
     /// The design system's components, each in its states (`ComponentSheet`).
     case components
+    /// The working arc on tiles (`MotionSheet`).
+    case arcs
 }
 
 /// One screenshot: the playground in a given state, rendered offscreen to `<name>.png`. Add one by adding a line to
@@ -252,6 +254,8 @@ struct Shot {
     static let standard = CGSize(width: 1280, height: 820)
     /// A 1280×720 screen: the hub must fit its edge without overflowing.
     static let hd = CGSize(width: 1280, height: 720)
+    /// The arcs sheet: a few rows of tiles.
+    static let arcs = CGSize(width: 480, height: 160)
 
     var name: String
     var edge = DockEdge.right
@@ -320,6 +324,8 @@ struct Shot {
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
+/// Working arc
+///   arcs, arcs-contrast (the arc on tiles, no hub)
 /// 1280×720, every edge
 ///   open-720, settings-720, repos-720, rest-sessions-12-720
 @MainActor
@@ -387,6 +393,8 @@ enum PlaygroundShots {
         Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
+        // The working arc.
+        [Shot(name: "arcs", sheet: .arcs, size: Shot.arcs), Shot(name: "arcs-contrast", sheet: .arcs, size: Shot.arcs, environment: .contrast)],
         // A 1280×720 screen.
         Shot.edges("open-720") { $0.pinned = true; $0.size = Shot.hd },
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
@@ -453,6 +461,7 @@ enum PlaygroundShots {
         let content: AnyView
         switch shot.sheet {
         case .components: content = AnyView(ComponentSheet())
+        case .arcs: content = AnyView(MotionSheet())
         case nil:
             content = AnyView(PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
                 .environment(\.previewTip, shot.tip))

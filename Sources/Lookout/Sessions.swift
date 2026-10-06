@@ -9,7 +9,7 @@ struct WorkingText: View {
     let row: AgentRow
 
     var body: some View {
-        Ticking { now in
+        Ticking(since: row.workingSince) { now in
             Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
         }
     }
@@ -37,7 +37,8 @@ struct TaskLines: View {
     let tasks: [ClaudeTask]
 
     var body: some View {
-        Ticking { now in
+        // Seconds count only while the newest task is under a minute old.
+        Ticking(since: tasks.map(\.since).max()) { now in
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(tasks) { task in
                     HStack(spacing: 6) {
@@ -345,6 +346,7 @@ struct DrawerRow: View {
                     .fixedSize(horizontal: busy, vertical: false)
                     .layoutPriority(busy ? 2 : 0)
                     .opacity(selected && plain ? 0 : 1)
+                    .tickingHidden(selected && plain)
             }
         }
         Group {
@@ -386,13 +388,21 @@ struct DrawerRow: View {
         return text
     }
 
+    private func statusLabel(now: Date = Date()) -> String {
+        row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText(now: now) : "new activity") : row.statusText(now: now)
+    }
+
     @ViewBuilder private var status: some View {
         if row.session.running {
             WorkingText(row: row)
         } else {
             HStack(spacing: 4) {
-                Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "new activity") : row.statusText)
-                    .foregroundStyle(row.statusColor)
+                // Its age is the only thing in it that changes with time, so only a status with one asks the clock.
+                if row.statusHasAge {
+                    Ticking(coarse: true) { now in Text(statusLabel(now: now)).foregroundStyle(row.statusColor) }
+                } else {
+                    Text(statusLabel()).foregroundStyle(row.statusColor)
+                }
                 if let tasks = row.tasksText {
                     Text("·").foregroundStyle(Theme.tertiary)
                     Text(tasks).foregroundStyle(Theme.secondary)

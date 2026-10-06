@@ -43,8 +43,11 @@ struct CompactItemRow: View {
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         // The actions take the timestamp's place; the title stops short of them.
-                        Text(shortAgo(item.createdAt)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+                        Ticking(coarse: true) { now in
+                            Text(shortAgo(item.createdAt, now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+                        }
                             .opacity(open ? 0 : 1)
+                            .tickingHidden(open)
                             .frame(width: open ? actionsWidth - 6 : nil, alignment: .trailing)
                     }
                     HStack(spacing: 6) {
