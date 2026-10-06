@@ -316,6 +316,8 @@ struct SessionBlock: View {
     let store: Store
     @Bindable var ui: UIState
     let hub: HubState
+    /// Draws its own highlight; off when the row it sits in draws one across its tile too (the sides' rail).
+    var fills = true
 
     var body: some View {
         let selected = ui.drawerSelection == row.id
@@ -331,7 +333,7 @@ struct SessionBlock: View {
                 .padding(.top, twoLines ? -8 : -3)
                 .padding(.bottom, twoLines ? 4 : 7)
         }
-        .background(Theme.Radius.shape(Theme.Radius.row).fill(selected ? Theme.Fill.hover : Theme.Fill.rest))
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(fills && selected ? Theme.Fill.hover : Theme.Fill.rest))
         // The same actions as an inbox item's, over the title line's right end, centred on it.
         .overlay(alignment: .topTrailing) {
             if selected {

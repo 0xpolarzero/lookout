@@ -336,8 +336,8 @@ struct LookoutHub: View {
     }
 
     /// A session in the full view (see `SessionBlock`).
-    func sessionBlock(_ r: AgentRow, twoLines: Bool) -> some View {
-        SessionBlock(row: r, twoLines: twoLines, store: store, ui: ui, hub: hub)
+    func sessionBlock(_ r: AgentRow, twoLines: Bool, fills: Bool = true) -> some View {
+        SessionBlock(row: r, twoLines: twoLines, store: store, ui: ui, hub: hub, fills: fills)
     }
 
     func twoLineRow(_ r: AgentRow) -> some View {

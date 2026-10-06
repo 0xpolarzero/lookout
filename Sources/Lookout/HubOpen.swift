@@ -92,6 +92,13 @@ extension LookoutHub {
         }
     }
 
+    /// A session on the sides: its tile in the rail and its block beside it, hovered or picked as one row.
+    func sideSession(_ r: AgentRow) -> some View {
+        SideSessionRow(id: r.id, ui: ui) {
+            railRow(alignment: .top, cell: { tile(r, size: Theme.Metrics.tile) }, detail: { sessionBlock(r, twoLines: false, fills: false) })
+        }
+    }
+
     /// The rail: its fill and the hairline on its inner edge, as tall as the hub.
     var rail: some View {
         Theme.rail
@@ -170,7 +177,7 @@ extension LookoutHub {
             VStack(alignment: .leading, spacing: 0) {
                 let starts = projectStarts(rows.kept)
                 ForEach(rows.kept) { r in
-                    railRow(alignment: .top, cell: { tile(r, size: Theme.Metrics.tile) }, detail: { sessionBlock(r, twoLines: false) })
+                    sideSession(r)
                         .modifier(AgentReorder(row: r, store: store))
                         .modifier(GroupRule(on: starts.contains(r.id)))
                         .capEdge()
@@ -179,7 +186,7 @@ extension LookoutHub {
                 if !rows.pending.isEmpty {
                     railRow(cell: { Color.clear }, detail: { pendingLabel(twoLines: false).frame(height: Theme.Metrics.pitch, alignment: .leading) })
                     ForEach(rows.pending) { r in
-                        railRow(alignment: .top, cell: { tile(r, size: Theme.Metrics.tile) }, detail: { sessionBlock(r, twoLines: false) })
+                        sideSession(r)
                             .capEdge()
                             .id("a:" + r.id)
                     }
@@ -347,6 +354,24 @@ extension LookoutHub {
                 }
             }
         }
+    }
+}
+
+/// The highlight of a session's line on the sides, across its content and its rail cell. Whether it is the picked one is
+/// compared here, in its own body, so a hover redraws this row alone.
+struct SideSessionRow<Content: View>: View {
+    let id: String
+    let ui: UIState
+    @ViewBuilder let content: Content
+    @Environment(\.resolved) private var resolved
+
+    var body: some View {
+        let selected = ui.drawerSelection == id
+        content
+            // The one outer inset on both sides: the rounded one and the rail's, against the screen.
+            .background(Theme.Radius.shape(Theme.Radius.row).fill(resolved.fill(selected ? Theme.Fill.hover : Theme.Fill.rest))
+                .padding(.horizontal, HubGeometry.inset))
+            .motion(Theme.Motion.hover, value: selected)
     }
 }
 
