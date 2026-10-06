@@ -246,14 +246,17 @@ extension LookoutHub {
         if ClaudeNotice.room(store) > 0 {
             railRow(cell: { Color.clear }, detail: { ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding) })
         }
-        if noClaudeSessions {
-            railRow(cell: { Color.clear }, detail: { noClaudeSessionsLine })
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: $0)) }
-                .onDisappear { record(.agents, nil) }
-        } else {
-            sessionsScroll(cap: cap).frame(width: Self.cell + Self.detail)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: agentsContent)) }
-                .onDisappear { record(.agents, nil) }
+        // Whether there are sessions to list is read in a body of its own, as the list's own rows are.
+        Scoped {
+            if noClaudeSessions {
+                railRow(cell: { Color.clear }, detail: { noClaudeSessionsLine })
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: $0)) }
+                    .onDisappear { record(.agents, nil) }
+            } else {
+                sessionsScroll(cap: cap).frame(width: Self.cell + Self.detail)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: agentsContent)) }
+                    .onDisappear { record(.agents, nil) }
+            }
         }
         newSessionRow().frame(width: Self.cell + Self.detail)
     }
@@ -429,12 +432,14 @@ extension LookoutHub {
     /// under the notice (when Claude's files are not there).
     @ViewBuilder func stripAgents(cap: CGFloat) -> some View {
         ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
-        if noClaudeSessions {
-            noClaudeSessionsLine
-        } else {
-            sessionsScroll(cap: cap)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: agentsContent)) }
-                .onDisappear { record(.agents, nil) }
+        Scoped {
+            if noClaudeSessions {
+                noClaudeSessionsLine
+            } else {
+                sessionsScroll(cap: cap)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: agentsContent)) }
+                    .onDisappear { record(.agents, nil) }
+            }
         }
     }
 }

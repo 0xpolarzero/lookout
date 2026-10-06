@@ -1001,6 +1001,19 @@ import Testing
         #expect(bodyChanges(pinned: true) { store.updater.preview(.ready, version: "0.5.0") })
     }
 
+    @Test(arguments: [false, true]) func aWorkingSessionsActivityAndTasksLeaveTheHubsBodyAlone(pinned: Bool) {
+        // A working agent writes a transcript step every few seconds: its row says it, the hub's structure does not change.
+        let id = store.claudeSessions.values.first { $0.running }?.id ?? store.claudeSessions.keys.first!
+        let changed = bodyChanges(pinned: pinned) {
+            store.claudeActivity[id] = ClaudeActivity(text: "Running swift test", since: Date())
+            store.claudeTasks[id] = [ClaudeTask(id: "t1", kind: .command, title: "swift test", since: Date())]
+            store.claudeActivity[id] = ClaudeActivity(text: "Editing Sessions.swift", since: Date())
+            // A turn ending changes the session itself: its row says so, and the hub's structure still stands.
+            store.claudeSessions[id]?.completedTurns += 1
+        }
+        #expect(!changed)
+    }
+
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
         #expect(bodyChanges(pinned: true) { store.items = [] })
     }

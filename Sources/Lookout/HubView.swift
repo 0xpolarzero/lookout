@@ -412,6 +412,14 @@ struct SharedWidthStack: Layout {
     }
 }
 
+/// Draws `content` from a body of its own: whatever it reads of the store is tracked there, so a change redraws it and not the
+/// view it sits in (DESIGN.md 8: the hub's body is its structure, and a working session's activity is not).
+struct Scoped<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View { content() }
+}
+
 /// Under the Sessions header: Claude's session files missing or unreadable (nothing when all is well).
 struct ClaudeNotice: View {
     let store: Store

@@ -926,6 +926,11 @@ extension LookoutHub {
 
     /// "Sessions" and its status.
     var agentsHeader: some View {
+        // Its status counts the sessions: read in a body of its own.
+        Scoped { agentsSectionHeader }
+    }
+
+    private var agentsSectionHeader: some View {
         SectionHeader(title: "Sessions", status: agentsStatus,
                       statusAction: searching ? nil : pickFirstWaiting, focused: hub.focus == .agents,
                       expandHelp: hub.focus == .agents ? "Back to all sections" : "Expand Sessions",
