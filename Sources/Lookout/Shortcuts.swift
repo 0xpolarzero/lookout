@@ -236,6 +236,7 @@ struct ShortcutRecorder: View {
     @State private var monitor: Any?
     @State private var error: String?
     @State private var tap = ModifierTap()
+    @Environment(\.pagePreview) private var preview
 
     var body: some View {
         let current = store.shortcut(action)
@@ -259,7 +260,15 @@ struct ShortcutRecorder: View {
             if let error {
                 Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.red)
                     .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                    // Wider than the keycap it sits under, so a conflict reads on two lines at most.
+                    .frame(maxWidth: 220, alignment: .trailing)
             }
+        }
+        .onAppear {
+            // A screenshot's recorder: waiting for keys (no monitor), with the error it was showing.
+            guard preview.recording == action else { return }
+            recording = true
+            error = preview.recorderError
         }
         .onDisappear(perform: stop)
     }

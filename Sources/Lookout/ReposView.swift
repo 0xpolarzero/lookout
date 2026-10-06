@@ -528,8 +528,9 @@ struct RepoRow: View {
             Button(action: store.refreshNow) {
                 Text("Retry").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
                     .padding(.horizontal, Theme.Space.xs)
-                    .frame(minHeight: Theme.Metrics.iconButton)
-                    .contentShape(Rectangle())
+                    .frame(height: Self.line)
+                    // 24pt to hit, and a ring that stays within the line, without taking the room.
+                    .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconButton - Self.line) / 2))
             }
             .buttonStyle(.plain)
             .focused($retryFocused)

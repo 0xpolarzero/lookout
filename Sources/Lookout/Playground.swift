@@ -327,7 +327,10 @@ struct Shot {
 /// Settings and Repositories, right edge
 ///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
 ///   settings-shortcuts-notice, settings-claude, settings-claude-off; repos (collapsed), repos-custom, repos-failure,
-///   repos-add, repos-add-error, repos-add-none, repos-undo, repos-empty, repos-contrast
+///   repos-add, repos-add-error, repos-add-none, repos-undo, repos-empty, repos-contrast, repos-retry-focus, repos-drop
+/// Settings states the dev build and a healthy account never show, right edge
+///   settings-signed-out, settings-launch-error, settings-update-{idle,available,downloading,ready,failed},
+///   settings-notifications-off, settings-shortcuts-{recording,conflict}, settings-claude-{missing,key-saved}
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -416,6 +419,42 @@ enum PlaygroundShots {
         Shot.edges("settings-claude-off", on: [.right]) {
             $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy
         },
+        // The states of Settings that the dev build and a healthy account never show.
+        Shot.edges("settings-signed-out", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.scenario = .signedOut },
+        Shot.edges("settings-launch-error", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.launchError = "The operation couldn't be completed. Operation not permitted"
+        },
+        Shot.edges("settings-update-idle", on: [.right]) { settingsShot(&$0, .idle) },
+        Shot.edges("settings-update-available", on: [.right]) { settingsShot(&$0, .available) },
+        Shot.edges("settings-update-downloading", on: [.right]) { settingsShot(&$0, .downloading(0.42)) },
+        Shot.edges("settings-update-ready", on: [.right]) { settingsShot(&$0, .ready) },
+        Shot.edges("settings-update-failed", on: [.right]) { settingsShot(&$0, .failed("Couldn't verify the download: the checksum doesn't match")) },
+        Shot.edges("settings-notifications-off", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications
+            $0.setup = { store, _, _ in store.settings.notifications = false }
+        },
+        Shot.edges("settings-shortcuts-recording", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+            $0.preview.recording = .togglePanel
+        },
+        Shot.edges("settings-shortcuts-conflict", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .shortcuts; $0.preview.accessibilityTrusted = true
+            $0.preview.recording = .openItem; $0.preview.recorderError = "Already used by Mark read / unread"
+        },
+        Shot.edges("settings-claude-missing", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy; $0.preview.claudeInstalled = false
+        },
+        Shot.edges("settings-claude-key-saved", on: [.right]) {
+            $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude
+            $0.setup = { store, _, _ in
+                store.hasTypesafeKey = true
+                store.agents.iconsEnabled = true
+            }
+        },
+        Shot.edges("repos-retry-focus", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed; $0.preview.retryFocused = "ziglang/zig"
+        },
+        Shot.edges("repos-drop", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.dropTarget = "ziglang/zig" },
         Shot.edges("repos-custom", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig" },
         Shot.edges("repos-failure", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed },
         Shot.edges("repos-add", on: [.right]) {
@@ -446,6 +485,13 @@ enum PlaygroundShots {
             $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig"; $0.environment = .contrast
         },
     ].flatMap { $0 }
+
+    /// The General pane with the updater in a phase (a release, as the dev build is never one).
+    private static func settingsShot(_ shot: inout Shot, _ phase: Updater.Phase) {
+        shot.pinned = true
+        shot.page = .settings
+        shot.setup = { store, _, _ in store.updater.preview(phase, version: "0.5.0") }
+    }
 
     /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.
     private static func scenarioShots(_ slug: String, _ scenario: Demo.Scenario, peek: HubSection? = nil) -> [Shot] {

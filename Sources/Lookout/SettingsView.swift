@@ -36,6 +36,13 @@ struct PagePreview: Equatable {
     var revealsToken = false
     /// Shortcuts: whether Accessibility is granted, instead of asking the system.
     var accessibilityTrusted: Bool?
+    /// General: the Launch at login row after the system refused, with its message.
+    var launchError: String?
+    /// Claude: whether the Claude app is installed, instead of looking for it.
+    var claudeInstalled: Bool?
+    /// Shortcuts: the action whose recorder is waiting for keys, and the error it shows (a conflict, say).
+    var recording: ShortcutAction?
+    var recorderError: String?
     /// Repositories: the repository whose Custom choices are open.
     var expandedRepo: String?
     /// Repositories: text typed in the add field, with its suggestions showing and the row `addHighlight` picked.
@@ -107,6 +114,7 @@ struct SettingsView: View {
         .onAppear {
             if let pane = preview.pane { ownPane = pane }
             revealToken = preview.revealsToken
+            launchError = preview.launchError
         }
     }
 
@@ -280,8 +288,7 @@ struct SettingsView: View {
             case .ready:
                 BorderedButton("Restart to update") { updater.install() }
             case .downloading(let fraction):
-                ProgressView(value: fraction).tint(Theme.accent).frame(width: 96)
-                    .accessibilityLabel("Download progress")
+                DownloadBar(fraction: fraction)
             case .installing:
                 EmptyView()
             case .idle:
@@ -428,26 +435,38 @@ struct SettingsView: View {
     // MARK: Claude
 
     private var claude: some View {
-        let installed = Claude.isInstalled
+        let installed = preview.claudeInstalled ?? Claude.isInstalled
         let on = store.agents.enabled
         return paneStack("Claude") {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            // Without the Claude app the switch is off and says why, outside the switch: a disabled one is drawn
+            // dimmer, and the reason is what has to stay readable.
+            let blocked = !installed && !on
             Toggle(isOn: Binding(get: { on }, set: { store.setAgentsEnabled($0) })) {
                 HStack(spacing: Theme.Space.md) {
                     Image(systemName: "asterisk").font(Theme.Typography.glyph(14, .bold)).foregroundStyle(Theme.claude)
                         .frame(width: 22).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: Theme.Space.hair) {
                         Text("Claude sessions").font(Theme.Typography.title).foregroundStyle(Theme.text)
-                        Text(installed || on ? "Shows your Claude Code sessions on the bar" : "Needs the Claude desktop app, with Claude Code sessions")
-                            .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
-                            .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                        if !blocked {
+                            Text("Shows your Claude Code sessions on the bar")
+                                .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                                .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(.vertical, Theme.Space.sm)
                 }
             }
             .toggleStyle(SwitchStyle())
-            .disabled(!installed && !on)
+            .disabled(blocked)
             .padding(.horizontal, Theme.Metrics.contentEdge)
+            if blocked {
+                Text("Needs the Claude desktop app, with Claude Code sessions")
+                    .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, Theme.Metrics.contentEdge + 22 + Theme.Space.md)
+                    .padding(.trailing, Theme.Metrics.contentEdge)
+            }
             if on {
                 FormGroup {
                     mutedFolders
@@ -513,5 +532,25 @@ struct SettingsView: View {
         guard !typesafeKey.isEmpty else { return }
         store.setTypesafeKey(typesafeKey)
         typesafeKey = ""
+    }
+}
+
+/// A determinate bar for the download, drawn here: the system's greys out while the panel is not the key window,
+/// which is most of the time Settings is in view. Accent on the neutral tile fill.
+private struct DownloadBar: View {
+    let fraction: Double
+    @Environment(\.resolved) private var resolved
+
+    var body: some View {
+        Capsule().fill(resolved.fill(Theme.Fill.tile))
+            .frame(width: 96, height: 6)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule().fill(Theme.accent).frame(width: proxy.size.width * min(max(fraction, 0), 1))
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel("Download progress")
+            .accessibilityValue("\(Int(fraction * 100)) percent")
     }
 }
