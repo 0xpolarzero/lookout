@@ -885,13 +885,31 @@ extension Store {
     func hubSessions(_ hub: HubState) -> [AgentRow] {
         guard agents.enabled else { return [] }
         if !hub.query.trimmingCharacters(in: .whitespaces).isEmpty {
-            let memo = hub.sessionMemo
-            if memo.revision == agentsRevision, memo.query == hub.query { return memo.result }
-            let result = searchSessions(hub.query)
-            hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
-            return result
+            var memo = hub.sessionMemo
+            if memo.query == hub.query, memo.rowsRevision == agentsRevision { return memo.rows }
+            let rows = searchSessions(hub.query)
+            if memo.query != hub.query { memo = SessionSearchMemo(query: hub.query) }
+            memo.rows = rows
+            memo.rowsRevision = agentsRevision
+            hub.sessionMemo = memo
+            return rows
         }
         return listedGroups(hub).groups.flatMap(\.rows)
+    }
+
+    /// The ids of `hubSessions`, for what only walks or counts them (the layout, the keys). Searching, it reads the sessions
+    /// and what is kept but not what they are doing: a working session's steps change its row, not the layout around it.
+    func hubSessionIDs(_ hub: HubState) -> [String] {
+        guard agents.enabled else { return [] }
+        guard !hub.query.trimmingCharacters(in: .whitespaces).isEmpty else { return hubSessions(hub).map(\.id) }
+        var memo = hub.sessionMemo
+        if memo.query == hub.query, memo.idsRevision == sessionsRevision { return memo.ids }
+        let ids = matchingSessions(hub.query).map(\.id)
+        if memo.query != hub.query { memo = SessionSearchMemo(query: hub.query) }
+        memo.ids = ids
+        memo.idsRevision = sessionsRevision
+        hub.sessionMemo = memo
+        return ids
     }
 
     /// What the sessions shortcut picks: the first row of Waiting for you (a session stopped on a question, mid-turn or
@@ -921,7 +939,7 @@ extension LookoutHub {
     /// (DESIGN.md 10.5).
     var agentsStatus: (text: String, color: AnyShapeStyle)? {
         if searching {
-            let found = store.hubSessions(hub).count
+            let found = store.hubSessionIDs(hub).count
             if searchFoundNothing { return nil }
             return found == 0 ? ("0 · No sessions match", AnyShapeStyle(Theme.tertiary)) : ("\(found)", AnyShapeStyle(Theme.secondary))
         }

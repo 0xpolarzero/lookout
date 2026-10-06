@@ -1014,6 +1014,22 @@ import Testing
         #expect(!changed)
     }
 
+    @Test(arguments: [false, true]) func aSessionSearchIsNotRedrawnByAWorkingSessionsSteps(pinned: Bool) {
+        // The search's layout counts the sessions it found; what they are doing is read by their rows, not by the hub's body.
+        let id = store.claudeSessions.values.first { $0.running }?.id ?? store.claudeSessions.keys.first!
+        hub.query = "e"
+        #expect(!store.hubSessionIDs(hub).isEmpty)
+        let changed = bodyChanges(pinned: pinned) {
+            store.claudeActivity[id] = ClaudeActivity(text: "Running swift test", since: Date())
+            store.claudeTasks[id] = [ClaudeTask(id: "t1", kind: .command, title: "swift test", since: Date())]
+            store.claudeActivity[id] = ClaudeActivity(text: "Editing Sessions.swift", since: Date())
+        }
+        #expect(!changed)
+        // The rows still hear of it: they are rebuilt for the new state, not served from the memo.
+        let row = store.hubSessions(hub).first { $0.id == id }
+        #expect(row?.activity?.text == "Editing Sessions.swift")
+    }
+
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
         #expect(bodyChanges(pinned: true) { store.items = [] })
     }

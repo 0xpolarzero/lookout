@@ -350,8 +350,12 @@ struct ScrollRequest: Equatable {
 /// The last session search's result, valid for one query and one state of the agents.
 struct SessionSearchMemo {
     var query = ""
-    var revision = -1
-    var result: [AgentRow] = []
+    /// The matches, which only the sessions and what is kept decide (`Store.sessionsRevision`)...
+    var idsRevision = -1
+    var ids: [String] = []
+    /// ...and their rows, which a working session's activity and tasks change too (`Store.agentsRevision`).
+    var rowsRevision = -1
+    var rows: [AgentRow] = []
 }
 
 /// The last search's lowercase keys and result, so the many reads of one render cost one search.

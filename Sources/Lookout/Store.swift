@@ -57,6 +57,7 @@ final class Store {
         didSet {
             agentCache = nil
             agentsRevision &+= 1
+            sessionsRevision &+= 1
             persistedRevision &+= 1
             if !ingesting { claudeStamp.revision += 1 }
             save()
@@ -64,10 +65,14 @@ final class Store {
     }
     /// Bumped whenever the rows the hub shows can change (agents, sessions, activity, tasks): a cheap memo/animation key.
     private(set) var agentsRevision = 0
+    /// Bumped when the sessions themselves or what is kept change, not their activity or tasks: what a search's matches
+    /// depend on, so a working session's steps don't redraw the hub's layout behind it.
+    private(set) var sessionsRevision = 0
     var claudeSessions: [String: ClaudeSession] = [:] {
         didSet {
             agentCache = nil
             agentsRevision &+= 1
+            sessionsRevision &+= 1
         }
     }
     var claudeActivity: [String: ClaudeActivity] = [:] {

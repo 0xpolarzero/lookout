@@ -65,7 +65,7 @@ extension HubState {
 extension Store {
     /// Every row the arrows walk through, top to bottom: the inbox's, then the sessions'.
     func hubTargets(_ hub: HubState) -> [String] {
-        hubItems(hub).map { "i:" + $0.id } + hub.ciTargets(self) + hubSessions(hub).map { "a:" + $0.id }
+        hubItems(hub).map { "i:" + $0.id } + hub.ciTargets(self) + hubSessionIDs(hub).map { "a:" + $0 }
     }
 }
 
@@ -162,7 +162,7 @@ extension LookoutHub {
     /// What the search found, by kind, each group counted even at none: "3 items · 0 sessions".
     var searchCount: String {
         let found = items.count
-        let sessions = store.hubSessions(hub).count
+        let sessions = store.hubSessionIDs(hub).count
         if found == 0 && sessions == 0 { return "No match" }
         return [plural(found, "item"), store.agents.enabled ? plural(sessions, "session") : nil]
             .compactMap { $0 }.joined(separator: " · ")
@@ -172,11 +172,11 @@ extension LookoutHub {
     var searchGroups: Bool { searching && store.agents.enabled && store.inboxReplacement == nil }
 
     /// Neither group has a result: one "No match" says so, in place of the groups' own lines.
-    var searchFoundNothing: Bool { searching && items.isEmpty && store.hubSessions(hub).isEmpty }
+    var searchFoundNothing: Bool { searching && items.isEmpty && store.hubSessionIDs(hub).isEmpty }
 
     /// One of the two groups found nothing: it is a line saying so ("Inbox 0 · No items match") and the other has the whole
     /// body, which a column of its own would waste half of on a line. Both empty is `searchFoundNothing`'s one "No match".
-    var searchSpansBody: Bool { searchGroups && !searchFoundNothing && (items.isEmpty || store.hubSessions(hub).isEmpty) }
+    var searchSpansBody: Bool { searchGroups && !searchFoundNothing && (items.isEmpty || store.hubSessionIDs(hub).isEmpty) }
 
     /// Whether the sessions' section is in the layout: the extension is on, and a search that found nothing in either group
     /// has no half-empty Sessions under its "No match".
