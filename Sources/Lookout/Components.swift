@@ -848,7 +848,9 @@ extension StatusBanner where Actions == EmptyView {
     }
 }
 
-/// A list with nothing in it, and why: two centred lines and at most one action (and a glyph when it says why).
+/// A list with nothing in it, and why: two centred lines and at most one action (and a glyph when it says why). It fits the
+/// room it is given (`Theme.Metrics.emptyBlock` is the room it likes): its cause and action on one line, and then that line
+/// scrolled, so a hub that has little room for its list is not made taller by what stands in for it.
 struct EmptyBlock<Action: View>: View {
     let title: String
     var detail: String? = nil
@@ -858,19 +860,33 @@ struct EmptyBlock<Action: View>: View {
     @ViewBuilder var action: Action
 
     var body: some View {
-        VStack(spacing: Theme.Space.xs) {
-            if let symbol {
-                Image(systemName: symbol).font(Theme.Typography.glyph(22, .regular)).foregroundStyle(symbolTint)
-                    .padding(.bottom, Theme.Space.xs)
-                    .accessibilityHidden(true)
+        ViewThatFits(in: .vertical) {
+            VStack(spacing: Theme.Space.xs) {
+                if let symbol {
+                    Image(systemName: symbol).font(Theme.Typography.glyph(22, .regular)).foregroundStyle(symbolTint)
+                        .padding(.bottom, Theme.Space.xs)
+                        .accessibilityHidden(true)
+                }
+                titleText
+                if let detail { Text(detail).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary) }
+                action.padding(.top, Theme.Space.sm)
             }
-            Text(title).font(Theme.Typography.body.weight(.medium)).foregroundStyle(Theme.secondary)
-            if let detail { Text(detail).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary) }
-            action.padding(.top, Theme.Space.sm)
+            line
+            ScrollView { line }
         }
         .multilineTextAlignment(.center)
-        .frame(maxWidth: .infinity, minHeight: Theme.Metrics.emptyBlock)
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
+    }
+
+    private var titleText: some View { Text(title).font(Theme.Typography.body.weight(.medium)).foregroundStyle(Theme.secondary) }
+
+    private var line: some View {
+        HStack(spacing: Theme.Space.md) {
+            titleText
+            action
+        }
+        .frame(maxWidth: .infinity, minHeight: Theme.Metrics.button)
     }
 }
 

@@ -962,8 +962,9 @@ private struct ComponentSheet: View {
 
     private var empties: some View {
         group("Empty block: two lines, with an action") {
-            EmptyBlock("All caught up", detail: "Checked 2m ago")
+            EmptyBlock("All caught up", detail: "Checked 2m ago").frame(height: Theme.Metrics.emptyBlock)
             EmptyBlock(title: "Nothing watched yet", detail: "Add a repository to start.") { BorderedButton("Add a repository") {} }
+                .frame(height: Theme.Metrics.emptyBlock)
         }
     }
 

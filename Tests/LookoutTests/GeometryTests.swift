@@ -196,7 +196,7 @@ import Testing
     /// The hub at rest, then kept open (on `page` when one is given, with `focus` on a section) or, given a `section`,
     /// with just that panel open as when it is hovered, in a window of `screen`.
     private func render(edge: DockEdge, position: Double, screen: CGSize, page: HubPage? = nil, scenario: Demo.Scenario = .agents,
-                        focus: HubSection? = nil, section: HubSection? = nil, query: String = "",
+                        focus: HubSection? = nil, section: HubSection? = nil, query: String = "", filter: InboxFilter? = nil,
                         setup: ((Store) -> Void)? = nil) -> (rest: Shot, open: Shot) {
         let store = Store()
         Demo.populate(store, scenario)
@@ -206,6 +206,7 @@ import Testing
         ui.position = position
         let hub = HubState()
         hub.query = query
+        if let filter { hub.filter = filter }
         let layout = HubLayout()
         let root = HubRoot(store: store, ui: ui, hub: hub, layout: layout).frame(width: screen.width, height: screen.height)
         let hosting = NSHostingView(rootView: root)
@@ -246,8 +247,8 @@ import Testing
 
     /// The tile and the hub's start are where they were at rest, and the hub is on the screen.
     private func expectTileStays(edge: DockEdge, position: Double, screen: CGSize, scenario: Demo.Scenario = .agents,
-                                 setup: ((Store) -> Void)? = nil) {
-        let (rest, open) = render(edge: edge, position: position, screen: screen, scenario: scenario, setup: setup)
+                                 filter: InboxFilter? = nil, setup: ((Store) -> Void)? = nil) {
+        let (rest, open) = render(edge: edge, position: position, screen: screen, scenario: scenario, filter: filter, setup: setup)
         #expect(abs(rest.frame.minY - open.frame.minY) < 0.5, "\(edge) \(position): the hub starts at \(rest.frame.minY), kept open at \(open.frame.minY)")
         let a = tile(rest, edge: edge, screen: screen)
         let b = tile(open, edge: edge, screen: screen)
@@ -294,6 +295,23 @@ import Testing
         expectTileStays(edge: edge, position: position, screen: CGSize(width: 1280, height: height)) {
             $0.agents.enabled = false
             longInbox($0, count: 8)
+        }
+    }
+
+    @Test(arguments: lowSides)
+    func theInboxTileStaysWhenATabIsEmptyOnALowBar(edge: DockEdge, position: Double, height: CGFloat) {
+        // What stands in for the list is held to the room the list had, however little: its block is 132 points when it likes.
+        expectTileStays(edge: edge, position: position, screen: CGSize(width: 1280, height: height), scenario: .noCI, filter: .bots) { store in
+            store.agents.enabled = false
+            store.items = Array(store.items.filter { $0.state == .unread && !store.isLowPriority($0) }.prefix(1))
+        }
+    }
+
+    @Test(arguments: lowSides)
+    func theInboxTileStaysWhenSigningInFailsOnALowBar(edge: DockEdge, position: Double, height: CGFloat) {
+        expectTileStays(edge: edge, position: position, screen: CGSize(width: 1280, height: height), scenario: .noCI) {
+            $0.agents.enabled = false
+            $0.authError = "Bad credentials"
         }
     }
 

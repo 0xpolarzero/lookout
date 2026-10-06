@@ -253,7 +253,7 @@ extension LookoutHub {
             }
             if groupLabel { SearchGroupLabel(title: "Inbox", count: items.count, message: items.isEmpty ? "No items match" : nil) }
             if store.inboxReplacement != nil || items.isEmpty {
-                emptyInbox
+                emptyInbox(room: min(Theme.Metrics.emptyBlock, max(listCap, 0)))
             } else {
                 InboxList(items: items, cap: listCap, peeking: peek, listKey: listKey, scopeID: searching ? "search" : hub.filter.rawValue,
                           store: store, ui: ui, hub: hub)
@@ -270,14 +270,15 @@ extension LookoutHub {
 
     /// The list is empty, or replaced: the cause, said once, with at most one way out. Searching, only when sessions
     /// found nothing either (they are listed beside the inbox's results).
-    @ViewBuilder var emptyInbox: some View {
+    /// `room`: what the list had, and all it takes (never more, or the hub grows for it).
+    @ViewBuilder func emptyInbox(room: CGFloat) -> some View {
         if searching && store.inboxReplacement == nil {
             // (A group that found nothing says so in its own label, the other having found something.)
-            if searchFoundNothing { EmptyBlock("No match") }
+            if searchFoundNothing { EmptyBlock("No match").frame(height: room) }
         } else {
             // Its own observation scope, on the minute clock: the cause is judged by the time it is drawn at, so "All caught
             // up" goes when the sync gets stale, and a poll only redraws this block, not the hub.
-            Ticking(coarse: true) { now in emptyCause(store.inboxEmpty(hub.filter, now: now), now: now) }
+            Ticking(coarse: true) { now in emptyCause(store.inboxEmpty(hub.filter, now: now), now: now) }.frame(height: room)
         }
     }
 
