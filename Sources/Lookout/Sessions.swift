@@ -147,14 +147,16 @@ struct SessionsScroll: View {
                 SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
             }
             if cut && scrolls {
-                SessionsCue(below: { searching ? SessionGroup.below(matches, reach: $0) : SessionGroup.below(listed.groups, hidden: listed.hidden, reach: $0) },
+                SessionsCue(below: { searching ? SessionGroup.below(matches, reach: $0).count : SessionGroup.below(listed.groups, hidden: listed.hidden, reach: $0) },
+                            waiting: { searching ? SessionGroup.below(matches, reach: $0).filter(\.isWaiting).count : SessionGroup.waitingBelow(listed.groups, reach: $0) },
                             end: searching ? matches.last.map { "a:" + $0.id } : listed.hidden > 0 ? "s:more" : listed.groups.last?.rows.last.map { "a:" + $0.id },
                             top: searching ? matches.first.map { "a:" + $0.id } : "s:top",
                             viewport: viewport, reach: reach, hub: hub, rail: rail)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             } else if cut {
                 let more = SessionGroup.below(listed.groups, hidden: listed.hidden, reach: viewport)
-                MoreSessionsRow(hidden: more, hub: hub, rail: rail, pickable: false, action: showAll)
+                MoreSessionsRow(hidden: more, waiting: SessionGroup.waitingBelow(listed.groups, reach: viewport), hub: hub, rail: rail,
+                                pickable: false, action: showAll)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             }
         }
@@ -174,8 +176,9 @@ struct SessionsScroll: View {
 /// The last line of a list that scrolls and doesn't fit (focused, or a search's matches): how many sessions are below, a
 /// click scrolling to them; at the end, the way back up.
 private struct SessionsCue: View {
-    /// How many sessions are not whole yet in a viewport scrolled to `reach`.
+    /// How many sessions are not whole yet in a viewport scrolled to `reach`, and how many of them wait for you.
     let below: (CGFloat) -> Int
+    let waiting: (CGFloat) -> Int
     let end: String?
     let top: String?
     let viewport: CGFloat
@@ -184,10 +187,11 @@ private struct SessionsCue: View {
     let rail: HorizontalEdge
 
     var body: some View {
-        let below = below(reach.bottom ?? viewport)
+        let at = reach.bottom ?? viewport
+        let below = below(at)
         if below > 0 {
             MoreSessionsRow(label: "+\(below) below", spoken: plural(below, "session") + " below", hint: "Scrolls to the end", hub: hub, rail: rail,
-                            pickable: false) {
+                            pickable: false, waiting: waiting(at)) {
                 if let end { hub.requestScroll(end) }
             }
         } else {
@@ -268,32 +272,46 @@ extension SessionGroup {
     /// How many sessions a list scrolled to `reach` (the content's y at the viewport's bottom edge) has not shown whole
     /// yet, counting those "+N more" is hiding once its row is not whole either.
     static func below(_ groups: [SessionGroup], hidden: Int, reach: CGFloat) -> Int {
+        unseen(groups, reach: reach).count + (hidden > 0 && cutShows(groups, reach: reach) ? hidden : 0)
+    }
+
+    /// How many of the sessions `below` counts wait for you: the rows among them (what `hidden` holds never does: the cap
+    /// keeps the waiting ones).
+    static func waitingBelow(_ groups: [SessionGroup], reach: CGFloat) -> Int {
+        unseen(groups, reach: reach).filter(\.isWaiting).count
+    }
+
+    /// The rows not whole in a viewport scrolled to `reach`.
+    private static func unseen(_ groups: [SessionGroup], reach: CGFloat) -> [AgentRow] {
         var y: CGFloat = 0
-        var count = 0
+        var rows: [AgentRow] = []
         for (i, group) in groups.enumerated() {
             y += (i == 0 ? 0 : gap) + headerHeight
             for row in group.rows {
                 y += height(of: row)
-                if y > reach + 0.5 { count += 1 }
+                if y > reach + 0.5 { rows.append(row) }
             }
         }
-        return hidden > 0 && y + Theme.Metrics.pitch > reach + 0.5 ? count + hidden : count
+        return rows
     }
 
-    /// How many of `groups`' rows are waiting for you.
+    /// Whether the "+N more" row after `groups` is not whole in a viewport scrolled to `reach`.
+    private static func cutShows(_ groups: [SessionGroup], reach: CGFloat) -> Bool {
+        height(groups) + Theme.Metrics.pitch > reach + 0.5
+    }
+
+    /// How many of `groups`' rows are waiting for you, whichever group lists them (a frozen one stays under its project).
     static func waiting(_ groups: [SessionGroup]) -> Int {
-        groups.first { $0.kind == .waiting }?.rows.count ?? 0
+        groups.reduce(0) { $0 + $1.rows.filter(\.isWaiting).count }
     }
 
-    /// `below` for a search's matches, which are listed flat.
-    static func below(_ rows: [AgentRow], reach: CGFloat) -> Int {
+    /// The matches of a search, which are listed flat, that are not whole in a viewport scrolled to `reach`.
+    static func below(_ rows: [AgentRow], reach: CGFloat) -> [AgentRow] {
         var y: CGFloat = 0
-        var count = 0
-        for row in rows {
+        return rows.filter { row in
             y += height(of: row)
-            if y > reach + 0.5 { count += 1 }
+            return y > reach + 0.5
         }
-        return count
     }
 
     var placement: SessionPlacement {

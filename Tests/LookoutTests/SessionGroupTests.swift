@@ -538,4 +538,26 @@ import Testing
         // Focused, the list is whole.
         #expect(s.listedGroups(expanded: true, frozen: frozen).groups.flatMap(\.rows).count == 10)
     }
+
+    @Test func theCutNamesHowManyOfTheSessionsBelowWait() {
+        let waiting = (0..<3).map { session("w\($0)", folder: "/code/y", minutesAgo: Double($0 + 1), blocked: true) }
+        let s = store(waiting + (0..<4).map { session("n\($0)", minutesAgo: Double($0 + 20)) }, kept: waiting.map(\.id),
+                      unread: Set(waiting.map(\.id)))
+        let groups = s.sessionGroups
+        let row = Theme.Metrics.twoLineRow
+        // Only the first waiting row is whole: the other two are below, and so are the new ones.
+        let reach = SessionGroup.headerHeight + row
+        #expect(SessionGroup.below(groups, hidden: 0, reach: reach) == 6)
+        #expect(SessionGroup.waitingBelow(groups, reach: reach) == 2)
+        #expect(SessionGroup.waitingBelow(groups, reach: SessionGroup.height(groups)) == 0)
+    }
+
+    @Test func aFrozenWaiterUnderItsProjectIsStillCountedWaiting() {
+        let s = store([session("x1", folder: "/code/x"), session("x2", folder: "/code/x")], kept: ["x1", "x2"])
+        let frozen = s.barSlots
+        s.claudeActivity = ["x2": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["x2"]?.running = true
+        let held = s.listedGroups(expanded: false, frozen: frozen).groups
+        #expect(held.map(\.id) == ["project:/code/x"] && SessionGroup.waiting(held) == 1)
+    }
 }
