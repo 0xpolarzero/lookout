@@ -153,6 +153,10 @@ import Testing
         #expect(store.ciWorstRepo?.fullName == "b/run")
     }
 
+    @Test func theBarsCountNeverNeedsMoreThanTwoCharacters() {
+        #expect([1, 9, 10, 15, 120].map(CICell.count) == ["1", "9", "9+", "9+", "9+"])
+    }
+
     @Test func rowsAreSpokenWithTheirNamesAndAges() {
         var entry = CIEntry(repo: RepoConfig(fullName: "apple/swift-format"),
                             status: status(.failure, failing: ["Linux / build", "Windows / test"], changed: 45 * 60), state: .failure, muted: false)

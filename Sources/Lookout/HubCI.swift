@@ -407,27 +407,31 @@ extension LookoutHub {
     var stripShowsCIHeader: Bool { hub.focus != nil && hub.focus != .ci }
 }
 
-/// CI in the bar: one glyph, the worst state that isn't muted, with the number of failing repos beside it only
-/// when some fail. Absent when no repo has CI on.
+/// CI in the bar: one glyph, the worst state that isn't muted, centred on the bar's axis. The number of failing repos
+/// sits under it, only when some fail, and over two digits reads "9+": the glyph never moves with the count.
 struct CICell: View {
     let store: Store
+
+    /// What the cell shows of how many fail: the number, or "9+" so two digits never reach the screen's edge.
+    static func count(_ failing: Int) -> String { failing > 9 ? "9+" : "\(failing)" }
 
     var body: some View {
         if !store.ciRepos.isEmpty {
             let worst = store.ciWorst
             Button { store.openWorstChecks() } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: worst.state.symbol)
-                        .font(Theme.Typography.glyph(16, worst.state == .failure ? .semibold : .regular))
-                        .foregroundStyle(worst.state.color)
-                        .contentTransition(.symbolEffect(.replace))
-                    if worst.failing > 0 {
-                        Text("\(worst.failing)").font(Theme.Typography.numeral).foregroundStyle(Theme.red)
-                            .contentTransition(.numericText(value: Double(worst.failing)))
+                Image(systemName: worst.state.symbol)
+                    .font(Theme.Typography.glyph(16, worst.state == .failure ? .semibold : .regular))
+                    .foregroundStyle(worst.state.color)
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: Theme.Metrics.pitch, height: Theme.Metrics.pitch)
+                    .overlay(alignment: .bottom) {
+                        if worst.failing > 0 {
+                            Text(Self.count(worst.failing)).font(Theme.Typography.numeral).foregroundStyle(Theme.red)
+                                .contentTransition(.numericText(value: Double(worst.failing)))
+                                .offset(y: 2)
+                        }
                     }
-                }
-                .frame(minWidth: Theme.Metrics.pitch, minHeight: Theme.Metrics.pitch)
-                .contentShape(Rectangle())
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .focusRing(Theme.Radius.tile)
