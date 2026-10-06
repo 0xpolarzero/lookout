@@ -140,6 +140,8 @@ final class HubController {
     /// Whether the hub was last reported to the store as visible beyond the bare bar.
     private var reportedOpen = false
     private var lastPinned = false
+    /// The bar is being turned from Settings: it goes to rest to be measured and comes back, which is no change of focus.
+    private var placing = false
     private var lastMenuKeys = false
     /// The app that had focus before the hub took it, to hand it back.
     private var previousApp: NSRunningApplication?
@@ -404,7 +406,7 @@ final class HubController {
             DispatchQueue.main.async {
                 guard let self else { return }
                 // Keyboard focus moves only when pinning changes: a panel closing under a pinned hub must not steal it back.
-                let pinnedChanged = self.hub.pinned != self.lastPinned
+                let pinnedChanged = self.hub.pinned != self.lastPinned && !self.placing
                 self.lastPinned = self.hub.pinned
                 if !pinnedChanged {
                 } else if self.hub.pinned, !self.window.isKeyWindow {
@@ -502,15 +504,28 @@ final class HubController {
     /// would. A bar that turns (its other axis) is measured again at rest before a page that was open comes back.
     private func moveBar(_ placement: BarPlacement) {
         let turns = placement.edge.map { $0.isHorizontal != ui.edge.isHorizontal } ?? false
-        let page = hub.page
-        if turns, page != .main { hub.go(.main) }
+        let (page, keptOpen) = (hub.page, hub.keepsOpen)
+        if turns {
+            // The bar is measured at rest for its new axis, which needs the hub shut (a hub kept open stops that measure, and
+            // the strip would take the old length): the page and Keep open come back once it has.
+            placing = true
+            var instant = Transaction(animation: nil)
+            instant.disablesAnimations = true
+            withTransaction(instant) {
+                if page != .main { hub.go(.main) }
+                hub.pinned = false
+            }
+        }
         if let id = placement.display, let target = NSScreen.screens.first(where: { $0.displayID == id }) { screen = target }
         if let edge = placement.edge { ui.edge = edge }
         if let position = placement.position { ui.position = position }
         dock()
         afterBarLayout(turns) { [weak self] in
             guard let self else { return }
-            if turns, page != .main { self.hub.go(page) }
+            if turns {
+                self.hub.resume(page, keptOpen: keptOpen)
+                self.placing = false
+            }
             self.mouseMoved()
         }
     }

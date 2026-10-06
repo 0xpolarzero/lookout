@@ -164,6 +164,20 @@ final class HubState {
         page = next
     }
 
+    /// Whether Keep open is on, whichever page is showing (a page pins the view, and remembers what it was).
+    var keepsOpen: Bool { page == .main ? pinned : pinnedBeforePage ?? false }
+
+    /// Back from the bare bar (a bar that turned was measured there): `page` open again, and the hub kept open or not as it
+    /// was under it.
+    func resume(_ page: HubPage, keptOpen: Bool) {
+        if page == .main {
+            pinned = keptOpen
+        } else {
+            go(page)
+            pinnedBeforePage = keptOpen
+        }
+    }
+
     /// One step back (Esc, Done): to the page you came from, the main view in the end.
     func back() {
         go(page == .repos && previous == .settings ? .settings : .main)

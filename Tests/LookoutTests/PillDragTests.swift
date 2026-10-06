@@ -106,3 +106,32 @@ import Testing
     }
 }
 
+@MainActor
+@Suite struct TurningUnderAPage {
+    @Test func aHubKeptOpenUnderSettingsComesBackAsItWasAfterTheBarTurned() {
+        let hub = HubState()
+        hub.pinned = true
+        hub.go(.settings)
+        #expect(hub.keepsOpen)
+        // The bar turns: the page goes and the hub shuts, so it is measured at rest.
+        hub.go(.main)
+        hub.pinned = false
+        #expect(!hub.pinned && hub.page == .main)
+        hub.resume(.settings, keptOpen: true)
+        #expect(hub.page == .settings && hub.pinned && hub.keepsOpen)
+        // Back from the page, the view is kept open still.
+        hub.go(.main)
+        #expect(hub.pinned)
+    }
+
+    @Test func aHubNotKeptOpenComesBackToAPageThatClosesIt() {
+        let hub = HubState()
+        hub.go(.settings)
+        #expect(!hub.keepsOpen)
+        hub.go(.main)
+        hub.resume(.settings, keptOpen: false)
+        #expect(hub.page == .settings && !hub.keepsOpen)
+        hub.go(.main)
+        #expect(!hub.pinned)
+    }
+}
