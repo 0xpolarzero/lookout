@@ -53,8 +53,14 @@ final class HubKeys {
             hub.go(.settings)
             return true
         }
+        // What the user bound comes first, even ⌘Z; undo is what's left of the key when no action takes it.
+        if act(event, flags: flags, shortcut: shortcut) { return true }
+        return flags == .command && event.charactersIgnoringModifiers == "z" && store.repoUndo.undo()
+    }
+
+    /// The configured actions, and the typing that searches. False when the key is none of them.
+    private func act(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool {
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
-        if flags == .command, event.charactersIgnoringModifiers == "z" { return store.repoUndo.undo() }
         guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
