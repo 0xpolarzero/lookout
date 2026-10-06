@@ -77,6 +77,27 @@ import Testing
         #expect(clock.minute == date)
     }
 
+    @Test func aChangeOfPaceKeepsTheMinutesDeadline() throws {
+        let start = Date(timeIntervalSince1970: 2_000_000_000)
+        var date = start
+        let clock = Clock(observing: false, windowVisible: { true }, date: { date })
+        clock.retain(.minute)
+        // A seconds label in view from t20 to t25, and again from t45 to t50: the age's update is still due at t30, and then t60.
+        date = start.addingTimeInterval(20)
+        clock.retain(.second)
+        date = start.addingTimeInterval(25)
+        clock.release(.second)
+        #expect(try #require(clock.nextTick).timeIntervalSinceNow < 5.5)
+        date = start.addingTimeInterval(30)
+        clock.tick()
+        #expect(clock.minute == date)
+        date = start.addingTimeInterval(45)
+        clock.retain(.second)
+        date = start.addingTimeInterval(50)
+        clock.release(.second)
+        #expect(try #require(clock.nextTick).timeIntervalSinceNow < 10.5)
+    }
+
     @Test func extraReleasesDoNotGoNegative() {
         let clock = clock()
         clock.release(.second)

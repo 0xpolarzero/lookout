@@ -26,7 +26,9 @@ final class Clock {
     @ObservationIgnored private(set) var interval: TimeInterval?
     @ObservationIgnored private var subscribers: [Rate: Int] = [:]
     @ObservationIgnored private var timer: Timer?
-    @ObservationIgnored private var ticks = 0
+    /// When the minute clock is next due, whatever the pace the timer is at: a change of pace keeps it, so a label that
+    /// follows it is never left waiting for more than the half minute it was promised.
+    @ObservationIgnored private var minuteDue = Date.distantFuture
     @ObservationIgnored private var asleep = false
     @ObservationIgnored private let windowVisible: @MainActor () -> Bool
     @ObservationIgnored let showing: @MainActor (NSWindow) -> Bool
@@ -59,7 +61,7 @@ final class Clock {
         // while. A later one changes nothing the others read (they would all redraw for it); `Ticking` draws its own
         // first frame from the system's date.
         if subscribers[rate] == 1 {
-            if rate == .second { now = date() } else { minute = date() }
+            if rate == .second { now = date() } else { setMinute(date()) }
         }
         update()
     }
@@ -87,10 +89,12 @@ final class Clock {
         // changes nothing they read (each label's own start has set its own), and would redraw every one of them.
         if wasStopped {
             now = date()
-            minute = now
+            setMinute(now)
         }
-        ticks = 0
-        let t = Timer(timeInterval: rate.interval, repeats: true) { [weak self] _ in
+        // The first tick is the next one due, not a whole step from now: a pace that came back after a short stay at the other
+        // must not postpone the minute's update.
+        let wait = rate == .minute ? max(minuteDue.timeIntervalSince(date()), 0.1) : rate.interval
+        let t = Timer(fire: Date().addingTimeInterval(wait), interval: rate.interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
         // A label may be late by a fraction of its step; the system can batch the wake-up with others.
@@ -99,15 +103,20 @@ final class Clock {
         timer = t
     }
 
+    /// When the timer fires next (a test reads it).
+    var nextTick: Date? { timer?.fireDate }
+
+    private func setMinute(_ date: Date) {
+        minute = date
+        minuteDue = date.addingTimeInterval(Rate.minute.interval)
+    }
+
     func tick() {
         guard let interval else { return }
         let date = date()
         if interval == Rate.second.interval { now = date }
-        ticks += 1
-        if Double(ticks) * interval >= Rate.minute.interval {
-            ticks = 0
-            minute = date
-        }
+        // At the minute's own pace every tick is the minute's; at a second's, it is when it falls due.
+        if interval >= Rate.minute.interval || date >= minuteDue { setMinute(date) }
     }
 }
 
