@@ -295,6 +295,8 @@ struct ReposView: View {
             highlight = nil
             failure = nil
         }
+        // Suggestions that go (Tab to Add, a click elsewhere) take their highlight with them: Add adds what the field reads.
+        .onChange(of: showsSuggestions) { _, shown in if !shown { highlight = nil } }
         // A highlight that moves is read out: the field keeps VoiceOver's focus, but Return now adds that repository.
         .onChange(of: highlight) { _, now in
             guard let now, matches.indices.contains(now) else { return }
@@ -365,7 +367,13 @@ struct ReposView: View {
     }
 
     private func submit() {
-        if let highlight, matches.indices.contains(highlight) { add(matches[highlight]) } else { add(input) }
+        add(Self.submission(typed: input, matches: matches, highlight: highlight))
+    }
+
+    /// What Return or Add adds: the highlighted suggestion, else what was typed.
+    static func submission(typed: String, matches: [String], highlight: Int?) -> String {
+        if let highlight, matches.indices.contains(highlight) { return matches[highlight] }
+        return typed
     }
 
     private func move(_ step: Int) -> KeyPress.Result {

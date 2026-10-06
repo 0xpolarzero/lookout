@@ -215,3 +215,13 @@ import Testing
         #expect(s.repos.map(\.name) == ["b", "c", "a"])
     }
 }
+
+@Suite struct AddingARepository {
+    @Test func returnAddsTheHighlightedSuggestionElseWhatWasTyped() {
+        let matches = ["owner/lookout", "owner/lookup"]
+        #expect(ReposView.submission(typed: "owner/look", matches: matches, highlight: 1) == "owner/lookup")
+        // Tab let the suggestions go and the highlight with them: Add adds what the field says.
+        #expect(ReposView.submission(typed: "owner/look", matches: matches, highlight: nil) == "owner/look")
+        #expect(ReposView.submission(typed: "owner/look", matches: [], highlight: 0) == "owner/look")
+    }
+}
