@@ -45,8 +45,10 @@ final class HubState {
     func selected(_ key: String) -> Bool { selectionLights.isOn(key) }
     /// Whether the keyboard (not the pointer) is what picked this row.
     func keyboardPicked(_ key: String) -> Bool { selectionLights.isOn(key) && keyboardLights.isOn(key) }
-    /// CI's Passing row is open in place (it also is while CI is the focused section).
+    /// CI's Passing row is open in place. Focusing CI opens it, and the end of the focus puts it back as it was unless it
+    /// was opened or closed meanwhile (`passingBeforeFocus`).
     var ciPassingOpen = false
+    @ObservationIgnored var passingBeforeFocus: Bool?
     /// CI is folded to its header because the screen leaves no room for its rows (`LookoutHub.foldsCI`): they aren't
     /// targets while they aren't drawn. Set by the full view's layout.
     var ciFolded = false
@@ -139,6 +141,13 @@ final class HubState {
             // CI isn't drawn while there is a query, and the inbox, shrunk to its header, would hide the field it is typed in:
             // CI focused ends the search, whichever way it was focused (⌘2, its header, a bar cell).
             if focus == .ci, !query.isEmpty || inbox.searchOpen { query = ""; inbox.endSearch() }
+            if focus == .ci, oldValue != .ci {
+                passingBeforeFocus = ciPassingOpen
+                ciPassingOpen = true
+            } else if oldValue == .ci, focus != .ci {
+                if let before = passingBeforeFocus { ciPassingOpen = before }
+                passingBeforeFocus = nil
+            }
         }
     }
 

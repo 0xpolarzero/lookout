@@ -757,6 +757,30 @@ import Testing
         #expect(hub.projectsMenuRequest == asked + 1 && hub.filter == .needsYou)
     }
 
+    @Test func focusedCIOpensPassingAndStillClosesItWhereverItIsAsked() {
+        hub.focus = .ci
+        let quiet = store.ciList.quiet.map { "c:" + $0.id }
+        #expect(hub.ciPassingOpen && !quiet.isEmpty && quiet.allSatisfy { keys.targets().contains($0) })
+        pick("c:passing")
+        press(kVK_Return, [], "\r")
+        #expect(!hub.ciPassingOpen && hub.focus == .ci && !quiet.contains { keys.targets().contains($0) })
+        press(kVK_Return, [], "\r")
+        #expect(hub.ciPassingOpen)
+        pick(quiet[0])
+        left()
+        #expect(!hub.ciPassingOpen && hub.focus == .ci && hub.selection == "c:passing")
+        // Closed by hand, it stays closed when the focus ends; left alone, it is as it was before.
+        hub.focus = nil
+        #expect(!hub.ciPassingOpen)
+        hub.focus = .ci
+        hub.focus = nil
+        #expect(!hub.ciPassingOpen)
+        hub.ciPassingOpen = true
+        hub.focus = .ci
+        hub.focus = nil
+        #expect(hub.ciPassingOpen)
+    }
+
     @Test func theArrowsLeaveTheTabsAloneWhileThereIsAQuery() {
         hub.query = "zig"
         #expect(!right() && hub.filter == .needsYou)

@@ -373,7 +373,7 @@ extension LookoutHub {
     }
 
     private func ciListRows(_ list: CIList, lines: ArraySlice<CIListLine>? = nil, marked: Bool = true) -> some View {
-        let open = hub.ciPassingOpen || hub.focus == .ci
+        let open = hub.ciPassingOpen
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(lines ?? ciLines(list, open: open)[...]) { line in
                 Group {
@@ -396,7 +396,7 @@ extension LookoutHub {
     /// A peek's rows: the whole lines that fit `cap`, and under them how many repositories are left. A closed Passing
     /// row stands for its repositories, an open one for none (they follow it).
     private func ciPeekRows(_ list: CIList, cap: CGFloat) -> some View {
-        let open = hub.ciPassingOpen || hub.focus == .ci
+        let open = hub.ciPassingOpen
         let lines = ciLines(list, open: open)
         let shown = PeekCut.shown(lines.map(\.height), cap: cap)
         let hidden = lines.dropFirst(shown).reduce(0) { sum, line in
@@ -505,6 +505,7 @@ extension HubState {
 
     /// Opens or closes the Passing group in place.
     func setCIPassingOpen(_ open: Bool) {
+        passingBeforeFocus = nil
         LookoutHub.animate(open ? Theme.Motion.move : Theme.Motion.close) { ciPassingOpen = open }
     }
 
@@ -526,7 +527,7 @@ extension HubState {
         var targets = list.attention.map { "c:" + $0.id }
         if !list.quiet.isEmpty {
             targets.append("c:passing")
-            if ciPassingOpen || focus == .ci { targets += list.quiet.map { "c:" + $0.id } }
+            if ciPassingOpen { targets += list.quiet.map { "c:" + $0.id } }
         }
         return targets
     }
@@ -550,7 +551,7 @@ extension HubKeys {
     /// The keys on a picked CI row (`id` is the target without its "c:"): Return opens its checks (on the Passing row,
     /// opens or closes it), ⌘C copies the checks' URL, → and ← open and close Passing. Returns whether it was handled.
     func ciKey(_ event: NSEvent, id: String, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool {
-        let open = hub.ciPassingOpen || hub.focus == .ci
+        let open = hub.ciPassingOpen
         let repo = store.repos.first { $0.fullName == id }
         // What is bound comes first, an arrow bound to Open included: its own meaning below is for the arrow left unbound.
         if shortcut == store.shortcut(.openItem) {
@@ -559,9 +560,9 @@ extension HubKeys {
         }
         if flags.isEmpty, event.keyCode == 124 || event.keyCode == 123 {
             guard !isBound(shortcut) else { return false }
-            // → opens it from its row; ← closes it from there or from a name under it, back on its row.
+            // → opens it from its row; ← closes it from there or from a name under it, back on its row (focused CI too).
             if event.keyCode == 124, id == "passing", !open { hub.setCIPassingOpen(true); return true }
-            if event.keyCode == 123, open, hub.focus != .ci { hub.setCIPassingOpen(false); select("c:passing"); return true }
+            if event.keyCode == 123, open { hub.setCIPassingOpen(false); select("c:passing"); return true }
             return false
         }
         if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "c", let repo {
