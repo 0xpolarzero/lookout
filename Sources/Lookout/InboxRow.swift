@@ -114,26 +114,49 @@ struct InboxRow: View {
     }
 
     private func label(_ now: Date) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            dot.padding(.top, wide ? 8 : 0)
-            Avatar(url: item.avatar, name: item.author)
-                .padding(.top, 4)
-                .accessibilityHidden(true)
-            Group {
-                if wide {
-                    wideLine(now)
-                } else {
-                    VStack(alignment: .leading, spacing: Theme.Space.hair) {
-                        firstLine(now)
-                        secondLine
-                    }
+        Group {
+            if wide {
+                // The request is what the row is for: the title keeps its whole text while anything of the meta can give
+                // (its kind's word, then everything but the stack's own cut), and a title that still doesn't fit with the
+                // meta on its line goes back to the two lines, where the author is what is cut.
+                ViewThatFits(in: .horizontal) {
+                    line(now, .wide(kind: true))
+                    line(now, .wide(kind: false))
+                    line(now, .stacked)
                 }
+            } else {
+                line(now, .stacked)
             }
-            .padding(.leading, Theme.Space.md)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: Self.contentHeight, alignment: .top)
         .rowHighlight(hover: hover, picked: selected && !hover)
+    }
+
+    private enum Layout: Equatable {
+        case stacked
+        case wide(kind: Bool)
+    }
+
+    private func line(_ now: Date, _ layout: Layout) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            dot.padding(.top, layout == .stacked ? 0 : 8)
+            Avatar(url: item.avatar, name: item.author)
+                .padding(.top, 4)
+                .accessibilityHidden(true)
+            Group {
+                switch layout {
+                case .stacked:
+                    VStack(alignment: .leading, spacing: Theme.Space.hair) {
+                        firstLine(now)
+                        secondLine
+                    }
+                case .wide(let kind):
+                    wideLine(now, kind: kind)
+                }
+            }
+            .padding(.leading, Theme.Space.md)
+        }
     }
 
     /// Unread: a 6pt dot, amber (grey for a bot), with a white ring under Differentiate Without Colour.
@@ -151,6 +174,9 @@ struct InboxRow: View {
             title
             Spacer(minLength: 0)
             age(now)
+            // A wide list keeps its ages in one column: a row that fell back to two lines leaves the action's room as the
+            // rows on one line do.
+            if wide { Color.clear.frame(width: Theme.Metrics.iconButton - Theme.Space.sm, height: 1) }
         }
     }
 
@@ -170,20 +196,10 @@ struct InboxRow: View {
     }
 
     /// The wide row: everything on the title's baseline, the meta after it, then the age and the action's room (always
-    /// kept). The title keeps its whole text while it fits with the meta (the kind's word goes first); with a title too long
-    /// for that, the meta keeps its room and the title is what is cut.
-    private func wideLine(_ now: Date) -> some View {
-        ViewThatFits(in: .horizontal) {
-            wide(now, kind: true, titleCut: false)
-            wide(now, kind: false, titleCut: false)
-            wide(now, kind: false, titleCut: true)
-        }
-        .frame(height: Self.contentHeight)
-    }
-
-    private func wide(_ now: Date, kind: Bool, titleCut: Bool) -> some View {
+    /// kept). The title keeps its whole text.
+    private func wideLine(_ now: Date, kind: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
-            if titleCut { title } else { title.fixedSize() }
+            title.fixedSize()
             HStack(spacing: Theme.Space.xs) {
                 glyph(item.kind.rowSymbol)
                 meta(kind: kind)
@@ -194,6 +210,7 @@ struct InboxRow: View {
             age(now)
             Color.clear.frame(width: Theme.Metrics.iconButton, height: 1)
         }
+        .frame(height: Self.contentHeight)
     }
 
     /// The kind's glyph and the meta line; then, for Addressed and Resolved, what became of it. The state is the
