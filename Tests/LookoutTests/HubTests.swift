@@ -1039,6 +1039,25 @@ private final class Redrawn: @unchecked Sendable {
         #expect(!changed)
     }
 
+    @Test(arguments: [HubSection.ci, nil]) func eachCIChecksMovingTheOldestCheckLeavesTheHubsBodyAlone(focus: HubSection?) {
+        // The peek and the focused list make room for the "Last checked" line: whether it is there is read from a flag that moves
+        // when the checks go stale, not from the checks' own times, which each poll moves once per repository.
+        if let focus { hub.focus = focus } else { hub.section = .ci }
+        let repos = store.ciRepos.sorted { (store.lastCICheck($0.fullName) ?? .distantPast) < (store.lastCICheck($1.fullName) ?? .distantPast) }
+        #expect(repos.count > 2)
+        let changed = bodyChanges(pinned: focus != nil) {
+            for (offset, repo) in repos.enumerated() {
+                let name = repo.fullName
+                store.ciTickets[name] = 1
+                // The answer a poll gets when nothing changed: the same status, checked a little later.
+                guard var answer = store.ci[name] else { continue }
+                answer.checkedAt = Date().addingTimeInterval(Double(offset))
+                store.publishCI(name, answer, ticket: 1)
+            }
+        }
+        #expect(!changed)
+    }
+
     @Test(arguments: [false, true]) func theRateLimitCountingDownLeavesTheHubsBodyAlone(pinned: Bool) {
         // GitHub's counter moves with every answer (and with gh's and other tools' own calls): only running out is news.
         store.rateRemaining = 4000
@@ -1142,6 +1161,36 @@ private final class Redrawn: @unchecked Sendable {
 
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
         #expect(bodyChanges(pinned: true) { store.items = [] })
+    }
+}
+
+/// The flag the CI lists' layout reads in place of the checks' times.
+@MainActor
+@Suite struct StaleFlag {
+    @Test func theFlagFollowsTheChecksGoingStaleAndBeingRefreshed() async throws {
+        let store = Store()
+        Demo.populate(store, .agents)
+        let hub = HubState()
+        let hosting = NSHostingView(rootView: StaleWatch(store: store, hub: hub))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 10, height: 10), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        func settle(until done: () -> Bool) async throws {
+            for _ in 0..<40 where !done() { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        // Every repository's last check is long ago: the lists make room for the line.
+        for repo in store.ciRepos { store.ciCheckedAt[repo.fullName] = Date().addingTimeInterval(-86400) }
+        store.ciFreshnessRevision &+= 1
+        try await settle { hub.ciStale }
+        #expect(hub.ciStale)
+        // A poll that checked them all again takes it away.
+        for repo in store.ciRepos { store.ciCheckedAt[repo.fullName] = Date() }
+        store.ciFreshnessRevision &+= 1
+        try await settle { !hub.ciStale }
+        #expect(!hub.ciStale)
     }
 }
 

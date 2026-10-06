@@ -153,6 +153,10 @@ final class HubState {
         }
     }
 
+    /// CI's oldest check is stale, so its list makes room for the "Last checked" line. A flag the hub's body reads in place of the
+    /// checks' times, which move with every check: `StaleWatch` sets it at the moment they turn stale, and when a poll refreshes them.
+    var ciStale = false
+
     /// Whether a section exists to be focused: the app says (Sessions is the extension's), a bare state offers them all.
     @ObservationIgnored var offers: (HubSection) -> Bool = { _ in true }
 
@@ -344,6 +348,7 @@ struct LookoutHub: View {
         .background(SelectionSync(ui: ui, hub: hub))
         .background(SessionFreeze(store: store, hub: hub))
         .background(SectionAvailability(store: store, hub: hub))
+        .background(StaleWatch(store: store, hub: hub))
         .background(HubAnnouncer(store: store, hub: hub))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lookout")

@@ -226,3 +226,29 @@ struct SectionAvailability: View {
             .onChange(of: store.agents.enabled) { hub.reconcileFocus() }
     }
 }
+
+/// Whether CI's checks are stale, kept in `hub.ciStale` for the layout: one wait for the moment they turn, again when a poll
+/// changes it, and no clock while they are fresh (as the gear's does). From a view of its own, so the hub's body reads the flag
+/// and not the checks' times, which each poll moves once per repository.
+struct StaleWatch: View {
+    let store: Store
+    let hub: HubState
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .task(id: store.ciFreshness) { await mark() }
+    }
+
+    private func mark() async {
+        func update() {
+            let stale = store.isCIStale(at: Date())
+            if hub.ciStale != stale { hub.ciStale = stale }
+        }
+        update()
+        guard let freshness = store.ciFreshness else { return }
+        let deadline = freshness.addingTimeInterval(store.staleAfter)
+        guard deadline > Date() else { return }
+        try? await Task.sleep(for: .seconds(deadline.timeIntervalSinceNow))
+        if !Task.isCancelled { update() }
+    }
+}

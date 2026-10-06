@@ -332,7 +332,7 @@ extension LookoutHub {
                 staleLine
                 if peek {
                     // The stale line and the undo line are in the peek's room too.
-                    let room = (cap ?? ciCap) - (staleChecked(Date()) == nil ? 0 : Self.staleHeight)
+                    let room = (cap ?? ciCap) - (hub.ciStale ? Self.staleHeight : 0)
                         - (undo == nil ? 0 : Theme.Metrics.undoLine + Theme.Space.xs)
                     ciPeekRows(list, cap: room)
                 } else {
@@ -420,7 +420,7 @@ extension LookoutHub {
         if !showsDetail { return max(4 * row, maxLength - Self.cell - 120) }
         if hub.focus == .ci {
             // What the other headers, the footer and CI's own stale and undo lines leave of the screen's length.
-            let extras = (staleChecked(Date()) == nil ? 0 : Self.staleHeight) + ciUndoRoom
+            let extras = (hub.ciStale ? Self.staleHeight : 0) + ciUndoRoom
             let free = edge.isHorizontal
                 ? HubGeometry.stripRoom(maxLength: maxLength) - Theme.Metrics.pitch * (store.agents.enabled ? 2 : 1)
                 : fullLength - fixedLength(ciBody: 0)
