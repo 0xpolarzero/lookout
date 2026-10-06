@@ -1045,19 +1045,32 @@ extension LookoutHub {
 
     /// The groups, scrolling once past `cap`, always on a whole row.
     func sessionsScroll(cap: CGFloat) -> some View {
+        sessionsWithUndo(inset: Theme.Metrics.inset) {
+            SessionsScroll(store: store, ui: ui, hub: hub, rail: railSide, cap: max(cap - sessionsUndoRoom, 0))
+        }
+    }
+
+    /// A peek's groups: whole rows up to `cap`, then "+N more" (never a scroll view or a fade).
+    func sessionsPeek(cap: CGFloat) -> some View {
+        sessionsWithUndo(inset: 0) { SessionsList(store: store, ui: ui, hub: hub, rail: nil, inset: 0, peekCap: cap) }
+    }
+
+    /// The list and, under it, the undo line of what was just done to a session (Hide, Mute): on every surface that lists them.
+    /// The list's cap leaves its room (`sessionsUndoRoom`), so the two together stay within the budget the layout gave them.
+    private func sessionsWithUndo(inset: CGFloat, @ViewBuilder list: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            SessionsScroll(store: store, ui: ui, hub: hub, rail: railSide, cap: cap)
+            list()
             if let undo = store.undoStack.visible(in: .agents) {
                 UndoLine(message: undo.message) { store.undoLast() }
-                    .padding(.horizontal, Theme.Metrics.inset).padding(.top, Theme.Space.xs)
+                    .padding(.horizontal, inset).padding(.top, Theme.Space.xs)
             }
         }
         .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
     }
 
-    /// A peek's groups: whole rows up to `cap`, then "+N more" (never a scroll view or a fade).
-    func sessionsPeek(cap: CGFloat) -> some View {
-        SessionsList(store: store, ui: ui, hub: hub, rail: nil, inset: 0, peekCap: cap)
+    /// What the undo line takes under the sessions, while there is one.
+    var sessionsUndoRoom: CGFloat {
+        store.undoStack.visible(in: .agents) == nil ? 0 : Theme.Metrics.undoLine + Theme.Space.xs
     }
 
     /// New session, under the list (not while searching).

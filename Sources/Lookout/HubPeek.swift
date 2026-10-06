@@ -297,9 +297,10 @@ extension LookoutHub {
 
     /// The sessions as the full view lists them, without their tiles: as many whole rows as fit, then New session.
     @ViewBuilder var peekAgents: some View {
-        // Its header and the New session row are always there, and the notice when Claude's files are not.
+        // Its header and the New session row are always there, the notice when Claude's files are not, and the undo line while there
+        // is one.
         // A group's header, a whole row and the "+N more" under them are the least it can show.
-        let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store),
+        let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store) + sessionsUndoRoom,
                           least: SessionGroup.headerHeight + Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
         sessionsPeekHeader
         sessionsPeek(cap: cap)

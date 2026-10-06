@@ -337,6 +337,7 @@ struct Shot {
 /// 1280×720, every edge, plus on right and top
 ///   rest-sessions-waiting-20-720 and peek-agents-sessions-waiting-20-720 (twenty waiting sessions, more than the screen has room for)
 /// Frozen order, right and top
+///   focus-agents-sessions-undo-720 and peek-agents-sessions-undo-720 (the undo line of a hidden session, in a short window)
 ///   peek-agents-sessions-late-waiting (the twelfth of twelve starts to wait while the pointer holds the bar)
 /// Settings and Repositories, right edge
 ///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
@@ -394,6 +395,16 @@ enum PlaygroundShots {
             $0.setup = { store, _, hub in
                 if let last = store.listedGroups(expanded: true).groups.flatMap(\.rows).last { hub.requestScroll("a:" + last.id) }
             }
+        }
+        // Hiding a session offers its undo, which the list's room leaves out: on a 720pt screen the focused list and a peek both stay within it.
+        let hide: (Store, UIState, HubState) -> Void = { store, _, _ in
+            if let row = store.listedGroups(expanded: true).groups.flatMap(\.rows).last(where: { !$0.isWaiting }) { store.dismissAgent(row.id) }
+        }
+        shots += Shot.edges("focus-agents-sessions-undo-720", on: .rightAndTop) {
+            $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents; $0.size = Shot.hd; $0.setup = hide
+        }
+        shots += Shot.edges("peek-agents-sessions-undo-720", on: .rightAndTop) {
+            $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd; $0.setup = hide
         }
         // A short screen (a 560pt hub on the sides): the inbox keeps a row beside the sessions' share.
         shots += Shot.edges("open-sessions-12-short", on: [.right]) { $0.pinned = true; $0.scenario = .sessions12; $0.size = CGSize(width: 1280, height: 650) }
