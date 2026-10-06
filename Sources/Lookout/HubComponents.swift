@@ -238,8 +238,15 @@ extension Store {
             hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
             return result
         }
+        let rows = hubAgentRows(hub)
+        return rows.kept + rows.pending
+    }
+
+    /// The sessions the hub lists: the kept ones, and the first few pending ones unless `all` (or the hub was asked
+    /// for them all: `HubState.allSessions`). What the keys walk through is these rows.
+    func hubAgentRows(_ hub: HubState, all: Bool = false) -> (kept: [AgentRow], pending: [AgentRow]) {
         let rows = agentRows
-        return rows.kept + rows.pending.prefix(LookoutHub.pendingTiles)
+        return (rows.kept, all || hub.allSessions ? rows.pending : Array(rows.pending.prefix(LookoutHub.pendingTiles)))
     }
 }
 

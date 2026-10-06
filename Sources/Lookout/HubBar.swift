@@ -134,7 +134,7 @@ extension LookoutHub {
     }
 
     @ViewBuilder var sessionRows: some View {
-        let rows = agentRows
+        let rows = agentRows()
         VStack(alignment: side, spacing: 0) {
             // By project, a line between projects, and draggable onto one another, as along the top and bottom.
             let starts = projectStarts(rows.kept)
@@ -351,8 +351,8 @@ extension LookoutHub {
         }
     }
 
-    /// A cell's `Show` (VoiceOver, and Return on a focused cell): keeps the hub open on that cell's section with
-    /// the selection there. TODO(keyboard package): move VoiceOver focus into the section as well.
+    /// A cell's `Show` (VoiceOver, and Return on a focused cell, or the "+N"): keeps the hub open on that cell's
+    /// section with the selection there. TODO(keyboard package): move VoiceOver focus into the section as well.
     func show(_ section: HubSection, session: String? = nil) {
         withAnimation(Self.opening.resolved(reduce: reduce)) {
             hub.go(.main)
@@ -363,13 +363,24 @@ extension LookoutHub {
         case .inbox:
             openInbox()
         case .agents:
-            if let id = session ?? store.agentRows.kept.first?.id ?? store.agentRows.pending.first?.id {
-                hub.selection = "a:" + id
-                ui.drawerSelection = id
-            }
+            hub.showSession(session, store: store, ui: ui)
         case .ci, .controls:
             break
         }
+    }
+}
+
+extension HubState {
+    /// The sessions' section as a bar cell shows it: `session` (else the first) picked and scrolled to, and every
+    /// pending session listed when it is one the list would leave out (the "+N" stands for the first of those). The
+    /// keys walk through the same rows.
+    func showSession(_ id: String?, store: Store, ui: UIState) {
+        query = ""
+        if let id, !store.hubSessions(self).contains(where: { $0.id == id }) { allSessions = true }
+        guard let id = id ?? store.hubSessions(self).first?.id else { return }
+        selection = "a:" + id
+        requestScroll("a:" + id)
+        ui.drawerSelection = id
     }
 }
 
@@ -404,7 +415,7 @@ struct RestSessionCells: View {
                 }
             }
             if !hidden.isEmpty {
-                MoreSessionsCell(axis: axis, count: hidden.count, waiting: hidden.filter(\.waiting).count) { show(nil) }
+                MoreSessionsCell(axis: axis, count: hidden.count, waiting: hidden.filter(\.waiting).count) { show(hidden.first?.id) }
             }
             NewSessionBarCell(axis: axis, store: store) { show(nil) }
         }
@@ -432,8 +443,8 @@ struct PeekSessionRows: View {
     let hub: HubState
     /// The bar's room for sessions (`LookoutHub.sessionRoom`): the same cut as the bar's own.
     let room: CGFloat
-    /// Keeps the sessions open, all of them listed.
-    let showAll: () -> Void
+    /// Keeps the sessions open with every one listed, the first of the hidden ones picked.
+    let showAll: (String) -> Void
 
     var body: some View {
         let rows = store.agentRows
@@ -454,7 +465,7 @@ struct PeekSessionRows: View {
                         .modifier(ReorderIf(enabled: !pending.contains(row.id), row: row, store: store))
                 }
             }
-            if !hidden.isEmpty { MoreSessionsRow(hidden: hidden, show: showAll) }
+            if let first = hidden.first { MoreSessionsRow(hidden: hidden) { showAll(first.id) } }
             NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
         }
     }

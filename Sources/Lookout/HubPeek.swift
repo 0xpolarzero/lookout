@@ -247,7 +247,7 @@ extension LookoutHub {
             case .agents:
                 // The one thing before the first tile: the rows under it line up with the bar's cells.
                 agentsHeader.frame(height: Self.peekLead(.agents))
-                PeekSessionRows(store: store, ui: ui, hub: hub, room: sessionRoom) { show(.agents) }
+                PeekSessionRows(store: store, ui: ui, hub: hub, room: sessionRoom) { show(.agents, session: $0) }
                 ClaudeNotice(store: store).padding(.horizontal, 8)
             default:
                 // (The controls have their own panel.)
@@ -269,7 +269,7 @@ extension LookoutHub {
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                let rows = agentRows
+                let rows = agentRows(all: true)
                 CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
                     VStack(alignment: .leading, spacing: 2) {
                         let starts = projectStarts(rows.kept)

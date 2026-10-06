@@ -21,6 +21,8 @@ enum Demo {
         case ciRunning, ciNoRuns, sessionsWaiting10
         // More waiting than a screen has room for; twelve in one project, the last one waiting (see `lateWaiting`).
         case sessionsWaiting20, sessionsLateWaiting
+        // Twelve new activity, none kept, the oldest waiting: the bar's "+4" stands for four the hub's list leaves out.
+        case sessionsPending12
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -192,6 +194,8 @@ enum Demo {
             sessionsWaiting20(store, now)
         case .sessionsLateWaiting:
             sessionsLateWaiting(store, now)
+        case .sessionsPending12:
+            sessionsPending12(store, now)
         }
     }
 
@@ -348,6 +352,16 @@ enum Demo {
             let detail = last ? "Which one should it be?" : "Finished turn \(i)."
             return Listed(session("l\(i)", "Session number \(i)", "lookout", minutes: Double(i * 11 + 1), blocked: last, detail: detail),
                           unread: last)
+        }
+        sessions(store, now, listed)
+    }
+
+    /// Twelve sessions of two projects, none of them kept, the oldest waiting for you.
+    private static func sessionsPending12(_ store: Store, _ now: Date) {
+        let listed: [Listed] = (0..<12).map { i in
+            let last = i == 11
+            return Listed(session("n\(i)", "Session number \(i)", i % 2 == 0 ? "lookout" : "lcu", minutes: Double(i * 7 + 1), blocked: last,
+                                  detail: last ? "Which one should it be?" : "Finished turn \(i)."), kept: false, unread: true)
         }
         sessions(store, now, listed)
     }

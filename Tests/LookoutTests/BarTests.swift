@@ -176,11 +176,12 @@ import Testing
                       summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
     }
 
-    private func store(_ sessions: [ClaudeSession]) -> Store {
+    private func store(_ sessions: [ClaudeSession], seeded: Bool = false) -> Store {
         let s = Store()
         s.persists = false
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
+        s.agents.seeded = seeded
         s.ingest(sessions, appUnread: [], claudeFrontmost: false, now: now)
         return s
     }
@@ -267,6 +268,67 @@ import Testing
         let late = (0..<12).map { slot("w\($0)", "waiting", waiting: true) }
         #expect(BarSessions.arrange(late, frozen: frozen).shown.count == 12)
         #expect(BarSessions.arrange(late, frozen: frozen, room: 6 * Theme.Metrics.pitch).shown.count == 5)
+    }
+
+    /// Twelve sessions nobody kept, one project; the oldest is the one that waits.
+    private func pendingStore() -> Store {
+        let s = store((0..<12).map { session("p\($0)", blocked: $0 == 11, minutesAgo: Double($0 + 1)) }, seeded: true)
+        s.agents.entries.indices.forEach { s.agents.entries[$0].unread = true }
+        return s
+    }
+
+    @Test func theMoreTileAndTheSessionsShowRouteListEveryPendingSession() throws {
+        let s = pendingStore()
+        let hub = HubState()
+        let ui = UIState(persists: false, edge: .right)
+        let keys = HubKeys(store: s, ui: ui, hub: hub)
+        let rows = s.agentRows
+        #expect(rows.kept.isEmpty)
+        #expect(rows.pending.count == 12)
+        // The bar: waiting first (the oldest), then the newest seven, and a "+4" for the rest.
+        let (shown, hidden) = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending), frozen: nil)
+        #expect(shown.count == 8)
+        #expect(hidden.count == 4)
+        // The hub, left alone, lists four of the twelve, and the keys walk through those four.
+        #expect(s.hubSessions(hub).count == 4)
+        #expect(keys.targets().count == 4)
+        let first = try #require(hidden.first)
+        #expect(!keys.targets().contains("a:" + first.id))
+
+        // The "+4": every session is listed, the first it stands for is picked and scrolled to, and the keys reach all.
+        hub.showSession(first.id, store: s, ui: ui)
+        #expect(s.hubSessions(hub).count == 12)
+        #expect(keys.targets() == rows.pending.map { "a:" + $0.id })
+        #expect(hub.selection == "a:" + first.id)
+        #expect(hub.keyboardSelection?.id == "a:" + first.id)
+        #expect(ui.drawerSelection == first.id)
+        for slot in hidden + shown { #expect(keys.targets().contains("a:" + slot.id)) }
+
+        // Closing puts the hub's list back to what it lists unasked.
+        hub.pinned = true
+        hub.pinned = false
+        #expect(s.hubSessions(hub).count == 4)
+    }
+
+    @Test func aTilePastTheListsCutoffAndAWaitingSessionBeyondItAreShownByTheirOwnRoute() throws {
+        let s = pendingStore()
+        let hub = HubState()
+        let ui = UIState(persists: false, edge: .right)
+        let pending = s.agentRows.pending
+        // A tile among the first four needs nothing more.
+        hub.showSession(pending[1].id, store: s, ui: ui)
+        #expect(!hub.allSessions)
+        #expect(hub.selection == "a:" + pending[1].id)
+        // The waiting session is the oldest, so the twelfth by age: its tile is the bar's first, its Show lists all.
+        let waiting = try #require(pending.first { $0.tileMarks.waiting })
+        #expect(!s.hubSessions(hub).contains { $0.id == waiting.id })
+        hub.showSession(waiting.id, store: s, ui: ui)
+        #expect(s.hubSessions(hub).contains { $0.id == waiting.id })
+        #expect(hub.selection == "a:" + waiting.id)
+        // A search narrows the list; showing a session leaves it.
+        hub.query = "Session p3"
+        hub.showSession(waiting.id, store: s, ui: ui)
+        #expect(hub.query.isEmpty)
     }
 
     @Test func theEdgesRoomCutsTheTilesAndTheMoreCellTakesOneSlot() {

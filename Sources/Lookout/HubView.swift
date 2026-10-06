@@ -11,12 +11,18 @@ final class HubState {
     var hovering = false
     /// The bar's session cells as the pointer found them, held while it is over the hub (see `BarSessions`).
     var frozenSessions: [BarSessions.Slot]?
+    /// Every pending session is listed, not just the first few: a bar cell stands for one the list would leave out.
+    /// Until the view closes.
+    var allSessions = false
     var pinned = false {
         didSet {
             // Pinned or unpinned by hand on a page: that's what you want once back, not what it was before.
             if !navigating, page != .main { pinnedBeforePage = nil }
             // Just closed with the pointer still over the bar: no panel pops back open under it.
-            if oldValue && !pinned { quiet = true }
+            if oldValue && !pinned {
+                quiet = true
+                allSessions = false
+            }
         }
     }
     /// No hover panels until the pointer has left the bar (set when the full view closes).
@@ -232,10 +238,10 @@ struct LookoutHub: View {
     /// What the inbox list animates on: its items changing, or the filter or search swapping them.
     struct ListKey: Equatable { let revision: Int; let filter: InboxFilter; let query: String }
     var listKey: ListKey { ListKey(revision: store.itemsRevision, filter: hub.filter, query: hub.query) }
-    var agentRows: (kept: [AgentRow], pending: [AgentRow]) {
+    /// The sessions the hub lists (see `Store.hubAgentRows`); a panel beside the bar lists every one it has a tile for.
+    func agentRows(all: Bool = false) -> (kept: [AgentRow], pending: [AgentRow]) {
         if searching { return (store.hubSessions(hub), []) }
-        let rows = store.agentRows
-        return (rows.kept, Array(rows.pending.prefix(Self.pendingTiles)))
+        return store.hubAgentRows(hub, all: all)
     }
 
     // MARK: Vertical (left / right edges)
@@ -349,7 +355,7 @@ struct LookoutHub: View {
 
     /// The sessions along the top and bottom: one per line, read top to bottom like the inbox beside them.
     var agentsColumn: some View {
-        let rows = agentRows
+        let rows = agentRows()
         return VStack(alignment: .leading, spacing: 0) {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)

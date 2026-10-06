@@ -100,7 +100,7 @@ final class HubKeys {
     }
 
     /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
-    private func targets() -> [String] {
+    func targets() -> [String] {
         store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
     }
 

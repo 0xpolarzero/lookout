@@ -406,6 +406,18 @@ enum PlaygroundShots {
         Shot.edges("peek-agents-sessions-waiting-20-720", on: .rightAndTop) {
             $0.scenario = .sessionsWaiting20; $0.section = .agents; $0.size = Shot.hd
         },
+        // Twelve new activity with the oldest waiting: the "+4" (and its row) opens the sessions with all twelve listed and
+        // the first it stood for picked (focused here, so the list is tall enough to show it).
+        Shot.edges("rest-sessions-pending-12", on: .rightAndTop) { $0.scenario = .sessionsPending12 },
+        Shot.edges("focus-agents-sessions-pending-12-more", on: .rightAndTop) {
+            $0.pinned = true; $0.scenario = .sessionsPending12; $0.focus = .agents
+            $0.setup = { store, ui, hub in
+                let rows = store.agentRows
+                let hidden = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending), frozen: nil).hidden
+                hub.showSession(hidden.first?.id, store: store, ui: ui)
+                hub.focus = .agents
+            }
+        },
         // The pointer holds the bar's order while the twelfth session starts to wait: its tile, and its row, take the eighth's
         // place, so the "+4" and the cells after it stay where they were.
         Shot.edges("peek-agents-sessions-late-waiting", on: .rightAndTop) {
