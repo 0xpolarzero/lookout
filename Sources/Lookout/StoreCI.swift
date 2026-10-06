@@ -113,8 +113,8 @@ extension Store {
 
     // MARK: Worst state
 
-    /// What the bar shows of CI: the worst state among the repos that aren't muted, and how many fail. A muted repo
-    /// counts as quiet, not as missing: with only muted repos left the bar reads passing, not "no runs".
+    /// What the bar shows of CI: the worst state among the repos that aren't muted, and how many fail. A muted repo is
+    /// left out altogether: it isn't passing, so it never turns the bar into a check.
     var ciWorst: CIWorst { Self.ciWorst(repos: ciRepos, status: ci, muted: mutedCI) }
 
     nonisolated static func ciWorst(repos: [RepoConfig], status: [String: CIStatus], muted: [String: String]) -> CIWorst {
@@ -123,7 +123,7 @@ extension Store {
         var passing = false
         for repo in repos {
             let state = status[repo.fullName]?.state ?? CIState.none
-            if isMuted(repo.fullName, status: status, muted: muted) { passing = true; continue }
+            if isMuted(repo.fullName, status: status, muted: muted) { continue }
             switch state {
             case .failure: failing += 1
             case .pending: running = true
@@ -306,7 +306,8 @@ extension Store {
     /// isn't one of them (the bar doesn't count it), unless nothing else is left.
     var ciWorstRepo: RepoConfig? {
         let entries = ciList.entries
-        let shown = entries.filter { !$0.muted && $0.state == ciWorst.state }
+        let worst = ciWorst.state
+        let shown = entries.filter { !$0.muted && $0.state == worst }
         return (shown.isEmpty ? entries : shown).max { ($0.changedAt ?? .distantPast) < ($1.changedAt ?? .distantPast) }?.repo
     }
 

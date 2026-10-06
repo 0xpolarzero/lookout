@@ -38,11 +38,21 @@ import Testing
         let list = repos("a/ok", "b/bad", "d/bad")
         let ci = ["a/ok": status(.success), "b/bad": status(.failure, sha: "b1"), "d/bad": status(.failure, sha: "d1")]
         #expect(Store.ciWorst(repos: list, status: ci, muted: ["b/bad": "b1"]) == CIWorst(state: .failure, failing: 1))
-        // Every failing repo muted: nothing needs a look, and the bar reads passing, not "no runs".
+        // Every failing repo muted: nothing needs a look, and the one repo that passes is what the bar shows.
         #expect(Store.ciWorst(repos: list, status: ci, muted: ["b/bad": "b1", "d/bad": "d1"]) == CIWorst(state: .success, failing: 0))
         // A muted running repo no longer makes the bar "running".
         let running = ["c/run": status(.pending, sha: "c1")]
-        #expect(Store.ciWorst(repos: repos("c/run"), status: running, muted: ["c/run": "c1"]).state == .success)
+        #expect(Store.ciWorst(repos: repos("c/run", "a/ok"), status: running.merging(["a/ok": status(.success)]) { a, _ in a },
+                              muted: ["c/run": "c1"]).state == .success)
+    }
+
+    @Test func aMutedRepoIsNotPassingSoItNeverMakesTheBarPass() {
+        // Only muted repos: nothing passes, and nothing is left to show.
+        #expect(Store.ciWorst(repos: repos("b/bad"), status: ["b/bad": status(.failure, sha: "b1")], muted: ["b/bad": "b1"])
+                == CIWorst(state: .none, failing: 0))
+        // A muted failure beside a repo that has no runs: the bar says no runs, not passing.
+        let ci = ["b/bad": status(.failure, sha: "b1")]
+        #expect(Store.ciWorst(repos: repos("b/bad", "c/none"), status: ci, muted: ["b/bad": "b1"]) == CIWorst(state: .none, failing: 0))
     }
 
     @Test func aMuteEndsWhenTheShaMoves() {
@@ -60,7 +70,7 @@ import Testing
         let repo = store.repos[0]
         store.muteCI(repo)
         #expect(store.mutedCI == ["b/bad": "b1"])
-        #expect(store.ciWorst == CIWorst(state: .success, failing: 0))
+        #expect(store.ciWorst == CIWorst(state: .none, failing: 0))
         // Polled again, nothing changed: still muted.
         store.unmuteCIIfChanged("b/bad", to: status(.failure, sha: "b1"))
         #expect(store.isCIMuted(repo))
@@ -163,6 +173,13 @@ import Testing
         store.ci["a/ok"] = nil
         store.repos.removeFirst()
         #expect(store.ciWorstRepo?.fullName == "b/bad")
+    }
+
+    @Test func theBarOpensTheRepoWithoutRunsNotTheMutedFailureBesideIt() {
+        let store = store(["b/bad": status(.failure, sha: "b1", changed: 10)], ["b/bad", "c/none"])
+        store.muteCI(store.repos[0])
+        #expect(store.ciWorst.state == CIState.none)
+        #expect(store.ciWorstRepo?.fullName == "c/none")
     }
 
     @Test func theBarOpensTheNewestOfItsStateAndRepoWithoutRunsWhenNothingElseExists() {
