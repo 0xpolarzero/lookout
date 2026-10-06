@@ -12,6 +12,22 @@ struct VoiceOverRequest: Equatable {
 }
 
 extension HubState {
+    /// What to say of the banner now on screen (it mounted, or it changed): nothing if it was said already, or was there when
+    /// the hub opened (`openingAnnouncement` has it).
+    func noticeToSay(_ notice: InboxNotice?) -> String? {
+        guard notice != noticeSaid else { return nil }
+        noticeSaid = notice
+        return notice?.message
+    }
+
+    /// The banner changed, from the announcer, which is there whether the banner is or not (a focused section folds the inbox
+    /// away): a banner found while nothing of the hub shows is no change anyone is told of, and one that went is new next time.
+    func noticeChanged(_ notice: InboxNotice?) {
+        if notice == nil || (!pinned && section == nil) { noticeSaid = notice }
+    }
+}
+
+extension HubState {
     /// How long a request waits for its view (a row the list has not drawn yet) before it is stale and ignored.
     static let voiceOverPatience: TimeInterval = 2
 
@@ -158,6 +174,7 @@ struct HubAnnouncer: View {
                     Announce.say("Back to bar")
                 }
             }
+            .onChange(of: store.inboxNotice(), initial: true) { _, notice in hub.noticeChanged(notice) }
             .onChange(of: store.ciStates) { old, _ in ciChanged(from: old) }
             // A failed update check or download is said wherever it was asked for: Settings' row is not always on screen.
             .onChange(of: store.updater.failures) { if let error = store.updater.shownError { Announce.say(error) } }

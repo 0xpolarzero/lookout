@@ -264,7 +264,11 @@ extension LookoutHub {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: notice) { _, new in
-            if let new { Announce.say(new.message) }
+            if let text = hub.noticeToSay(new) { Announce.say(text) }
+        }
+        // It may mount with the banner already there: a focused section gave the inbox its room back after the banner came.
+        .onAppear {
+            if hub.pinned, let text = hub.noticeToSay(notice) { Announce.say(text) }
         }
     }
 

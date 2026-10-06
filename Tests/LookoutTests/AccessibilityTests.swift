@@ -409,6 +409,32 @@ enum AccessibilityTree {
         #expect(hub.selection == nil && hub.keyboardSelection == nil && hub.voiceOverRequest?.target == "h:agents")
     }
 
+    @Test func aBannerThatAppearsWhileTheInboxIsFoldedAwayIsSaidWhenItMounts() {
+        let banner = InboxNotice.reposFailed(2)
+        // Kept open with CI focused: the banner is not on screen, and appears. Said when the inbox comes back with it.
+        hub.pinned = true
+        hub.noticeChanged(nil)
+        hub.noticeChanged(banner)
+        #expect(hub.noticeToSay(banner) == banner.message)
+        // Mounting again with the same banner says nothing; a changed one does, and one that went is new when it returns.
+        #expect(hub.noticeToSay(banner) == nil)
+        #expect(hub.noticeToSay(.reposFailed(3)) == "3 repositories didn't sync")
+        #expect(hub.noticeToSay(nil) == nil && hub.noticeToSay(.reposFailed(3)) != nil)
+    }
+
+    @Test func aBannerFoundWhileTheHubWasClosedIsNotToldAgainWhenItOpens() {
+        // The opening announcement has it: the banner mounting with the hub says nothing more.
+        let banner = InboxNotice.rateLimited(until: nil)
+        hub.noticeChanged(banner)
+        hub.pinned = true
+        #expect(hub.noticeToSay(banner) == nil)
+        // A change under a peek is told by the banner there, not marked as found.
+        hub.pinned = false
+        hub.section = .inbox
+        hub.noticeChanged(.reviewRequestsFailed)
+        #expect(hub.noticeToSay(.reviewRequestsFailed) == "Review requests didn't sync")
+    }
+
     @Test func theInboxCellEndsASearchSoItsTabsAndActionsComeBack() {
         hub.pinned = true
         hub.beginSearch()

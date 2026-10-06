@@ -66,6 +66,9 @@ final class HubState {
     @ObservationIgnored var sessionMemo = SessionSearchMemo()
     /// The last search's results (see `Store.hubItems`).
     @ObservationIgnored var searchMemo = SearchMemo()
+    /// The banner above the inbox as it was last said, or found while no banner was in view: what is told once, so a banner that
+    /// mounts again (a section's focus gave its room back) is not told again, and one that came while it was away is.
+    @ObservationIgnored var noticeSaid: InboxNotice?
     var toast: String?
     /// Typed while the hub has the keyboard: narrows the inbox and finds sessions, kept or not.
     var query = ""
