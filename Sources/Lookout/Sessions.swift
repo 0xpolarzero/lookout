@@ -87,7 +87,9 @@ struct SessionsList: View {
             if searching {
                 ForEach(store.hubSessions(hub)) { row($0, .search) }
             } else if listed.groups.isEmpty && listed.hidden == 0 {
-                EmptyBlock("No Claude sessions")
+                // Nothing: the kept-open lists say "No Claude sessions" in a line of their own (`noClaudeSessionsLine`), and a
+                // peek is its header and New session (DESIGN.md 5.6).
+                EmptyView()
             } else {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
                     SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)

@@ -180,6 +180,11 @@ extension LookoutHub {
 
     var noSessionsLine: some View { quietLine("No sessions match") }
 
+    /// The extension is on and Claude has no sessions to list (a peek leaves this out: its header and New session say it).
+    var noClaudeSessions: Bool { store.agents.enabled && !searching && store.sessionGroups.isEmpty }
+
+    var noClaudeSessionsLine: some View { quietLine("No Claude sessions") }
+
     private func quietLine(_ text: String) -> some View {
         Text(text).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
             .padding(.horizontal, Theme.Metrics.rowPadding)

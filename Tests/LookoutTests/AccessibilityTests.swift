@@ -134,6 +134,17 @@ enum AccessibilityTree {
         }
     }
 
+    @Test func noSessionsIsSaidKeptOpenOnEveryEdgeAndLeftOutOfAPeek() async throws {
+        func nobody(_ store: Store, _ hub: HubState) { store.claudeSessions = [:]; store.agents.entries = [] }
+        func says(_ tree: AXNode) -> Bool { tree.all.contains { $0.label == "No Claude sessions" || $0.value == "No Claude sessions" } }
+        for edge in [DockEdge.right, .top] {
+            let open = try await AccessibilityTree.render(edge: edge) { store, hub in nobody(store, hub); hub.pinned = true }
+            #expect(says(open), "\(edge) kept open")
+        }
+        let peek = try await AccessibilityTree.render { store, hub in nobody(store, hub); hub.section = .agents }
+        #expect(!says(peek) && peek.all.contains { $0.label == "New session" })
+    }
+
     @Test func theKeptOpenHubHasASectionAndAHeadingForEach() async throws {
         let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true })
         #expect(lookout.children.map(\.label) == ["Inbox", "CI", "Sessions", "Controls"])
