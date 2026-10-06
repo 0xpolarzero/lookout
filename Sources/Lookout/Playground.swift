@@ -287,9 +287,9 @@ struct Shot {
 /// Baseline, every edge
 ///   rest, open, settings, search, peek-inbox, peek-ci, peek-agents, peek-controls
 /// Baseline, right and top
-///   repos, tip, picked (also left), focus-inbox, focus-agents, peek-controls-keys (the menu VoiceOver asked for)
+///   repos, tip, picked (also left), focus-inbox, focus-agents (also left), peek-controls-keys (the menu VoiceOver asked for)
 /// Inbox, right and top
-///   open-bots, open-done, search-none, search-sessions, focus-ci
+///   open-bots, open-done, search-none, search-sessions, focus-ci (also left)
 /// Causes, open on right and top; at rest on every edge (the bar's own state)
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
 ///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
@@ -350,13 +350,13 @@ enum PlaygroundShots {
         // An inbox item and a session picked, their actions showing, to compare them.
         Shot.edges("picked", on: [.right, .left, .top]) { $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci" },
         Shot.edges("focus-inbox", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },
-        Shot.edges("focus-agents", on: .rightAndTop) { $0.pinned = true; $0.focus = .agents },
+        Shot.edges("focus-agents", on: [.right, .left, .top]) { $0.pinned = true; $0.focus = .agents },
         // Inbox.
         Shot.edges("open-bots", on: .rightAndTop) { $0.pinned = true; $0.filter = .bots },
         Shot.edges("open-done", on: .rightAndTop) { $0.pinned = true; $0.filter = .done },
         Shot.edges("search-none", on: .rightAndTop) { $0.pinned = true; $0.query = "zzzz" },
         Shot.edges("search-sessions", on: .rightAndTop) { $0.pinned = true; $0.query = "lcu" },
-        Shot.edges("focus-ci", on: .rightAndTop) { $0.pinned = true; $0.focus = .ci },
+        Shot.edges("focus-ci", on: [.right, .left, .top]) { $0.pinned = true; $0.focus = .ci },
         // Causes: why a list is empty or the sync is not healthy.
         causes.flatMap { slug, scenario in scenarioShots(slug, scenario) },
         Shot.edges("open-no-repos", on: .rightAndTop) { $0.pinned = true; $0.scenario = .empty },

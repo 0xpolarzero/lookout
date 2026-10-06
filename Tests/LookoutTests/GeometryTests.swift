@@ -164,6 +164,30 @@ import Testing
             return nil
         }
 
+        /// Whether anything is drawn over `surface` in the rows `ys` (points), within `x`.
+        func hasContent(rows ys: ClosedRange<CGFloat>, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> Bool {
+            for py in Int(ys.lowerBound * scale)...Int(ys.upperBound * scale) {
+                for px in Int(x.lowerBound * scale)...Int(x.upperBound * scale) {
+                    let p = pixel(px, py)
+                    if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return true }
+                }
+            }
+            return false
+        }
+
+        /// The first row at or below `y` (points) that a hairline crosses: every sample along `x` is a little off `surface`.
+        func hairline(from y: CGFloat, to end: CGFloat, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> CGFloat? {
+            let samples = stride(from: x.lowerBound, through: x.upperBound, by: 24).map { Int($0 * scale) }
+            for py in Int(y * scale)...Int(end * scale) {
+                let all = samples.allSatisfy { px in
+                    let p = pixel(px, py)
+                    return abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 20
+                }
+                if all { return CGFloat(py) / scale }
+            }
+            return nil
+        }
+
         /// The hub's first opaque column along a row (its leading edge when it hangs from the top or bottom).
         func firstOpaque(row y: CGFloat) -> CGFloat? {
             let py = Int(y * scale)
@@ -345,6 +369,26 @@ import Testing
                 : open.gapBelow(y: open.frame.minY + lead + footer + 1, x: x, surface: surface)
             #expect(gap != nil && gap! <= 60, "\(edge) \(scenario) \(height): \(name) column starts \(gap ?? -1)pt from the footer's hairline")
         }
+    }
+
+    private nonisolated static let foldedInboxes = [DockEdge.right, .left].flatMap { edge in [HubSection.ci, .agents].map { (edge, $0) } }
+
+    @Test(arguments: foldedInboxes)
+    func theDividerUnderAFoldedInboxDoesNotCrossItsCount(edge: DockEdge, focus: HubSection) {
+        let screen = CGSize(width: 1280, height: 800)
+        let (_, open) = render(edge: edge, position: 0.3, screen: screen, focus: focus)
+        guard let tile = tile(open, edge: edge, screen: screen) else { Issue.record("\(edge): no inbox tile"); return }
+        let railSurface = open.pixel(Int(tile.midX * open.scale), Int((tile.maxY + 3) * open.scale))
+        let detail = edge == .right ? (open.frame.minX + 200)...(open.frame.maxX - 46 - 40) : (open.frame.minX + 46 + 200)...(open.frame.maxX - 40)
+        let bg = open.pixel(Int(detail.lowerBound * open.scale), Int((tile.midY + 30) * open.scale))
+        // The hairline under the header, below the tile's own row.
+        guard let line = open.hairline(from: tile.midY + 19, to: tile.midY + 120, x: detail, surface: bg) else {
+            Issue.record("\(edge) \(focus): no hairline under the inbox"); return
+        }
+        // The count hangs under the tile: it ends clear above the hairline, and nothing in the rail is drawn across it.
+        let column = (tile.midX - 8)...(tile.midX + 8)
+        #expect(!open.hasContent(rows: (line - 3)...(line - 1), x: column, surface: railSurface), "\(edge) \(focus): the count touches the hairline at \(line)")
+        #expect(!open.hasContent(rows: (line + 1)...(line + 8), x: column, surface: railSurface), "\(edge) \(focus): the count runs past the hairline at \(line)")
     }
 
     @Test(arguments: [DockEdge.right, .left, .top, .bottom])

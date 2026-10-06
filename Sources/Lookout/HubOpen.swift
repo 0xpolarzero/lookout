@@ -105,12 +105,15 @@ extension LookoutHub {
     /// The inbox's cell in its slot of the full view: the bar's own cell, so it keeps its look and its action (which
     /// picks the newest item that needs you), one pitch tall with its tile where it is at rest. The cell hangs its tile
     /// 21pt below its top (it has its count beneath); the slot's middle is 18pt down. A cell that is one pitch tall
-    /// by itself needs no shift.
-    @ViewBuilder var openInboxCell: some View {
+    /// by itself needs no shift. `folded`: the inbox is only a header (another section has the room), so the cell keeps
+    /// its own height, count and all, for the hairline under the section to fall below it.
+    @ViewBuilder func openInboxCell(folded: Bool) -> some View {
         if edge.isHorizontal {
             inboxIcon.frame(height: Theme.Metrics.pitch)
         } else {
-            inboxIcon.frame(height: Theme.Metrics.pitch, alignment: .top).offset(y: Theme.Metrics.pitch / 2 - 21)
+            inboxIcon.frame(height: folded ? nil : Theme.Metrics.pitch, alignment: .top)
+                .padding(.bottom, folded ? -3 : 0)
+                .offset(y: Theme.Metrics.pitch / 2 - 21)
         }
     }
 
@@ -151,7 +154,7 @@ extension LookoutHub {
         return VStack(alignment: .leading, spacing: 0) {
             // Inbox: its header level with its cell, the tile where it is at rest.
             VStack(alignment: .leading, spacing: 0) {
-                railRow(cell: { openInboxCell }, detail: {
+                railRow(alignment: .top, cell: { openInboxCell(folded: shrunk(.inbox)) }, detail: {
                     headerSlot(.inbox) { shrunk(.inbox) ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
                 })
                 if !shrunk(.inbox) { sideInbox(cap: caps.inbox) }
@@ -276,7 +279,7 @@ extension LookoutHub {
         }
         .padding(.trailing, HubGeometry.lead)
         let inbox = HStack(spacing: 0) {
-            openInboxCell.frame(width: stripCell, height: Self.cell)
+            openInboxCell(folded: false).frame(width: stripCell, height: Self.cell)
             headerSlot(.inbox) { shrunk(.inbox) ? AnyView(collapsedInboxHeader) : AnyView(inboxHeader) }
                 .padding(.leading, Theme.Metrics.contentEdge - Self.inset - Theme.Space.md)
                 .padding(.trailing, Self.inset)
