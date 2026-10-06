@@ -43,6 +43,34 @@ import Testing
         #expect(s.repoErrors.isEmpty)
     }
 
+    @Test func anAnswerThatArrivesAfterTheRepositoryWasStoppedLeavesNothingInTheInbox() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.settings.reviewRequests = false
+        var repo = RepoConfig(fullName: "a/one")
+        repo.events = [.issueOpened]
+        s.repos = [repo]
+        let fresh = ISO8601DateFormatter().string(from: Date())
+        let issue = """
+            [{"id": 7, "number": 7, "title": "Late", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
+              "html_url": "https://github.com/a/one/issues/7", "created_at": "\(fresh)", "updated_at": "\(fresh)", "pull_request": null}]
+            """
+        // Stop watching while the issues request is out; it then answers with a new issue.
+        s.gh.transport = { request in
+            if request.url?.path.hasSuffix("/issues") == true {
+                await MainActor.run { s.removeRepo(repo) }
+                return SyncHealth.reply(200, issue)
+            }
+            if request.url?.path.hasSuffix("/comments") == true { return SyncHealth.reply(200, "[]") }
+            return SyncHealth.reply(500, #"{"message": "Not here"}"#)
+        }
+        let pulse = s.pulse
+        await s.pollAll()
+        #expect(s.repos.isEmpty && s.items.isEmpty && s.repoErrors.isEmpty)
+        #expect(s.pulse == pulse)
+    }
+
     @Test func aLaterReviewPageFailingKeepsTheRequestsAlreadyFetched() async {
         let s = Store()
         s.persists = false

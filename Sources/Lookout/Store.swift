@@ -933,6 +933,9 @@ final class Store {
             var changed = false
             for reply in myReplies {
                 for i in all.indices where all[i].repo == name && all[i].number == reply.number
+        // The repository may have been stopped, or set to follow something else, while the answers were out: nothing of
+        // them is kept, counted or told (the cursors stay, so a repository that is still watched asks again).
+        guard isCurrent(repo) else { return }
                     && all[i].state.isOpen && all[i].createdAt < reply.at {
                     if let root = reply.root {
                         if all[i].threadRoot == root { all[i].state = .addressed; changed = true }
@@ -970,6 +973,13 @@ final class Store {
                 pr += " reviewThreads(last: 60) { nodes { comments(first: 50) { nodes { databaseId author { login } createdAt } } } }"
             }
             q += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { \(common) } ... on PullRequest { \(pr) } }"
+    /// Whether `repo`, as an answer was asked for it, is still what is watched: not stopped (nor stopped and watched again), and
+    /// following the same events.
+    private func isCurrent(_ repo: RepoConfig) -> Bool {
+        guard let now = repos.first(where: { $0.fullName == repo.fullName }) else { return false }
+        return now.addedAt == repo.addedAt && now.events == repo.events && now.allComments == repo.allComments
+    }
+
         }
         q += " } }"
         let json = try await gh.graphql(q)
