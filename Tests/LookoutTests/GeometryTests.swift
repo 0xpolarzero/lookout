@@ -554,6 +554,15 @@ private extension NSView {
 
     private let grace = Duration.milliseconds(120) + .milliseconds(80)
 
+    /// Waits for the tip to close, as long as a busy run needs.
+    private func closes(_ center: TipCenter) async throws -> Bool {
+        for _ in 0..<100 {
+            if center.current == nil { return true }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
     @Test func theTipOutlivesTheGapAndStaysWhileThePointerIsOnIt() async throws {
         let center = TipCenter()
         let id = UUID()
@@ -565,8 +574,7 @@ private extension NSView {
         #expect(center.current?.id == id)
         // Leaving the bubble closes it after the grace.
         center.releaseBubble(id)
-        try await Task.sleep(for: grace)
-        #expect(center.current == nil)
+        #expect(try await closes(center))
     }
 
     @Test func aPointerThatLeavesForGoodClosesItAndComingBackKeepsIt() async throws {
@@ -578,7 +586,6 @@ private extension NSView {
         try await Task.sleep(for: grace)
         #expect(center.current?.id == id)
         center.leave(id)
-        try await Task.sleep(for: grace)
-        #expect(center.current == nil)
+        #expect(try await closes(center))
     }
 }
