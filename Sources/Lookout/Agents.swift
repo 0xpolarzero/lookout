@@ -741,11 +741,12 @@ extension Store {
     }
 
     /// Keeps every session under New activity, in the order they are listed, the ones its list cuts to "+N more"
-    /// too. A pending session promoted to Waiting for you isn't under it, so it stays as it was. The ids are taken
-    /// first: keeping one rebuilds the groups.
-    func keepAllAgents() {
-        let ids = cache.groups.first { $0.kind == .newActivity }?.rows.map(\.id) ?? []
-        for id in ids { keepAgent(id) }
+    /// too. `frozen`: the order and groups the list is held in while the pointer is over the hub, which is the group the
+    /// header names: a session that stopped waiting under the freeze is still listed under Waiting for you, so it isn't
+    /// kept with the rest. A session that waits now isn't kept either. The ids are taken first: keeping one rebuilds the groups.
+    func keepAllAgents(frozen: [BarSessions.Slot]? = nil) {
+        let new = listedGroups(expanded: true, frozen: frozen).groups.first { $0.kind == .newActivity }
+        for id in new?.rows.filter({ !$0.isWaiting }).map(\.id) ?? [] { keepAgent(id) }
     }
 
     /// Reordering stays within a project: dropping on another project's session does nothing. The project's sessions

@@ -95,7 +95,7 @@ struct SessionsList: View {
                 EmptyView()
             } else {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
-                    SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
+                    SessionGroupHeader(group: group, store: store, hub: hub, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
                         .id(i == 0 ? "s:top" : group.id)
                     ForEach(group.rows) { row($0, group.placement(of: $0)) }
                 }
@@ -335,6 +335,8 @@ extension SessionGroup {
 struct SessionGroupHeader: View {
     let group: SessionGroup
     let store: Store
+    /// Read when Keep all is pressed, for the groups the list is held in.
+    let hub: HubState
     let rail: HorizontalEdge?
     @State private var dropTarget = false
 
@@ -381,7 +383,7 @@ struct SessionGroupHeader: View {
     }
 
     private var keepAll: some View {
-        Button { LookoutHub.animate { store.keepAllAgents() } } label: {
+        Button { LookoutHub.animate { store.keepAllAgents(frozen: hub.frozenSessions) } } label: {
             Text("Keep all").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
                 .frame(minHeight: Theme.Metrics.iconButton)
                 .contentShape(Rectangle())

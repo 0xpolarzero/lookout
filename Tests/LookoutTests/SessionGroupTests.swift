@@ -222,6 +222,20 @@ import Testing
         #expect(s.sessionGroups.map(\.id) == ["waiting", "project:/code/app"])
     }
 
+    @Test func keepAllKeepsWhatTheFrozenHeaderListsNotWhatIsNewActivityNow() {
+        // "ask" is waiting, pending, and listed under Waiting for you; the pointer is over the hub, so the list is frozen like that.
+        let s = store([session("ask", minutesAgo: 30, running: true)] + (0..<3).map { session("n\($0)", minutesAgo: Double($0 + 1)) },
+                      unread: ["ask"], asking: ["ask"])
+        let frozen = s.barSlots
+        #expect(ids(s)["waiting"] == ["ask"])
+        // Then it stops waiting: it is new activity now, but the list under the pointer still has it under Waiting for you.
+        s.claudeActivity = [:]
+        #expect(ids(s)["waiting"] == nil && ids(s)["new"]?.contains("ask") == true)
+        s.keepAllAgents(frozen: frozen)
+        #expect(s.agentRows.pending.map(\.id) == ["ask"])
+        #expect(s.agentRows.kept.count == 3)
+    }
+
     @Test func hideAndMuteOfferAnUndo() {
         let s = store([session("a"), session("b", folder: "/code/other")], kept: ["a"])
         s.dismissAgent("a")
