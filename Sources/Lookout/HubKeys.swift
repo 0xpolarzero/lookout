@@ -78,8 +78,9 @@ final class HubKeys {
             move(down: event.keyCode == 125, in: targets)
             return true
         }
+        // Not over rows the list isn't showing (a sign-in problem replaces it).
         if shortcut == store.shortcut(.markAllRead) {
-            LookoutHub.animate { store.markAllRead(hub.filter) }
+            if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }
             return true
         }
         // Row commands act only on a row the lists show (a pick the search has since filtered out is not one).

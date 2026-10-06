@@ -26,10 +26,14 @@ import Testing
 
     final class Opened { var titles: [String] = [] }
 
-    private func key(_ code: Int, in window: NSWindow? = nil) -> NSEvent {
-        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                         windowNumber: window?.windowNumber ?? 0, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
-                         isARepeat: false, keyCode: UInt16(code))!
+    private func key(_ code: Int, in window: NSWindow? = nil) -> NSEvent { Self.keyEvent(code, in: window) }
+
+    /// A key press with no modifiers; its characters are the ones the key types.
+    static func keyEvent(_ code: Int, in window: NSWindow? = nil) -> NSEvent {
+        let typed = code == kVK_Space ? " " : code == kVK_Delete ? "\u{7f}" : "\r"
+        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                windowNumber: window?.windowNumber ?? 0, context: nil, characters: typed,
+                                charactersIgnoringModifiers: typed, isARepeat: false, keyCode: UInt16(code))!
     }
 
     // MARK: Results and the pick
@@ -127,5 +131,33 @@ import Testing
         #expect(s.inboxEmpty(.needsYou) == .signedOut)
         s.authError = nil
         #expect(s.inboxReplacement == nil)
+    }
+
+    @Test func rowsThatAreNotDrawnAreNeitherTargetsNorResults() {
+        let s = Store()
+        s.persists = false
+        s.repos = [RepoConfig(fullName: "a/b")]
+        s.lastSync = Date()
+        s.items = [InboxItem(id: "1", repo: "a/b", kind: .issueComment, number: 1, title: "Cached", snippet: "", author: "x",
+                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(),
+                             state: .unread)]
+        let hub = HubState()
+        hub.pinned = true
+        #expect(s.hubTargets(hub) == ["i:1"])
+        s.authError = "Bad credentials"
+        #expect(s.hubTargets(hub).isEmpty)
+        hub.query = "cached"
+        #expect(s.hubItems(hub).isEmpty)
+        // Down, then Return: nothing to open or to mark read.
+        var opened: [String] = []
+        s.interceptOpen = { opened.append($0) }
+        hub.selection = "i:1"
+        let keys = HubKeys(store: s, ui: UIState(), hub: hub)
+        #expect(!keys.key(InboxSearch.keyEvent(kVK_Return)))
+        #expect(opened.isEmpty)
+        #expect(s.items[0].state == .unread)
+        // Signed in again: the same rows are back.
+        s.authError = nil
+        #expect(s.hubItems(hub).count == 1)
     }
 }

@@ -222,7 +222,7 @@ extension LookoutHub {
                 hub.inbox.endSearch()
                 hub.filter = .needsYou
             }
-            if let first = store.list(.needsYou).first {
+            if store.inboxReplacement == nil, let first = store.list(.needsYou).first {
                 hub.selection = "i:" + first.id
                 hub.requestScroll("i:" + first.id)
                 ui.drawerSelection = nil
@@ -259,7 +259,7 @@ extension LookoutHub {
     }
 
     var filters: some View {
-        let rows = !store.list(hub.filter).isEmpty
+        let rows = !items.isEmpty
         return HStack(spacing: Theme.Space.xs) {
             // The tabs never give up their words: the actions after them are what yields when the column is narrow.
             tabs.fixedSize().layoutPriority(2)
