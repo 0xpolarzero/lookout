@@ -240,6 +240,12 @@ enum ShotSelection {
     case session(String)
 }
 
+/// What a shot shows instead of the playground.
+enum ShotSheet {
+    /// The design system's components, each in its states (`ComponentSheet`).
+    case components
+}
+
 /// One screenshot: the playground in a given state, rendered offscreen to `<name>.png`. Add one by adding a line to
 /// `PlaygroundShots.catalog`; everything but `name` has a default.
 struct Shot {
@@ -249,6 +255,8 @@ struct Shot {
 
     var name: String
     var edge = DockEdge.right
+    /// A sheet instead of the playground (the fields below that describe the hub are then ignored).
+    var sheet: ShotSheet?
     /// The data (see `Demo.Scenario`).
     var scenario = Demo.Scenario.agents
     /// Kept open (as when pinned) rather than at rest.
@@ -306,9 +314,12 @@ struct Shot {
 ///   sessions-12 (also `focus-agents-sessions-12`)
 /// Update: `rest-`, `open-` plus
 ///   update-available, update-downloading, update-ready
-/// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y)
+/// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y; Differentiate
+/// shows the waiting tile's outline, the one cue drawn so far)
 ///   rest-contrast, rest-reduce-motion, rest-differentiate, rest-a11y on every edge;
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
+/// Components
+///   components, components-contrast (each shared component in its states, no hub)
 /// 1280×720, every edge
 ///   open-720, settings-720, repos-720, rest-sessions-12-720
 @MainActor
@@ -374,6 +385,8 @@ enum PlaygroundShots {
             $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci"; $0.environment = .contrast
         },
         Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
+        // The shared components, each in its states.
+        [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
         // A 1280×720 screen.
         Shot.edges("open-720") { $0.pinned = true; $0.size = Shot.hd },
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
@@ -437,8 +450,14 @@ enum PlaygroundShots {
         }
         ui.drawerSelection = shot.hoveredSession
         shot.setup?(store, ui, hub)
-        let root = PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
-            .environment(\.previewTip, shot.tip)
+        let content: AnyView
+        switch shot.sheet {
+        case .components: content = AnyView(ComponentSheet())
+        case nil:
+            content = AnyView(PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
+                .environment(\.previewTip, shot.tip))
+        }
+        let root = content
             .shotEnvironment(shot.environment)
             .frame(width: shot.size.width, height: shot.size.height)
         let hosting = NSHostingView(rootView: root)
@@ -457,5 +476,177 @@ enum PlaygroundShots {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+}
+
+
+// MARK: - Component sheet
+
+/// The shared components laid out in their states, on the hub's surface: what the `components` shots render, so a
+/// component can be reviewed (and guarded against clipping) before a surface adopts it. States a pointer or the
+/// keyboard would put a control in are drawn through the same fills and rings the controls use.
+private struct ComponentSheet: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) { rows; fills; controls; tabs; forms }
+            VStack(alignment: .leading, spacing: 12) { headers; banners; empties; undo }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.bg)
+        .environment(\.colorScheme, .dark)
+        .themeResolved()
+    }
+
+    private func group<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text(title).font(Theme.Typography.label).foregroundStyle(Theme.secondary)
+            content()
+        }
+        .frame(width: 440, alignment: .leading)
+    }
+
+    private func line(_ title: String, _ meta: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text)
+            Text(meta).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Theme.Metrics.twoLineRow - 12)
+    }
+
+    private var rows: some View {
+        group("Row: rest, hover, picked") {
+            line("Rest", "owner/repo#1 · Review comment").rowHighlight(hover: false)
+            line("Hover", "Fill.hover, pointer only").rowHighlight(hover: true)
+            line("Picked", "Fill.selected and the accent bar").rowHighlight(hover: false, picked: true)
+        }
+    }
+
+    private var fills: some View {
+        group("Fills, and a repository badge on each of its tints") {
+            HStack(spacing: Theme.Space.md) {
+                FillSwatch(name: "hover", fill: Theme.Fill.hover)
+                FillSwatch(name: "field", fill: Theme.Fill.field)
+                FillSwatch(name: "tile", fill: Theme.Fill.tile)
+                FillSwatch(name: "selected", fill: Theme.Fill.selected)
+                FillSwatch(name: "pressed", fill: Theme.Fill.pressed)
+                FillSwatch(name: "group", fill: Theme.Fill.group)
+            }
+            HStack(spacing: Theme.Space.md) {
+                BadgeSwatch(name: "rest", level: .rest)
+                BadgeSwatch(name: "hover", level: .hover)
+                BadgeSwatch(name: "pressed", level: .pressed)
+            }
+        }
+    }
+
+    private var controls: some View {
+        group("Buttons, keys, menu row, focus ring") {
+            HStack(spacing: Theme.Space.lg) {
+                BorderedButton("Retry") {}
+                IconButton(symbol: "magnifyingglass", help: "Search") {}
+                IconButton(symbol: "pin.fill", help: "Keep open", active: true) {}
+                KeyCap("esc")
+                Image(systemName: "gearshape").font(Theme.Typography.glyph(14, .medium)).foregroundStyle(Theme.secondary)
+                    .tile(Theme.Metrics.tile).focusRing(Theme.Radius.tile, isFocused: true)
+            }
+            .padding(Theme.Space.xs)
+            MenuRow(symbol: "pin", title: "Keep open", key: "⌃⌥L") {}
+            MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,") {}
+        }
+    }
+
+    private var tabs: some View {
+        group("Tabs") {
+            Tabs(label: "Inbox filter", tabs: [
+                .init(id: 0, title: "Needs you", count: 5, countTint: AnyShapeStyle(Theme.amber)),
+                .init(id: 1, title: "Bots", count: 12),
+                .init(id: 2, title: "Done"),
+            ], selection: 0) { _ in }
+        }
+    }
+
+    private var forms: some View {
+        group("Switch (on, off, disabled) and field (rest, focused)") {
+            VStack(spacing: 0) {
+                Toggle("Launch at login", isOn: .constant(true))
+                Toggle("Desktop notifications", isOn: .constant(false))
+                Toggle("Review requests", isOn: .constant(true)).disabled(true)
+            }
+            .toggleStyle(SwitchStyle())
+            .font(Theme.Typography.body).foregroundStyle(Theme.text)
+            .padding(.horizontal, Theme.Metrics.contentEdge - Theme.Metrics.inset)
+            .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
+            HStack(spacing: Theme.Space.md) {
+                TextField("owner/repo or GitHub URL", text: .constant("")).fieldStyle()
+                TextField("Search", text: .constant("zig")).fieldStyle(focused: true)
+            }
+        }
+    }
+
+    private var headers: some View {
+        group("Section header: plain, with a status, focused") {
+            SectionHeader(title: "Inbox", onFocus: {}) { IconButton(symbol: "magnifyingglass", help: "Search") {} }
+            SectionHeader(title: "Sessions", status: ("1 waiting", AnyShapeStyle(Theme.amber)), onFocus: {}) { EmptyView() }
+            SectionHeader(title: "CI", status: ("1 failing", AnyShapeStyle(Theme.red)), focused: true, onFocus: {}) { EmptyView() }
+        }
+    }
+
+    private var banners: some View {
+        group("Status banner: no button, one, two") {
+            StatusBanner(symbol: "clock", message: "Snoozed until 14:30")
+            StatusBanner(symbol: "exclamationmark.circle.fill", tint: AnyShapeStyle(Theme.amber), message: "2 repositories didn't sync") {
+                BorderedButton("Retry") {}
+            }
+            StatusBanner(symbol: "exclamationmark.triangle.fill", tint: AnyShapeStyle(Theme.red), message: "Can't sign in to GitHub") {
+                BorderedButton("Details") {}
+                BorderedButton("Settings") {}
+            }
+        }
+    }
+
+    private var empties: some View {
+        group("Empty block: two lines, with an action") {
+            EmptyBlock("All caught up", detail: "Checked 2m ago")
+            EmptyBlock(title: "Nothing watched yet", detail: "Add a repository to start.") { BorderedButton("Add a repository") {} }
+        }
+    }
+
+    private var undo: some View {
+        group("Undo line") {
+            UndoLine(message: "Moved to Done") {}
+        }
+    }
+}
+
+/// A fill token on a tile, named, as the views draw it (`resolved.fill`).
+private struct FillSwatch: View {
+    let name: String
+    let fill: Color
+    @Environment(\.resolved) private var resolved
+
+    var body: some View {
+        VStack(spacing: Theme.Space.xs) {
+            Theme.Radius.shape(Theme.Radius.tile).fill(resolved.fill(fill)).frame(width: 48, height: Theme.Metrics.tile)
+            Text(name).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
+        }
+    }
+}
+
+/// An enabled repository badge's glyph on one tint of its own hue, as `BadgeLabel` draws it.
+private struct BadgeSwatch: View {
+    let name: String
+    let level: Theme.Fill.Tint
+    @Environment(\.resolved) private var resolved
+
+    var body: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Image(systemName: "bubble.left.and.bubble.right.fill").font(Theme.Typography.glyph(10.5)).foregroundStyle(Theme.accent)
+                .frame(width: 24, height: 24)
+                .background(Theme.Radius.shape(Theme.Radius.tile).fill(resolved.fill(Theme.Fill.tint(Theme.accent, level))))
+            Text(name).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
+        }
+        .frame(width: 100, alignment: .leading)
     }
 }
