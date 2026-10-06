@@ -55,7 +55,7 @@ enum Theme {
 
     /// A token that follows Increase Contrast by itself: it takes its value from `\.resolved` wherever it is drawn
     /// (`foregroundStyle`, `fill`, `strokeBorder`), so a view can't forget to. Use it where SwiftUI wants a
-    /// `ShapeStyle`; `AnyShapeStyle` carries it through a property that used to be a `Color`.
+    /// `ShapeStyle`; `AnyShapeStyle` carries it through a property.
     struct Ink: ShapeStyle {
         let token: KeyPath<Theme.Resolved, Color> & Sendable
         init(_ token: KeyPath<Theme.Resolved, Color> & Sendable) { self.token = token }
@@ -68,8 +68,7 @@ enum Theme {
     /// values, so the tokens' Increase Contrast set can be tested.
     struct Resolved: Equatable {
         var contrast = false
-        /// Drawn by the waiting tile (an `onTint` inner stroke). TODO: the unread dot's 1pt white ring, with the dot
-        /// itself (WP2).
+        /// Drawn by the waiting tile and the lit gear (an `onTint` inner stroke) and the unread dot (a white ring).
         var differentiate = false
 
         var stroke: Color { Color.white.opacity(contrast ? 0.28 : 0.12) }

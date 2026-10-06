@@ -20,8 +20,7 @@ import SwiftUI
 //             `Theme.Typography.glyph(_ size, weight)` sizes an icon off its box (symbols may be smaller).
 //   Space     Theme.Space.hair 2 / xs 4 / sm 6 / md 8 / lg 12 / xl 16.
 //   Metrics   pitch 36 (every cell, header, one-line row and footer), bar 46, inset 6, contentEdge 14, twoLineRow 44,
-//             taskRow 60, menuRow 28, formRow 36, field/button 28, tab 24, tile 26, avatar 24 ... `line` 30 is the
-//             pre-redesign pitch, kept until each surface moves to `pitch`.
+//             taskRow 60, menuRow 28, formRow 36, field/button 28, tab 24, tile 26, avatar 24 ...
 //   Motion    Theme.Motion.hover (easeOut .12), fade (.14), move (spring .28), close (spring .20): never a bounce.
 //             `.motion(_:value:)` replaces `.animation(_:value:)` and follows Reduce Motion live; with no view,
 //             `Theme.Motion.resolve(_:reduce:)` (or `.resolved(reduce:)`), the reduce flag coming from
@@ -351,24 +350,22 @@ extension View {
 /// The label keeps its own colours: labels that should change on hover read `@Environment(\.hoverFillHovering)`.
 /// Disabled: no fill at all, and the label a step quieter.
 struct HoverFillButtonStyle: ButtonStyle {
-    var shape: AnyShape = AnyShape(Theme.Radius.shape(Theme.Radius.row))
-    var rest: Color = Theme.Fill.rest
-    var hover: Color = Theme.Fill.hover
-    var active: Color = Theme.Fill.selected
-    var pressed: Color = Theme.Fill.pressed
-    var isActive = false
+    var shape: AnyShape
+    var rest: Color
+    var hover: Color
+    var active: Color
+    var isActive: Bool
     /// How far past the drawn shape the button takes clicks, on every side (a 24pt circle hit as 28pt).
-    var hitOutset: CGFloat = 0
+    var hitOutset: CGFloat
 
     init(shape: some Shape = Theme.Radius.shape(Theme.Radius.row), rest: Color = Theme.Fill.rest, hover: Color = Theme.Fill.hover,
-         active: Color = Theme.Fill.selected, pressed: Color = Theme.Fill.pressed, isActive: Bool = false, hitOutset: CGFloat = 0) {
-        self.hitOutset = hitOutset
+         active: Color = Theme.Fill.selected, isActive: Bool = false, hitOutset: CGFloat = 0) {
         self.shape = AnyShape(shape)
         self.rest = rest
         self.hover = hover
         self.active = active
-        self.pressed = pressed
         self.isActive = isActive
+        self.hitOutset = hitOutset
     }
 
     func makeBody(configuration: Configuration) -> some View {
@@ -384,7 +381,7 @@ struct HoverFillButtonStyle: ButtonStyle {
 
         var body: some View {
             let hot = enabled && hovering
-            let fill = !enabled ? style.rest : configuration.isPressed ? style.pressed : style.isActive ? style.active : hot ? style.hover : style.rest
+            let fill = !enabled ? style.rest : configuration.isPressed ? Theme.Fill.pressed : style.isActive ? style.active : hot ? style.hover : style.rest
             configuration.label
                 .environment(\.hoverFillHovering, hot)
                 .background(style.shape.fill(resolved.fill(fill)))
@@ -479,7 +476,7 @@ struct BorderedButton: View {
                 .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(Theme.fieldBorder, lineWidth: resolved.borderWidth))
         }
         .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.tile), rest: Theme.Fill.tile,
-                                          hover: Theme.Fill.selected, pressed: Theme.Fill.pressed))
+                                          hover: Theme.Fill.selected))
         .focusRing(Theme.Radius.tile)
     }
 }
