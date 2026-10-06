@@ -213,6 +213,29 @@ import Testing
         #expect(store.mutedCI == ["b/bad": "b2"])
     }
 
+    @Test func stoppingCIOffersAnUndoThatTurnsItBackOn() {
+        let store = store(["b/bad": status(.failure, sha: "b1")], ["b/bad", "c/ok"])
+        store.ciFetch = { _ in throw CancellationError() }
+        store.stopShowingCI(store.repos[0])
+        #expect(!store.repos[0].events.contains(.ciMain))
+        #expect(store.ciList.entries.map(\.id) == ["c/ok"])
+        #expect(store.undoStack.visible(in: .ci)?.message == "Stopped showing CI for bad")
+        #expect(store.undoLast())
+        #expect(store.repos[0].events.contains(.ciMain))
+        #expect(store.ciList.entries.map(\.id) == ["b/bad", "c/ok"])
+        #expect(!store.undoLast())
+    }
+
+    @Test func undoingStopShowingCILeavesARepoTurnedBackOnAlone() {
+        let store = store(["b/bad": status(.failure, sha: "b1")], ["b/bad"])
+        store.ciFetch = { _ in throw CancellationError() }
+        store.stopShowingCI(store.repos[0])
+        // Turned back on in Repositories before the undo: it stays on.
+        store.toggle(.ciMain, on: store.repos[0])
+        store.undoLast()
+        #expect(store.repos[0].events.contains(.ciMain))
+    }
+
     // MARK: The quiet group
 
     @Test func theQuietGroupCountsOnlyWhatReallyPasses() {

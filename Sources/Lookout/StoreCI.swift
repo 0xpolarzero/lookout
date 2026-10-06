@@ -345,8 +345,16 @@ extension Store {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    /// Stops showing CI for a repo, like turning its CI toggle off in Repositories.
+    /// Stops showing CI for a repo, like turning its CI toggle off in Repositories, and offers to take it back: the
+    /// repo leaves CI's list at once, and its toggle is somewhere else.
     func stopShowingCI(_ repo: RepoConfig) {
-        if repo.events.contains(.ciMain) { toggle(.ciMain, on: repo) }
+        guard repo.events.contains(.ciMain) else { return }
+        let title = ciList.title(repo)
+        toggle(.ciMain, on: repo)
+        registerUndo("Stopped showing CI for \(title)", in: .ci,
+                     announcement: "Stopped showing CI for \(repo.name). Undo available") { [self] in
+            // Only if it is still off: it may have been turned back on in Repositories since.
+            if let now = repos.first(where: { $0.id == repo.id }), !now.events.contains(.ciMain) { toggle(.ciMain, on: now) }
+        }
     }
 }

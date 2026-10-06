@@ -396,6 +396,13 @@ enum PlaygroundShots {
                 if let repo = store.repos.first(where: { $0.fullName == "apple/swift-format" }) { store.muteCI(repo) }
             }
         },
+        // Stopping CI on the last repository that had it: the undo line is all the section has to say.
+        Shot.edges("open-ci-stop-undo", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in
+                for repo in store.repos.filter({ $0.events.contains(.ciMain) }) { store.stopShowingCI(repo) }
+            }
+        },
         Shot.edges("open-ci-contrast", on: .rightAndTop) {
             $0.pinned = true
             $0.environment = .contrast
