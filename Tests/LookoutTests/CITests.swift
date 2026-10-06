@@ -280,9 +280,10 @@ import Testing
         return (store, answers)
     }
 
-    /// Lets the tasks the test started run until `condition` holds.
+    /// Lets the tasks the test started run until `condition` holds (or two seconds have passed).
     private func settle(_ condition: () -> Bool) async {
-        for _ in 0..<200 where !condition() { await Task.yield() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(2)) }
     }
 
     @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async {
@@ -291,7 +292,7 @@ import Testing
         async let second: () = { try? await store.syncCI("a/x") }()
         await settle { answers.waiting.count == 1 }
         async let third: () = { try? await store.syncCI("a/x") }()
-        for _ in 0..<20 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(50))
         #expect(answers.asked == 1)
         answers.settle(0, with: status(.failure, sha: "s1"))
         _ = await (first, second, third)
