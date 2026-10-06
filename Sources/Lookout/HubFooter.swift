@@ -59,7 +59,7 @@ struct SyncButton: View {
         SyncStatus(store: store) { line in
             Button {
                 // Not disabled while it checks: that would fade the one word that says so ("Checking…").
-                if line.opensSettings { hub.go(.settings) } else if !store.isSyncing { store.refreshNow() }
+                if line.opensSettings { hub.go(.settings) } else { store.checkNow() }
             } label: {
                 Text(line.text)
                     .font(Theme.Typography.meta)
@@ -76,6 +76,11 @@ struct SyncButton: View {
             .voiceOverTarget("h:controls", hub: hub)
         }
     }
+}
+
+extension Store {
+    /// Checks GitHub now, unless a check is already running.
+    func checkNow() { if !isSyncing { refreshNow() } }
 }
 
 extension SyncLine {

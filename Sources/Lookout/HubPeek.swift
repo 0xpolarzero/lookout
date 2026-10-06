@@ -57,7 +57,7 @@ extension HubState {
         case .keepOpen: LookoutHub.animate(LookoutHub.opening) { pinned = true }
         case .repositories: go(.repos)
         case .settings: go(.settings)
-        case .sync: if !store.isSyncing { store.refreshNow() }
+        case .sync: store.checkNow()
         }
         // A page or the full view takes over; syncing leaves the menu as it is.
         if row != .sync { menuKeys = false }
@@ -377,7 +377,7 @@ struct ControlsSyncRow: View {
                 Text(line.text).font(Theme.Typography.meta).foregroundStyle(line.color).lineLimit(1)
                 Spacer(minLength: 0)
                 if !line.opensSettings {
-                    Button { if !store.isSyncing { store.refreshNow() } } label: {
+                    Button(action: store.checkNow) {
                         HStack(spacing: Theme.Space.sm) {
                             Text("Sync now").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                             Text(store.shortcut(.refresh).display).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary)

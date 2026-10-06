@@ -111,9 +111,7 @@ final class HubState {
         guard !dragging, !menuKeys else { return }
         if section != nil {
             guard section != next else { return }
-            var instant = Transaction(animation: nil)
-            instant.disablesAnimations = true
-            withTransaction(instant) { section = next }
+            LookoutHub.instantly { section = next }
             return
         }
         dwell = Task { [weak self] in
@@ -296,6 +294,13 @@ struct LookoutHub: View {
     /// `withAnimation` for code with no view (key handlers), following Reduce Motion.
     static func animate(_ animation: Animation = Theme.Motion.fade, _ body: () -> Void) {
         withAnimation(animation.resolved(reduce: reduceNow), body)
+    }
+
+    /// Runs `body` with every animation off, the implicit ones too.
+    static func instantly(_ body: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, body)
     }
 
     var edge: DockEdge { ui.edge }

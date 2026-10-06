@@ -403,11 +403,12 @@ final class HubController {
                 // Keyboard focus moves only when pinning changes: a panel closing under a pinned hub must not steal it back.
                 let pinnedChanged = self.hub.pinned != self.lastPinned && !self.placing
                 self.lastPinned = self.hub.pinned
-                if !pinnedChanged {
-                } else if self.hub.pinned, !self.window.isKeyWindow {
-                    self.takeFocus()
-                } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
-                    self.giveFocusBack()
+                if pinnedChanged {
+                    if self.hub.pinned, !self.window.isKeyWindow {
+                        self.takeFocus()
+                    } else if !self.hub.pinned, !self.hub.hovering, self.window.isKeyWindow {
+                        self.giveFocusBack()
+                    }
                 }
                 // The controls menu, asked for by VoiceOver or a key, takes the keyboard while it is up.
                 if self.hub.menuKeys != self.lastMenuKeys {
@@ -448,9 +449,7 @@ final class HubController {
             hub.section = nil
             // Back to the bar at once (no closing animation), and carry just the bar, under the cursor where you
             // grabbed it.
-            var instant = Transaction(animation: nil)
-            instant.disablesAnimations = true
-            withTransaction(instant) {
+            LookoutHub.instantly {
                 hub.pinned = false
                 hub.hovering = false
                 hub.page = .main
@@ -502,9 +501,7 @@ final class HubController {
             // The bar is measured at rest for its new axis, which needs the hub shut (a hub kept open stops that measure, and
             // the strip would take the old length): the page and Keep open come back once it has.
             placing = true
-            var instant = Transaction(animation: nil)
-            instant.disablesAnimations = true
-            withTransaction(instant) {
+            LookoutHub.instantly {
                 if page != .main { hub.go(.main) }
                 hub.pinned = false
             }
