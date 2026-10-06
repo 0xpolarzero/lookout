@@ -10,7 +10,6 @@ extension LookoutHub {
     var barColumn: some View {
         VStack(alignment: side, spacing: 0) {
             VStack(alignment: side, spacing: 0) { mainRows }
-                .opacity(pageOpen ? 0.5 : 1)
             // Last, the controls: a gear at rest (hover for pin, repositories, settings), settings and the
             // footer once open. In the full view, dragging the line above them sizes the sessions' list.
             sectionDivider
@@ -235,7 +234,6 @@ extension LookoutHub {
                 .modifier(probe(.agents))
             }
         }
-        .opacity(pageOpen ? 0.5 : 1)
         if !expanded {
             stripDivider
             controlsCell

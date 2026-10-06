@@ -1,0 +1,62 @@
+import SwiftUI
+
+/// The hub's measures and where it sits on its edge, as arithmetic over numbers: what the layout is built from and what
+/// the geometry tests check (DESIGN.md 3.4, 5.3).
+enum HubGeometry {
+    /// What the bar leaves at its ends along its axis, so its first cell starts this far from the rounded end.
+    static let lead = (Theme.Metrics.bar - Theme.Metrics.pitch) / 2
+
+    /// Kept open on the sides: what sits beside the 46pt rail.
+    static let sideDetail: CGFloat = 420
+    /// Kept open along the top and bottom: the inbox and CI column, the sessions column and the gutter between them.
+    static let leftColumn: CGFloat = 420
+    static let rightColumn: CGFloat = 400
+    static let gutter: CGFloat = 12
+    static let maxColumns: CGFloat = 860
+    /// A focused section is one column: the inbox up to this wide (its meta joins the title's line from here), CI and
+    /// the sessions as wide as their own column.
+    static let focusedInbox: CGFloat = 560
+    static let focusedAgents: CGFloat = 480
+    /// A page beside the bar and under the strip.
+    static let pageSide: CGFloat = 420
+    static let pageStrip: CGFloat = 480
+
+    /// The one outer inset, and the hub's own depth beyond the rail.
+    static let inset = Theme.Metrics.inset
+
+    /// The width of the full view along the top and bottom: both columns (the sessions' only with the extension on),
+    /// or the one column of a focused section; never more than the screen leaves.
+    static func stripWidth(focus: HubSection?, sessions: Bool, room: CGFloat) -> CGFloat {
+        let width: CGFloat = switch focus {
+        case .inbox: focusedInbox
+        case .ci: leftColumn
+        case .agents: focusedAgents
+        default: sessions ? min(leftColumn + gutter + rightColumn, maxColumns) : leftColumn
+        }
+        return min(width, max(room - 2 * inset, 0))
+    }
+
+    /// Where the hub's start lies along its edge, from where the bar starts at rest: the bar never moves as the view
+    /// opens, and only the screen's end moves it, by the least that keeps both insets.
+    static func along(length: CGFloat, position: Double, restLength: CGFloat, own: CGFloat) -> CGFloat {
+        let start = length * position - restLength / 2
+        return min(max(start, inset), max(length - own - inset, inset))
+    }
+
+    /// The hub's origin in a window `bounds` spanning the edge, flush with the screen on its own side.
+    static func origin(edge: DockEdge, position: Double, restLength: CGFloat, size: CGSize, in bounds: CGRect) -> CGPoint {
+        switch edge {
+        case .right: CGPoint(x: bounds.maxX - size.width, y: bounds.minY + along(length: bounds.height, position: position, restLength: restLength, own: size.height))
+        case .left: CGPoint(x: bounds.minX, y: bounds.minY + along(length: bounds.height, position: position, restLength: restLength, own: size.height))
+        case .top: CGPoint(x: bounds.minX + along(length: bounds.width, position: position, restLength: restLength, own: size.width), y: bounds.minY)
+        case .bottom: CGPoint(x: bounds.minX + along(length: bounds.width, position: position, restLength: restLength, own: size.width), y: bounds.maxY - size.height)
+        }
+    }
+
+    /// The longest the hub may be along its depth axis: the screen's usable height less both insets, never a floor.
+    static func maxLength(visibleHeight: CGFloat) -> CGFloat { max(visibleHeight - 2 * inset, 0) }
+
+    /// The first cell's centre, along the bar's axis from the hub's own start: the same at rest and kept open, which is
+    /// why the inbox tile stays where it is.
+    static var firstCellCenter: CGFloat { lead + Theme.Metrics.pitch / 2 }
+}

@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-// The footer of the full view and the controls: sync status, Keep open, Repositories and Settings.
+// The footer of the full view (DESIGN.md 4.11): one 36pt row, last on every edge. On the left how syncing is going, as
+// a button that checks now; on the right Keep open and Repositories. Settings is the gear cell, not part of it.
 
 /// Beside the sync status, on every edge: the GitHub rate limit running low (nothing otherwise).
 struct RateNotice: View {
@@ -16,26 +17,33 @@ struct RateNotice: View {
     }
 }
 
+/// How syncing is going, in a few words: a fault says what and why, otherwise when it last checked.
+struct SyncLine {
+    var text: String
+    var color: AnyShapeStyle
+    /// The system tooltip: what a click does, with the detail the words leave out.
+    var help: String
+    /// A sign-in problem goes to Settings; everything else checks now.
+    var opensSettings = false
+    var isFault = false
+}
+
 extension LookoutHub {
-    // MARK: Bar actions
-
-    /// Beside the settings cell: on the left edge, the same pieces mirrored, so pin and repositories sit by
-    /// the bar on either side and the sync status out by the rounded side.
-    @ViewBuilder var footerDetail: some View {
-        if edge == .left {
-            HStack(spacing: 9) {
-                reposButton
-                pinButton
-                Spacer(minLength: 0)
-                syncStatus
-            }
-            .frame(height: 40)
-        } else {
-            footer
+    /// The footer row, as tall as every one-line row.
+    var footerRow: some View {
+        HStack(spacing: Theme.Space.md) {
+            syncButton
+            RateNotice(store: store, fill: false).lineLimit(1).layoutPriority(-1)
+            Spacer(minLength: 0)
+            pinButton
+            reposButton
         }
+        .padding(.leading, Theme.Metrics.rowPadding)
+        .padding(.trailing, Theme.Space.hair)
+        .frame(height: Theme.Metrics.pitch)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Footer")
     }
-
-    // MARK: Footer
 
     var pinButton: some View {
         IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Stop keeping open" : "Keep open",
@@ -45,110 +53,70 @@ extension LookoutHub {
     }
 
     var reposButton: some View {
-        IconButton(symbol: "square.stack.3d.up.fill", help: "Repositories", detail: "Watched repos and what they notify",
+        IconButton(symbol: "books.vertical", help: "Repositories", detail: "Watched repos and what they notify",
                    active: hub.page == .repos) { hub.go(.repos) }
     }
 
-    /// Lit on Settings; on Repositories too beside the bar, where the repositories button hides with the rows.
+    /// Lit while Settings is open; its tooltip and label say what a click does.
     var settingsCell: some View {
-        IconButton(symbol: "gearshape.fill", help: "Settings", detail: "⌘,",
-                   active: hub.page == .settings || (hub.page == .repos && !edge.isHorizontal)) { hub.go(.settings) }
+        let open = hub.page == .settings
+        return IconButton(symbol: open ? "gearshape.fill" : "gearshape", help: open ? "Close Settings" : "Settings",
+                          detail: "⌘,", active: open) { open ? hub.back() : hub.go(.settings) }
     }
 
-    /// Beside the settings cell: how syncing is going, then pin and repositories.
-    var footer: some View {
-        // 9pt apart: the same step as from repositories to the settings cell beside them.
-        HStack(spacing: 9) {
-            syncStatus
-            Spacer(minLength: 0)
-            pinButton
-            reposButton
-        }
-        .frame(height: 40)
-    }
-
-    /// Sync state, as a dot and a few words: problems first, then checking, snoozed, and up to date.
-    var syncStatus: some View {
-        HStack(spacing: 8) {
-            Ticking(coarse: true) { now in
-                syncLabel(now: now)
-            }
-            // The rate limit is part of syncing: it pauses at 0, inbox included.
-            RateNotice(store: store, fill: false).lineLimit(1).layoutPriority(-1)
-        }
-    }
-
-    private func syncLabel(now: Date) -> some View {
-        let s = sync(now: now)
-        return Button {
-            if store.authError != nil { hub.go(.settings) } else { store.refreshNow() }
-        } label: {
-            HStack(spacing: 6) {
-                Group {
-                    if s.spinning {
-                        ProgressView().controlSize(.mini).scaleEffect(0.6)
-                    } else if let symbol = s.symbol {
-                        Image(systemName: symbol).font(Theme.Typography.glyph(9, .bold)).foregroundStyle(s.color)
-                    } else {
-                        Circle().fill(s.color).frame(width: 6, height: 6)
-                    }
-                }
-                .frame(width: 10, height: 10)
-                Text(s.text).font(Theme.Typography.meta).foregroundStyle(s.color)
+    /// "Checked 2m ago", or the fault in its place: a button that checks now (or opens Settings to sign in).
+    var syncButton: some View {
+        Ticking(coarse: true) { now in
+            let line = syncLine(now: now)
+            Button {
+                if line.opensSettings { hub.go(.settings) } else { store.refreshNow() }
+            } label: {
+                Text(line.text)
+                    .font(Theme.Typography.meta)
+                    .foregroundStyle(line.color)
                     .lineLimit(1)
+                    .frame(minHeight: Theme.Metrics.iconButton)
+                    .contentShape(Rectangle())
             }
-            .padding(.horizontal, 8)
-            .frame(height: Theme.Metrics.tile)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .focusRing(Theme.Radius.small)
+            .disabled(store.isSyncing)
+            .help(line.help)
+            .accessibilityLabel(line.text)
+            .accessibilityHint(line.opensSettings ? "Opens Settings" : "Checks GitHub now")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(s.text)
-        .accessibilityHint(s.title)
-        .disabled(store.isSyncing)
-        .tip(s.title, s.detail)
     }
 
-    private struct SyncState {
-        var color: AnyShapeStyle
-        var text: String
-        var title: String
-        var detail: String?
-        var symbol: String? = nil
-        var spinning = false
-    }
-
-    private func sync(now: Date) -> SyncState {
-        let refresh = "Click to check now · \(store.shortcut(.refresh).display)"
+    func syncLine(now: Date) -> SyncLine {
+        let refresh = "Check now  \(store.shortcut(.refresh).display)"
         if let error = store.authError {
-            return SyncState(color: AnyShapeStyle(Theme.red), text: "Sign-in problem", title: "Can't sign in to GitHub",
-                             detail: error + "\nClick for Settings")
+            return SyncLine(text: "Can't sign in to GitHub", color: AnyShapeStyle(Theme.red), help: error + "\nOpens Settings",
+                            opensSettings: true, isFault: true)
         }
         let failed = store.repoErrors.keys.sorted()
         if !failed.isEmpty {
-            return SyncState(color: AnyShapeStyle(Theme.amber), text: "\(plural(failed.count, "repo")) failed",
-                             title: "Some repositories didn't sync", detail: failed.joined(separator: "\n") + "\n" + refresh)
+            return SyncLine(text: "\(plural(failed.count, "repository", "repositories")) didn't sync", color: AnyShapeStyle(Theme.secondary),
+                            help: failed.joined(separator: "\n") + "\n" + refresh, isFault: true)
         }
         if store.isSyncing {
-            return SyncState(color: AnyShapeStyle(Theme.tertiary), text: "Checking…", title: "Checking GitHub",
-                             detail: "Repositories, CI and review requests", spinning: true)
+            return SyncLine(text: "Checking…", color: AnyShapeStyle(Theme.tertiary), help: "Checking GitHub")
         }
         guard let last = store.lastSync else {
-            return SyncState(color: AnyShapeStyle(Theme.tertiary), text: store.me == nil ? "Connecting…" : "Not checked yet",
-                             title: "Connecting to GitHub", detail: nil)
+            return SyncLine(text: store.me == nil ? "Connecting…" : "Not checked yet", color: AnyShapeStyle(Theme.tertiary), help: refresh)
         }
         let interval = store.settings.pollInterval
-        let checked = "Last checked at \(last.formatted(date: .omitted, time: .shortened))"
         if now.timeIntervalSince(last) > interval * 3 {
-            return SyncState(color: AnyShapeStyle(Theme.amber), text: "Synced \(agoPhrase(last, now: now))", title: "Not syncing",
-                             detail: "\(checked) · check your connection or token\n" + refresh)
-        }
-        if store.isSnoozed, let until = store.settings.snoozeUntil {
-            return SyncState(color: AnyShapeStyle(Theme.secondary), text: "Snoozed until \(until.formatted(date: .omitted, time: .shortened))",
-                             title: "Notifications snoozed", detail: "No banners; the inbox keeps filling · resume in Settings",
-                             symbol: "moon.fill")
+            return SyncLine(text: "Not syncing", color: AnyShapeStyle(Theme.secondary),
+                            help: "Last checked at \(last.formatted(date: .omitted, time: .shortened)): check your connection or token\n" + refresh,
+                            isFault: true)
         }
         let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))
-        return SyncState(color: AnyShapeStyle(Theme.tertiary), text: "Up to date", title: checked,
-                         detail: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n\(refresh)")
+        return SyncLine(text: "Checked \(agoPhrase(last, now: now))", color: AnyShapeStyle(Theme.tertiary),
+                        help: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n" + refresh)
     }
+}
+
+extension LookoutHub {
+    /// Still named by the old full view in HubBar.swift, which `HubOpen.swift` replaces: it goes with it.
+    var footerDetail: some View { footerRow }
 }
