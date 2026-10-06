@@ -180,17 +180,20 @@ extension LookoutHub {
             .frame(width: wide ? columnWidth(.inbox) : nil, alignment: .leading)
             .frame(maxHeight: .infinity)
             .modifier(probe(.inbox))
-            stripDivider
-            // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
-            HStack(spacing: 8) {
-                ciCell
-                if wide && showsCI && stripShowsCIHeader { ciHeader.transition(.hubReveal) }
+            // Without CI there is no cell, so no segment (and no second divider beside it).
+            if !store.ciRepos.isEmpty {
+                stripDivider
+                // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
+                HStack(spacing: 8) {
+                    ciCell
+                    if wide && showsCI && stripShowsCIHeader { ciHeader.transition(.hubReveal) }
+                }
+                .padding(.leading, Self.inset + 1)
+                .padding(.trailing, Self.inset)
+                .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
+                .frame(maxHeight: .infinity)
+                .modifier(probe(.ci))
             }
-            .padding(.leading, Self.inset + 1)
-            .padding(.trailing, Self.inset)
-            .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
-            .frame(maxHeight: .infinity)
-            .modifier(probe(.ci))
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {

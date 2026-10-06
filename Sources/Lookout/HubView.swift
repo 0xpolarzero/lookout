@@ -303,10 +303,9 @@ struct LookoutHub: View {
                             focusedBody(focus).frame(minWidth: Self.ciWidth, idealWidth: Self.ciWidth, maxWidth: .infinity, alignment: .topLeading)
                         } else {
                             HStack(alignment: .top, spacing: 0) {
-                                // CI at the bottom (level with the new session row): the room between is the inbox's.
+                                // CI directly under the inbox, however short either is: no pinned spacer, no dead band.
                                 VStack(alignment: .leading, spacing: 0) {
                                     inboxColumn
-                                    Spacer(minLength: 0)
                                     Hairline(inset: 12)
                                     ciColumn
                                 }
@@ -398,7 +397,8 @@ struct LookoutHub: View {
     /// them; the sessions' (with the controls after it) spans theirs.
     func columnWidth(_ section: HubSection) -> CGFloat {
         switch section {
-        case .inbox: return Self.inboxSegment
+        // Without CI the inbox's segment spans the column (there is no cell for a segment of its own).
+        case .inbox: return store.ciRepos.isEmpty ? Self.githubWidth : Self.inboxSegment
         case .ci: return Self.githubWidth - Self.inboxSegment - 1
         default:
             // As much as the screen has left after the measured controls and update button, and the margins.

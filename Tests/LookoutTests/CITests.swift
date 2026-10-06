@@ -270,7 +270,10 @@ import Testing
             return try await withCheckedThrowingContinuation { waiting.append($0) }
         }
 
-        func settle(_ index: Int, with status: CIStatus) { waiting[index].resume(returning: status) }
+        func settle(_ index: Int, with status: CIStatus) {
+            guard waiting.indices.contains(index) else { Issue.record("No check \(index) is waiting"); return }
+            waiting[index].resume(returning: status)
+        }
     }
 
     private func quiet(_ store: Store) -> (Store, Answers) {
@@ -280,9 +283,9 @@ import Testing
         return (store, answers)
     }
 
-    /// Lets the tasks the test started run until `condition` holds (or two seconds have passed).
+    /// Lets the tasks the test started run until `condition` holds (or half a minute has: the suite shares the main actor with slower tests).
     private func settle(_ condition: () -> Bool) async {
-        let deadline = ContinuousClock.now + .seconds(2)
+        let deadline = ContinuousClock.now + .seconds(30)
         while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(2)) }
     }
 
