@@ -644,8 +644,8 @@ struct RepoRow: View {
     @ViewBuilder private var menu: some View {
         Button("Open on GitHub", systemImage: "arrow.up.right") { NSWorkspace.shared.open(repo.url) }
         Button("Open Actions", systemImage: "play.circle") { NSWorkspace.shared.open(repo.url.appendingPathComponent("actions")) }
-        if let url = store.ci[repo.fullName]?.url {
-            Button("Open latest commit checks", systemImage: "checkmark.circle") { NSWorkspace.shared.open(url) }
+        if store.ci[repo.fullName]?.url != nil {
+            Button("Open latest commit checks", systemImage: "checkmark.circle") { store.openChecks(repo) }
         }
         Divider()
         Button("Move up", systemImage: "arrow.up") { move(-1) }.disabled(isFirst)
