@@ -241,8 +241,18 @@ final class Store {
     /// What the app does besides drawing, on the demo's data (`--demo --lifecycle`, for the idle gate): polling, with every
     /// request failing at once (nothing leaves the machine), and the Claude watchers and timers on whatever folder
     /// `LOOKOUT_CLAUDE_ROOT` names.
-    func startLifecycle() {
-        gh.transport = { _ in throw URLError(.notConnectedToInternet) }
+    ///
+    /// `canned`: GitHub answers, as a quiet account's answers with their ETags (`CannedGitHub`), and polling is every five seconds,
+    /// so a window of the gate holds several polls of 304s: the cost of a poll is what it measures.
+    func startLifecycle(canned: Bool = false) {
+        if canned {
+            gh.transport = CannedGitHub.transport
+            settings.pollInterval = Self.cannedPollInterval
+            // The answers turn the demo's failing repository green: nothing should be said about it on the desktop.
+            settings.notifications = false
+        } else {
+            gh.transport = { _ in throw URLError(.notConnectedToInternet) }
+        }
         demoLifecycle = true
         restartPolling()
         watchClaude()
@@ -271,6 +281,9 @@ final class Store {
             say()
         }
     }
+
+    /// How often the gate's canned polling asks (scripts/idle-cpu.sh scales what it measures to the default of a minute).
+    static let cannedPollInterval: TimeInterval = 5
 
     func lifecycleLine() -> String {
         let rows = allAgentRows

@@ -23,7 +23,13 @@
 # A sample that is missing or malformed (ps failed, the process went), a window that is not positive or a CPU time that goes
 # backwards is a failure, never a 0%.
 #
-# What it does not measure: the network (every request fails at once, so nothing is parsed or drawn from an answer),
+# Polling is measured once more with GitHub's answers served from memory (`--canned`: a quiet account's, sized as GitHub sizes
+# them, each with an ETag, and a 304 for every request that has it; the first poll is the full answers, the rest the 304s the
+# shipped app gets at rest). It polls every 5 seconds so that a window holds several, and the figure is scaled to the default
+# minute: that is what a poll's requests, cache and bookkeeping cost at rest, which the other runs (every request failing) do
+# not reach.
+#
+# What it does not measure: the network itself (TLS, the radio), what a changed answer costs to parse and draw,
 # notifications, the updater's loop, a real Claude app's files changing under the watchers, a transcript being read,
 # typing, hovering and scrolling. Those are covered by the rules of section 8 and by Instruments by hand.
 #
@@ -101,6 +107,8 @@ trap cleanup EXIT
 failed=0
 scenario=agents
 last_ws=0
+# What a measurement is multiplied by before it is judged: 1, except the canned polling's, which runs faster than the default.
+scale=1
 
 # measure <label> <edge> [launch argument]: one launch, one verdict.
 measure() {
@@ -151,14 +159,15 @@ measure() {
     else
         last_ws="n/a"
     fi
-    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v ws="$last_ws" 'BEGIN {
+    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v ws="$last_ws" -v scale="$scale" 'BEGIN {
         if (!(window > 0) || a1 < a0) {
             printf "%-12s FAIL: a window of %s s and CPU time going from %s to %s are no measurement\n", label, window, a0, a1
             exit 1
         }
-        app = (a1 - a0) / window * 100
+        app = (a1 - a0) / window * 100 * scale
         verdict = app < limit ? "ok" : "FAIL"
-        printf "%-12s Lookout %.3f%% (limit %s%%)  WindowServer %s%% (all clients)  %s\n", label, app, limit, ws, verdict
+        note = scale == 1 ? "" : sprintf(" (scaled by %.3f to the default poll)", scale)
+        printf "%-12s Lookout %.3f%% (limit %s%%)%s  WindowServer %s%% (all clients)  %s\n", label, app, limit, note, ws, verdict
         exit app < limit ? 0 : 1
     }' || failed=1
     kill "$pid" 2>/dev/null
@@ -174,6 +183,11 @@ for edge in $edges; do
     [ -z "$ring_ws" ] && ring_ws=$last_ws
     measure open "$edge" --open
 done
+
+# Polling with answers (304s) at rest: the app polls every 5 s here (`Store.cannedPollInterval`), the default is 60.
+scale=$(awk 'BEGIN { printf "%.4f", 5 / 60 }')
+measure "polling" "${edges%% *}" --canned
+scale=1
 
 # What the rings cost: the same bar at rest with no working session, WindowServer's share beside the first one's.
 scenario=busy

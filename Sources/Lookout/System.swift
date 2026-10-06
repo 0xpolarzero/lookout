@@ -265,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let i = CommandLine.arguments.firstIndex(of: "--demo") {
             let name = CommandLine.arguments.dropFirst(i + 1).first ?? ""
             Demo.populate(store, Demo.Scenario(rawValue: name) ?? .busy)
-            if CommandLine.arguments.contains("--lifecycle") { store.startLifecycle() }
+            if CommandLine.arguments.contains("--lifecycle") { store.startLifecycle(canned: CommandLine.arguments.contains("--canned")) }
         } else {
             store.start()
         }

@@ -82,3 +82,32 @@ import Testing
         #expect(client.remembered == 3)
     }
 }
+
+/// The answers the idle gate's polling run serves (`--canned`): a poll through them gets every source of every repository, the
+/// first time in full and the next time (the repository's branch and a commit's headline, asked once, apart) as 304s.
+@MainActor
+@Suite struct CannedPolling {
+    @Test func aPollGetsEverySourceAndTheNextOneIsAll304s() async {
+        let s = Store()
+        Demo.populate(s, .agents)
+        s.settings.reviewRequests = false
+        s.lastSync = nil
+        s.repoErrors = [:]
+        let statuses = OSAllocatedUnfairLock(initialState: [Int]())
+        s.gh.transport = { request in
+            let answer = try await CannedGitHub.transport(request)
+            // (The graph has no ETag: it is answered in full every time.)
+            if request.url!.path != "/graphql" { statuses.withLock { $0.append((answer.1 as! HTTPURLResponse).statusCode) } }
+            return answer
+        }
+        await s.pollAll()
+        let first = statuses.withLock { $0 }
+        #expect(s.repoErrors.isEmpty && !first.isEmpty && first.allSatisfy { $0 == 200 }, "\(s.repoErrors) \(first)")
+        // What the CI answers say reached the store: the demo's failing repository passes in them.
+        #expect(s.ci["apple/swift-format"]?.state == .success)
+        statuses.withLock { $0 = [] }
+        await s.pollAll()
+        let second = statuses.withLock { $0 }
+        #expect(s.repoErrors.isEmpty && !second.isEmpty && second.allSatisfy { $0 == 304 }, "\(second)")
+    }
+}
