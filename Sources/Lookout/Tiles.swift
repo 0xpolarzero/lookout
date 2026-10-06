@@ -87,7 +87,7 @@ struct StatusTile: View {
         } else if label.unicodeScalars.first.map({ $0.properties.isEmoji && $0.value > 0xFF }) == true {
             Text(label).font(.system(size: 14)).lineLimit(1)
         } else {
-            Text(label).font(Theme.Typography.tile).minimumScaleFactor(0.6).lineLimit(1)
+            Text(label).font(Theme.Typography.tile).lineLimit(1)
         }
     }
 }

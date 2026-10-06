@@ -318,14 +318,19 @@ enum AgentLabel {
         var result: [String: String] = [:]
         for item in items {
             if let custom = item.custom, !custom.isEmpty {
-                result[item.id] = custom
+                result[item.id] = sanitize(custom) ?? custom
                 continue
             }
             let options = candidates(item.title, folder: folders[item.id])
             var label = options.first { !taken.contains($0) }
             if label == nil {
                 let base = String((options.first ?? "S").prefix(1))
-                label = (1...99).lazy.map { "\(base)\($0)" }.first { !taken.contains($0) }
+                // Two characters still, which is all a tile holds at its type size: the project's letter with a digit or
+                // another letter, then any pair.
+                let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+                let spare = Array("123456789").map { "\(base)\($0)" } + letters.map { "\(base)\($0)" }
+                    + letters.flatMap { a in letters.map { "\(a)\($0)" } }
+                label = spare.first { !taken.contains($0) } ?? "··"
             }
             taken.insert(label!)
             result[item.id] = label!
@@ -344,8 +349,9 @@ enum AgentLabel {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = trimmed.first else { return nil }
         if isEmoji(String(first)) { return String(first) }
-        let letters = String(trimmed.filter { !$0.isWhitespace }.prefix(2))
-        return letters.isEmpty ? nil : letters.uppercased()
+        // Upper-cased first: ß is SS, and the limit is what is drawn.
+        let letters = String(trimmed.filter { !$0.isWhitespace }.uppercased().prefix(2))
+        return letters.isEmpty ? nil : letters
     }
 }
 

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Lookout
@@ -221,6 +222,21 @@ import Testing
         #expect(AgentLabel.sanitize("🐧 linux") == "🐧")
         #expect(AgentLabel.sanitize("1") == "1")
         #expect(AgentLabel.sanitize("   ") == nil)
+        // Upper-cased before it is cut: ß is SS, so two of them are still two characters.
+        #expect(AgentLabel.sanitize("ßß") == "SS")
+    }
+
+    @Test func everyLabelIsTwoCharactersWideEnoughForTheTileAtItsTypeSize() {
+        // Past the nine digits a project's tiles take another letter, never a third character.
+        let items = (0..<60).map { (id: "s\($0)", title: "Same title", custom: String?.none) }
+        let labels = AgentLabel.assign(items).values
+        #expect(Set(labels).count == 60 && labels.allSatisfy { $0.count == 2 })
+        // The widest two the tile can be given fit it without scaling the type down.
+        let base = NSFont.systemFont(ofSize: 11, weight: .bold)
+        let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 11) } ?? base
+        for pair in ["WW", "MM", "W9", "SS"] {
+            #expect(ceil((pair as NSString).size(withAttributes: [.font: font]).width) <= Theme.Metrics.tile - 2, "\(pair)")
+        }
     }
 }
 
