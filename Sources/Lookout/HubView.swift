@@ -276,9 +276,9 @@ struct LookoutHub: View {
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
         let free = max(160, maxLength - 360 - ciExtra)
         guard store.agents.enabled else { return (free, 0) }
-        // Whole 44pt session rows, so the last one showing is never cut through its tile.
-        let row = Theme.Metrics.twoLineRow
-        let agents = max(3, (free * 0.45 / row).rounded(.down)) * row
+        // Not under the room for three sessions, their headers and "Show all" (the list itself stops on a whole row, and is no
+        // taller than it is).
+        let agents = max(SessionGroup.leastHeight, free * 0.45)
         return (free - agents, agents)
     }
 

@@ -91,7 +91,7 @@ struct SessionsList: View {
                     ForEach(group.rows) { row($0, group.placement) }
                 }
                 if listed.hidden > 0 {
-                    MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail, action: moreAction).id("s:more")
+                    MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail, action: moreAction).capEdge().id("s:more")
                 }
             }
         }
@@ -113,7 +113,9 @@ struct SessionsList: View {
     }
 }
 
-/// The groups in a scroll view that stops on a whole row, lazy once the list is long.
+/// The groups in a scroll view that stops on a whole row, lazy once the list is long. Cut short while Sessions isn't
+/// focused, it ends with "Show all 12" (the system's scrollers are overlay-style, so nothing else says there is more),
+/// which gives Sessions the room.
 struct SessionsScroll: View {
     let store: Store
     let ui: UIState
@@ -124,9 +126,25 @@ struct SessionsScroll: View {
 
     var body: some View {
         // Read here, not in the hub's body: the list changing length doesn't redraw the hub.
-        CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count), fades: false, indicators: true) {
-            SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
+        let listed = store.listedGroups(expanded: hub.sessionsExpanded)
+        let count = listed.groups.reduce(0) { $0 + $1.rows.count } + listed.hidden
+        let cut = hub.focus != .agents && hub.query.trimmingCharacters(in: .whitespaces).isEmpty
+            && SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0) > cap + 0.5
+        VStack(spacing: 0) {
+            CappedScroll(cap: cut ? cap - Theme.Metrics.pitch : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count),
+                         fades: false, indicators: true) {
+                SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
+            }
+            if cut {
+                MoreSessionsRow(label: "Show all \(count)", spoken: "All " + plural(count, "session"), hub: hub, rail: rail,
+                                pickable: false, action: showAll)
+                    .padding(rail == .leading ? .trailing : .leading, inset)
+            }
         }
+    }
+
+    private func showAll() {
+        LookoutHub.animate(LookoutHub.refocus) { hub.focus = .agents }
     }
 }
 
@@ -138,14 +156,20 @@ extension SessionGroup {
     /// A row's height: a third line for what it left running.
     static func height(of row: AgentRow) -> CGFloat { row.tasks.isEmpty ? Theme.Metrics.twoLineRow : Theme.Metrics.taskRow }
 
+    /// The height of `groups` laid out: headers, the gaps between groups and every row.
+    static func height(_ groups: [SessionGroup]) -> CGFloat {
+        groups.enumerated().reduce(0) { sum, entry in
+            sum + (entry.offset == 0 ? 0 : gap) + headerHeight + entry.element.rows.reduce(0) { $0 + height(of: $1) }
+        }
+    }
+
+    /// The least the list shows kept open: three sessions under two headers, with the gap between, and the "Show all"
+    /// row that ends a list cut short (a list with fewer sessions is only as tall as it is).
+    static let leastHeight = 3 * Theme.Metrics.twoLineRow + 2 * headerHeight + gap + Theme.Metrics.pitch
+
     /// What a peek of `cap` points lists: the groups in order, whole rows only (a header never stands alone), and
     /// how many sessions are left out. With any left out the last line is the "+N more" row, which is in the cap.
     static func peek(_ groups: [SessionGroup], cap: CGFloat) -> (groups: [SessionGroup], hidden: Int) {
-        func height(_ groups: [SessionGroup]) -> CGFloat {
-            groups.enumerated().reduce(0) { sum, entry in
-                sum + (entry.offset == 0 ? 0 : gap) + headerHeight + entry.element.rows.reduce(0) { $0 + Self.height(of: $1) }
-            }
-        }
         let total = groups.reduce(0) { $0 + $1.rows.count }
         var shown: [SessionGroup] = []
         outer: for group in groups {
@@ -232,28 +256,43 @@ struct SessionGroupHeader: View {
     }
 }
 
-/// "+3 more" at the end of the list: shows the rest.
+/// "+3 more" at the end of the list: shows the rest. Also the list's own "Show all" when it is cut short, which no key
+/// picks (⌘3 gives Sessions the room too).
 struct MoreSessionsRow: View {
-    let hidden: Int
+    let label: String
+    let spoken: String
     let hub: HubState
     let rail: HorizontalEdge
+    var pickable = true
     let action: () -> Void
     @State private var hovering = false
 
+    init(hidden: Int, hub: HubState, rail: HorizontalEdge, action: @escaping () -> Void) {
+        self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hub: hub, rail: rail, action: action)
+    }
+
+    init(label: String, spoken: String, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
+        self.label = label
+        self.spoken = spoken
+        self.hub = hub
+        self.rail = rail
+        self.pickable = pickable
+        self.action = action
+    }
+
     var body: some View {
-        let picked = hub.selection == "s:more"
+        let picked = pickable && hub.selection == "s:more"
         Button(action: action) {
             RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
                     picked: picked, tile: { Color.clear }) {
-                Text("+\(hidden) more").font(Theme.Typography.body).foregroundStyle(Theme.secondary)
+                Text(label).font(Theme.Typography.body).foregroundStyle(Theme.secondary)
             }
         }
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
         .onHover { hovering = $0 }
-        .accessibilityLabel(plural(hidden, "more session"))
+        .accessibilityLabel(spoken)
         .accessibilityHint("Shows them")
-        .capEdge()
     }
 }
 
