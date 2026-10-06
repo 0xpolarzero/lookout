@@ -5,9 +5,9 @@ import SwiftUI
 /// `--demo [scenario]`: fake data for trying the UI without touching GitHub or the saved state.
 @MainActor
 enum Demo {
-    /// The first group is the original `--demo` set. The rest are the states DESIGN.md 5.9 lists, each on top of the
+    /// `busy` to `agents` are the plain `--demo` sets. The rest are the states DESIGN.md 5.9 lists, each on top of the
     /// `agents` data (the bar with everything on it) unless noted, so a shot shows the state in a realistic bar.
-    enum Scenario: String, CaseIterable {
+    enum Scenario: String {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
         // Inbox and sync causes.
         case signedOut, reposFailed, reviewRequestsFailed, reviewRequestsCut, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
@@ -64,11 +64,11 @@ enum Demo {
         case .busy:
             break
         case .botsOnly:
-            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
-            for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+            nothingForYou(store)
+            passing(store)
         case .allClear:
             store.items = store.items.filter { !$0.state.isOpen }
-            for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+            passing(store)
         case .snoozed:
             store.settings.snoozeUntil = Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: now)
                 .map { $0 > now ? $0 : now.addingTimeInterval(3600) }
@@ -111,13 +111,13 @@ enum Demo {
         case .reviewRequestsFailed:
             // The repositories synced and nothing is for you, but the search for review requests failed: no claim.
             agents(store, now)
-            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            nothingForYou(store)
             passing(store)
             store.reviewRequestsError = "API rate limit exceeded"
         case .reviewRequestsCut:
             // The search worked, but GitHub gave up before it had looked at everything: nothing can say the rest is empty.
             agents(store, now)
-            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            nothingForYou(store)
             passing(store)
             store.reviewRequestsIncomplete = true
         case .rateLimited:
@@ -127,7 +127,7 @@ enum Demo {
         case .needsYouEmpty:
             // Nothing for you, CI healthy, bot items still unread: "All caught up" with a way to the Bots tab.
             agents(store, now)
-            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            nothingForYou(store)
             passing(store)
         case .botsEmpty:
             agents(store, now)
@@ -223,14 +223,22 @@ enum Demo {
             agents(store, now)
             store.ci = [:]
         case .sessionsWaiting10:
-            sessionsWaiting10(store, now)
+            // Twelve sessions, ten of them waiting: none of them may be hidden.
+            questions(store, now, id: "q", total: 12, waiting: 10, minutes: 7)
         case .sessionsWaiting20:
-            sessionsWaiting20(store, now)
+            // Twenty waiting and two finished: more than a 720pt screen's bar has room for, so the bar keeps its other cells
+            // and a "+N" holds the rest.
+            questions(store, now, id: "w", total: 22, waiting: 20, minutes: 3)
         case .sessionsLateWaiting:
             sessionsLateWaiting(store, now)
         case .sessionsPending12:
             sessionsPending12(store, now)
         }
+    }
+
+    /// Only the bot items and the finished ones left: nothing is for you.
+    private static func nothingForYou(_ store: Store) {
+        store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
     }
 
     /// Every CI repo green.
@@ -255,10 +263,6 @@ enum Demo {
                                    updatedAt: now.addingTimeInterval(-age)))
         })
     }
-
-    static let hoverID = "demo-hover"
-    static let selectedID = "demo-selected"
-    static let blockedAgentID = "local_demo-lcu"
 
     /// A session as the Claude app reports it: a finished turn with a summary, or (`running`) mid-turn.
     private static func session(_ id: String, _ title: String, _ folder: String?, minutes: Double, turns: Int = 4,
@@ -310,9 +314,9 @@ enum Demo {
     }
 
     /// The sessions in every state: a waiting one, a working one, finished ones (unread and read), new activity.
-    static func agents(_ store: Store, _ now: Date) {
+    private static func agents(_ store: Store, _ now: Date) {
         let listed = [
-            Listed(session(blockedAgentID, "LCU update notifications", "lcu", minutes: 2, blocked: true,
+            Listed(session("local_demo-lcu", "LCU update notifications", "lcu", minutes: 2, blocked: true,
                            detail: "Should updates install silently, or ask first each time?"), unread: true, icon: "bell.badge"),
             Listed(session("local_demo-ci", "CI failure diagnosis", "microsandbox", minutes: 4,
                            detail: "Fixed the flaky sandbox test; CI is green on the branch."), unread: true, icon: "ladybug"),
@@ -373,23 +377,12 @@ enum Demo {
         sessions(store, now, listed)
     }
 
-    /// Twelve sessions, ten of them waiting for you: more than the bar has room for, and none of them may be hidden.
-    private static func sessionsWaiting10(_ store: Store, _ now: Date) {
+    /// `total` sessions, the first `waiting` of them waiting for you, `minutes` apart: more than the bar has room for.
+    private static func questions(_ store: Store, _ now: Date, id: String, total: Int, waiting: Int, minutes: Int) {
         let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
-        let listed = (0..<12).map { i in
-            Listed(session("q\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 7 + 1), blocked: i < 10,
-                           detail: i < 10 ? "Which one should it be?" : "Finished turn \(i)."), unread: i < 10)
-        }
-        sessions(store, now, listed)
-    }
-
-    /// Twenty sessions waiting for you and two finished: more than a 720pt screen's bar has room for, so the bar keeps
-    /// its other cells and a "+N" holds the rest.
-    private static func sessionsWaiting20(_ store: Store, _ now: Date) {
-        let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
-        let listed = (0..<22).map { i in
-            Listed(session("w\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 3 + 1), blocked: i < 20,
-                           detail: i < 20 ? "Which one should it be?" : "Finished turn \(i)."), unread: i < 20)
+        let listed = (0..<total).map { i in
+            Listed(session("\(id)\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * minutes + 1), blocked: i < waiting,
+                           detail: i < waiting ? "Which one should it be?" : "Finished turn \(i)."), unread: i < waiting)
         }
         sessions(store, now, listed)
     }
@@ -425,11 +418,10 @@ enum Demo {
     private static func items(_ now: Date) -> [InboxItem] {
         var counter = 0
         func item(_ kind: EventKind, _ repo: String, _ n: Int, _ title: String, _ author: String, _ snippet: String,
-                  _ minutesAgo: Double, _ state: ItemState = .unread, app: Bool = false, path: String? = nil,
-                  id: String? = nil) -> InboxItem {
+                  _ minutesAgo: Double, _ state: ItemState = .unread, app: Bool = false, path: String? = nil) -> InboxItem {
             counter += 1
             let login = author.replacingOccurrences(of: "[bot]", with: "")
-            return InboxItem(id: id ?? "demo-\(counter)", repo: repo, kind: kind, number: n, title: title, snippet: snippet,
+            return InboxItem(id: "demo-\(counter)", repo: repo, kind: kind, number: n, title: title, snippet: snippet,
                              author: author, avatar: URL(string: "https://github.com/\(login).png"), authorIsApp: app,
                              url: URL(string: "https://github.com/\(repo)/issues/\(n)")!,
                              createdAt: now.addingTimeInterval(-minutesAgo * 60), state: state, path: path)
@@ -438,11 +430,11 @@ enum Demo {
             // Needs you
             item(.reviewComment, "ziglang/zig", 21877, "std.Io: add vectored reads to File", "andrewrk",
                  "This should take the buffer by slice instead, otherwise we copy twice on the hot path.", 3,
-                 path: "lib/std/Io/File.zig", id: hoverID),
+                 path: "lib/std/Io/File.zig"),
             item(.prComment, "apple/swift-format", 1042, "Respect trailing comma config in collection literals", "allevato",
                  "Thanks! Could you add a test for the nested array case?", 18),
             item(.issueOpened, "0xpolarzero/lookout", 12, "Pill overlaps the Dock when it's on the right", "mattt",
-                 "With the Dock pinned right, the pill sits under it. Maybe snap to the visible frame?", 42, id: selectedID),
+                 "With the Dock pinned right, the pill sits under it. Maybe snap to the visible frame?", 42),
             item(.reviewRequested, "apple/swift-format", 1051, "Add --lines option to format a range", "ahoppen", "", 65),
             item(.prOpened, "0xpolarzero/lookout", 15, "Add GitHub Enterprise host setting", "kylef",
                  "Adds an API base URL field in Settings and threads it through the client.", 95),
