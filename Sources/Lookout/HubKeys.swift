@@ -40,13 +40,13 @@ final class HubKeys {
         if (event.window?.firstResponder as? NSTextView)?.hasMarkedText() == true { return false }
         // What a field or overlay has open (a token, suggestions, a tooltip) is the first thing Esc closes, the search field's
         // focus included: a tooltip over a picked result goes before the query does.
-        if event.keyCode == UInt16(kVK_Escape), event.modifierFlags.intersection(Shortcut.relevant).isEmpty, EscapeRoute.run() { return true }
+        let flags = event.modifierFlags.intersection(Shortcut.relevant)
+        if event.keyCode == UInt16(kVK_Escape), flags.isEmpty, EscapeRoute.run() { return true }
         if hub.inbox.searchFocused, hub.page == .main, let handled = searchKey(event) { return handled }
         // A focused control (Clear, More, Undo) takes Space and Return: they are not the search's or the row's.
-        if hub.controls.isActive, event.modifierFlags.intersection(Shortcut.relevant).isEmpty,
+        if hub.controls.isActive, flags.isEmpty,
            [kVK_Space, kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) { return false }
         let editing = event.window?.firstResponder is NSText
-        let flags = event.modifierFlags.intersection(Shortcut.relevant)
         let shortcut = Shortcut(event)
         // A field keeps what it types, and the chords it has no use for stay the hub's: Settings, Check now, the focus keys.
         if editing, event.keyCode != UInt16(kVK_Escape) { return chord(event, flags: flags, shortcut: shortcut, editing: true) }
@@ -61,10 +61,6 @@ final class HubKeys {
             else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
             else { close() }
             return true
-        }
-        // A control the Tab ring is on takes Return and Space itself; they don't act on the row that is picked.
-        if hub.controls.isActive, flags.isEmpty, [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) {
-            return false
         }
         // What the user bound comes first, even ⌘Z and the hub's own chords (⌘1, ⌘F, ⌘,): they are what is left of the key
         // when the action has nothing to act on (no row picked), as undo is.
@@ -116,10 +112,10 @@ final class HubKeys {
         }
         let targets = targets()
         // A configured action comes before the arrows' own meaning: Right bound to "Mark read / unread" does that.
-        if event.keyCode == 125 || event.keyCode == 126, flags.isEmpty, !bound {
+        if [kVK_DownArrow, kVK_UpArrow].contains(Int(event.keyCode)), flags.isEmpty, !bound {
             // The arrows walk the rows, so a control the Tab ring was on lets go: Space and Return are the pick's again.
             if hub.controls.isActive { event.window?.makeFirstResponder(nil) }
-            move(down: event.keyCode == 125, in: targets)
+            move(down: Int(event.keyCode) == kVK_DownArrow, in: targets)
             return true
         }
         if flags.isEmpty, !bound, let step = Self.horizontalStep(event.keyCode), horizontal(step, in: targets, event: event, shortcut: shortcut) { return true }
@@ -133,18 +129,23 @@ final class HubKeys {
         if Self.opensRowMenu(event, flags: flags) { return openRowMenu() }
         // What no action took: ⌘F, and typing, which starts the search (a letter someone bound to an action is that action's,
         // while a row is picked to act on).
-        if searchKey(event, flags: flags) { return true }
-        if flags.subtracting(.shift).isEmpty, let typed = event.characters, !typed.isEmpty,
-           typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }),
-           !(typed == " " && hub.query.isEmpty) {
+        if searchChord(event, flags: flags) { return true }
+        if flags.subtracting(.shift).isEmpty, let typed = Self.printable(event), !(typed == " " && hub.query.isEmpty) {
             setQuery(hub.query + typed)
             return true
         }
         return false
     }
 
+    /// What a key types, when it is printable text (not a control character or a function key).
+    private static func printable(_ event: NSEvent) -> String? {
+        guard let typed = event.characters, !typed.isEmpty,
+              typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }) else { return nil }
+        return typed
+    }
+
     /// ⌘F: starts the search.
-    private func searchKey(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+    private func searchChord(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
         guard flags == .command, event.charactersIgnoringModifiers == "f" else { return false }
         hub.beginSearch()
         return true
@@ -355,7 +356,6 @@ extension HubKeys {
 
     /// Whether a field would put this key in its text: a printable character without ⌃⌥⌘.
     private func typesText(_ event: NSEvent) -> Bool {
-        guard !Shortcut(event).hasCommandLikeModifier, let typed = event.characters, !typed.isEmpty else { return false }
-        return typed.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }
+        !Shortcut(event).hasCommandLikeModifier && Self.printable(event) != nil
     }
 }
