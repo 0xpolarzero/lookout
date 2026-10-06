@@ -1,13 +1,24 @@
 import AppKit
 import SwiftUI
 
-// The bar's own pieces: the rows of the full view beside the bar on the sides, and the strip along the top and
-// bottom, each cell next to the content it stands for.
+// The bar's own pieces: at rest, the same cells in the same order on every edge (`restBar`); kept open, the rows
+// of the full view beside the bar on the sides and the strip along the top and bottom, each cell next to the
+// content it stands for.
 
 extension LookoutHub {
+    /// The bar column on the sides: the rail of cells at rest, the rows of the full view otherwise.
+    @ViewBuilder var barColumn: some View {
+        if expanded { openColumn } else { restBar }
+    }
+
+    /// The strip along the top and bottom: the same cells at rest, the full view's segments otherwise.
+    @ViewBuilder var strip: some View {
+        if expanded { openStrip } else { restBar }
+    }
+
     /// The rows: the bar's cells on the screen side, their content beside them. With a page open, the same cells
     /// as at rest, dimmed, and settings lit at the bottom.
-    var barColumn: some View {
+    var openColumn: some View {
         VStack(alignment: side, spacing: 0) {
             VStack(alignment: side, spacing: 0) { mainRows }
                 .opacity(pageOpen ? 0.5 : 1)
@@ -142,7 +153,7 @@ extension LookoutHub {
                 row(cell: { Capsule().fill(Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: 14) },
                     detail: { pendingLabel(twoLines: false) })
                 ForEach(rows.pending) { r in
-                    row(alignment: .top, cell: { tile(r, size: 22) }, detail: { sessionBlock(r, twoLines: false) })
+                    row(alignment: .top, cell: { tile(r, size: 26) }, detail: { sessionBlock(r, twoLines: false) })
                         .capEdge()
                         .id("a:" + r.id)
                 }
@@ -177,7 +188,7 @@ extension LookoutHub {
 
     /// The bar along the top or bottom: each segment as wide as the column under it once expanded; with a page
     /// open, back to their size at rest, dimmed.
-    @ViewBuilder var strip: some View {
+    @ViewBuilder var openStrip: some View {
         let wide = showsDetail
         Group {
             HStack(spacing: 8) {
@@ -223,7 +234,7 @@ extension LookoutHub {
                         ForEach(rows.kept) { tile($0, size: 26) }
                         if !rows.pending.isEmpty {
                             Capsule().fill(Theme.Fill.selected).frame(width: 1.5, height: 14)
-                            ForEach(rows.pending) { tile($0, size: 22) }
+                            ForEach(rows.pending) { tile($0, size: 26) }
                         }
                     }
                 }
@@ -280,5 +291,151 @@ extension LookoutHub {
 
     var stripDivider: some View {
         Hairline(axis: .vertical).frame(height: 22)
+    }
+}
+
+// MARK: - At rest
+
+extension LookoutHub {
+    /// The bar's own axis: vertical on the sides, horizontal along the top and bottom.
+    var barAxis: Axis { edge.isHorizontal ? .horizontal : .vertical }
+    /// Space at both ends of the bar along its axis, so a tile sits as far from the rounded end as from the sides.
+    static let barEnd = (Theme.Metrics.bar - Theme.Metrics.pitch) / 2
+
+    /// One order on every edge (DESIGN.md 5.1): Inbox, CI | sessions, + | Update, Gear. Side edges stack it on the
+    /// rail; along the top and bottom it runs left to right.
+    @ViewBuilder var restBar: some View {
+        let axis = barAxis
+        if axis == .vertical {
+            VStack(spacing: 0) { restCells }
+                .padding(.vertical, Self.barEnd)
+                .frame(width: Self.cell)
+                .background(Theme.rail)
+        } else {
+            HStack(spacing: 0) { restCells }
+                .padding(.horizontal, Self.barEnd)
+                .frame(height: Self.cell)
+        }
+    }
+
+    @ViewBuilder var restCells: some View {
+        let axis = barAxis
+        InboxBarCell(axis: axis, needsYou: store.unreadCount(.needsYou), bots: store.unreadCount(.bots),
+                     show: { show(.inbox) }, action: openInbox)
+            .modifier(probe(.inbox))
+        if !store.ciRepos.isEmpty {
+            let summary = CIBarSummary.make(repos: store.ciRepos, status: store.ci, muted: store.mutedCI)
+            CIBarCell(axis: axis, summary: summary, show: { show(.ci) }, action: {
+                if let repo = summary.open { store.openChecks(repo) } else { show(.ci) }
+            })
+            .modifier(probe(.ci))
+        }
+        barDivider
+        if store.agents.enabled {
+            RestSessionCells(store: store, ui: ui, hub: hub, axis: axis, onRail: axis == .vertical) { show(.agents, session: $0) }
+                .modifier(probe(.agents))
+            barDivider
+        }
+        if store.updater.showsInPill {
+            UpdateBarCell(axis: axis, updater: store.updater) { hub.go(.settings) }
+        }
+        GearBarCell(axis: axis, store: store, hub: hub) { show(.controls) }
+            .modifier(probe(.controls))
+    }
+
+    /// One hairline grammar: 18pt long, 9pt of room each side, whichever way the bar runs.
+    var barDivider: some View {
+        Group {
+            if barAxis == .vertical {
+                Hairline().frame(width: 18).frame(width: Self.cell, height: Self.dividerSlot)
+            } else {
+                Hairline(axis: .vertical).frame(height: 18).frame(width: Self.dividerSlot, height: Self.cell)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+    static let dividerSlot: CGFloat = 19
+
+    /// The inbox cell's click: straight to what needs you, its newest item picked so the keys act on it at once.
+    func openInbox() {
+        withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
+            hub.go(.main)
+            hub.query = ""
+            hub.filter = .needsYou
+        }
+        if let first = store.list(.needsYou).first {
+            hub.selection = "i:" + first.id
+            hub.requestScroll("i:" + first.id)
+            ui.drawerSelection = nil
+        }
+    }
+
+    /// A cell's `Show` (VoiceOver, and Return on a focused cell): keeps the hub open on that cell's section with
+    /// the selection there. TODO(keyboard package): move VoiceOver focus into the section as well.
+    func show(_ section: HubSection, session: String? = nil) {
+        withAnimation(Self.opening.resolved(reduce: reduce)) {
+            hub.go(.main)
+            hub.focus = nil
+            hub.pinned = true
+        }
+        switch section {
+        case .inbox:
+            openInbox()
+        case .agents:
+            if let id = session ?? store.agentRows.kept.first?.id ?? store.agentRows.pending.first?.id {
+                hub.selection = "a:" + id
+                ui.drawerSelection = id
+            }
+        case .ci, .controls:
+            break
+        }
+    }
+}
+
+/// The session cells of the bar at rest: their tiles by group, the "+N", the "+". The order they show is frozen
+/// while the pointer is over the hub and applied, with a fade, once it leaves.
+struct RestSessionCells: View {
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+    let axis: Axis
+    let onRail: Bool
+    /// Show the sessions' section, picking this session (or the first).
+    let show: (String?) -> Void
+    @State private var frozen: [String]?
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    /// A project boundary: this much more than the cells' own pitch.
+    static let groupGap: CGFloat = 8
+
+    var body: some View {
+        let rows = store.agentRows
+        let slots = BarSessions.slots(kept: rows.kept, pending: rows.pending)
+        let (shown, hidden) = BarSessions.arrange(slots, frozen: frozen)
+        let byID = Dictionary(uniqueKeysWithValues: (rows.kept + rows.pending).map { ($0.id, $0) })
+        let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        layout {
+            if slots.isEmpty { SessionsAnchorCell(axis: axis) { show(nil) } }
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, slot in
+                if let row = byID[slot.id] {
+                    BarTile(row: row, axis: axis, onRail: onRail, store: store, ui: ui, hub: hub) { show(row.id) }
+                        .padding(axis == .vertical ? .top : .leading, index > 0 && shown[index - 1].group != slot.group ? Self.groupGap : 0)
+                        .transition(.opacity)
+                }
+            }
+            if hidden > 0 { MoreSessionsCell(axis: axis, count: hidden) { show(nil) } }
+            NewSessionBarCell(axis: axis, store: store) { show(nil) }
+        }
+        .animation(reduce ? nil : Theme.Motion.fade, value: shown.map(\.id))
+        .onAppear { if hub.hovering { freeze() } }
+        .onChange(of: hub.hovering) { _, over in
+            if over { freeze() } else { frozen = nil }
+        }
+    }
+
+    /// Keeps the order as it is now, whatever the sessions do until the pointer leaves.
+    private func freeze() {
+        let rows = store.agentRows
+        frozen = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending), frozen: nil, visible: .max).shown.map(\.id)
     }
 }
