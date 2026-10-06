@@ -405,6 +405,33 @@ import Testing
         #expect(hub.closePeek() && hub.section == nil)
     }
 
+    @Test func thePointerOnAnotherSectionLeavesTheMenuTheKeysHave() {
+        hub.showControls()
+        hub.enter(.inbox)
+        hub.enter(.agents)
+        #expect(hub.section == .controls && hub.menuKeys)
+        // Once it is closed, hovering works as it always did.
+        press(kVK_Escape, "\u{1b}")
+        hub.section = .ci
+        hub.enter(.inbox)
+        #expect(hub.section == .inbox)
+    }
+
+    @Test func aFocusedControlKeepsReturnAndSpaceForItself() {
+        hub.showControls()
+        let control = UUID()
+        hub.controlFocus(control, true)
+        #expect(!press(kVK_Return, "\r"))
+        #expect(!press(kVK_Space, " "))
+        // The menu's own highlight did nothing, and keeps the keys for when the control lets go.
+        #expect(!hub.pinned && hub.menuKeys)
+        // The arrows are not the control's.
+        #expect(press(kVK_DownArrow, "\u{F701}") && hub.menuPick == .repositories)
+        hub.controlFocus(control, false)
+        #expect(press(kVK_Return, "\r"))
+        #expect(hub.page == .repos)
+    }
+
     @Test func aMenuThatIsNotUpLeavesTheKeysAlone() {
         #expect(!press(kVK_DownArrow, "\u{F701}"))
         #expect(!press(kVK_Return, "\r"))

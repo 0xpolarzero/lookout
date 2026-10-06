@@ -56,15 +56,22 @@ final class HubState {
     /// one and Esc closes it. `menuPick` is the highlighted row.
     var menuKeys = false
     var menuPick = ControlsRow.keepOpen
+    /// Controls that have the keyboard (Tab with Full Keyboard Access): Return and Space are theirs, not the hub's.
+    @ObservationIgnored private var focusedControls: Set<UUID> = []
+    var controlHasFocus: Bool { !focusedControls.isEmpty }
+    func controlFocus(_ id: UUID, _ focused: Bool) {
+        if focused { focusedControls.insert(id) } else { focusedControls.remove(id) }
+    }
     /// The bar is being carried to another edge: no panels meanwhile.
     @ObservationIgnored var dragging = false
     @ObservationIgnored private var dwell: Task<Void, Never>?
 
     /// The pointer entered a section. The first panel waits for the pointer to settle (so sweeping along the edge
-    /// opens nothing); once one is open, moving to another section switches at once, with no transition.
+    /// opens nothing); once one is open, moving to another section switches at once, with no transition. Not while the
+    /// controls menu has the keyboard: it stays up (with its keys) until Esc or a row closes it.
     func enter(_ next: HubSection) {
         dwell?.cancel()
-        guard !dragging else { return }
+        guard !dragging, !menuKeys else { return }
         if section != nil {
             guard section != next else { return }
             var instant = Transaction(animation: nil)
@@ -242,6 +249,7 @@ struct LookoutHub: View {
         .motion(Self.refocus, value: hub.focus)
         .contextMenu { barMenu }
         .environment(\.colorScheme, .dark)
+        .environment(\.controlFocus) { [hub] id, focused in hub.controlFocus(id, focused) }
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
         .accessibilityElement(children: .contain)

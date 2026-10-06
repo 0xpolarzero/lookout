@@ -48,6 +48,9 @@ final class HubKeys {
             else { close() }
             return true
         }
+        // A focused control takes its own Return and Space (the Tab ring, DESIGN.md 6.2): a row's pick or the menu's
+        // highlight is not what it does.
+        if hub.controlHasFocus, flags.isEmpty, [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) { return false }
         if flags == .command, event.charactersIgnoringModifiers == "," {
             hub.go(.settings)
             return true

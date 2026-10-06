@@ -263,8 +263,31 @@ private struct FocusRing: ViewModifier {
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
-        content.focused($focused).modifier(FocusRingDrawing(radius: radius, inset: inset, focused: focused))
+        content.focused($focused).modifier(FocusRingDrawing(radius: radius, inset: inset, focused: focused)).reportsFocus(focused)
     }
+}
+
+extension EnvironmentValues {
+    /// Told when a control gains or loses the keyboard (its id, and whether it has it now): the hub's key monitor leaves
+    /// Return and Space to a control that has it (DESIGN.md 6.2).
+    @Entry var controlFocus: (UUID, Bool) -> Void = { _, _ in }
+}
+
+private struct ReportsFocus: ViewModifier {
+    let focused: Bool
+    @Environment(\.controlFocus) private var report
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: focused) { _, now in report(id, now) }
+            .onDisappear { report(id, false) }
+    }
+}
+
+extension View {
+    /// Reports real keyboard focus (never a menu's own highlight) to the hub's key monitor.
+    func reportsFocus(_ focused: Bool) -> some View { modifier(ReportsFocus(focused: focused)) }
 }
 
 extension View {
@@ -357,6 +380,7 @@ struct IconButton: View {
             .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
             .focused($focused)
             .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
+            .reportsFocus(focused)
             .accessibilityLabel(label ?? help)
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
@@ -455,6 +479,7 @@ struct MenuRow: View {
         .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.field), hover: Theme.Fill.selected, isActive: picked))
         .focused($focused)
         .focusRing(Theme.Radius.field, isFocused: focused || picked)
+        .reportsFocus(focused)
         .accessibilityLabel(title)
     }
 }
