@@ -282,6 +282,7 @@ struct SessionGroupHeader: View {
                     .font(Theme.Typography.label)
                     .foregroundStyle(group.kind == .waiting ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
                     .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
                 if folder != nil { Text("\(group.total)").font(Theme.Typography.numeral).foregroundStyle(Theme.tertiary) }
                 Spacer(minLength: 0)
                 if group.kind == .newActivity { keepAll }
@@ -290,7 +291,7 @@ struct SessionGroupHeader: View {
         .contentShape(Rectangle())
         .contextMenu { if let folder { ProjectMenu(folder: folder, name: group.title, store: store) } }
         .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isHeader)
+        .accessibilityActions { if let folder { Button("Mute \(group.title)") { store.muteFolder(folder) } } }
     }
 
     private var project: String? {
@@ -354,7 +355,7 @@ struct MoreSessionsRow: View {
             }
         }
         .buttonStyle(.plain)
-        .focusRing(Theme.Radius.row, inset: true)
+        .focusable(false)
         .onHover { hovering = $0 }
         .accessibilityLabel(spoken)
         .accessibilityHint(hint)
@@ -390,7 +391,7 @@ struct SessionRow: View {
                     picked: picked, tile: { AgentTile(row: row) }, content: { lines })
         }
         .buttonStyle(.plain)
-        .focusRing(Theme.Radius.row, inset: true)
+        .focusable(false)
         .overlay(alignment: .topTrailing) {
             if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail)) }
         }
@@ -414,6 +415,7 @@ struct SessionRow: View {
         .accessibilityHint(row.spokenHint.isEmpty ? "Opens it in Claude" : row.spokenHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityFocused($voiceOverFocused)
+        .voiceOverTarget(id, hub: hub, focus: $voiceOverFocused)
         .accessibilityAction { store.openAgent(row.id) }
         .accessibilityActions {
             Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
@@ -559,13 +561,14 @@ struct NewSessionRow: View {
             }
         }
         .buttonStyle(.plain)
-        .focusRing(Theme.Radius.row, inset: true)
+        .focusable(false)
+        // Named before the chevron goes over it: a label put on the whole would replace the chevron's own.
+        .accessibilityLabel("New session")
+        .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
         .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail) - 6) }
         .onHover { hovering = $0 }
         .padding(rail == .leading ? .trailing : .leading, inset)
         .onChange(of: hub.projectsMenuRequest) { _, _ in presentProjects() }
-        .accessibilityLabel("New session")
-        .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
     }
 
     /// The chevron opens the menu of projects: an AppKit menu, so → on the row can open it too.
@@ -751,6 +754,7 @@ extension LookoutHub {
                       onFocus: showsDetail ? {
                           withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = hub.focus == .agents ? nil : .agents }
                       } : nil) {}
+            .voiceOverTarget("h:agents", hub: hub)
     }
 
     /// The first row of Waiting for you, picked as the keys would, and scrolled to.

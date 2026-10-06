@@ -38,8 +38,8 @@ final class HubState {
     /// CI is folded to its header because the screen leaves no room for its rows (`LookoutHub.foldsCI`): they aren't
     /// targets while they aren't drawn. Set by the full view's layout.
     var ciFolded = false
-    /// The bar's CI cell asked VoiceOver to move into CI's section (`showCI`); the section's header answers it.
-    var ciFocusPending = false
+    /// Where VoiceOver's cursor is asked to go (a bar cell's Show, the hub opening); the view with that key answers it.
+    var voiceOverRequest: VoiceOverRequest?
     /// Which controls have the Tab ring: the key monitor leaves them Return and Space (see `HubKeys.key`).
     @ObservationIgnored let controls = ControlFocus()
     var filter: InboxFilter = .needsYou {
@@ -269,6 +269,7 @@ struct LookoutHub: View {
         .environment(\.controlFocus, hub.controls)
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
+        .background(HubAnnouncer(store: store, hub: hub))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lookout")
         .accessibilityHint("Up and down to pick, Return to open, Delete to finish, Escape to go back")

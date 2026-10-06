@@ -74,7 +74,7 @@ import Testing
         #expect(hub.focus == nil)
         #expect(hub.selection == "c:b/bad")
         #expect(hub.keyboardSelection?.id == "c:b/bad")
-        #expect(hub.ciFocusPending)
+        #expect(hub.voiceOverRequest?.target == "h:ci")
     }
 
     // MARK: A focused control

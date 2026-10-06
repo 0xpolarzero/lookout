@@ -145,8 +145,8 @@ struct BarAction: Identifiable {
 
 /// The one element type of the bar: a 36pt slot along the bar's axis, as deep as the bar across it, holding a
 /// 26pt face centred. A button with a label, a value and a hint, and a `Show` action that keeps the hub open on its
-/// section. `face` is told when the pointer is over the cell; the focus ring (Tab, or the keyboard pick) is drawn
-/// round it.
+/// section (which Return on a focused cell does too). `face` is told when the pointer is over the cell; the focus ring
+/// (Tab, or the keyboard pick) is drawn round it.
 struct BarCell<Face: View>: View {
     /// The bar's own axis: vertical on the sides, horizontal along the top and bottom.
     let axis: Axis
@@ -175,6 +175,13 @@ struct BarCell<Face: View>: View {
         }
         .buttonStyle(.plain)
         .focused($focused)
+        .reportsControlFocus(focused)
+        // Return and Space on a focused cell keep the hub open on its section (DESIGN.md 6.1); a click does what it did.
+        .onKeyPress(keys: [.return, .space]) { press in
+            guard let show, press.modifiers.isEmpty else { return .ignored }
+            show()
+            return .handled
+        }
         .onHover { hovering = $0 }
         .motion(Theme.Motion.hover, value: hovering)
         .modifier(BarCellHelp(help: help))

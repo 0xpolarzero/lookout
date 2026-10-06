@@ -146,7 +146,7 @@ struct CIRow: View {
             .rowHighlight(hover: hover, picked: selected && !hover)
         }
         .buttonStyle(.plain)
-        .focusRing(Theme.Radius.row, inset: true)
+        .focusable(false)
         .accessibilityLabel(title)
         .accessibilityValue(CISpeech.value(entry, now: now))
         .accessibilityHint("Opens its checks. More actions available.")
@@ -222,7 +222,7 @@ private struct CIQuietRow: View {
             .rowHighlight(hover: hover, picked: selected && !hover)
         }
         .buttonStyle(.plain)
-        .focusRing(Theme.Radius.row, inset: true)
+        .focusable(false)
         .accessibilityLabel(list.quietName)
         .accessibilityValue("\(list.quietSpeech), \(open ? "expanded" : "collapsed")")
         .accessibilityHint(open ? "Hides the repositories" : "Lists the repositories")
@@ -269,7 +269,7 @@ private struct CINameRow: View {
             .rowHighlight(hover: hover, picked: selected && !hover)
         }
         .buttonStyle(.plain)
-        .focusRing(Theme.Radius.row, inset: true)
+        .focusable(false)
         .accessibilityLabel(title)
         .accessibilityValue(CISpeech.value(entry, now: now))
         .accessibilityHint("Opens its checks. More actions available.")
@@ -292,7 +292,7 @@ extension LookoutHub {
         } : nil
         return SectionHeader(title: "CI", status: ciPhrase, focused: focused, expandHelp: focused ? "Back to all sections" : "Expand CI",
                              onFocus: toggle) {}
-            .modifier(CIShowTarget(hub: hub))
+            .voiceOverTarget("h:ci", hub: hub)
     }
 
     /// "2 failing" in red; "1 running" while nothing fails; nothing once everything has passed. Only while CI is just its
@@ -465,27 +465,6 @@ private struct CapEdgeIf: ViewModifier {
 
 // MARK: - Keys
 
-/// The CI header takes VoiceOver's focus when the bar's Show asks for it.
-private struct CIShowTarget: ViewModifier {
-    let hub: HubState
-    @AccessibilityFocusState private var focused: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .accessibilityFocused($focused)
-            // `initial`: the header may have appeared with the hub opening, after the request was made.
-            .onChange(of: hub.ciFocusPending, initial: true) { _, pending in
-                guard pending else { return }
-                Task { @MainActor in
-                    // Let the opened hub lay out before focus moves into it.
-                    try? await Task.sleep(for: .milliseconds(100))
-                    focused = true
-                    hub.ciFocusPending = false
-                }
-            }
-    }
-}
-
 extension HubState {
     /// The bar's CI cell, shown (VoiceOver's Show): the hub stays open on CI, with its first row picked and VoiceOver's
     /// focus moved to its header. Another section's focus, or a search, would hide the rows, so they step back.
@@ -498,7 +477,7 @@ extension HubState {
             ui.drawerSelection = nil
             requestScroll(first)
         }
-        ciFocusPending = true
+        moveVoiceOver(to: "h:ci")
     }
 
     /// Opens or closes the Passing group in place.

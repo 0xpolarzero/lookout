@@ -230,6 +230,7 @@ extension LookoutHub {
         Tabs(label: "Inbox filter", tabs: InboxFilter.allCases.map(tab), selection: hub.filter) { f in
             withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = f }
         }
+        .voiceOverTarget("h:inbox", hub: hub)
     }
 
     func tab(_ f: InboxFilter) -> Tabs<InboxFilter>.Tab {
@@ -390,7 +391,10 @@ struct InboxList: View {
         let shown = PeekCut.shown(count: items.count, height: Theme.Metrics.twoLineRow, spacing: Self.spacing, cap: cap)
         return VStack(spacing: 0) {
             VStack(spacing: Self.spacing) {
-                ForEach(items.prefix(shown)) { InboxRow(item: $0, store: store, ui: ui, hub: hub) }
+                ForEach(items.prefix(shown)) { InboxRow(item: $0, store: store, ui: ui, hub: hub, rotor: rotor) }
+            }
+            .accessibilityRotor("Unread") {
+                ForEach(items.prefix(shown).filter { $0.state == .unread }) { AccessibilityRotorEntry(Text($0.title), id: $0.id, in: rotor) }
             }
             if shown < items.count {
                 MoreRow(text: "+\(items.count - shown) more", label: plural(items.count - shown, "more item"),
@@ -514,6 +518,7 @@ struct InboxSearchField: View {
                 .focused($focused)
                 .focusEffectDisabled()
                 .foregroundStyle(Theme.text)
+                .accessibilityLabel("Search inbox and sessions")
             if !hub.query.isEmpty {
                 // Its own element after the field: VoiceOver reads it, and the field keeps its text as its value.
                 Text(summary).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1).fixedSize()

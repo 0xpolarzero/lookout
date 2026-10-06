@@ -37,7 +37,7 @@ extension ItemState {
 
 /// An inbox item on two lines, 44pt in every tab (see DESIGN.md 4.4):
 /// `[dot][avatar] title … age / kind · meta … action`. The one action (Done, or Restore) shows on hover, on the
-/// keyboard's pick, and on keyboard or VoiceOver focus; everything else is in the context menu, a key and the
+/// keyboard's pick and on VoiceOver focus; everything else is in the context menu, a key and the
 /// accessibility actions. A click opens the item on GitHub and reads it.
 struct InboxRow: View {
     let item: InboxItem
@@ -47,7 +47,6 @@ struct InboxRow: View {
     /// Set by the list that holds the row, so the "Unread" rotor can find it.
     var rotor: Namespace.ID?
     @State private var hover = false
-    @FocusState private var focused: Bool
     @AccessibilityFocusState private var spoken: Bool
     @Environment(\.resolved) private var resolved
 
@@ -61,12 +60,11 @@ struct InboxRow: View {
     private var low: Bool { store.isLowPriority(item) }
 
     var body: some View {
-        let showsAction = hover || selected || focused || spoken
+        let showsAction = hover || selected || spoken
         ZStack(alignment: .bottomTrailing) {
             Button { store.open(item) } label: { label }
                 .buttonStyle(.plain)
-                .focused($focused)
-                .focusRing(Theme.Radius.row, inset: true, isFocused: focused)
+                .focusable(false)
                 .help(tooltip)
             if showsAction {
                 // In the room line 2 keeps for it (`secondLine`), level with it and with the age above.
@@ -86,6 +84,7 @@ struct InboxRow: View {
         .accessibilityHint("Opens on GitHub. More actions available.")
         .accessibilityAddTraits(.isButton)
         .accessibilityFocused($spoken)
+        .voiceOverTarget(key, hub: hub, focus: $spoken)
         .accessibilityAction { store.open(item) }
         .accessibilityActions {
             Button("Open on GitHub") { store.open(item) }

@@ -1,0 +1,282 @@
+import AppKit
+import SwiftUI
+import Testing
+@testable import Lookout
+
+/// One element of the accessibility tree VoiceOver would read, as SwiftUI builds it for a hosted view.
+struct AXNode {
+    let role: String
+    let label: String
+    let value: String
+    let help: String
+    let selected: Bool
+    let actions: [String]
+    let children: [AXNode]
+
+    /// This element and everything under it.
+    var all: [AXNode] { [self] + children.flatMap(\.all) }
+    func descendants(_ role: String) -> [AXNode] { all.filter { $0.role == role } }
+    func first(_ role: String, _ label: String) -> AXNode? { all.first { $0.role == role && $0.label == label } }
+
+    /// The controls: what a screen reader user presses, ticks or types in, so each must say what it is.
+    static let controls: Set<String> = ["AXButton", "AXMenuButton", "AXPopUpButton", "AXCheckBox", "AXRadioButton", "AXTextField",
+                                        "AXTextArea", "AXSlider", "AXLink", "AXComboBox"]
+}
+
+/// The hub in a window of its own, offscreen, and its accessibility tree.
+@MainActor
+enum AccessibilityTree {
+    /// Rendering needs SwiftUI to believe an assistive technology is attached: it builds the tree only then.
+    private static let enabled: Void = {
+        _ = NSApplication.shared
+        NSApp.perform(NSSelectorFromString("setAccessibilityEnhancedUserInterface:"), with: true as NSNumber)
+    }()
+
+    /// The tree of a hub on `edge`, put in the state `configure` asks for once it is on screen.
+    static func render(edge: DockEdge = .right, scenario: Demo.Scenario = .agents, size: CGSize = CGSize(width: 900, height: 800),
+                       configure: (Store, HubState) -> Void = { _, _ in }) async throws -> AXNode {
+        _ = enabled
+        let store = Store()
+        Demo.populate(store, scenario)
+        store.agents.expanded = true
+        let hub = HubState()
+        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: edge), hub: hub, maxLength: 700, openLength: 700,
+                              maxWidth: size.width, barLength: 700)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame.size = size
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        configure(store, hub)
+        try await Task.sleep(for: .seconds(0.7))
+        hosting.layoutSubtreeIfNeeded()
+        return node(hosting)
+    }
+
+    private static func node(_ element: Any) -> AXNode {
+        guard let object = element as? NSObject else { return AXNode(role: "?", label: "", value: "", help: "", selected: false, actions: [], children: []) }
+        func string(_ key: String) -> String { (object.value(forKey: key) as? String) ?? "" }
+        let role = string("accessibilityRole")
+        // A scroll bar's parts are the system's own.
+        let children = role == "AXScrollBar" ? [] : ((object.value(forKey: "accessibilityChildren") as? [Any]) ?? []).map(node)
+        let value = object.value(forKey: "accessibilityValue").map { "\($0)" } ?? ""
+        let actions = (object.value(forKey: "accessibilityCustomActions") as? [NSAccessibilityCustomAction])?.map(\.name) ?? []
+        return AXNode(role: role, label: string("accessibilityLabel"), value: value, help: string("accessibilityHelp"),
+                      selected: (object.value(forKey: "accessibilitySelected") as? Bool) ?? false, actions: actions, children: children)
+    }
+}
+
+@MainActor
+@Suite struct AccessibilityTreeTests {
+    /// Every control of the hub in `state` has a name, wherever it is.
+    private func unnamed(_ state: String, edge: DockEdge = .right, configure: @escaping (Store, HubState) -> Void) async throws -> [String] {
+        let tree = try await AccessibilityTree.render(edge: edge, configure: configure)
+        return tree.all.filter { AXNode.controls.contains($0.role) && $0.label.isEmpty }.map { "\(state) (\(edge)): \($0.role) has no label" }
+    }
+
+    @Test func noButtonIsLeftWithoutAName() async throws {
+        var missing: [String] = []
+        for edge in [DockEdge.right, .top] {
+            missing += try await unnamed("at rest", edge: edge) { _, _ in }
+            missing += try await unnamed("kept open", edge: edge) { _, hub in hub.pinned = true }
+            missing += try await unnamed("searching", edge: edge) { _, hub in hub.pinned = true; hub.query = "zig" }
+            missing += try await unnamed("controls", edge: edge) { _, hub in hub.showControls() }
+        }
+        for section in [HubSection.inbox, .ci, .agents] {
+            missing += try await unnamed("peek \(section.name)") { _, hub in hub.section = section }
+        }
+        for focus in [HubSection.inbox, .ci, .agents] {
+            missing += try await unnamed("\(focus.name) focused") { _, hub in hub.pinned = true; hub.focus = focus }
+        }
+        for tab in [InboxFilter.bots, .done] {
+            missing += try await unnamed("\(tab.label) tab") { _, hub in hub.pinned = true; hub.filter = tab }
+        }
+        missing += try await unnamed("Passing open") { _, hub in hub.pinned = true; hub.ciPassingOpen = true }
+        for pane in SettingsPane.allCases {
+            missing += try await unnamed("Settings \(pane.title)") { _, hub in hub.go(.settings); hub.settingsPane = pane }
+        }
+        missing += try await unnamed("Repositories") { _, hub in hub.go(.repos) }
+        missing += try await unnamed("signed out") { store, hub in store.authError = "Bad credentials"; hub.pinned = true }
+        missing += try await unnamed("update ready") { store, hub in store.updater.preview(.ready, version: "0.5.0"); hub.pinned = true }
+        #expect(missing.isEmpty, "\(missing)")
+    }
+}
+
+/// What VoiceOver finds, and in what shape (DESIGN.md 7): the root container, the sections in it, every bar cell a button
+/// with its value, hint and Show, rows as one element each with their actions.
+@MainActor
+@Suite struct AccessibilityStructure {
+    private func root(_ tree: AXNode) throws -> AXNode {
+        try #require(tree.children.first { $0.label == "Lookout" }, "No Lookout container under \(tree.children.map(\.label))")
+    }
+
+    @Test func theBarAtRestIsOneContainerOfFourSectionsAndEachCellAButtonWithShow() async throws {
+        for edge in [DockEdge.right, .top] {
+            let lookout = try root(try await AccessibilityTree.render(edge: edge))
+            #expect(lookout.children.map(\.label) == ["Inbox", "CI", "Sessions", "Controls"], "\(edge)")
+            let cells = lookout.all.filter { $0.role == "AXButton" || $0.role == "AXMenuButton" }
+            #expect(!cells.isEmpty && cells.allSatisfy { $0.actions.contains("Show") || $0.label == "Settings" }, "\(edge)")
+            let inbox = try #require(lookout.first("AXButton", "Inbox"))
+            #expect(inbox.value == "5 need you, 2 bot items" && inbox.help == "Shows the inbox" && inbox.actions == ["Show"])
+            let ci = try #require(lookout.first("AXButton", "CI"))
+            #expect(ci.value == "1 failing, 1 running, 2 passing" && ci.actions.contains("Show"))
+            // A session's tile says its state, project and age, and its hint is what it last said.
+            let waiting = try #require(lookout.first("AXButton", "LCU update notifications"))
+            #expect(waiting.value.hasPrefix("waiting for you, lcu, ") && !waiting.help.isEmpty && waiting.actions == ["Show"])
+            // The gear: Settings by press, the controls by its actions.
+            let gear = try #require(lookout.first("AXButton", "Settings"))
+            #expect(Set(gear.actions) == ["Show controls", "Check now", "Repositories", "Keep open"])
+            #expect(lookout.first("AXMenuButton", "New session")?.actions == ["Show"])
+        }
+    }
+
+    @Test func theKeptOpenHubHasASectionAndAHeadingForEach() async throws {
+        let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true })
+        #expect(lookout.children.map(\.label) == ["Inbox", "CI", "Sessions", "Controls"])
+        #expect(lookout.first("AXHeading", "CI") != nil && lookout.first("AXHeading", "Sessions") != nil)
+        // The project groups are headings too.
+        #expect(lookout.first("AXHeading", "Waiting for you") != nil && lookout.first("AXHeading", "microsandbox") != nil)
+        // The tabs are one tab group, with the open one selected.
+        let tabs = try #require(lookout.all.first { $0.role == "AXTabGroup" })
+        #expect(tabs.label == "Inbox filter" && tabs.children.count == 3)
+        #expect(tabs.children.filter(\.selected).map(\.label) == ["Needs you, 5"], "\(tabs.children.map { ($0.label, $0.selected) })")
+    }
+
+    @Test func aRowIsOneElementWithItsLabelValueHintAndActions() async throws {
+        let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true })
+        let item = try #require(lookout.all.first { $0.label.hasPrefix("Review comment from andrewrk on zig #21877: std.Io: add vectored reads to File") })
+        #expect(item.role == "AXButton" && item.label.hasSuffix("minutes ago") && item.value == "Unread")
+        #expect(item.help == "Opens on GitHub. More actions available.")
+        #expect(Set(item.actions) == ["Open on GitHub", "Mark as read", "Done", "Copy link"])
+        let read = try #require(lookout.all.first { $0.label.hasPrefix("Issue comment from kyle") })
+        #expect(read.value.isEmpty && read.actions.contains("Mark as unread"))
+        let failing = try #require(lookout.first("AXButton", "swift-format"))
+        #expect(failing.value.hasPrefix("failing, Linux build and Windows test, ") && failing.value.hasSuffix("minutes ago"))
+        #expect(failing.actions.contains("Mute until it changes") && failing.actions.contains("Open checks"))
+        let session = try #require(lookout.first("AXButton", "Calculator display reading"))
+        #expect(session.value.hasPrefix("finished, unread, lcu-research") && Set(session.actions) == ["Mark as read", "Keep", "Hide"])
+    }
+
+    @Test func theSearchFieldIsNamedAndSaysWhatItFound() async throws {
+        let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true; hub.query = "zig" })
+        let field = try #require(lookout.all.first { $0.role == "AXTextField" })
+        #expect(field.label == "Search inbox and sessions" && field.value == "zig")
+        #expect(lookout.all.contains { $0.role == "AXStaticText" && $0.value == "3 items · 0 sessions" })
+        #expect(lookout.first("AXHeading", "Inbox, 3 results") != nil)
+        // CI leaves the layout while searching, its cell stays.
+        #expect(lookout.first("AXButton", "CI") != nil)
+    }
+
+    @Test func settingsAndRepositoriesAreNamedPagesWithTheirTabsAndHeadings() async throws {
+        let settings = try root(try await AccessibilityTree.render { _, hub in hub.go(.settings) })
+        let page = try #require(settings.children.first { $0.label == "Settings" })
+        let tabs = try #require(page.all.first { $0.role == "AXTabGroup" })
+        #expect(tabs.label == "Settings pane" && tabs.children.map(\.label) == ["General", "Notifications", "Shortcuts", "Claude"])
+        #expect(tabs.children.filter(\.selected).map(\.label) == ["General"])
+        #expect(page.first("AXButton", "Done")?.help == "Closes Settings")
+        #expect(page.all.contains { $0.role == "AXHeading" && $0.label == "GitHub" })
+        // The bar beside it is the same bar, its gear saying what it now does.
+        #expect(settings.first("AXButton", "Close Settings") != nil)
+        let repos = try root(try await AccessibilityTree.render { _, hub in hub.go(.repos) })
+        let list = try #require(repos.children.first { $0.label == "Repositories" })
+        #expect(list.first("AXHeading", "Repositories") != nil)
+        let repo = try #require(list.all.first { $0.label == "ziglang/zig" })
+        #expect(Set(repo.actions) == ["Stop watching", "Move up", "Move down", "Toggle issues", "Toggle pull requests", "Toggle CI"])
+    }
+
+    @Test func theUpdateCellOffersItsMenuAsActions() async throws {
+        let lookout = try root(try await AccessibilityTree.render { store, _ in store.updater.preview(.ready, version: "0.5.0") })
+        let update = try #require(lookout.first("AXButton", "Restart to update"))
+        #expect(update.actions.contains("Show") && update.actions.contains("Skip 0.5.0"), "\(update.actions)")
+    }
+
+    @Test func theControlsPeekIsAContainerOfNamedRows() async throws {
+        let lookout = try root(try await AccessibilityTree.render { _, hub in hub.showControls() })
+        let controls = try #require(lookout.children.last { $0.label == "Controls" })
+        #expect(controls.descendants("AXButton").map(\.label) == ["Keep open", "Repositories…", "Settings…", "Sync now"])
+    }
+}
+
+/// Where VoiceOver's cursor is sent, and what is said when the hub opens or CI changes under it.
+@MainActor
+@Suite struct VoiceOverMoves {
+    private let store = Store()
+    private let hub = HubState()
+    private let ui = UIState(persists: false, edge: .right)
+    private var view: LookoutHub { LookoutHub(store: store, ui: ui, hub: hub, maxLength: 700) }
+
+    init() {
+        Demo.populate(store, .agents)
+        store.agents.expanded = true
+    }
+
+    @Test func showOnTheInboxKeepsTheHubOpenAndSendsVoiceOverToItsFirstRow() {
+        view.show(.inbox)
+        let first = "i:" + store.list(.needsYou)[0].id
+        #expect(hub.pinned && hub.selection == first && hub.voiceOverRequest?.target == first)
+    }
+
+    @Test func showOnASessionSendsVoiceOverToThatSession() {
+        let id = store.hubSessions(hub)[2].id
+        view.show(.agents, session: id)
+        #expect(hub.pinned && hub.selection == "a:" + id && hub.voiceOverRequest?.target == "a:" + id)
+    }
+
+    @Test func showOnCIGoesToItsHeader() {
+        view.show(.ci)
+        #expect(hub.pinned && hub.voiceOverRequest?.target == "h:ci" && hub.selection?.hasPrefix("c:") == true)
+    }
+
+    @Test func showStepsBackFromASectionFocusSoWhatIsShownIsThere() {
+        hub.pinned = true
+        hub.focus = .agents
+        view.show(.inbox)
+        #expect(hub.focus == nil)
+    }
+
+    @Test func openingFromTheKeyboardSendsVoiceOverToThePickedRowElseTheInbox() {
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "h:inbox")
+        hub.voiceOverRequest = nil
+        hub.selection = "a:x"
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "a:x")
+    }
+
+    @Test func openingDoesNotTakeVoiceOverFromWhereShowJustSentIt() {
+        hub.moveVoiceOver(to: "h:ci")
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "h:ci")
+        // A request nobody answered goes stale.
+        hub.voiceOverRequest = VoiceOverRequest(target: "h:ci", at: Date().addingTimeInterval(-HubState.voiceOverPatience - 1))
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "h:inbox")
+    }
+
+    @Test func theHubSaysWhatNeedsYouWhenItOpens() {
+        #expect(store.openingAnnouncement == "Lookout, 5 need you, 1 CI failing, 1 session waiting")
+        store.items = store.items.filter { !$0.state.isOpen }
+        #expect(store.openingAnnouncement == "Lookout, nothing needs you, 1 CI failing, 1 session waiting")
+        store.agents.enabled = false
+        for key in store.ci.keys { store.ci[key]?.state = .success }
+        #expect(store.openingAnnouncement == "Lookout, nothing needs you")
+    }
+
+    @Test func ciChangingUnderTheOpenHubIsSaidByName() {
+        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI failing: swift-format")
+        // The latest change first, as the rows are.
+        store.ci["ziglang/zig"]?.state = .failure
+        store.ci["ziglang/zig"]?.failing = ["Linux / test"]
+        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI failing: zig and swift-format")
+        for key in store.ci.keys { store.ci[key]?.state = .pending }
+        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI running")
+        for key in store.ci.keys { store.ci[key]?.state = .success }
+        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI passing")
+        for key in store.ci.keys { store.ci[key]?.state = CIState.none }
+        #expect(store.ciAnnouncement(for: store.ciWorst) == nil)
+    }
+}

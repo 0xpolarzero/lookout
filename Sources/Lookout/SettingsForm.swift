@@ -158,6 +158,7 @@ struct SecretField: View {
             .fieldStyle(focused: focused)
             .focused($focused)
             .onSubmit(save)
+            .accessibilityLabel(prompt)
             .cancelsOnEscape(focused && cancel != nil) { cancel?() }
             .onAppear { if autofocus { focused = true } }
     }

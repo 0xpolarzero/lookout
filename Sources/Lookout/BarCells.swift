@@ -115,13 +115,20 @@ struct UpdateBarCell: View {
     var body: some View {
         let version = updater.release?.version ?? ""
         BarCell(axis: axis, name: Self.name(updater.phase, version: version), value: value, hint: help.title, help: help,
-                show: show, action: { updater.advance() }) { hovering in
+                show: show, actions: menuActions(version), action: { updater.advance() }) { hovering in
             Face(phase: updater.phase, hovering: hovering)
         }
         .contextMenu {
             if let page = updater.release?.page { Button("What's new in \(version)") { NSWorkspace.shared.open(page) } }
             Button("Skip \(version)") { updater.skip() }
         }
+    }
+
+    /// The context menu's items, for VoiceOver's actions.
+    private func menuActions(_ version: String) -> [BarAction] {
+        var actions: [BarAction] = []
+        if let page = updater.release?.page { actions.append(BarAction(name: "What's new in \(version)") { NSWorkspace.shared.open(page) }) }
+        return actions + [BarAction(name: "Skip \(version)") { updater.skip() }]
     }
 
     static func name(_ phase: Updater.Phase, version: String) -> String {
@@ -344,6 +351,7 @@ struct NewSessionBarCell: View {
     let store: Store
     let show: () -> Void
     @State private var hovering = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         let folders = store.agentFolders
@@ -359,6 +367,7 @@ struct NewSessionBarCell: View {
                 .foregroundStyle(hovering ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
                 .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
                 .background(Tile.shape(Theme.Metrics.tile).fill(hovering ? Theme.Fill.selected : Theme.Fill.tile))
+                .focusRing(Theme.Radius.tile, isFocused: focused)
                 .frame(width: axis == .vertical ? Theme.Metrics.bar : Theme.Metrics.pitch,
                        height: axis == .vertical ? Theme.Metrics.pitch : Theme.Metrics.bar)
                 .contentShape(Rectangle())
@@ -367,6 +376,8 @@ struct NewSessionBarCell: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
+        .focused($focused)
+        .reportsControlFocus(focused)
         .onHover { hovering = $0 }
         .motion(Theme.Motion.hover, value: hovering)
         .tip("New session", "Scratch chat, or pick a project")

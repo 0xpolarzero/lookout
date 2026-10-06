@@ -163,6 +163,8 @@ struct Avatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Theme.stroke))
+        // Decoration: the name is always beside it.
+        .accessibilityHidden(true)
         .task(id: sized) {
             guard let sized, ImageCache.shared.cached(sized) == nil else { loaded = nil; return }
             loaded = nil

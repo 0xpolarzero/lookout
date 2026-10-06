@@ -53,9 +53,11 @@ extension LookoutHub {
         InboxBarCell(axis: axis, needsYou: store.unreadCount(.needsYou), bots: store.unreadCount(.bots),
                      show: { show(.inbox) }, action: openInbox)
             .modifier(probe(.inbox))
+            .section("Inbox")
         if !store.ciRepos.isEmpty {
             CIBarCell(axis: axis, store: store, show: { show(.ci) })
                 .modifier(probe(.ci))
+                .section("CI")
         }
         barDivider
         if store.agents.enabled {
@@ -63,6 +65,7 @@ extension LookoutHub {
                 show(.agents, session: $0)
             }
                 .modifier(probe(.agents))
+                .section("Sessions")
             barDivider
         }
         if store.updater.showsInPill {
@@ -70,6 +73,7 @@ extension LookoutHub {
         }
         GearBarCell(axis: axis, store: store, hub: hub) { show(.controls) }
             .modifier(probe(.controls))
+            .section("Controls")
     }
 
     /// One hairline grammar: 18pt long, 9pt of room each side, whichever way the bar runs.
@@ -109,8 +113,7 @@ extension LookoutHub {
     }
 
     /// A cell's `Show` (VoiceOver, and Return on a focused cell, or the "+N"): keeps the hub open on that cell's
-    /// section with the selection there. CI also moves VoiceOver's focus to its header (`showCI`); the others
-    /// don't yet (TODO: keyboard package).
+    /// section with the selection there, and moves VoiceOver's cursor to the picked row (CI: its header).
     func show(_ section: HubSection, session: String? = nil) {
         withAnimation(Self.opening.resolved(reduce: reduce)) {
             hub.go(.main)
@@ -120,8 +123,10 @@ extension LookoutHub {
         switch section {
         case .inbox:
             openInbox()
+            hub.moveVoiceOver(to: hub.selection ?? "h:inbox")
         case .agents:
             hub.showSession(session, store: store, ui: ui)
+            hub.moveVoiceOver(to: hub.selection ?? "h:agents")
         case .ci:
             hub.showCI(store, ui: ui)
         case .controls:
