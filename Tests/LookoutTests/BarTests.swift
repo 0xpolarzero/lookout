@@ -8,10 +8,6 @@ import Testing
 @Suite struct Bar {
     private let now = sessionsNow
 
-    private func status(_ state: CIState, sha: String = "a1", minutesAgo: Double = 10) -> CIStatus {
-        ciStatus(state, sha: sha, checkedAt: now, updatedAt: now.addingTimeInterval(-minutesAgo * 60))
-    }
-
     // MARK: CI cell
 
     @Test func ciGlyphIsOneTileWhateverItSays() {
@@ -45,8 +41,8 @@ import Testing
     }
 
     /// The quietest states are the quietest marks on the bar (DESIGN.md 5.1): passing and no runs draw `tertiary`,
-    /// running `secondary`, and none reaches the white of a tile's letters. (Measured in the shot, where the two outline
-    /// symbols once drew pure white whatever their style said.)
+    /// running `secondary`, and none reaches the white of a tile's letters. Measured in the shot: a symbol drawn with its
+    /// own style can come out white whatever the style says.
     @Test func ciGlyphsDrawTheirOwnTokenNotWhite() async throws {
         let passing = try #require(await ciGlyphBrightness(.allPassing))
         let noRuns = try #require(await ciGlyphBrightness(.ciNoRuns))

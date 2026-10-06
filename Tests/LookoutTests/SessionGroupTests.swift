@@ -511,7 +511,7 @@ import Testing
         #expect(AgentLabel.isEmoji("🐧") && !AgentLabel.isEmoji("AB") && !AgentLabel.isEmoji("7") && !AgentLabel.isEmoji(""))
     }
 
-    // MARK: Review round 1
+    // MARK: Project order and frozen lists
 
     @Test func projectsMoveAsBlocksAndScratchStaysLast() {
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y"), session("x2", folder: "/code/x"),
@@ -600,7 +600,7 @@ import Testing
         #expect(listed.groups.flatMap(\.rows).map(\.id).contains("n9"))
     }
 
-    // MARK: Review round 2
+    // MARK: Search, frozen counts and the spoken age
 
     @Test func aSearchListsEverySessionThatMatches() {
         let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
