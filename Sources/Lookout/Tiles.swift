@@ -185,7 +185,7 @@ struct BarCell<Face: View>: View {
         }
         .onHover { hovering = $0 }
         .motion(Theme.Motion.hover, value: hovering)
-        .modifier(BarCellHelp(help: help))
+        .modifier(BarCellHelp(help: help, focused: focused))
         .accessibilityLabel(name)
         .accessibilityValue(value)
         .accessibilityHint(hint)
@@ -207,10 +207,12 @@ private struct BarCellPress: ViewModifier {
 
 private struct BarCellHelp: ViewModifier {
     let help: BarHelp?
+    /// The cell's own keyboard focus: its tip shows after a second.
+    let focused: Bool
     @Environment(\.tipBeside) private var beside
 
     @ViewBuilder func body(content: Content) -> some View {
-        if let help { content.tip(help.title, help.detail, beside: beside) } else { content }
+        if let help { content.tip(help.title, help.detail, focused: focused, beside: beside) } else { content }
     }
 }
 

@@ -403,7 +403,7 @@ struct NewSessionBarCell: View {
         .reportsControlFocus(focused)
         .onHover { hovering = $0 }
         .motion(Theme.Motion.hover, value: hovering)
-        .tip("New session", "Scratch chat, or pick a project", beside: beside)
+        .tip("New session", "Scratch chat, or pick a project", focused: focused, beside: beside)
         .accessibilityLabel("New session")
         .accessibilityHint("Scratch chat, or pick a project")
         .accessibilityActions { Button("Show", action: show) }

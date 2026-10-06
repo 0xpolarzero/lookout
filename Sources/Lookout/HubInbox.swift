@@ -211,32 +211,7 @@ extension LookoutHub {
         .padding(.trailing, 3)
     }
 
-    /// Mark all as read and Done: all read on the first two tabs, Clear Done on Done.
-    private var inboxMenu: some View {
-        let filter = hub.filter
-        return Menu {
-            if filter == .done {
-                Button("Clear Done") { LookoutHub.animate { store.clearDone() } }
-                    .disabled(!store.hasClearableDone)
-            } else {
-                let rows = store.list(filter)
-                Button("Mark all as read") { LookoutHub.animate { store.markAllRead(filter) } }
-                    .keyboardShortcut(store.shortcut(.markAllRead).menuShortcut)
-                    .disabled(!rows.contains { $0.state == .unread })
-                Button("Done: all read") { LookoutHub.animate { store.doneAllRead(filter) } }
-                    .disabled(!rows.contains { $0.state == .read })
-            }
-        } label: {
-            InboxMenuGlyph()
-        }
-        .menuStyle(.button)
-        .buttonStyle(HoverFillButtonStyle(shape: Circle(), hitOutset: (Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .focusRing(Theme.Metrics.iconButton / 2)
-        .tip("More")
-        .accessibilityLabel("More")
-    }
+    private var inboxMenu: some View { InboxMenu(store: store, hub: hub) }
 
     var tabs: some View {
         Tabs(label: "Inbox filter", tabs: InboxFilter.allCases.map(tab), selection: hub.filter) { f in
@@ -617,6 +592,42 @@ struct SearchGroupLabel: View {
         .accessibilityLabel("\(title), \(plural(count, "result"))")
         .accessibilityValue(message ?? "")
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Mark all as read and Done: all read on the first two tabs, Clear Done on Done. Its focus is its own, so the ring and the tip
+/// that names it ("More", after a second) come from the same one.
+private struct InboxMenu: View {
+    let store: Store
+    let hub: HubState
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let filter = hub.filter
+        return Menu {
+            if filter == .done {
+                Button("Clear Done") { LookoutHub.animate { store.clearDone() } }
+                    .disabled(!store.hasClearableDone)
+            } else {
+                let rows = store.list(filter)
+                Button("Mark all as read") { LookoutHub.animate { store.markAllRead(filter) } }
+                    .keyboardShortcut(store.shortcut(.markAllRead).menuShortcut)
+                    .disabled(!rows.contains { $0.state == .unread })
+                Button("Done: all read") { LookoutHub.animate { store.doneAllRead(filter) } }
+                    .disabled(!rows.contains { $0.state == .read })
+            }
+        } label: {
+            InboxMenuGlyph()
+        }
+        .menuStyle(.button)
+        .buttonStyle(HoverFillButtonStyle(shape: Circle(), hitOutset: (Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .focused($focused)
+        .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
+        .reportsControlFocus(focused)
+        .tip("More", focused: focused)
+        .accessibilityLabel("More")
     }
 }
 
