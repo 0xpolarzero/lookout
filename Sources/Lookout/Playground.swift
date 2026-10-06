@@ -16,7 +16,7 @@ struct PlaygroundView: View {
     /// The window's least size; screenshots at another size (1280×720) set their own.
     var minSize = CGSize(width: 1280, height: 820)
     @State private var behindClicks = 0
-    @State private var leaveTask: Task<Void, Never>?
+    @State private var layout = HubLayout()
 
     private let menuBar: CGFloat = 26
 
@@ -31,7 +31,7 @@ struct PlaygroundView: View {
                                       y: geo.size.height / 2 + (ui.edge == .top ? 120 : ui.edge == .bottom ? -120 : 0))
                 }
                 fakeMenuBar.frame(maxHeight: .infinity, alignment: .top)
-                docked(geo.size)
+                docked
                 if let toast = hub.toast {
                     Text(toast).font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -51,30 +51,11 @@ struct PlaygroundView: View {
         }
     }
 
-    @ViewBuilder private func docked(_ size: CGSize) -> some View {
-        let hubView = LookoutHub(store: store, ui: ui, hub: hub,
-                                 maxLength: ui.edge.isHorizontal ? size.height - menuBar - 80 : size.height - menuBar - 60,
-                                 maxWidth: size.width)
-            .onHover(perform: hover)
-        switch ui.edge {
-        case .right: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.top, menuBar + 40)
-        case .left: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(.top, menuBar + 40)
-        case .top: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, menuBar)
-        case .bottom: hubView.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        }
-    }
-
-    /// Opens at once; closes a moment after the mouse leaves, so crossing a gap doesn't flicker it shut.
-    private func hover(_ inside: Bool) {
-        leaveTask?.cancel()
-        if inside {
-            hub.hovering = true
-        } else {
-            leaveTask = Task {
-                try? await Task.sleep(for: .milliseconds(350))
-                if !Task.isCancelled { hub.hovering = false }
-            }
-        }
+    /// The hub as the app lays it out (`HubRoot`) in the room under the menu bar, so what the playground and the shots
+    /// show of where it sits, rest and open, is the app's own geometry.
+    private var docked: some View {
+        HubRoot(store: store, ui: ui, hub: hub, layout: layout)
+            .padding(.top, menuBar)
     }
 
     private var fakeMenuBar: some View {
@@ -230,6 +211,8 @@ extension [DockEdge] {
     static let all: [DockEdge] = [.right, .top, .left, .bottom]
     /// The side bar and the strip: where a state differs between them, and the two the old shots covered.
     static let rightAndTop: [DockEdge] = [.right, .top]
+    static let sides: [DockEdge] = [.right, .left]
+    static let strips: [DockEdge] = [.top, .bottom]
 }
 
 /// What a shot has picked, for the row actions and the keyboard pick to show.
@@ -255,6 +238,9 @@ struct Shot {
 
     var name: String
     var edge = DockEdge.right
+    /// Where the bar rests along its edge, as a fraction of its length (what the user's drag saves): a third of the way
+    /// leaves a side hub its full height and a strip its width, so rest and kept open compare directly.
+    var position = 0.3
     /// A sheet instead of the playground (the fields below that describe the hub are then ignored).
     var sheet: ShotSheet?
     /// The data (see `Demo.Scenario`).
@@ -320,6 +306,8 @@ struct Shot {
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
+/// Position: `rest-`, `open-` plus
+///   low (a third of the way down is not low: 0.7, on the sides), clamped (0.9) and centred (0.5), on the top and bottom
 /// 1280×720, every edge
 ///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-agents-720,
 ///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
@@ -388,6 +376,14 @@ enum PlaygroundShots {
         Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
+        // Where the bar rests, rest beside kept open: low on the sides it must not move; along the top and bottom a
+        // strip too near the end is moved by the least, and a centred one keeps its leading edge.
+        Shot.edges("rest-low", on: .sides) { $0.position = 0.7 },
+        Shot.edges("open-low", on: .sides) { $0.pinned = true; $0.position = 0.7 },
+        Shot.edges("rest-clamped", on: .strips) { $0.position = 0.9 },
+        Shot.edges("open-clamped", on: .strips) { $0.pinned = true; $0.position = 0.9 },
+        Shot.edges("rest-centred", on: .strips) { $0.position = 0.5 },
+        Shot.edges("open-centred", on: .strips) { $0.pinned = true; $0.position = 0.5 },
         // A 1280×720 screen.
         Shot.edges("open-720") { $0.pinned = true; $0.size = Shot.hd },
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
@@ -426,11 +422,14 @@ enum PlaygroundShots {
         Task {
             // Some at a time: every window is a live SwiftUI hierarchy, and a full set is too much to hold at once.
             for batch in stride(from: 0, to: shots.count, by: 10).map({ Array(shots[$0..<min($0 + 10, shots.count)]) }) {
-                let windows = batch.map { (name: $0.name, window: open($0)) }
-                try? await Task.sleep(for: .seconds(2.5))
-                for (name, window) in windows {
-                    capture(window, to: "\(dir)/\(name).png")
-                    window.close()
+                let windows = batch.map { (name: $0.name, shown: open($0)) }
+                // As in the app, the bar rests (and is measured) before anything opens from it.
+                try? await Task.sleep(for: .seconds(0.8))
+                windows.forEach { $0.shown.open() }
+                try? await Task.sleep(for: .seconds(2))
+                for (name, shown) in windows {
+                    capture(shown.window, to: "\(dir)/\(name).png")
+                    shown.window.close()
                 }
             }
             print("\(shots.count) shots in \(dir)")
@@ -438,18 +437,16 @@ enum PlaygroundShots {
         }
     }
 
-    /// The shot's window, offscreen and showing.
-    private static func open(_ shot: Shot) -> NSWindow {
+    /// The shot's window, offscreen and showing the bar at rest, and what opens it (kept open, a page, a focused section).
+    private static func open(_ shot: Shot) -> (window: NSWindow, open: () -> Void) {
         let store = Store()
         Demo.populate(store, shot.scenario)
         store.agents.expanded = true
         let ui = UIState(persists: false, edge: shot.edge)
+        ui.position = shot.position
         let hub = HubState()
-        hub.pinned = shot.pinned
-        hub.page = shot.page
         hub.query = shot.query
         hub.section = shot.section
-        hub.focus = shot.focus
         if let filter = shot.filter { hub.filter = filter }
         switch shot.selection {
         case .firstNeedsYou: hub.selection = store.list(.needsYou).first.map { "i:" + $0.id }
@@ -476,7 +473,7 @@ enum PlaygroundShots {
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
-        return window
+        return (window, { hub.pinned = shot.pinned; hub.page = shot.page; hub.focus = shot.focus })
     }
 
     private static func capture(_ window: NSWindow, to path: String) {

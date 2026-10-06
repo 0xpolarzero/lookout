@@ -34,6 +34,28 @@ import Testing
         #expect(huge == HubGeometry.inset)
     }
 
+    @Test func aShorterHubStaysWhereTheBarIsEvenWhenTheBarIsClamped() {
+        // A bar resting against the screen's end is clamped; a hub shorter than it keeps that place (it never drifts
+        // down to where an unclamped start would be).
+        let rest = HubGeometry.origin(edge: .right, position: 0.95, restLength: 400, size: CGSize(width: 46, height: 400), in: window).y
+        let short = HubGeometry.origin(edge: .right, position: 0.95, restLength: 400, size: CGSize(width: 466, height: 300), in: window).y
+        #expect(rest == window.height - 400 - HubGeometry.inset)
+        #expect(short == rest)
+    }
+
+    @Test func theSidesFullViewStaysBelowWhereTheBarStartsAtRest() {
+        // 800 high, 0.7 down, a 400 bar: it starts at 360, so the view may take what lies below, less the inset.
+        let room = HubGeometry.sideLength(visibleHeight: 800, position: 0.7, restLength: 400)
+        #expect(room == 800 - 360 - HubGeometry.inset)
+        // Given that room, the hub's start is the bar's: nothing moves.
+        let rest = HubGeometry.origin(edge: .right, position: 0.7, restLength: 400, size: CGSize(width: 46, height: 400), in: window).y
+        let open = HubGeometry.origin(edge: .right, position: 0.7, restLength: 400, size: CGSize(width: 466, height: room), in: window).y
+        #expect(rest == 360 && open == rest)
+        // A bar clamped at the end has the room it rests in; one at the start has all that is left of the screen.
+        #expect(HubGeometry.sideLength(visibleHeight: 800, position: 0.95, restLength: 400) == 400)
+        #expect(HubGeometry.sideLength(visibleHeight: 800, position: 0.0, restLength: 400) == 800 - 2 * HubGeometry.inset)
+    }
+
     @Test func theFullViewFitsAnyScreen() {
         // The longest it may be leaves both insets; along the top and bottom it never outgrows the screen's width.
         #expect(HubGeometry.maxLength(visibleHeight: 695) == 683)
@@ -45,37 +67,38 @@ import Testing
     }
 }
 
-/// The hub in its window as the app lays it out (`HubRoot`), rendered at rest and kept open and compared pixel for
-/// pixel: what the user aimed at doesn't move.
+/// The hub in its window as the app lays it out (`HubRoot`) at rest and kept open, compared as the user sees it: what they
+/// aimed at doesn't move, and nothing leaves the screen.
 @MainActor
 @Suite struct RestVersusOpen {
-    private let screen = CGSize(width: 1280, height: 800)
-
     private struct Shot {
         let rep: NSBitmapImageRep
         let scale: CGFloat
+        /// The hub's frame in the window (`HubLayout`), top-left origin.
+        let frame: CGRect
 
         func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int, a: Int) {
             guard x >= 0, y >= 0, x < rep.pixelsWide, y < rep.pixelsHigh, let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0, 0, 0, 0) }
             return (Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255), Int(c.alphaComponent * 255))
         }
 
-        /// The amber of a tile that needs you (`Theme.amber`, as the hosting view's colour space renders it).
-        func isAmber(_ x: Int, _ y: Int) -> Bool {
+        /// A tile that needs you is the one saturated colour in the first cells: any hue, so a new tile colour doesn't
+        /// break this (greys, the white count and the rail all sit far below it).
+        func isColoured(_ x: Int, _ y: Int) -> Bool {
             let p = pixel(x, y)
-            return p.a > 250 && p.r > 225 && (170...205).contains(p.g) && (50...115).contains(p.b)
+            return p.a > 250 && max(p.r, p.g, p.b) - min(p.r, p.g, p.b) > 80
         }
 
-        /// The first amber blob, scanning the band from its start: its box in points.
-        func firstAmber(x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>, fromTop: Bool = true) -> CGRect? {
+        /// The first coloured blob, scanning the band from its start: its box in points.
+        func firstTile(x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>) -> CGRect? {
             let xs = Int(x.lowerBound * scale)...Int(min(x.upperBound * scale, CGFloat(rep.pixelsWide - 1)))
             let ys = Int(y.lowerBound * scale)...Int(min(y.upperBound * scale, CGFloat(rep.pixelsHigh - 1)))
             var top: Int?
-            for py in ys where top == nil { for px in xs where isAmber(px, py) { top = py; break } }
+            for py in ys where top == nil { for px in xs where isColoured(px, py) { top = py; break } }
             guard let top else { return nil }
             let limit = top + Int(30 * scale)
             var box = CGRect.null
-            for py in top...min(limit, ys.upperBound) { for px in xs where isAmber(px, py) { box = box.union(CGRect(x: px, y: py, width: 1, height: 1)) } }
+            for py in top...min(limit, ys.upperBound) { for px in xs where isColoured(px, py) { box = box.union(CGRect(x: px, y: py, width: 1, height: 1)) } }
             return CGRect(x: box.minX / scale, y: box.minY / scale, width: (box.width) / scale, height: (box.height) / scale)
         }
 
@@ -87,12 +110,13 @@ import Testing
         }
     }
 
-    private func render(edge: DockEdge, open: Bool) -> Shot {
+    /// The hub at rest, then kept open (on `page` when one is given), in a window of `screen`.
+    private func render(edge: DockEdge, position: Double, screen: CGSize, page: HubPage? = nil) -> (rest: Shot, open: Shot) {
         let store = Store()
         Demo.populate(store, .agents)
         store.agents.expanded = true
         let ui = UIState(persists: false, edge: edge)
-        ui.position = 0.3
+        ui.position = position
         let hub = HubState()
         let layout = HubLayout()
         let root = HubRoot(store: store, ui: ui, hub: hub, layout: layout).frame(width: screen.width, height: screen.height)
@@ -111,42 +135,97 @@ import Testing
                 hosting.layoutSubtreeIfNeeded()
             }
         }
-        settle(0.7)
-        if open {
-            hub.pinned = true
-            settle(1.0)
+        func capture() -> Shot {
+            hosting.layoutSubtreeIfNeeded()
+            let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            return Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width, frame: layout.frame)
         }
-        hosting.layoutSubtreeIfNeeded()
-        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
-        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        settle(0.7)
+        let rest = capture()
+        hub.pinned = true
+        if let page { hub.page = page }
+        settle(1.0)
+        let open = capture()
         window.contentView = nil
         window.orderOut(nil)
-        return Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width)
+        return (rest, open)
     }
 
-    @Test(arguments: [DockEdge.right, .left])
-    func theInboxTileDoesNotMoveOnTheSides(edge: DockEdge) {
+    /// The hub never leaves the screen: both insets along the edge, and across it the screen's own edge.
+    private func expectInside(_ frame: CGRect, edge: DockEdge, screen: CGSize, _ label: String) {
+        let inset = HubGeometry.inset
+        let along = edge.isHorizontal ? (frame.minX, frame.maxX, screen.width) : (frame.minY, frame.maxY, screen.height)
+        let across = edge.isHorizontal ? (frame.minY, frame.maxY, screen.height) : (frame.minX, frame.maxX, screen.width)
+        #expect(along.0 >= inset - 0.5 && along.1 <= along.2 - inset + 0.5, "\(label): \(frame) along the edge in \(screen)")
+        #expect(across.0 >= -0.5 && across.1 <= across.2 + 0.5, "\(label): \(frame) across the edge in \(screen)")
+    }
+
+    /// The inbox tile: the first coloured blob in the rail's column (for the sides).
+    private func tile(_ shot: Shot, edge: DockEdge, screen: CGSize) -> CGRect? {
         let band = edge == .right ? (screen.width - 46)...screen.width : 0...46
-        let rest = render(edge: edge, open: false)
-        let open = render(edge: edge, open: true)
-        let a = rest.firstAmber(x: band, y: 0...screen.height)
-        let b = open.firstAmber(x: band, y: 0...screen.height)
-        #expect(a != nil && b != nil, "\(edge): no amber tile found")
+        return shot.firstTile(x: band, y: 0...screen.height)
+    }
+
+    private nonisolated static let sides = [DockEdge.right, .left].flatMap { edge in [0.3, 0.7].map { (edge, $0) } }
+
+    @Test(arguments: sides)
+    func theInboxTileDoesNotMoveOnTheSides(edge: DockEdge, position: Double) {
+        let screen = CGSize(width: 1280, height: 800)
+        let (rest, open) = render(edge: edge, position: position, screen: screen)
+        #expect(rest.frame.minY == open.frame.minY, "\(edge) \(position): the hub starts at \(rest.frame.minY), kept open at \(open.frame.minY)")
+        let a = tile(rest, edge: edge, screen: screen)
+        let b = tile(open, edge: edge, screen: screen)
+        #expect(a != nil && b != nil, "\(edge): no inbox tile found")
         guard let a, let b else { return }
         // Compared by centre: the tile's own size is the bar's business.
-        #expect(abs(a.midX - b.midX) < 0.5 && abs(a.midY - b.midY) < 0.5, "\(edge): tile at \(a), kept open at \(b)")
+        #expect(abs(a.midX - b.midX) < 0.5 && abs(a.midY - b.midY) < 0.5, "\(edge) \(position): tile at \(a), kept open at \(b)")
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(position)")
     }
 
-    @Test(arguments: [DockEdge.top, .bottom])
-    func theStripsLeadingEdgeStaysPut(edge: DockEdge) {
+    private nonisolated static let strips = [DockEdge.top, .bottom].flatMap { edge in [0.3, 0.5].map { (edge, $0) } }
+
+    @Test(arguments: strips)
+    func theStripsLeadingEdgeStaysPut(edge: DockEdge, position: Double) {
+        let screen = CGSize(width: 1280, height: 800)
         // Halfway through the strip's depth.
         let row = edge == .top ? Theme.Metrics.bar / 2 : screen.height - Theme.Metrics.bar / 2
-        let rest = render(edge: edge, open: false)
-        let open = render(edge: edge, open: true)
+        let (rest, open) = render(edge: edge, position: position, screen: screen)
+        #expect(rest.frame.minX == open.frame.minX, "\(edge) \(position): the strip starts at \(rest.frame.minX), kept open at \(open.frame.minX)")
         let a = rest.firstOpaque(row: row)
         let b = open.firstOpaque(row: row)
         #expect(a != nil && b != nil, "\(edge): no hub found")
         guard let a, let b else { return }
-        #expect(abs(a - b) < 0.5, "\(edge): strip starts at \(a), kept open at \(b)")
+        #expect(abs(a - b) < 0.5, "\(edge) \(position): strip starts at \(a), kept open at \(b)")
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(position)")
+    }
+
+    @Test(arguments: [DockEdge.top, .bottom])
+    func aStripTooNearTheEndIsMovedByTheLeast(edge: DockEdge) {
+        let screen = CGSize(width: 1280, height: 800)
+        let (rest, open) = render(edge: edge, position: 0.9, screen: screen)
+        // At rest it is clamped against the end; kept open it is wider, so it ends at the inset instead.
+        #expect(open.frame.maxX == screen.width - HubGeometry.inset, "\(edge): opens to \(open.frame)")
+        #expect(open.frame.minX < rest.frame.minX && open.frame.width > rest.frame.width, "\(edge): \(rest.frame) then \(open.frame)")
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge) 0.9")
+    }
+
+    @Test(arguments: [DockEdge.right, .left, .top, .bottom])
+    func theViewFitsA720ScreenOnEveryEdge(edge: DockEdge) {
+        let screen = CGSize(width: 1280, height: 720)
+        for position in [0.3, 0.9] {
+            let (rest, open) = render(edge: edge, position: position, screen: screen)
+            expectInside(rest.frame, edge: edge, screen: screen, "\(edge) \(position) at rest")
+            expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(position) open")
+        }
+    }
+
+    @Test(arguments: [DockEdge.right, .left, .top, .bottom])
+    func aPageKeepsTheBarWhereItIs(edge: DockEdge) {
+        let screen = CGSize(width: 1280, height: 720)
+        let (rest, open) = render(edge: edge, position: 0.5, screen: screen, page: .settings)
+        if edge.isHorizontal { #expect(rest.frame.minX == open.frame.minX, "\(edge): \(rest.frame) then \(open.frame)") }
+        else { #expect(rest.frame.minY == open.frame.minY, "\(edge): \(rest.frame) then \(open.frame)") }
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge) with a page")
     }
 }

@@ -36,11 +36,13 @@ enum HubGeometry {
         return min(width, max(room - 2 * inset, 0))
     }
 
-    /// Where the hub's start lies along its edge, from where the bar starts at rest: the bar never moves as the view
-    /// opens, and only the screen's end moves it, by the least that keeps both insets.
+    /// Where the hub's start lies along its edge: where the bar starts at rest, which it never leaves as the view
+    /// opens. Only a hub too long to fit below that anchor moves, by the least that keeps both insets; one shorter than
+    /// the bar stays where it is.
     static func along(length: CGFloat, position: Double, restLength: CGFloat, own: CGFloat) -> CGFloat {
         let start = length * position - restLength / 2
-        return min(max(start, inset), max(length - own - inset, inset))
+        let anchor = min(max(start, inset), max(length - restLength - inset, inset))
+        return min(anchor, max(length - own - inset, inset))
     }
 
     /// The hub's origin in a window `bounds` spanning the edge, flush with the screen on its own side.
@@ -55,6 +57,14 @@ enum HubGeometry {
 
     /// The longest the hub may be along its depth axis: the screen's usable height less both insets, never a floor.
     static func maxLength(visibleHeight: CGFloat) -> CGFloat { max(visibleHeight - 2 * inset, 0) }
+
+    /// The longest the full view may be on the sides: what lies below the anchor the bar starts from at rest, so the
+    /// inbox tile stays where it is (§5.3: only the strip's horizontal edges may clamp). A bar resting so low that
+    /// even the fixed parts don't fit below it is the one case `along` still moves.
+    static func sideLength(visibleHeight: CGFloat, position: Double, restLength: CGFloat) -> CGFloat {
+        let anchor = along(length: visibleHeight, position: position, restLength: restLength, own: restLength)
+        return max(visibleHeight - anchor - inset, 0)
+    }
 
     /// The first cell's centre, along the bar's axis from the hub's own start: the same at rest and kept open, which is
     /// why the inbox tile stays where it is.

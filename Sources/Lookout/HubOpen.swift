@@ -46,12 +46,15 @@ extension LookoutHub {
         fixed += (searching ? 0 : pitch + (shrunk(.ci) ? 0 : max(ciHeight, pitch)) + 9) + 9  // CI block and its divider, footer's
         if agents { fixed += pitch + 9 + (sessions ? pitch : 0) }
         if store.updater.showsInPill { fixed += pitch }
-        let free = max(maxLength - fixed, 88)
+        // Never less than a row of each list: a hub that can't fit even that below where the bar rests is the one case
+        // `HubGeometry.along` moves.
+        let row = Theme.Metrics.twoLineRow
+        let free = max(fullLength - fixed, 2 * row)
         switch (inbox, sessions) {
         case (true, true):
             // Whole 44pt session rows, so the last one showing is never cut through its tile.
-            let rows = max(2, (free * 0.45 / Theme.Metrics.twoLineRow).rounded(.down)) * Theme.Metrics.twoLineRow
-            return (max(free - rows, 88), rows)
+            let rows = max(1, (free * 0.45 / row).rounded(.down)) * row
+            return (max(free - rows, row + 1), rows)
         case (true, false): return (free, 0)
         case (false, true): return (0, free)
         default: return (0, 0)

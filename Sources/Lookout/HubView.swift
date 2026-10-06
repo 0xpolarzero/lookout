@@ -131,6 +131,9 @@ struct LookoutHub: View {
     @Bindable var hub: HubState
     /// Room the expanded view may take along its depth: the screen's usable length less both insets.
     var maxLength: CGFloat = 700
+    /// What the full view and a page may take beside the bar on the sides: the room below where the bar starts at rest,
+    /// so opening never moves it. Panels hang from the bar's cells and go by `maxLength`; nil: the same.
+    var openLength: CGFloat?
     /// The window's width: along the top and bottom, the full view takes what the screen has.
     var maxWidth: CGFloat = .infinity
     /// Where each section's cells are in the bar, and whether the pointer is on the bar or a section's panel.
@@ -179,6 +182,8 @@ struct LookoutHub: View {
     var expanded: Bool { hub.expanded && hub.page == .main }
     /// Settings or Repositories showing: the bar as at rest, and the page beside it.
     var pageOpen: Bool { hub.expanded && hub.page != .main }
+    /// The longest the full view (or a page) may be along the sides.
+    var fullLength: CGFloat { openLength ?? maxLength }
     /// The rows' content beside the bar (and the strip's segments at full width).
     var showsDetail: Bool { expanded }
 
@@ -268,7 +273,7 @@ struct LookoutHub: View {
     var sidePage: some View {
         page
             .frame(width: HubGeometry.pageSide)
-            .modifier(FitHeight(cap: maxLength))
+            .modifier(FitHeight(cap: fullLength))
             .transition(.slide(from: edge == .right ? .trailing : .leading, reduce: reduce))
     }
 

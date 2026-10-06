@@ -89,8 +89,17 @@ struct HubRoot: View {
         HubGeometry.maxLength(visibleHeight: size.height)
     }
 
+    /// On the sides the full view stays below the bar's rest anchor, so the inbox tile never moves.
+    private func openLength(in size: CGSize) -> CGFloat? {
+        guard !ui.edge.isHorizontal, layout.restLength > 0 else { return nil }
+        return HubGeometry.sideLength(visibleHeight: size.height, position: HubRoot.position(ui, store), restLength: layout.restLength)
+    }
+
+    /// Where along its edge the bar rests: centred when the setting says so.
+    static func position(_ ui: UIState, _ store: Store) -> Double { store.settings.centerPill == true ? 0.5 : ui.position }
+
     @ViewBuilder private func content(in size: CGSize) -> some View {
-        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), maxWidth: size.width)
+        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), openLength: openLength(in: size), maxWidth: size.width)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
                 layout.frame = frame
@@ -103,7 +112,7 @@ struct HubRoot: View {
             if layout.floating {
                 view.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                EdgeLayout(edge: ui.edge, position: store.settings.centerPill == true ? 0.5 : ui.position,
+                EdgeLayout(edge: ui.edge, position: Self.position(ui, store),
                            restLength: layout.restLength) { view }
                     .motion(hub.expanded ? LookoutHub.opening : LookoutHub.closing, value: hub.expanded)
             }
@@ -467,7 +476,7 @@ final class HubController {
 
     /// Where the bar rests on its edge: the same place `EdgeLayout` puts it once docked.
     private func restFrame(size: NSSize, in vf: NSRect) -> NSRect {
-        let position = store.settings.centerPill == true ? 0.5 : ui.position
+        let position = HubRoot.position(ui, store)
         let dock = dockFrame()
         let inset: CGFloat = 6
         switch ui.edge {
