@@ -100,16 +100,28 @@ private struct ScrollOffsetReader: NSViewRepresentable {
 private final class ScrollOffsetView: NSView {
     var change: (CGFloat) -> Void = { _ in }
     private var observer: NSObjectProtocol?
+    private var styleObserver: NSObjectProtocol?
 
     /// Clicks pass through to the content.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
+    deinit {
+        observer.map(NotificationCenter.default.removeObserver)
+        styleObserver.map(NotificationCenter.default.removeObserver)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         observer.map(NotificationCenter.default.removeObserver)
+        styleObserver.map(NotificationCenter.default.removeObserver)
         observer = nil
+        styleObserver = nil
+        // Overlay scrollers whatever "Show scroll bars" says: a legacy one takes its width out of the rows and, over the rail,
+        // moves the tiles off the bar's axis (DESIGN.md 5.3). The "+N below" cue says what the scroller would.
+        enclosingScrollView?.scrollerStyle = .overlay
+        styleObserver = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.enclosingScrollView?.scrollerStyle = .overlay }
+        }
         guard let clip = enclosingScrollView?.contentView else { return }
         clip.postsBoundsChangedNotifications = true
         observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
@@ -242,8 +254,7 @@ struct CappedScroll<Content: View>: View {
                         settle()
                     }
                 }
-                // The system's scrollers, overlay as a rule, shown for a moment as the list appears; a legacy one ("Show
-                // scroll bars: Always") takes its width out of the rows, as it does in any list.
+                // The system's overlay scrollers (`ScrollOffsetView` makes them so), shown for a moment as the list appears.
                 .scrollIndicators(.automatic)
                 .scrollIndicatorsFlash(onAppear: true)
                 .scrollDisabled(!cut)
