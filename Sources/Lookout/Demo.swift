@@ -46,6 +46,9 @@ enum Demo {
                                       title: "Release 0.4.2", updatedAt: now.addingTimeInterval(-86400)),
         ]
         store.items = items(now)
+        // What the add field on Repositories offers.
+        store.suggestions = ["apple/swift-nio", "apple/swift-argument-parser", "pointfreeco/swift-composable-architecture",
+                             "vapor/vapor", "oven-sh/bun", "swiftlang/swift-package-manager"]
 
         switch scenario {
         case .busy:

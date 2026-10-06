@@ -1,96 +1,228 @@
 import SwiftUI
 
+// Repositories (DESIGN.md 5.8): the add field, then one row per watched repository.
+
+/// What a repository tells you about, in three words. A preset is a state of the flags the repository already has
+/// (its five event kinds and `allComments`), not a new setting: `init(_:)` names the state, `Store.setPreset` makes
+/// it. Anything else is Custom, which shows the flags as checkboxes.
+enum RepoPreset: CaseIterable {
+    case everything, forMe, custom
+
+    var title: String {
+        switch self {
+        case .everything: "Everything"
+        case .forMe: "Only what's for me"
+        case .custom: "Custom"
+        }
+    }
+
+    /// The kinds a preset is about; CI has its own switch on the row.
+    static let kinds = Set(EventKind.repoToggles).subtracting([.ciMain])
+
+    init(_ repo: RepoConfig) {
+        guard repo.events.isSuperset(of: Self.kinds) else { self = .custom; return }
+        self = repo.allComments ? .everything : .forMe
+    }
+
+    /// Whether the preset turns All comments on; nil for Custom, which keeps the flags as they are.
+    var allComments: Bool? {
+        switch self {
+        case .everything: true
+        case .forMe: false
+        case .custom: nil
+        }
+    }
+}
+
+extension Store {
+    /// Turns on every kind the preset covers and sets All comments to match, through the same calls the checkboxes
+    /// make (so turning All comments off prunes what wasn't for you).
+    func setPreset(_ preset: RepoPreset, on repo: RepoConfig) {
+        guard let allComments = preset.allComments else { return }
+        for kind in RepoPreset.kinds where !repo.events.contains(kind) { toggle(kind, on: repo) }
+        if repo.allComments != allComments { toggleAllComments(repo) }
+    }
+
+    /// What it takes to bring a repository back after Stop watching: its row, its place in the list, and what
+    /// `removeRepo` clears with it.
+    struct StoppedRepo: Equatable {
+        let repo: RepoConfig
+        let index: Int
+        let items: [InboxItem]
+        let ci: CIStatus?
+        let mutedCI: String?
+    }
+
+    func stopWatching(_ repo: RepoConfig) -> StoppedRepo? {
+        guard let index = repos.firstIndex(where: { $0.id == repo.id }) else { return nil }
+        let stopped = StoppedRepo(repo: repos[index], index: index,
+                                  items: items.filter { $0.repo == repo.fullName && $0.kind != .reviewRequested },
+                                  ci: ci[repo.fullName], mutedCI: mutedCI[repo.fullName])
+        removeRepo(repo)
+        return stopped
+    }
+
+    func resumeWatching(_ stopped: StoppedRepo) {
+        guard !repos.contains(where: { $0.id == stopped.repo.id }) else { return }
+        repos.insert(stopped.repo, at: min(stopped.index, repos.count))
+        let known = Set(items.map(\.id))
+        items.append(contentsOf: stopped.items.filter { !known.contains($0.id) })
+        ci[stopped.repo.fullName] = stopped.ci
+        mutedCI[stopped.repo.fullName] = stopped.mutedCI
+        save()
+    }
+
+    /// Moves a repository one place up or down the list.
+    func moveRepo(_ name: String, by step: Int) {
+        guard let from = repos.firstIndex(where: { $0.fullName == name }), repos.indices.contains(from + step) else { return }
+        moveRepo(name, onto: repos[from + step].fullName)
+    }
+}
+
 struct ReposView: View {
     let store: Store
     @State private var input = ""
     @State private var error: String?
     @State private var adding = false
+    /// The suggestion ↑↓ has picked.
+    @State private var highlight: Int?
+    @State private var stopped: Store.StoppedRepo?
     @FocusState private var fieldFocused: Bool
     /// Keeps the suggestions up while the pointer is on them: clicking one ends the editing before the click lands.
     @State private var overList = false
+    @Environment(\.pagePreview) private var preview
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var matches: [String] {
         let q = input.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return Array(store.suggestions.prefix(5)) }
-        return Array(store.suggestions.filter { $0.lowercased().contains(q) }.prefix(5))
+        let watched = Set(store.repos.map { $0.fullName.lowercased() })
+        let open = store.suggestions.filter { !watched.contains($0.lowercased()) }
+        guard !q.isEmpty else { return Array(open.prefix(store.repos.isEmpty ? 2 : 5)) }
+        return Array(open.filter { $0.lowercased().contains(q) }.prefix(5))
     }
+
+    private var showsSuggestions: Bool { fieldFocused || overList || preview.addQuery != nil }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.md) {
-                addField
-                if !store.repos.isEmpty { legend }
-                ForEach(store.repos) { repo in
-                    RepoCard(repo: repo, store: store)
-                }
+        VStack(spacing: 0) {
+            addRow
+                .padding(.horizontal, Theme.Metrics.inset)
+                .padding(.vertical, Theme.Space.md)
+                // The suggestions hang over the list below.
+                .zIndex(1)
+            ScrollView {
                 if store.repos.isEmpty {
-                    Text("Watch your own repos or any public one you contribute to. You'll only hear about the events you pick.")
-                        .font(Theme.Typography.control)
-                        .foregroundStyle(Theme.tertiary)
-                        .padding(.horizontal, Theme.Space.xs)
-                        .padding(.top, Theme.Space.xs)
+                    EmptyBlock("Nothing watched yet", detail: "Watch your own repositories, or any public one you contribute to.")
+                        .padding(.top, Theme.Space.xl)
+                } else {
+                    FormGroup(title: "Watching \(store.repos.count)") {
+                        ForEach(Array(store.repos.enumerated()), id: \.element.id) { index, repo in
+                            if index > 0 { FormDivider() }
+                            RepoRow(repo: repo, store: store, isFirst: index == 0, isLast: index == store.repos.count - 1,
+                                    stop: stopWatching)
+                        }
+                    }
+                    .padding(.horizontal, Theme.Metrics.inset)
+                    .padding(.bottom, Theme.Space.md)
                 }
             }
-            .padding(Theme.Space.lg)
+            if let stopped {
+                UndoLine(message: "Stopped watching \(stopped.repo.fullName)", undo: undoStop)
+                    .padding(.horizontal, Theme.Metrics.inset)
+                    .padding(.bottom, Theme.Metrics.inset)
+                    // ⌘Z while the line is up.
+                    .background(Button("Undo", action: undoStop).keyboardShortcut("z", modifiers: .command).hidden())
+                    .task(id: stopped.repo.id) {
+                        try? await Task.sleep(for: .seconds(6))
+                        if !Task.isCancelled { withAnimation(Theme.Motion.fade.resolved(reduce: reduceMotion)) { self.stopped = nil } }
+                    }
+            }
         }
-        .scrollIndicators(.never)
         .task { await store.loadSuggestions() }
-    }
-
-    /// Column header over the toggles of every card, in the same order and spacing as the badges.
-    private var legend: some View {
-        HStack(spacing: 10) {
-            Text("Watching  \(store.repos.count)").font(Theme.Typography.label)
-            Spacer(minLength: Theme.Space.sm)
-            RepoToggleColumns.legend
-            Color.clear.frame(width: 20, height: 1)
+        .onAppear {
+            if let query = preview.addQuery {
+                input = query
+                DispatchQueue.main.async { highlight = preview.addHighlight }
+            }
+            // Nothing watched yet: the field is the one thing to do.
+            if store.repos.isEmpty { DispatchQueue.main.async { fieldFocused = true } }
         }
-        .foregroundStyle(Theme.tertiary)
-        .padding(.leading, Theme.Space.lg)
-        .padding(.trailing, Theme.Space.sm)
-        .padding(.top, 2)
-        .accessibilityHidden(true)
+        .onChange(of: input) { highlight = nil }
     }
 
-    private var addField: some View {
+    // MARK: Add
+
+    private var addRow: some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
             HStack(spacing: Theme.Space.sm) {
                 HStack(spacing: Theme.Space.sm) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary).font(Theme.Typography.control)
+                    Image(systemName: "plus").font(Theme.Typography.glyph(11, .semibold)).foregroundStyle(Theme.secondary)
+                        .accessibilityHidden(true)
                     TextField("owner/repo or GitHub URL", text: $input)
                         .textFieldStyle(.plain)
                         .focused($fieldFocused)
-                        .onSubmit { add(input) }
+                        .onSubmit(submit)
+                        .onKeyPress(.downArrow) { move(1) }
+                        .onKeyPress(.upArrow) { move(-1) }
+                        .onKeyPress(.escape) { closeSuggestions() }
+                        .accessibilityLabel("Repository to watch")
                     if adding { ProgressView().controlSize(.mini) }
                 }
-                .fieldStyle()
-                Button { add(input) } label: {
-                    Image(systemName: "plus")
-                        .font(Theme.Typography.glyph(13, .bold))
-                        .foregroundStyle(Theme.onTint)
-                        .frame(width: Theme.Metrics.field, height: Theme.Metrics.field)
-                }
-                .buttonStyle(HoverFillButtonStyle(rest: Theme.amber, hover: Theme.amber.opacity(0.85), pressed: Theme.amber.opacity(0.7)))
-                .disabled(input.isEmpty || adding)
-                .accessibilityLabel("Watch repository")
-                .tip("Watch repository", "Add the repo typed on the left")
+                .fieldStyle(focused: fieldFocused)
+                BorderedButton("Add") { add(input) }
+                    .disabled(input.isEmpty || adding)
             }
             if let error {
-                Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.red).padding(.horizontal, Theme.Space.xs)
-            }
-            if (fieldFocused || overList) && !matches.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(matches, id: \.self) { name in
-                        SuggestionRow(name: name) { add(name) }
-                    }
-                }
-                .padding(Theme.Space.xs)
-                .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
-                .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(Theme.stroke))
-                .onHover { overList = $0 }
+                Label(error, systemImage: "exclamationmark.circle.fill")
+                    .font(Theme.Typography.meta).foregroundStyle(Theme.red)
+                    .padding(.horizontal, Theme.Space.xs)
             }
         }
-        .padding(.bottom, Theme.Space.xs)
+        .overlay(alignment: .topLeading) {
+            if showsSuggestions && (!matches.isEmpty || !input.isEmpty) {
+                suggestions.padding(.top, Theme.Metrics.field + Theme.Space.xs)
+            }
+        }
+    }
+
+    private var suggestions: some View {
+        VStack(spacing: 0) {
+            if matches.isEmpty {
+                Text("No match. Press Return to add owner/repo")
+                    .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                    .padding(.horizontal, Theme.Space.md)
+                    .frame(maxWidth: .infinity, minHeight: Theme.Metrics.menuRow, alignment: .leading)
+            }
+            ForEach(Array(matches.enumerated()), id: \.element) { index, name in
+                SuggestionRow(name: name, picked: highlight == index) { add(name) }
+            }
+        }
+        .padding(Theme.Space.xs)
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.popover))
+        .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(Theme.stroke))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        .onHover { overList = $0 }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Suggestions")
+    }
+
+    private func submit() {
+        if let highlight, matches.indices.contains(highlight) { add(matches[highlight]) } else { add(input) }
+    }
+
+    private func move(_ step: Int) -> KeyPress.Result {
+        guard showsSuggestions, !matches.isEmpty else { return .ignored }
+        let next = (highlight ?? (step > 0 ? -1 : matches.count)) + step
+        highlight = matches.indices.contains(next) ? next : nil
+        return .handled
+    }
+
+    private func closeSuggestions() -> KeyPress.Result {
+        guard showsSuggestions else { return .ignored }
+        highlight = nil
+        overList = false
+        fieldFocused = false
+        return .handled
     }
 
     private func add(_ name: String) {
@@ -108,122 +240,94 @@ struct ReposView: View {
             }
         }
     }
+
+    // MARK: Stop watching
+
+    private func stopWatching(_ repo: RepoConfig) {
+        guard let result = store.stopWatching(repo) else { return }
+        withAnimation(Theme.Motion.fade.resolved(reduce: reduceMotion)) { stopped = result }
+        AccessibilityNotification.Announcement("Stopped watching \(repo.fullName). Undo available").post()
+    }
+
+    private func undoStop() {
+        guard let stopped else { return }
+        store.resumeWatching(stopped)
+        withAnimation(Theme.Motion.fade.resolved(reduce: reduceMotion)) { self.stopped = nil }
+    }
 }
 
 private struct SuggestionRow: View {
     let name: String
+    let picked: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            SuggestionLabel(name: name)
-        }
-        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.tile)))
-        .accessibilityLabel("Watch \(name)")
-    }
-}
-
-private struct SuggestionLabel: View {
-    let name: String
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
             HStack(spacing: Theme.Space.md) {
-                Image(systemName: "book.closed").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
-                Text(name.split(separator: "/").first.map { "\($0)/" } ?? "").foregroundStyle(Theme.tertiary)
-                    + Text(name.split(separator: "/").last.map(String.init) ?? "").foregroundStyle(Theme.text)
-                Spacer()
-                if hover { Image(systemName: "plus").font(Theme.Typography.glyph(11)).foregroundStyle(Theme.secondary) }
+                Image(systemName: "book.closed").font(Theme.Typography.glyph(11, .regular)).foregroundStyle(Theme.secondary)
+                    .accessibilityHidden(true)
+                (Text(name.split(separator: "/").first.map { "\($0)/" } ?? "").foregroundStyle(Theme.tertiary)
+                    + Text(name.split(separator: "/").last.map(String.init) ?? "").foregroundStyle(Theme.text))
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
             }
             .font(Theme.Typography.body)
             .padding(.horizontal, Theme.Space.md)
-            .frame(height: 28)
+            .frame(maxWidth: .infinity, minHeight: Theme.Metrics.menuRow, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.tile), rest: picked ? Theme.Fill.selected : Theme.Fill.rest,
+                                          hover: picked ? Theme.Fill.selected : Theme.Fill.hover))
+        .accessibilityLabel("Watch \(name)")
+        .accessibilityAddTraits(picked ? .isSelected : [])
     }
 }
 
-/// Shared geometry so the legend lines up with the badges.
-private enum RepoToggleColumns {
-    static let spacing: CGFloat = 3
-    static var kinds: [EventKind] { EventKind.repoToggles.filter { $0 != .ciMain } }
-
-    /// Group captions with a bracket underneath, spanning the badge columns they describe:
-    /// issues (opened, comments), pull requests (opened, comments, review comments), all-comments ("All") and CI.
-    static var legend: some View {
-        HStack(spacing: 3) {
-            group("Issues", columns: 2)
-            group("Pull requests", columns: 3)
-            Color.clear.frame(width: 5, height: 1)
-            group("All", columns: 1)
-            group("CI", columns: 1)
-        }
-    }
-
-    private static func group(_ text: String, columns: Int) -> some View {
-        let width = CGFloat(columns) * 24 + CGFloat(columns - 1) * spacing
-        return VStack(spacing: 2) {
-            Text(text).font(Theme.Typography.meta).lineLimit(1).fixedSize()
-            Hairline()
-        }
-        .frame(width: width)
-    }
-}
-
-struct RepoCard: View {
+/// A watched repository: its name, what it tells you about, and CI. 36pt; 44 with a failure line under it.
+struct RepoRow: View {
     let repo: RepoConfig
     let store: Store
+    let isFirst: Bool
+    let isLast: Bool
+    let stop: (RepoConfig) -> Void
+    @State private var customOpen = false
     @State private var dropTarget = false
-    @State private var hover = false
-    @Environment(\.previewTip) private var previewTip
+    @Environment(\.pagePreview) private var preview
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var failure: String? { store.repoErrors[repo.fullName] }
+
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(repo.owner).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
-                Text(repo.name).font(Theme.Typography.title)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: Theme.Space.md) {
+                name
+                Spacer(minLength: Theme.Space.md)
+                preset
+                Toggle(isOn: binding(.ciMain)) { Text("CI").font(Theme.Typography.body).foregroundStyle(Theme.text) }
+                    .toggleStyle(SwitchStyle())
+                    .fixedSize()
+                    .accessibilityLabel("CI")
             }
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .layoutPriority(1)
-            Spacer(minLength: Theme.Space.sm)
-            if let error = store.repoErrors[repo.fullName] {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(Theme.Typography.meta)
-                    .foregroundStyle(Theme.amber)
-                    .frame(width: 18, height: 24)
-                    .accessibilityLabel("Sync failed: \(error)")
-                    .tip("Sync failed", error)
-            }
-            HStack(spacing: RepoToggleColumns.spacing) {
-                ForEach(RepoToggleColumns.kinds) { kind in
-                    badge(kind)
-                }
-                Hairline(axis: .vertical).frame(height: 14).padding(.horizontal, 2)
-                allCommentsBadge
-                ciBadge
-            }
-            menu
+            .frame(minHeight: Theme.Metrics.formRow)
+            if let failure { failureLine(failure) }
+            if customOpen { custom }
         }
-        .padding(.leading, Theme.Space.lg)
-        .padding(.trailing, Theme.Space.sm)
-        .padding(.vertical, Theme.Space.md)
-        .background(Theme.Radius.shape(Theme.Radius.row).fill(hover ? Theme.Fill.hover : Theme.Fill.group))
-        .motion(Theme.Motion.hover, value: hover)
-        .overlay(
-            Theme.Radius.shape(Theme.Radius.row)
-                .strokeBorder(dropTarget ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.stroke), lineWidth: dropTarget ? 1.5 : 1)
-        )
-        .onHover { hover = $0 }
-        // Screenshots target one badge as "owner/repo|Tooltip title"; only that card shows it.
-        .environment(\.previewTip, previewTip.flatMap { spec in
-            spec.hasPrefix(repo.fullName + "|") ? String(spec.dropFirst(repo.fullName.count + 1)) : nil
-        })
+        .overlay(alignment: .top) {
+            if dropTarget { Capsule().fill(Theme.accent).frame(height: 2).offset(y: -1) }
+        }
+        .focusable()
+        .focusRing(Theme.Radius.row, inset: true)
+        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+            guard press.modifiers == .option else { return .ignored }
+            move(press.key == .upArrow ? -1 : 1)
+            return .handled
+        }
         .draggable(repo.fullName) {
             Text(repo.fullName)
                 .font(Theme.Typography.title)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, Theme.Space.lg)
                 .frame(height: Theme.Metrics.tile)
-                .background(Capsule().fill(Theme.bg))
+                .background(Capsule().fill(Theme.popover))
                 .foregroundStyle(Theme.text)
         }
         .dropDestination(for: String.self) { names, _ in
@@ -231,99 +335,127 @@ struct RepoCard: View {
             withAnimation(Theme.Motion.move.resolved(reduce: reduceMotion)) { store.moveRepo(name, onto: repo.fullName) }
             return true
         } isTargeted: { dropTarget = $0 }
+        .contextMenu { menu }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(repo.fullName)
+        .accessibilityAction(named: "Toggle issues") { toggle([.issueOpened, .issueComment]) }
+        .accessibilityAction(named: "Toggle pull requests") { toggle([.prOpened, .prComment, .reviewComment]) }
+        .accessibilityAction(named: "Toggle CI") { store.toggle(.ciMain, on: repo) }
+        .accessibilityAction(named: "Move up") { move(-1) }
+        .accessibilityAction(named: "Move down") { move(1) }
+        .accessibilityAction(named: "Stop watching") { stop(repo) }
+        .onAppear { customOpen = preview.expandedRepo == repo.fullName }
     }
 
-    // MARK: Badges
-
-    private func badge(_ kind: EventKind) -> some View {
-        let on = repo.events.contains(kind)
-        let filtered = kind != .issueOpened && kind != .prOpened && !repo.allComments
-        let detail = filtered ? "Only on your threads, @mentions and replies to you" : kind.tipDetail
-        return BadgeButton(symbol: kind.symbol, color: Theme.accent, on: on, label: kind.toggleLabel) { store.toggle(kind, on: repo) }
-            .tip(kind.toggleLabel, detail + (on ? "" : "\nOff · click to turn on"))
+    /// `owner/` quiet, the name in bold; the middle gives way first.
+    private var name: some View {
+        (Text("\(repo.owner)/").foregroundStyle(Theme.tertiary) + Text(repo.name).fontWeight(.semibold).foregroundStyle(Theme.text))
+            .font(Theme.Typography.body)
+            .lineLimit(1)
+            .truncationMode(.middle)
     }
 
-    private var allCommentsBadge: some View {
-        let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
-        return BadgeButton(symbol: "bubble.left.and.bubble.right.fill", color: Theme.accent, on: repo.allComments, label: "All comments") {
-            store.toggleAllComments(repo)
-        }
-        .opacity(hasComments ? 1 : 0.35)
-        .disabled(!hasComments)
-        .tip(repo.allComments ? "All comments" : "Comments for you",
-             repo.allComments ? "Every comment in this repo" : "Click to get every comment, not only the ones for you")
-    }
+    // MARK: Preset
 
-    private var ciBadge: some View {
-        let on = repo.events.contains(.ciMain)
-        let status = store.ci[repo.fullName]
-        let state = status?.state ?? .none
-        let symbol = on ? state.symbol : "seal"
-        let branch = status?.branch ?? repo.defaultBranch ?? "default branch"
-        var detail = on ? "\(branch) \(state.label)" : "Hidden from the bar · click to show"
-        if on, state == .failure, let failing = status?.failing, !failing.isEmpty {
-            detail += "\n" + failing.prefix(4).joined(separator: "\n")
-        }
-        return BadgeButton(symbol: symbol, color: Theme.accent, on: on, label: "CI",
-                           value: on ? "\(state.label), shown on the bar" : "Hidden from the bar") {
-            store.toggle(.ciMain, on: repo)
-        }
-        .tip("CI", detail)
-    }
-
-    private var menu: some View {
-        Menu {
-            Button("Open on GitHub") { NSWorkspace.shared.open(repo.url) }
-            Button("Open Actions") { NSWorkspace.shared.open(repo.url.appendingPathComponent("actions")) }
-            if let url = store.ci[repo.fullName]?.url {
-                Button("Open latest commit checks") { NSWorkspace.shared.open(url) }
+    private var preset: some View {
+        let shown: RepoPreset = customOpen ? .custom : RepoPreset(repo)
+        return PopUp(label: "Notify me about, \(repo.fullName)", value: shown.title) {
+            ForEach(RepoPreset.allCases, id: \.self) { choice in
+                Toggle(choice.title, isOn: Binding(get: { shown == choice }, set: { _ in choose(choice) }))
             }
-            Divider()
-            Button("Stop watching", role: .destructive) { store.removeRepo(repo) }
-        } label: {
-            Image(systemName: "ellipsis").font(Theme.Typography.glyph(11, .bold)).foregroundStyle(Theme.tertiary)
-                .frame(width: 20, height: 24)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("More actions for \(repo.fullName)")
-        .tip("More", "Open on GitHub, or stop watching")
     }
-}
 
-private struct BadgeButton: View {
-    let symbol: String
-    let color: Color
-    let on: Bool
-    var label = ""
-    /// What VoiceOver reads as the state; defaults to On/Off.
-    var value: String? = nil
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) { BadgeLabel(symbol: symbol, color: color, on: on) }
-            .buttonStyle(HoverFillButtonStyle(
-                shape: Theme.Radius.shape(Theme.Radius.tile),
-                rest: on ? Theme.Fill.tint(color, .rest) : Theme.Fill.rest,
-                hover: on ? Theme.Fill.tint(color, .hover) : Theme.Fill.hover,
-                pressed: on ? Theme.Fill.tint(color, .pressed) : Theme.Fill.selected))
-            .accessibilityLabel(label)
-            .accessibilityValue(value ?? (on ? "On" : "Off"))
+    private func choose(_ choice: RepoPreset) {
+        withAnimation(Theme.Motion.move.resolved(reduce: reduceMotion)) {
+            if choice == .custom {
+                customOpen.toggle()
+            } else {
+                customOpen = false
+                store.setPreset(choice, on: repo)
+            }
+        }
     }
-}
 
-private struct BadgeLabel: View {
-    let symbol: String
-    let color: Color
-    let on: Bool
-    @Environment(\.hoverFillHovering) private var hover
+    // MARK: Custom
 
-    var body: some View {
-        Image(systemName: symbol)
-            .font(Theme.Typography.glyph(10.5))
-            .foregroundStyle(on ? AnyShapeStyle(color) : AnyShapeStyle(Theme.tertiary.opacity(hover ? 1 : 0.7)))
-            .frame(width: 24, height: 24)
-            .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(on ? AnyShapeStyle(color.opacity(0.25)) : AnyShapeStyle(Theme.stroke)))
+    private var custom: some View {
+        let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Self.checkboxes, id: \.kind) { box in
+                Toggle(box.title, isOn: binding(box.kind)).toggleStyle(.checkbox).frame(minHeight: Theme.Metrics.menuRow)
+            }
+            Toggle("Every comment, not only the ones for me", isOn: Binding(get: { repo.allComments }, set: { _ in store.toggleAllComments(repo) }))
+                .toggleStyle(.checkbox)
+                .frame(minHeight: Theme.Metrics.menuRow)
+                .disabled(!hasComments)
+            Text("Otherwise only comments on your issues and pull requests, mentioning you, or after you joined the conversation.")
+                .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 20)
+        }
+        .font(Theme.Typography.body)
+        .foregroundStyle(Theme.text)
+        .padding(.bottom, Theme.Space.md)
+        .transition(.opacity)
+    }
+
+    private static let checkboxes: [(kind: EventKind, title: String)] = [
+        (.issueOpened, "Issues opened"), (.issueComment, "Issue comments"), (.prOpened, "Pull requests opened"),
+        (.prComment, "Pull request comments"), (.reviewComment, "Review comments"),
+    ]
+
+    private func binding(_ kind: EventKind) -> Binding<Bool> {
+        Binding(get: { repo.events.contains(kind) }, set: { _ in store.toggle(kind, on: repo) })
+    }
+
+    /// All on, or if any is on, all off.
+    private func toggle(_ kinds: [EventKind]) {
+        let turnOn = !kinds.contains { repo.events.contains($0) }
+        for kind in kinds where repo.events.contains(kind) != turnOn { store.toggle(kind, on: repo) }
+    }
+
+    // MARK: Failure
+
+    /// A line of its own under the name: the sentence truncates, Retry keeps its place at the end. It overlaps the
+    /// 36pt row's empty margin, which makes the row 44.
+    private func failureLine(_ message: String) -> some View {
+        HStack(spacing: Theme.Space.sm) {
+            Image(systemName: "exclamationmark.circle.fill").font(Theme.Typography.glyph(11, .regular)).foregroundStyle(Theme.red)
+                .accessibilityHidden(true)
+            Text("Couldn't sync: \(message)").font(Theme.Typography.meta).foregroundStyle(Theme.red).lineLimit(1)
+            Spacer(minLength: Theme.Space.md)
+            Button(action: store.refreshNow) {
+                Text("Retry").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
+                    .padding(.horizontal, Theme.Space.xs)
+                    .frame(minHeight: Theme.Metrics.iconButton)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusRing(Theme.Radius.small)
+        }
+        .frame(height: 14)
+        .padding(.top, -6)
+        .padding(.bottom, Theme.Space.sm)
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Menu and order
+
+    @ViewBuilder private var menu: some View {
+        Button("Open on GitHub", systemImage: "arrow.up.right") { NSWorkspace.shared.open(repo.url) }
+        Button("Open Actions", systemImage: "play.circle") { NSWorkspace.shared.open(repo.url.appendingPathComponent("actions")) }
+        if let url = store.ci[repo.fullName]?.url {
+            Button("Open latest commit checks", systemImage: "checkmark.circle") { NSWorkspace.shared.open(url) }
+        }
+        Divider()
+        Button("Move up", systemImage: "arrow.up") { move(-1) }.disabled(isFirst)
+        Button("Move down", systemImage: "arrow.down") { move(1) }.disabled(isLast)
+        Divider()
+        Button("Stop watching", systemImage: "eye.slash", role: .destructive) { stop(repo) }
+    }
+
+    private func move(_ step: Int) {
+        withAnimation(Theme.Motion.move.resolved(reduce: reduceMotion)) { store.moveRepo(repo.fullName, by: step) }
     }
 }

@@ -326,7 +326,8 @@ struct Shot {
 ///   open-720, settings-720, repos-720, rest-sessions-12-720
 /// Settings and Repositories, right edge
 ///   settings (General), settings-token, settings-notifications, settings-notifications-snoozed, settings-shortcuts,
-///   settings-shortcuts-notice, settings-claude, settings-claude-off
+///   settings-shortcuts-notice, settings-claude, settings-claude-off; repos (collapsed), repos-custom, repos-failure,
+///   repos-add, repos-add-none, repos-empty, repos-contrast
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -397,7 +398,7 @@ enum PlaygroundShots {
         Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
         Shot.edges("repos-720") { $0.pinned = true; $0.page = .repos; $0.size = Shot.hd },
         Shot.edges("rest-sessions-12-720") { $0.scenario = .sessions12; $0.size = Shot.hd },
-        // Settings, one pane each (General is `right-settings`).
+        // Settings, one pane each (General is `right-settings`), and Repositories in each of its states.
         Shot.edges("settings-token", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.revealsToken = true },
         Shot.edges("settings-notifications", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .notifications },
         Shot.edges("settings-notifications-snoozed", on: [.right]) {
@@ -414,6 +415,16 @@ enum PlaygroundShots {
         Shot.edges("settings-claude", on: [.right]) { $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude },
         Shot.edges("settings-claude-off", on: [.right]) {
             $0.pinned = true; $0.page = .settings; $0.preview.pane = .claude; $0.scenario = .busy
+        },
+        Shot.edges("repos-custom", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig" },
+        Shot.edges("repos-failure", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed },
+        Shot.edges("repos-add", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addHighlight = 1
+        },
+        Shot.edges("repos-add-none", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "zzzz" },
+        Shot.edges("repos-empty", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .empty },
+        Shot.edges("repos-contrast", on: [.right]) {
+            $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig"; $0.environment = .contrast
         },
     ].flatMap { $0 }
 
