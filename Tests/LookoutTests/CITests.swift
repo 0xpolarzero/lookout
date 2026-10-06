@@ -305,10 +305,10 @@ import Testing
         return (store, answers)
     }
 
-    /// Lets the tasks the test started run until `condition` holds (or half a minute has: the suite shares the main actor with slower tests).
+    /// Lets the tasks the test started run until `condition` holds, or a fixed number of turns have gone by: counted, not timed,
+    /// because the suite shares the main actor with the rendering tests, which can hold it for minutes together.
     private func settle(_ condition: () -> Bool) async {
-        let deadline = ContinuousClock.now + .seconds(30)
-        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(2)) }
+        for _ in 0..<15_000 where !condition() { try? await Task.sleep(for: .milliseconds(2)) }
     }
 
     @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async {
