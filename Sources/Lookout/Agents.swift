@@ -968,6 +968,8 @@ extension Store {
         mutateAgent(id) { $0.label = label.flatMap(AgentLabel.sanitize) }
     }
 
+    func isFolderMuted(_ folder: String) -> Bool { agents.mutedFolders.contains(folder) }
+
     func setFolderMuted(_ folder: String, _ muted: Bool) {
         agents.mutedFolders.removeAll { $0 == folder }
         if muted { agents.mutedFolders.append(folder) }
@@ -976,7 +978,7 @@ extension Store {
     /// Mutes a project (from its menu, or Settings): its sessions stop arriving as new activity. Offers an undo, unless it
     /// was muted already: undoing that would unmute what you had muted before.
     func muteFolder(_ folder: String) {
-        guard !agents.mutedFolders.contains(folder) else { return }
+        guard !isFolderMuted(folder) else { return }
         setFolderMuted(folder, true)
         registerUndo("Muted \(folderName(folder))", in: .agents) { [weak self] in self?.setFolderMuted(folder, false) }
     }

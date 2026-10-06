@@ -213,6 +213,23 @@ enum AccessibilityTree {
         #expect(session.value.hasPrefix("finished, unread, lcu-research") && Set(session.actions) == ["Mark as read", "Keep", "Hide"])
     }
 
+    @Test func aMutedProjectsHeaderOffersUnmuteAndSaysItIsMuted() async throws {
+        func headers(_ lookout: AXNode, _ verb: String) -> [AXNode] {
+            lookout.descendants("AXGroup").filter { $0.actions.contains { $0.hasPrefix(verb + " ") } }
+        }
+        let before = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true })
+        let name = try #require(headers(before, "Mute").first?.actions.first { $0.hasPrefix("Mute ") }).dropFirst(5)
+        #expect(headers(before, "Unmute").isEmpty && headers(before, "Mute").allSatisfy { $0.value.isEmpty })
+        // Muting keeps its sessions listed (only new activity is held back), so the header stays and no longer offers a Mute that does nothing.
+        let after = try root(try await AccessibilityTree.render { store, hub in
+            hub.pinned = true
+            store.setFolderMuted(store.claudeSessions.values.first { store.folderName($0.folderKey) == name }!.folderKey, true)
+        })
+        let muted = headers(after, "Unmute")
+        #expect(muted[0].actions.contains("Unmute \(name)") && headers(after, "Mute").count == 1)
+        #expect(after.first("AXHeading", String(name))?.value == "Muted" && before.first("AXHeading", String(name))?.value.isEmpty == true)
+    }
+
     @Test func theSearchFieldIsNamedAndSaysWhatItFound() async throws {
         let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true; hub.query = "zig" })
         let field = try #require(lookout.all.first { $0.role == "AXTextField" })

@@ -371,6 +371,7 @@ struct SessionGroupHeader: View {
                     .foregroundStyle(group.kind == .waiting ? AnyShapeStyle(Theme.amber) : AnyShapeStyle(Theme.secondary))
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityValue(folder.map { store.isFolderMuted($0) } == true ? "Muted" : "")
                 if folder != nil { Text("\(group.total)").font(Theme.Typography.numeral).foregroundStyle(Theme.tertiary) }
                 Spacer(minLength: 0)
                 if group.kind == .newActivity { keepAll }
@@ -384,7 +385,8 @@ struct SessionGroupHeader: View {
         .accessibilityElement(children: .contain)
         .accessibilityActions {
             if let folder {
-                Button("Mute \(title)") { store.muteFolder(folder) }
+                if store.isFolderMuted(folder) { Button("Unmute \(title)") { store.setFolderMuted(folder, false) } }
+                else { Button("Mute \(title)") { store.muteFolder(folder) } }
                 if hub.canMoveProject(folder, by: -1, store: store) { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, by: -1, store: store) } } }
                 if hub.canMoveProject(folder, by: 1, store: store) { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, by: 1, store: store) } } }
             }
@@ -1111,7 +1113,9 @@ struct ProjectMenu: View {
         }
         if hub.canMoveProject(folder, by: -1, store: store) { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, by: -1, store: store) } } }
         if hub.canMoveProject(folder, by: 1, store: store) { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, by: 1, store: store) } } }
-        Button("Mute \u{201C}\(store.folderName(folder))\u{201D}") { store.muteFolder(folder) }
+        let name = "\u{201C}\(store.folderName(folder))\u{201D}"
+        if store.isFolderMuted(folder) { Button("Unmute \(name)") { store.setFolderMuted(folder, false) } }
+        else { Button("Mute \(name)") { store.muteFolder(folder) } }
     }
 }
 
