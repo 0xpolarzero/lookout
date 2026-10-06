@@ -16,11 +16,11 @@ enum SessionPlacement {
 
 /// A line of the sessions list and the bar's tile column beside it: a bar-wide slot for the tile (the rail itself on a
 /// side edge, so tile and text read as one row) and the text next to it. The fill spans both. Rows lay out the same
-/// in a peek and kept open, on every edge: only the side the tile is on changes. The row's height is its own, so the
-/// fill, the pick bar and the focus ring span all of it.
+/// kept open, on every edge: only the side the tile is on changes. A peek has no tile column (`rail` nil): the bar's
+/// tiles are beside it. The row's height is its own, so the fill, the pick bar and the focus ring span all of it.
 struct RailRow<Tile: View, Content: View>: View {
-    /// The screen's side on the left and right edges, the leading edge along the top and bottom.
-    let rail: HorizontalEdge
+    /// The screen's side on the left and right edges, the leading edge along the top and bottom; nil in a peek.
+    let rail: HorizontalEdge?
     let height: CGFloat
     var fill = Color.clear
     var picked = false
@@ -32,7 +32,7 @@ struct RailRow<Tile: View, Content: View>: View {
     private static var fillInset: CGFloat { 4 }
 
     /// How far the text's end is from the row's end on the side `rail` puts the tile: a trailing action lines up here.
-    static func textEnd(_ rail: HorizontalEdge) -> CGFloat {
+    static func textEnd(_ rail: HorizontalEdge?) -> CGFloat {
         Theme.Metrics.rowPadding + (rail == .trailing ? Theme.Metrics.bar : 0)
     }
 
@@ -47,7 +47,8 @@ struct RailRow<Tile: View, Content: View>: View {
         .frame(height: height)
         .background {
             Theme.Radius.shape(Theme.Radius.row).fill(resolved.fill(fill))
-                .padding(rail == .leading ? .leading : .trailing, Self.fillInset)
+                .padding(.leading, rail == .leading ? Self.fillInset : 0)
+                .padding(.trailing, rail == .trailing ? Self.fillInset : 0)
         }
         .overlay(alignment: .leading) {
             if picked {
@@ -72,7 +73,7 @@ struct SessionsList: View {
     let store: Store
     let ui: UIState
     let hub: HubState
-    let rail: HorizontalEdge
+    let rail: HorizontalEdge?
     /// The hub's own inset on the side away from the tile; peeks pad themselves, and pass 0.
     var inset: CGFloat = Theme.Metrics.inset
     var peekCap: CGFloat?
@@ -270,7 +271,7 @@ extension SessionGroup {
 struct SessionGroupHeader: View {
     let group: SessionGroup
     let store: Store
-    let rail: HorizontalEdge
+    let rail: HorizontalEdge?
 
     var body: some View {
         let folder = project
@@ -324,17 +325,17 @@ struct MoreSessionsRow: View {
     let spoken: String
     let hint: String
     let hub: HubState
-    let rail: HorizontalEdge
+    let rail: HorizontalEdge?
     var pickable = true
     let action: () -> Void
     @State private var hovering = false
 
-    init(hidden: Int, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
+    init(hidden: Int, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, action: @escaping () -> Void) {
         self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hint: "Shows them", hub: hub, rail: rail,
                   pickable: pickable, action: action)
     }
 
-    init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge, pickable: Bool = true, action: @escaping () -> Void) {
+    init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, action: @escaping () -> Void) {
         self.label = label
         self.spoken = spoken
         self.hint = hint
@@ -349,7 +350,7 @@ struct MoreSessionsRow: View {
         Button(action: action) {
             RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
                     picked: picked, tile: { Color.clear }) {
-                Text(label).font(Theme.Typography.body).foregroundStyle(Theme.secondary)
+                Text(label).font(Theme.Typography.control).foregroundStyle(Theme.secondary)
             }
         }
         .buttonStyle(.plain)
@@ -368,7 +369,7 @@ struct SessionRow: View {
     let store: Store
     let ui: UIState
     let hub: HubState
-    let rail: HorizontalEdge
+    let rail: HorizontalEdge?
     let placement: SessionPlacement
     @State private var dropTarget = false
     @AccessibilityFocusState private var voiceOverFocused: Bool
@@ -536,7 +537,7 @@ struct Reorderable: ViewModifier {
 struct NewSessionRow: View {
     let store: Store
     let hub: HubState
-    let rail: HorizontalEdge
+    let rail: HorizontalEdge?
     var inset: CGFloat = Theme.Metrics.inset
     @State private var hovering = false
     @State private var anchor = MenuAnchor()
@@ -764,12 +765,12 @@ extension LookoutHub {
 
     /// A peek's groups: whole rows up to `cap`, then "+N more" (never a scroll view or a fade).
     func sessionsPeek(cap: CGFloat) -> some View {
-        SessionsList(store: store, ui: ui, hub: hub, rail: railSide, inset: 0, peekCap: cap)
+        SessionsList(store: store, ui: ui, hub: hub, rail: nil, inset: 0, peekCap: cap)
     }
 
     /// New session, under the list (not while searching).
-    @ViewBuilder func newSessionRow(inset: CGFloat = Theme.Metrics.inset) -> some View {
-        if !searching { NewSessionRow(store: store, hub: hub, rail: railSide, inset: inset) }
+    @ViewBuilder func newSessionRow(inset: CGFloat = Theme.Metrics.inset, tile: Bool = true) -> some View {
+        if !searching { NewSessionRow(store: store, hub: hub, rail: tile ? railSide : nil, inset: inset) }
     }
 }
 

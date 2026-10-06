@@ -110,6 +110,8 @@ import Testing
         let frame: CGRect
         /// The hover panel's, when one is open (zero otherwise).
         let panel: CGRect
+        /// Whether anything in the window scrolls.
+        var scrolls = false
 
         func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int, a: Int) {
             guard x >= 0, y >= 0, x < rep.pixelsWide, y < rep.pixelsHigh, let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0, 0, 0, 0) }
@@ -239,7 +241,9 @@ import Testing
             hosting.layoutSubtreeIfNeeded()
             let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
             hosting.cacheDisplay(in: hosting.bounds, to: rep)
-            return Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width, frame: layout.frame, panel: hub.panelFrame)
+            var shot = Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width, frame: layout.frame, panel: hub.panelFrame)
+            shot.scrolls = hosting.hasScrollView
+            return shot
         }
         settle(0.7)
         let rest = capture()
@@ -448,6 +452,26 @@ import Testing
                 "\(edge) \(position) \(section): the panel is at \(panel) in \(screen)")
     }
 
+    /// A peek never scrolls (DESIGN.md 10.3): a list too long for it is whole rows and "+N more", on every edge.
+    private nonisolated static let longPeeks = [DockEdge.right, .left, .top, .bottom].flatMap { edge in
+        [(HubSection.inbox, Demo.Scenario.inboxMany), (.ci, .manyCI), (.agents, .sessions12)].map { (edge, $0.0, $0.1) }
+    }
+
+    @Test(arguments: longPeeks)
+    func aPeekTooLongForItIsWholeRowsAndNeverScrolls(edge: DockEdge, section: HubSection, scenario: Demo.Scenario) {
+        let screen = CGSize(width: 1280, height: 720)
+        let (_, open) = render(edge: edge, position: 0.3, screen: screen, scenario: scenario, section: section)
+        #expect(open.panel.height > 0, "\(edge) \(section): no panel")
+        #expect(!open.scrolls, "\(edge) \(section): the peek has a scroll view")
+        #expect(open.panel.maxY <= screen.height - HubGeometry.inset + 0.5, "\(edge) \(section): the panel is at \(open.panel)")
+    }
+
+    @Test func aKeptOpenListThatIsTooLongDoesScroll() {
+        // The control of the test above: the scroll view is found where there is one.
+        let (_, open) = render(edge: .right, position: 0.3, screen: CGSize(width: 1280, height: 720), scenario: .inboxMany, focus: .inbox)
+        #expect(open.scrolls)
+    }
+
     @Test(arguments: [DockEdge.top, .bottom])
     func aFocusedSessionsListFitsWithItsNewSessionRowAndNotice(edge: DockEdge) {
         let screen = CGSize(width: 1280, height: 720)
@@ -466,4 +490,9 @@ import Testing
         let left = screen.height - HubGeometry.inset - open.frame.maxY
         #expect(left >= -0.5 && left < 2 * Theme.Metrics.twoLineRow, "\(edge): \(left)pt unused under \(open.frame)")
     }
+}
+
+private extension NSView {
+    /// A scroll view anywhere below this one.
+    var hasScrollView: Bool { self is NSScrollView || subviews.contains { $0.hasScrollView } }
 }

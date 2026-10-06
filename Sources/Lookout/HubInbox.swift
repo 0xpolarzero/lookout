@@ -247,8 +247,9 @@ extension LookoutHub {
     // MARK: Body
 
     /// What goes under the header: a banner for what is wrong with syncing, the rows (or why there are none), and
-    /// the undo line. `cap` is the height the list scrolls within; the caller pads the sides.
-    func inboxBody(cap: CGFloat) -> some View {
+    /// the undo line. `cap` is the height the list scrolls within (a peek's: the rows that fit, and "+N more"); the
+    /// caller pads the sides.
+    func inboxBody(cap: CGFloat, peek: Bool = false) -> some View {
         let notice = store.inboxNotice()
         let undo = store.undoStack.visible(in: .inbox)
         // The banner and the undo line come out of the room the list has, so the whole body stays within `cap`.
@@ -270,7 +271,7 @@ extension LookoutHub {
             if store.inboxReplacement != nil || items.isEmpty {
                 emptyInbox
             } else {
-                InboxList(items: items, cap: listCap, listKey: listKey, scopeID: searching ? "search" : hub.filter.rawValue,
+                InboxList(items: items, cap: listCap, peeking: peek, listKey: listKey, scopeID: searching ? "search" : hub.filter.rawValue,
                           store: store, ui: ui, hub: hub)
             }
             if let undo {
@@ -339,10 +340,12 @@ extension InboxNotice {
 // MARK: - List
 
 /// The rows, scrolling within `cap`. Owns the rotor namespace ("Unread" walks the unread rows) and tells the header
-/// when the list has scrolled under it. A list cut short says how many rows are below in a quiet `+N more` line.
+/// when the list has scrolled under it. A list cut short says how many rows are below in a quiet `+N more` line; a
+/// peek's never scrolls, and its "+N more" line keeps the hub open on the inbox.
 struct InboxList: View {
     let items: [InboxItem]
     let cap: CGFloat
+    var peeking = false
     let listKey: LookoutHub.ListKey
     /// The tab or the search: a new one starts a new list.
     let scopeID: String
@@ -356,7 +359,8 @@ struct InboxList: View {
     private static let space = "inbox-list"
 
     /// Every row is one height (`twoLineRow`, a point apart), so what a cap shows is arithmetic, not measurement.
-    static let pitch = Theme.Metrics.twoLineRow + 1
+    static let spacing: CGFloat = 1
+    static let pitch = Theme.Metrics.twoLineRow + spacing
     /// The `+N more` line's height, taken from the cap while the list is cut.
     static let moreHeight = Theme.Metrics.iconButton
 
@@ -378,6 +382,24 @@ struct InboxList: View {
     private var rows: Int { Self.rowsFitting(cut ? cap - Self.moreHeight : cap) }
 
     var body: some View {
+        if peeking { peek } else { scrolling }
+    }
+
+    /// The rows that fit whole, and what is left as "+N more".
+    private var peek: some View {
+        let shown = PeekCut.shown(count: items.count, height: Theme.Metrics.twoLineRow, spacing: Self.spacing, cap: cap)
+        return VStack(spacing: 0) {
+            VStack(spacing: Self.spacing) {
+                ForEach(items.prefix(shown)) { InboxRow(item: $0, store: store, ui: ui, hub: hub) }
+            }
+            if shown < items.count {
+                MoreRow(text: "+\(items.count - shown) more", label: plural(items.count - shown, "more item"),
+                        hint: "Keeps Lookout open to show them") { hub.showAll(.inbox) }
+            }
+        }
+    }
+
+    private var scrolling: some View {
         VStack(spacing: 0) {
             list
             if cut {
@@ -395,7 +417,7 @@ struct InboxList: View {
 
     private var list: some View {
         CappedScroll(cap: cut ? cap - Self.moreHeight : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
-            AdaptiveStack(count: items.count, spacing: 1) {
+            AdaptiveStack(count: items.count, spacing: Self.spacing) {
                 ForEach(items) { item in
                     InboxRow(item: item, store: store, ui: ui, hub: hub, rotor: rotor).capEdge().id("i:" + item.id)
                 }

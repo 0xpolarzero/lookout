@@ -213,10 +213,14 @@ struct BarTile: View {
             StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size, hovering: hovering, onRail: onRail)
         }
         .sessionMenu(row, store)
-        .onHover {
-            if $0 {
+        .onHover { inside in
+            if inside {
                 hub.selection = "a:" + row.id
                 ui.drawerSelection = row.id
+            } else if hub.keyboardSelection?.id != "a:" + row.id {
+                // The pointer left: no ring on the tile, nor a lit row in the peek, unless the keyboard picked it.
+                if ui.drawerSelection == row.id { ui.drawerSelection = nil }
+                if hub.selection == "a:" + row.id { hub.selection = nil }
             }
         }
     }

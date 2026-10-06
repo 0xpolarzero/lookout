@@ -274,36 +274,29 @@ extension LookoutHub {
     /// undo line.
     @ViewBuilder var peekInbox: some View {
         inboxHeader.frame(height: Theme.Metrics.pitch)
-        inboxBody(cap: peekCap(.inbox, fixed: Theme.Metrics.pitch))
+        inboxBody(cap: peekCap(.inbox, fixed: Theme.Metrics.pitch), peek: true)
     }
 
     /// CI: its header, then its rows, as many whole ones as fit and "+N more" under them, like the inbox and the sessions.
     @ViewBuilder var peekCI: some View {
         ciHeader.frame(height: Theme.Metrics.pitch)
-        ciRows(cap: peekCap(.ci, fixed: Theme.Metrics.pitch))
+        ciRows(cap: peekCap(.ci, fixed: Theme.Metrics.pitch), peek: true)
     }
 
-    /// The sessions' header and notice over their rows: indented by the tile column where it is leading, so the header,
-    /// the groups and the rows' text start at one x (on the right edge the tile is trailing and nothing moves).
+    /// The sessions' header and notice over their rows, which have no tile column: the bar's tiles are beside them.
     @ViewBuilder var sessionsPeekHeader: some View {
-        let indent = railSide == .leading ? Theme.Metrics.bar : 0
-        agentsHeader.frame(height: Theme.Metrics.pitch).padding(.leading, indent)
-        ClaudeNotice(store: store).padding(.leading, indent + Theme.Metrics.rowPadding).padding(.trailing, Theme.Metrics.rowPadding)
+        agentsHeader.frame(height: Theme.Metrics.pitch)
+        ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
     }
 
-    /// The sessions as the full view lists them, as many whole rows as fit, then New session.
+    /// The sessions as the full view lists them, without their tiles: as many whole rows as fit, then New session.
     @ViewBuilder var peekAgents: some View {
         // Its header and the New session row are always there, and the notice when Claude's files are not.
         let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store))
         sessionsPeekHeader
         if noSessionsMatch { noSessionsLine }
         sessionsPeek(cap: cap)
-        newSessionRow(inset: 0)
-    }
-
-    /// "+N more" opens the full view, where every row is.
-    func keepOpen() {
-        withAnimation(Self.opening.resolved(reduce: reduce)) { hub.pinned = true }
+        newSessionRow(inset: 0, tile: false)
     }
 
     // MARK: Controls
@@ -361,43 +354,29 @@ extension LookoutHub {
     }
 }
 
-/// A list cut to the rows that fit whole, with "+N more" under it (never a fade, never a scroll). The rows mark
-/// themselves with `.capEdge()`; pass no more than `instantiated(cap)` of them: that many always cover the room.
-struct WholeRows<Content: View>: View {
-    /// How many rows the data has.
-    let total: Int
-    let cap: CGFloat
-    let noun: String
-    let onMore: () -> Void
-    @ViewBuilder let content: () -> Content
-    @State private var edges: [CGFloat] = []
-
-    /// A row is never shorter than a one-line row.
-    static func instantiated(_ cap: CGFloat) -> Int { Int(cap / Theme.Metrics.pitch) + 2 }
-
-    var body: some View {
-        // No rows, no list: nothing to measure, so nothing of the cap is kept for it.
-        if total > 0 { list }
+/// A peek never scrolls (DESIGN.md 10.3): it lists the whole rows that fit its cap and, under them, one "+N more" line,
+/// as tall as a one-line row, that keeps the hub open on the section. Rows are as tall as their layout says they are, so
+/// what a cap holds is arithmetic, not measurement.
+enum PeekCut {
+    /// How many of the rows of `heights`, laid out `spacing` apart, a peek of `cap` points lists: all of them when they
+    /// fit, else as many as leave room for the "+N more" line, and never fewer than one.
+    static func shown(_ heights: [CGFloat], spacing: CGFloat = 0, cap: CGFloat) -> Int {
+        func length(_ n: Int) -> CGFloat { heights.prefix(n).reduce(0, +) + CGFloat(max(n - 1, 0)) * spacing }
+        guard length(heights.count) > cap + 0.5 else { return heights.count }
+        let fits = heights.indices.filter { length($0 + 1) + Theme.Metrics.pitch <= cap + 0.5 }.count
+        return max(fits, 1)
     }
 
-    @ViewBuilder private var list: some View {
-        // Nothing is cut before the rows are measured.
-        let measured = !edges.isEmpty
-        let fits = measured && edges.count >= total && (edges.last ?? 0) <= cap + 0.5
-        let limit = fits ? nil : edges.filter { $0 <= cap - Theme.Metrics.pitch + 0.5 }.max() ?? (measured ? 0 : cap)
-        let hidden = measured && !fits ? total - edges.filter { $0 <= (limit ?? cap) + 0.5 }.count : 0
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-                .coordinateSpace(.named(CappedScrollSpace.name))
-                .frame(height: limit, alignment: .top)
-                .clipped()
-            if hidden > 0 {
-                MoreRow(text: "+\(hidden) more", label: plural(hidden, "more " + noun), hint: "Keeps Lookout open to show them", action: onMore)
-            }
-        }
-        .onPreferenceChange(CapEdges.self) { new in
-            let sorted = Array(Set(new.map { ($0 * 2).rounded() / 2 })).sorted()
-            if sorted != edges { edges = sorted }
-        }
+    /// `shown` for `count` rows of one height.
+    static func shown(count: Int, height: CGFloat, spacing: CGFloat = 0, cap: CGFloat) -> Int {
+        guard CGFloat(count) * (height + spacing) - spacing > cap + 0.5 else { return count }
+        return min(count, max(Int(((cap - Theme.Metrics.pitch + spacing + 0.5) / (height + spacing)).rounded(.down)), 1))
+    }
+}
+
+extension HubState {
+    /// A peek's "+N more": keeps the hub open on that section, which then has all the room.
+    func showAll(_ section: HubSection) {
+        LookoutHub.animate(LookoutHub.refocus) { pinned = true; focus = section }
     }
 }

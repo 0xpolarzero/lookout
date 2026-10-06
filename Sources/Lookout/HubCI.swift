@@ -305,17 +305,26 @@ extension LookoutHub {
 
     /// The rows under the header: one per failing or running repo, then the Passing row (open in place on request),
     /// all in one list that scrolls within `cap` (`ciCap` unless a panel says), ending between rows (each marks its
-    /// edge). Without any CI, one calm line with the way to turn it on.
-    func ciRows(cap: CGFloat? = nil) -> some View {
+    /// edge). A peek (`peek`) never scrolls: it lists the whole rows within `cap`, and "+N more" keeps the hub open on
+    /// CI. Without any CI, one calm line with the way to turn it on.
+    func ciRows(cap: CGFloat? = nil, peek: Bool = false) -> some View {
         let list = store.ciList
+        let undo = store.undoStack.visible(in: .ci)
         return VStack(alignment: .leading, spacing: 0) {
             if list.isEmpty {
                 noCI
             } else {
                 staleLine
-                CappedScroll(cap: cap ?? ciCap, hub: hub, cue: MoreCue(noun: "repository")) { ciListRows(list) }
+                if peek {
+                    // The stale line and the undo line are in the peek's room too.
+                    let room = (cap ?? ciCap) - (staleChecked(Date()) == nil ? 0 : Self.staleHeight)
+                        - (undo == nil ? 0 : Theme.Metrics.undoLine + Theme.Space.xs)
+                    ciPeekRows(list, cap: room)
+                } else {
+                    CappedScroll(cap: cap ?? ciCap, hub: hub, cue: MoreCue(noun: "repository")) { ciListRows(list) }
+                }
             }
-            if let undo = store.undoStack.visible(in: .ci) {
+            if let undo {
                 UndoLine(message: undo.message) { store.undoLast() }.padding(.top, Theme.Space.xs)
             }
         }
@@ -325,22 +334,64 @@ extension LookoutHub {
         .onChange(of: hub.ciTargets(store)) { old, new in hub.rehomeCI(from: old, to: new) }
     }
 
-    private func ciListRows(_ list: CIList) -> some View {
+    /// A line of the list: a failing or running repo, the Passing row, or (Passing open) a quiet repo.
+    private struct CIListLine: Identifiable {
+        enum Kind { case attention, passing, quiet }
+        let kind: Kind
+        let entry: CIEntry?
+        var id: String { "c:" + (entry?.id ?? "passing") }
+
+        var height: CGFloat {
+            switch kind {
+            case .attention: Theme.Metrics.twoLineRow
+            case .passing: Theme.Metrics.pitch
+            case .quiet: Theme.Metrics.menuRow
+            }
+        }
+    }
+
+    /// The lines in the order they are listed.
+    private func ciLines(_ list: CIList, open: Bool) -> [CIListLine] {
+        list.attention.map { CIListLine(kind: .attention, entry: $0) }
+            + (list.quiet.isEmpty ? [] : [CIListLine(kind: .passing, entry: nil)])
+            + (open ? list.quiet.map { CIListLine(kind: .quiet, entry: $0) } : [])
+    }
+
+    private func ciListRows(_ list: CIList, lines: ArraySlice<CIListLine>? = nil, marked: Bool = true) -> some View {
         let open = hub.ciPassingOpen || hub.focus == .ci
         return VStack(alignment: .leading, spacing: 0) {
-            ForEach(list.attention) { entry in
-                CIRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub)
-                    .capEdge().id("c:" + entry.id)
-            }
-            if !list.quiet.isEmpty {
-                CIQuietRow(list: list, open: open, ui: ui, hub: hub) { hub.setCIPassingOpen(!open) }
-                    .capEdge().id("c:passing")
-                if open {
-                    ForEach(list.quiet) { entry in
-                        CINameRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub)
-                            .capEdge().id("c:" + entry.id)
+            ForEach(lines ?? ciLines(list, open: open)[...]) { line in
+                Group {
+                    switch line.kind {
+                    case .attention:
+                        CIRow(entry: line.entry!, title: list.title(line.entry!.repo), store: store, ui: ui, hub: hub)
+                    case .passing:
+                        CIQuietRow(list: list, open: open, ui: ui, hub: hub) { hub.setCIPassingOpen(!open) }
+                    case .quiet:
+                        CINameRow(entry: line.entry!, title: list.title(line.entry!.repo), store: store, ui: ui, hub: hub)
+                            .transition(.opacity)
                     }
-                    .transition(.opacity)
+                }
+                .modifier(CapEdgeIf(marked: marked))
+                .id(line.id)
+            }
+        }
+    }
+
+    /// A peek's rows: the whole lines that fit `cap`, and under them how many repositories are left. A closed Passing
+    /// row stands for its repositories, an open one for none (they follow it).
+    private func ciPeekRows(_ list: CIList, cap: CGFloat) -> some View {
+        let open = hub.ciPassingOpen || hub.focus == .ci
+        let lines = ciLines(list, open: open)
+        let shown = PeekCut.shown(lines.map(\.height), cap: cap)
+        let hidden = lines.dropFirst(shown).reduce(0) { sum, line in
+            sum + (line.kind == .passing ? (open ? 0 : list.quiet.count) : 1)
+        }
+        return VStack(alignment: .leading, spacing: 0) {
+            ciListRows(list, lines: lines.prefix(shown), marked: false)
+            if hidden > 0 {
+                MoreRow(text: "+\(hidden) more", label: plural(hidden, "more repository"), hint: "Keeps Lookout open to show them") {
+                    hub.showAll(.ci)
                 }
             }
         }
@@ -380,14 +431,31 @@ extension LookoutHub {
     private var staleLine: some View {
         Ticking(coarse: true) { now in
             VStack(spacing: 0) {
-                if let checked = store.ciFreshness, now.timeIntervalSince(checked) > store.settings.pollInterval * 3 {
+                if let checked = staleChecked(now) {
                     Text("Last checked \(checked.formatted(date: .omitted, time: .shortened))")
                         .font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
                         .padding(.horizontal, Theme.Metrics.rowPadding)
-                        .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: Self.staleHeight, alignment: .leading)
                 }
             }
         }
+    }
+
+    private static let staleHeight: CGFloat = 20
+
+    /// When CI was last checked, if that is too long ago to call the rows fresh.
+    private func staleChecked(_ now: Date) -> Date? {
+        guard let checked = store.ciFreshness, now.timeIntervalSince(checked) > store.settings.pollInterval * 3 else { return nil }
+        return checked
+    }
+}
+
+/// A row of a list that scrolls marks its bottom edge; a peek's, which never does, needs no mark.
+private struct CapEdgeIf: ViewModifier {
+    let marked: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if marked { content.capEdge() } else { content }
     }
 }
 
