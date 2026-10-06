@@ -322,7 +322,7 @@ struct Shot {
 ///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
 ///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
 ///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none,
-///   inbox-search-from-focus,
+///   inbox-search-from-focus, inbox-many, inbox-peek-many,
 ///   inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
 /// Components
@@ -433,6 +433,9 @@ enum PlaygroundShots {
             $0.filter = .done
             $0.setup = { store, _, hub in hub.selection = store.list(.done).first.map { "i:" + $0.id } }
         },
+        // More rows than fit: the last whole row, then "+N more".
+        Shot.edges("inbox-many", on: .rightAndTop) { $0.pinned = true; $0.scenario = .inboxMany },
+        Shot.edges("inbox-peek-many", on: .rightAndTop) { $0.section = .inbox; $0.scenario = .inboxMany },
         Shot.edges("inbox-peek", on: .rightAndTop) { $0.section = .inbox },
         Shot.edges("inbox-peek-done", on: .rightAndTop) { $0.section = .inbox; $0.filter = .done },
         Shot.edges("inbox-focus", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },

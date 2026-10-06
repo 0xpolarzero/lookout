@@ -14,6 +14,8 @@ final class InboxState {
     /// Bumped to ask the field for focus.
     var focusRequest = 0
     var scrolled = false
+    /// The rows below the last whole row a list cut short shows (what its `+N more` line says).
+    var hiddenBelow = 0
 
     func startSearch() {
         searchOpen = true
@@ -411,7 +413,7 @@ extension InboxNotice {
 // MARK: - List
 
 /// The rows, scrolling within `cap`. Owns the rotor namespace ("Unread" walks the unread rows) and tells the header
-/// when the list has scrolled under it.
+/// when the list has scrolled under it. A list cut short says how many rows are below in a quiet `+N more` line.
 struct InboxList: View {
     let items: [InboxItem]
     let cap: CGFloat
@@ -422,11 +424,50 @@ struct InboxList: View {
     let ui: UIState
     let hub: HubState
     @Namespace private var rotor
+    /// How far the list has scrolled: not state, so scrolling doesn't redraw the rows (only the count below does).
+    @State private var scroll = ScrollBox()
 
     private static let space = "inbox-list"
 
+    /// Every row is one height (`twoLineRow`, a point apart), so what a cap shows is arithmetic, not measurement.
+    static let pitch = Theme.Metrics.twoLineRow + 1
+    /// The `+N more` line's height, taken from the cap while the list is cut.
+    static let moreHeight = Theme.Metrics.iconButton
+
+    /// The whole rows a height holds (at least one).
+    static func rowsFitting(_ height: CGFloat) -> Int { max(1, Int(((height + 1.5) / pitch).rounded(.down))) }
+
+    /// Whether `count` rows overflow `cap`.
+    static func isCut(count: Int, cap: CGFloat) -> Bool { count > rowsFitting(cap) }
+
+    /// The rows wholly below a list scrolled by `offset`, showing `rows` of them.
+    static func hiddenBelow(count: Int, offset: CGFloat, rows: Int) -> Int {
+        let shown = CGFloat(rows) * pitch - 1
+        return max(0, count - Int(((max(0, offset) + shown + 1.5) / pitch).rounded(.down)))
+    }
+
+    private var cut: Bool { Self.isCut(count: items.count, cap: cap) }
+    private var rows: Int { Self.rowsFitting(cut ? cap - Self.moreHeight : cap) }
+
     var body: some View {
-        CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count), fades: false, indicators: true) {
+        VStack(spacing: 0) {
+            list
+            if cut {
+                if hub.inbox.hiddenBelow > 0 {
+                    InboxMoreRow(hidden: hub.inbox.hiddenBelow, action: showMore)
+                } else {
+                    // Scrolled to the end: the line's room stays, so the hub doesn't change height under the pointer.
+                    Color.clear.frame(height: Self.moreHeight)
+                }
+            }
+        }
+        .onChange(of: items.count) { refreshHidden() }
+        .onChange(of: cap) { refreshHidden() }
+    }
+
+    private var list: some View {
+        CappedScroll(cap: cut ? cap - Self.moreHeight : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count),
+                     fades: false, indicators: true) {
             AdaptiveStack(count: items.count, spacing: 1) {
                 ForEach(items) { item in
                     InboxRow(item: item, store: store, ui: ui, hub: hub, rotor: rotor).capEdge().id("i:" + item.id)
@@ -445,11 +486,54 @@ struct InboxList: View {
         .onPreferenceChange(ScrollOffset.self) { offset in
             let scrolled = offset < -1
             if hub.inbox.scrolled != scrolled { hub.inbox.scrolled = scrolled }
+            scroll.offset = -offset
+            refreshHidden()
         }
-        .onDisappear { hub.inbox.scrolled = false }
+        .onDisappear { hub.inbox.scrolled = false; hub.inbox.hiddenBelow = 0 }
         .accessibilityRotor("Unread") {
             ForEach(items.filter { $0.state == .unread }) { AccessibilityRotorEntry(Text($0.title), id: $0.id, in: rotor) }
         }
+    }
+
+    private func refreshHidden() {
+        let hidden = cut ? Self.hiddenBelow(count: items.count, offset: scroll.offset, rows: rows) : 0
+        if hub.inbox.hiddenBelow != hidden { hub.inbox.hiddenBelow = hidden }
+    }
+
+    /// A page further down: the last row of the next screenful scrolls into view.
+    private func showMore() {
+        let last = min(items.count - 1, items.count - hub.inbox.hiddenBelow + rows - 1)
+        if items.indices.contains(last) { hub.requestScroll("i:" + items[last].id) }
+    }
+
+    private final class ScrollBox { var offset: CGFloat = 0 }
+}
+
+/// "+3 more", under a list that is cut short: `tertiary` text level with the rows' titles. A button, so it is on the
+/// Tab ring and VoiceOver can use it; it scrolls a page.
+private struct InboxMoreRow: View {
+    let hidden: Int
+    let action: () -> Void
+    @Environment(\.resolved) private var resolved
+    @FocusState private var focused: Bool
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("+\(hidden) more")
+                .font(Theme.Typography.meta)
+                .foregroundStyle(hover || focused ? AnyShapeStyle(Theme.secondary) : AnyShapeStyle(resolved.tertiary))
+                .padding(.leading, Theme.Metrics.rowPadding + Theme.Metrics.dotSlot + Theme.Metrics.avatar + Theme.Space.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: InboxList.moreHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focused)
+        .focusRing(Theme.Radius.small, isFocused: focused)
+        .onHover { hover = $0 }
+        .accessibilityLabel(plural(hidden, "more item"))
+        .accessibilityHint("Scrolls the list")
     }
 }
 

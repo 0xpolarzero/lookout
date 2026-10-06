@@ -11,6 +11,8 @@ enum Demo {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
         // Inbox and sync causes.
         case signedOut, reposFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        // An inbox longer than any list shows: the rest is "+N more".
+        case inboxMany
         // CI.
         case noCI, allPassing, manyCI
         // Sessions, replacing the `agents` ones: a handful of each state, and a long list.
@@ -81,6 +83,17 @@ enum Demo {
             store.authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
             // The rows it had stay cached; the message replaces them.
             store.ci = [:]
+        case .inboxMany:
+            agents(store, now)
+            let titles = ["Cache the avatar lookups", "Dark mode for the Settings window", "Snooze until Monday", "Open the right repo on click",
+                          "Hide read items after a day", "Keyboard shortcut for Mark all read", "Tab order in the footer", "Menu bar icon option",
+                          "Group by repository", "Notifications repeat after wake", "Sort Done by repository", "Search inside snippets"]
+            store.items += titles.enumerated().map { index, title in
+                InboxItem(id: "many-\(index)", repo: "0xpolarzero/lookout", kind: .issueOpened, number: 30 + index, title: title,
+                          snippet: "", author: ["kylef", "mattt", "allevato"][index % 3], avatar: nil, authorIsApp: false,
+                          url: URL(string: "https://github.com/0xpolarzero/lookout/issues/\(30 + index)")!,
+                          createdAt: now.addingTimeInterval(-Double(130 + index * 40) * 60), state: .unread)
+            }
         case .reposFailed:
             agents(store, now)
             store.repoErrors = ["ziglang/zig": "Not found (or no access)", "e2b-dev/runtime": "Forbidden"]
