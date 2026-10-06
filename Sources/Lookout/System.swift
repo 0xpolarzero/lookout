@@ -127,6 +127,13 @@ final class HotKeys {
         buttons[id] = nil
     }
 
+    /// The system's prompt for Accessibility access, which modifier taps and mouse buttons need to be seen in other apps.
+    private func askForAccessibility() {
+        if !AXIsProcessTrusted() {
+            AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
+        }
+    }
+
     private func updateMonitors() {
         if taps.isEmpty {
             monitors.forEach(NSEvent.removeMonitor)
@@ -135,9 +142,7 @@ final class HotKeys {
             return
         }
         guard monitors.isEmpty else { return }
-        if !AXIsProcessTrusted() {
-            AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
-        }
+        askForAccessibility()
         // Only modifier changes are watched; whether anything else happened during a tap is asked on release.
         let events: NSEvent.EventTypeMask = [.flagsChanged]
         // design-lint: ignore (`events` is just .flagsChanged)
@@ -166,9 +171,7 @@ final class HotKeys {
             return
         }
         guard buttonTap == nil else { return }
-        if !AXIsProcessTrusted() {
-            AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
-        }
+        askForAccessibility()
         let mask = CGEventMask(1 << CGEventType.otherMouseDown.rawValue | 1 << CGEventType.otherMouseUp.rawValue)
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                           eventsOfInterest: mask, callback: { _, type, event, info in
@@ -269,9 +272,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             store.start()
         }
-        hub = HubController(store: store, demo: CommandLine.arguments.contains("--demo"))
+        let demo = CommandLine.arguments.contains("--demo")
+        hub = HubController(store: store, demo: demo)
         // Demo: the keep-open key on right ⌘ (not saved), to try tap and double-tap.
-        if CommandLine.arguments.contains("--demo"), hub != nil {
+        if demo {
             store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
         }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }

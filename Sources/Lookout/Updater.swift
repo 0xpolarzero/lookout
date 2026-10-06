@@ -98,7 +98,7 @@ final class Updater {
         loop = Task { [weak self] in
             try? await Task.sleep(for: .seconds(20))
             while !Task.isCancelled {
-                if let self, self.automatic() { await self.update(manual: false) }
+                await self?.updateIfAutomatic()
                 try? await Task.sleep(for: .seconds(Self.interval))
             }
         }
@@ -106,9 +106,13 @@ final class Updater {
                                                                  queue: .main) { [weak self] _ in
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(10))
-                if let self, self.automatic() { await self.update(manual: false) }
+                await self?.updateIfAutomatic()
             }
         }
+    }
+
+    private func updateIfAutomatic() async {
+        if automatic() { await update(manual: false) }
     }
 
     /// Checks, then fetches and verifies anything new in the background.
