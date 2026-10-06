@@ -159,6 +159,14 @@ import Testing
         #expect(entry(s, "stale") == nil)
     }
 
+    @Test func keepingAKeptSessionLeavesItsPlace() {
+        let s = store([session("a"), session("b")])
+        s.keepAgent("a")
+        s.keepAgent("b")
+        s.keepAgent("a")
+        #expect(s.agentRows.kept.map(\.id) == ["a", "b"])
+    }
+
     @Test func keptOrderAndReorder() {
         let s = store([session("a"), session("b"), session("c")])
         s.keepAgent("b")
