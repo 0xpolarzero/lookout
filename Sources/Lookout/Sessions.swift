@@ -27,20 +27,23 @@ struct RailRow<Tile: View, Content: View>: View {
     @ViewBuilder let tile: Tile
     @ViewBuilder let content: Content
     @Environment(\.resolved) private var resolved
+    @Environment(\.railInset) private var railInset
 
     /// The fill starts this far in from the rail's side, so the tile sits inside it.
     private static var fillInset: CGFloat { 4 }
 
     /// How far the text's end is from the row's end on the side `rail` puts the tile: a trailing action lines up here.
-    static func textEnd(_ rail: HorizontalEdge?) -> CGFloat {
-        Theme.Metrics.rowPadding + (rail == .trailing ? Theme.Metrics.bar : 0)
+    /// `inset`: the room the side hub keeps between the rail's hairline and the text (`railInset`).
+    static func textEnd(_ rail: HorizontalEdge?, inset: CGFloat = 0) -> CGFloat {
+        Theme.Metrics.rowPadding + (rail == .trailing ? Theme.Metrics.bar + inset : 0)
     }
 
     var body: some View {
         HStack(spacing: 0) {
             if rail == .leading { slot }
             content
-                .padding(.horizontal, Theme.Metrics.rowPadding)
+                .padding(.leading, Theme.Metrics.rowPadding + (rail == .leading ? railInset : 0))
+                .padding(.trailing, Theme.Metrics.rowPadding + (rail == .trailing ? railInset : 0))
                 .frame(maxWidth: .infinity, alignment: .leading)
             if rail == .trailing { slot }
         }
@@ -469,6 +472,7 @@ struct SessionRow: View {
     @State private var dropTarget = false
     @AccessibilityFocusState private var voiceOverFocused: Bool
     @Environment(\.resolved) private var resolved
+    @Environment(\.railInset) private var railInset
 
     /// Keep for a session that isn't yours yet, Hide for the others (see `Store.dismissAgent`).
     private var keeps: Bool { row.pending && (placement == .newActivity || placement == .search) }
@@ -493,7 +497,7 @@ struct SessionRow: View {
         .buttonStyle(.plain)
         .focusable(false)
         .overlay(alignment: .topTrailing) {
-            if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail)) }
+            if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset)) }
         }
         .motion(Theme.Motion.hover, value: showsAction)
         .modifier(Reorderable(enabled: placement == .project, row: row, store: store, dropTarget: $dropTarget))
@@ -678,6 +682,7 @@ struct NewSessionRow: View {
     let hub: HubState
     let rail: HorizontalEdge?
     var inset: CGFloat = Theme.Metrics.inset
+    @Environment(\.railInset) private var railInset
     @State private var hovering = false
     @State private var anchor = MenuAnchor()
 
@@ -700,7 +705,7 @@ struct NewSessionRow: View {
         // Named before the chevron goes over it: a label put on the whole would replace the chevron's own.
         .accessibilityLabel("New session")
         .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
-        .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail) - 6) }
+        .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset) - 6) }
         .onHover { hovering = $0 }
         .padding(rail == .leading ? .trailing : .leading, inset)
         .onChange(of: hub.projectsMenuRequest) { _, _ in presentProjects() }

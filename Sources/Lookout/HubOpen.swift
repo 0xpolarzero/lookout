@@ -150,8 +150,8 @@ extension LookoutHub {
                                            @ViewBuilder detail: () -> Detail) -> some View {
         let slot = cell().frame(width: Self.cell)
         let content = detail()
-            // The one outer inset, against the rounded side; the rail's cells sit on the other.
-            .padding(edge == .right ? .leading : .trailing, Self.inset)
+            // An inset on each side (the outline's, and the rail's hairline): text sits `contentEdge` from either.
+            .padding(.horizontal, Self.inset)
             .frame(width: Self.detail, alignment: .leading)
         return HStack(alignment: alignment, spacing: 0) {
             if edge == .left { slot }
@@ -214,6 +214,7 @@ extension LookoutHub {
         }
         .padding(.vertical, HubGeometry.lead)
         .frame(width: Self.cell + Self.detail)
+        .environment(\.railInset, Self.inset)
         .background(alignment: edge == .right ? .trailing : .leading) { rail }
         // The keys walk only the rows that are drawn.
         .onChange(of: foldsCI, initial: true) { _, folded in hub.ciFolded = folded }

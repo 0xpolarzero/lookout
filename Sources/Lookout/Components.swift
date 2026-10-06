@@ -270,6 +270,9 @@ extension View {
 }
 
 extension EnvironmentValues {
+    /// Room the side hub keeps between the rail's hairline and the text and fills beside it, as it does against its own
+    /// outline (DESIGN.md 5.3): rows put their text `contentEdge` from either, their fills `inset`.
+    @Entry var railInset: CGFloat = 0
     /// Nil outside the hub (a sheet of components, a settings pane in isolation): nobody is listening.
     @Entry var controlFocus: ControlFocus? = nil
 }
