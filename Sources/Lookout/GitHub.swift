@@ -192,6 +192,10 @@ final class GitHubClient: @unchecked Sendable {
     }
 
     private func exchange(_ path: String, _ query: [String: String]) async throws -> Answer {
+        // Out of calls: GitHub asks that nothing is sent until the reset. Search has a budget of its own, which this one's end leaves.
+        if !path.hasPrefix("/search/"), let reset = lock.withLock({ coreRemaining == 0 ? coreResetsAt : nil }), reset > Date() {
+            throw GitHubError(message: "API rate limit exceeded, waiting for the reset")
+        }
         var comps = URLComponents(string: "https://api.github.com" + path)!
         if !query.isEmpty {
             comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }

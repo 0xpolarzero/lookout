@@ -430,6 +430,11 @@ final class Store {
             var wait = 3600.0
             if !systemAsleep {
                 wait = effectivePollInterval - Date().timeIntervalSince(lastSync ?? .distantPast)
+                // Out of calls: the reset is when the banner says it checks again, whatever is left of the interval.
+                if rateLimited, let reset = rateResetsAt {
+                    if reset <= Date(), (lastSync ?? .distantPast) < reset, !isSyncing { return }
+                    if reset > Date() { wait = min(wait, reset.timeIntervalSinceNow) }
+                }
                 if wait <= 0 {
                     if !isSyncing { return }
                     wait = 1

@@ -81,6 +81,24 @@ import Testing
         let _: Counted = try await client.get("/repos/o/other/commits/\(String(repeating: "a", count: 40))/status")
         #expect(client.remembered == 3)
     }
+
+    @Test func nothingIsAskedOfTheCoreBudgetBetweenItsEndAndItsResetButSearchStillIs() async throws {
+        let client = GitHubClient()
+        let asked = OSAllocatedUnfairLock(initialState: [String]())
+        let reset = Date().addingTimeInterval(600)
+        client.transport = { request in
+            let url = request.url!
+            asked.withLock { $0.append(url.path) }
+            let limits = ["x-ratelimit-resource": "core", "x-ratelimit-remaining": "0",
+                          "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970))]
+            return (Data(#"{"id": 7}"#.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: limits)!)
+        }
+        let _: Counted = try await client.get("/repos/o/r/issues")
+        #expect(client.rateRemaining == 0)
+        await #expect(throws: GitHubError.self) { let _: Counted = try await client.get("/repos/o/r/issues") }
+        let _: Counted = try await client.get("/search/issues")
+        #expect(asked.withLock { $0 } == ["/repos/o/r/issues", "/search/issues"])
+    }
 }
 
 /// The answers the idle gate's polling run serves (`--canned`): a poll through them gets every source of every repository, the
