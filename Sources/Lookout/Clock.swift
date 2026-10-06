@@ -30,14 +30,17 @@ final class Clock {
     @ObservationIgnored private var asleep = false
     @ObservationIgnored private let windowVisible: @MainActor () -> Bool
     @ObservationIgnored let showing: @MainActor (NSWindow) -> Bool
+    /// The system's date; a test moves it.
+    @ObservationIgnored private let date: @MainActor () -> Date
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     /// `observing` follows the screens' sleep and the windows' occlusion, as the app does; a test turns it off and
     /// says whether a window is visible (`windowVisible`: any of them; `showing`: the one a label is in).
     init(observing: Bool = true, windowVisible: @escaping @MainActor () -> Bool = { NSApp.windows.contains { $0.isShowing } },
-         showing: @escaping @MainActor (NSWindow) -> Bool = { $0.isShowing }) {
+         showing: @escaping @MainActor (NSWindow) -> Bool = { $0.isShowing }, date: @escaping @MainActor () -> Date = { Date() }) {
         self.windowVisible = windowVisible
         self.showing = showing
+        self.date = date
         guard observing else { return }
         let ws = NSWorkspace.shared.notificationCenter
         for (name, sleeping) in [(NSWorkspace.screensDidSleepNotification, true), (NSWorkspace.screensDidWakeNotification, false)] {
@@ -52,10 +55,12 @@ final class Clock {
 
     func retain(_ rate: Rate) {
         subscribers[rate, default: 0] += 1
-        // What a label reads must be current when it starts ticking: the clock may have been stopped for a while.
-        let date = Date()
-        if rate == .second, subscribers[.second] == 1 { now = date }
-        if date.timeIntervalSince(minute) > 1 { minute = date }
+        // What a label reads must be current when the first one starts ticking: the clock may have been stopped for a
+        // while. A later one changes nothing the others read (they would all redraw for it); `Ticking` draws its own
+        // first frame from the system's date.
+        if subscribers[rate] == 1 {
+            if rate == .second { now = date() } else { minute = date() }
+        }
         update()
     }
 
@@ -77,7 +82,7 @@ final class Clock {
         timer = nil
         interval = rate?.interval
         guard let rate else { return }
-        now = Date()
+        now = date()
         minute = now
         ticks = 0
         let t = Timer(timeInterval: rate.interval, repeats: true) { [weak self] _ in
@@ -91,7 +96,7 @@ final class Clock {
 
     private func tick() {
         guard let interval else { return }
-        let date = Date()
+        let date = date()
         if interval == Rate.second.interval { now = date }
         ticks += 1
         if Double(ticks) * interval >= Rate.minute.interval {
@@ -173,7 +178,10 @@ struct Ticking<Content: View>: View {
     var body: some View {
         let clock = environmentClock ?? .shared
         let rate = rate
-        content(rate == .second ? clock.now : clock.minute)
+        // The clock's time is the one that ticks; a stopped clock's is old, and a label that has just appeared reads the
+        // system's date for its first frame.
+        let ticked = rate == .second ? clock.now : clock.minute
+        content(clock.interval == nil ? Date() : ticked)
             .background(OnScreen(showing: clock.showing) { claim.onScreen = $0 })
             .onAppear { claim.start(on: clock, rate: rate, hidden: hidden) }
             .onChange(of: rate) { claim.rate = rate }

@@ -43,6 +43,20 @@ import Testing
         #expect(clock.interval == nil)
     }
 
+    @Test func aSecondSubscriberChangesNothingTheFirstReads() {
+        var date = Date(timeIntervalSince1970: 2_000_000_000)
+        let clock = Clock(observing: false, windowVisible: { true }, date: { date })
+        clock.retain(.minute)
+        let first = clock.minute
+        // The system's date has moved on since the first one started: a label mounting now must not tell the others (the
+        // footer's mounts one on every poll, and every row reads this).
+        date.addTimeInterval(5)
+        let changed = Flag()
+        withObservationTracking { _ = clock.minute } onChange: { changed.set() }
+        clock.retain(.minute)
+        #expect(!changed.value && clock.minute == first)
+    }
+
     @Test func extraReleasesDoNotGoNegative() {
         let clock = clock()
         clock.release(.second)
@@ -200,4 +214,10 @@ import Testing
         window.contentView = nil
         window.orderOut(nil)
     }
+}
+
+/// Set from an observation's change handler.
+private final class Flag: @unchecked Sendable {
+    private(set) var value = false
+    func set() { value = true }
 }

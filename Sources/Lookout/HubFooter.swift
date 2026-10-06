@@ -67,24 +67,16 @@ extension LookoutHub {
 }
 
 /// The sync state is read here, in views of their own: a poll flips `isSyncing` and `lastSync` every time, and that
-/// redraws these lines, not the hub (DESIGN.md 8).
+/// redraws these lines, not the hub (DESIGN.md 8). One `Ticking` whatever the line says: it is the same view through a
+/// poll (swapping it for a plain line while syncing would mount it again, and a mount is a claim on the clock). A fault,
+/// "Checking…" and "Not checked yet" name no time and ignore the one they are given.
 struct SyncStatus<Content: View>: View {
     let store: Store
     @ViewBuilder let content: (SyncLine) -> Content
 
-    /// Whether the sync line says how long ago it checked, and so has to follow the clock. A fault, "Checking…" and "Not
-    /// checked yet" name no time: they are drawn once, with nothing subscribed to the clock.
-    private var namesTime: Bool {
-        store.authError == nil && store.repoErrors.isEmpty && !store.reviewRequestsFailing && !store.isSyncing && store.lastSync != nil
-    }
-
-    /// The sync line for `content`, redrawn on the minute clock (which never starts the seconds one) only while it counts minutes.
+    /// The sync line for `content`, redrawn on the minute clock (which never starts the seconds one).
     var body: some View {
-        if namesTime {
-            Ticking(coarse: true) { content(SyncLine(store, now: $0)) }
-        } else {
-            content(SyncLine(store, now: Date()))
-        }
+        Ticking(coarse: true) { content(SyncLine(store, now: $0)) }
     }
 }
 
