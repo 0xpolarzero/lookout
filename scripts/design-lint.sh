@@ -47,7 +47,7 @@ scan() {
 # Motion and performance (section 8): nothing repeats in SwiftUI, nothing watches globally at rest.
 scan "repeating SwiftUI motion (the working arc is Core Animation)" 'repeatForever|TimelineView|Timer\.publish'
 scan "global event monitor other than .flagsChanged" 'addGlobalMonitorForEvents' 
-scan "no bounce: three speeds, none springy" '[(, ]\.(snappy|bouncy)[,)]|bounce: *0?\.0*[1-9]'
+scan "no bounce: three speeds, none springy" '\.(snappy|bouncy)([^A-Za-z0-9_]|$)|bounce: *0?\.0*[1-9]'
 # Type floor: text is 11pt or more (symbols size themselves with Theme.Typography.glyph).
 scan "text below 11pt" '\.system\(size: *([0-9]|10)(\.[0-9]+)?[,)]'
 
