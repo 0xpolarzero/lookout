@@ -17,10 +17,9 @@ struct TileMarks: Equatable {
 extension AgentRow {
     var tileMarks: TileMarks {
         let waiting = waitsForYou || (!session.running && unread && session.summary?.blocked == true)
-        // Never while it waits for you, however it waits: a finished turn that ended on a question is `.blocked` read
-        // or not, and what it left running behind it doesn't turn that into work.
-        return TileMarks(waiting: waiting, working: status != .blocked && (session.running || !tasks.isEmpty),
-                         unread: unread && !waiting)
+        // Never while it waits for you, however it waits: what a finished question left running behind it is not work
+        // until you have read it (then the tile is not amber any more, and the ring says what is still going).
+        return TileMarks(waiting: waiting, working: !waiting && (session.running || !tasks.isEmpty), unread: unread && !waiting)
     }
 
     /// "waiting for you", "working", "finished, unread": the state as VoiceOver says it, never colour alone.

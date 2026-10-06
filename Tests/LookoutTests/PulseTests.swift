@@ -140,7 +140,13 @@ import Testing
     @Test func aSessionWaitingForYouNeverWorks() {
         #expect(!row(running: true, stopped: true).tileMarks.working)
         // Finished on a question, with a subagent or command still running behind it.
-        #expect(!row(blocked: true, tasks: [task]).tileMarks.working)
         #expect(!row(blocked: true, unread: true, tasks: [task]).tileMarks.working)
+    }
+
+    @Test func readingAQuestionBringsTheRingBackForWhatItLeftRunning() {
+        // Finished on a question and read: no longer amber, and the subagent or command behind it is work (DESIGN.md 10.1).
+        let read = row(blocked: true, tasks: [task])
+        #expect(!read.tileMarks.waiting && read.tileMarks.working)
+        #expect(!row(blocked: true).tileMarks.working)
     }
 }
