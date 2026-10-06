@@ -119,6 +119,8 @@ final class HubKeys {
             return true
         }
         if flags.isEmpty, !bound, let step = Self.horizontalStep(event.keyCode), horizontal(step, in: targets, event: event, shortcut: shortcut) { return true }
+        // Check now needs no row, so a plain letter bound to it is its own and not the search's.
+        if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
         // Not over rows the list isn't showing (a sign-in problem replaces it, a focused section hides the inbox).
         if shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) {
             if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }

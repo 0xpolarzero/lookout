@@ -105,6 +105,16 @@ import Testing
         #expect(press(kVK_ANSI_T, [], "t") && hub.query == "t")
     }
 
+    @Test func aLetterBoundToCheckNowChecksInsteadOfSearching() {
+        var refreshes = 0
+        store.interceptRefresh = { refreshes += 1 }
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_E)), for: .refresh)
+        #expect(press(kVK_ANSI_E, [], "e") && refreshes == 1 && hub.query.isEmpty)
+        // It needs no row: with nothing picked it still checks.
+        hub.selection = nil
+        #expect(press(kVK_ANSI_E, [], "e") && refreshes == 2 && hub.query.isEmpty)
+    }
+
     @Test func aBindingOnACommandDigitRunsBeforeTheFocusChord() {
         store.agents.enabled = true
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_3), modifiers: [.command]), for: .toggleRead)
