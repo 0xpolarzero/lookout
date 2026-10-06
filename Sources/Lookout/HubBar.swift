@@ -182,7 +182,6 @@ extension LookoutHub {
             HStack(spacing: 8) {
                 inboxIcon
                 if wide && !shrunk(.inbox) { inboxHeader.transition(.hubReveal) }
-                if wide && shrunk(.inbox) { Spacer(minLength: 0); focusButton(.inbox) }
             }
             .padding(.leading, Self.inset + 1)
             .padding(.trailing, Self.inset)
@@ -197,7 +196,6 @@ extension LookoutHub {
                     // Shrunk: the counts fit where the header's words wouldn't.
                     HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
                     Spacer(minLength: 0)
-                    focusButton(.ci)
                 } else if wide {
                     ciHeader.transition(.hubReveal)
                 } else {

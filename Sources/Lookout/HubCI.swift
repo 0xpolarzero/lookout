@@ -86,7 +86,7 @@ extension LookoutHub {
                 return n == 0 ? nil : ("\(n) \(state.label)", state.color)
             } + (ciRepos(listedIn: .none).isEmpty ? [] : [("\(ciRepos(listedIn: .none).count) no runs", CIState.none.color)])
             : ciStatus.map { [$0] } ?? []
-        return sectionHeader("CI", status: status) { if showsDetail { focusButton(.ci) } }
+        return sectionHeader("CI", status: status)
     }
 
     /// "2 failing" in red; "1 running" while nothing fails but something runs; "all passing" once everything has.

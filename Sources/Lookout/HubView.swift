@@ -325,16 +325,6 @@ struct LookoutHub: View {
         showsDetail && hub.focus != nil && hub.focus != section
     }
 
-    /// A section header's button: give this section all the room (the others shrink to their header), or back.
-    func focusButton(_ section: HubSection) -> some View {
-        let focused = hub.focus == section
-        return IconButton(symbol: focused ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                          help: focused ? "Back to all sections" : "Expand \(section.name)",
-                          detail: focused ? "Esc" : "The other sections shrink to their counts") {
-            hub.toggleFocus(section)
-        }
-    }
-
     /// A session in the full view (see `SessionBlock`).
     func sessionBlock(_ r: AgentRow, twoLines: Bool, fills: Bool = true) -> some View {
         SessionBlock(row: r, twoLines: twoLines, store: store, ui: ui, hub: hub, fills: fills)

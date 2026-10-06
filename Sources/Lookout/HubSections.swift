@@ -68,7 +68,7 @@ extension LookoutHub {
         case .missing, .unreadable: status.append(("!", AnyShapeStyle(Theme.red)))
         default: break
         }
-        return sectionHeader("Sessions", status: status) { if showsDetail { focusButton(.agents) } }
+        return sectionHeader("Sessions", status: status)
     }
 
     /// A session's tile in the bar; opens it in Claude.

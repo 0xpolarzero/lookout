@@ -17,13 +17,12 @@ extension LookoutHub {
         if edge.isHorizontal { openStripHub } else { openSideHub }
     }
 
-    /// A section's header slot, one pitch tall. A click anywhere on it that its own controls don't take gives the
-    /// section all the room, or gives it back.
-    func headerSlot<Header: View>(_ section: HubSection, @ViewBuilder _ header: () -> Header) -> some View {
-        header()
-            .frame(height: Theme.Metrics.pitch)
-            .contentShape(Rectangle())
-            .onTapGesture { hub.toggleFocus(section) }
+    /// A section's header slot, one pitch tall: the whole header is the control that gives the section all the room, or
+    /// gives it back (DESIGN.md 4.2). Its chevron shows on hover only (and while the section is the focused one, with
+    /// `esc`), it is a pointing hand with a "Focus" action for VoiceOver, and its own controls take their clicks first.
+    /// `owns`: the header is a `SectionHeader(onFocus:)`, which carries all that itself.
+    func headerSlot<Header: View>(_ section: HubSection, owns: Bool = false, @ViewBuilder _ header: () -> Header) -> some View {
+        HeaderSlot(section: section, focused: hub.focus == section, owns: owns, toggle: { hub.toggleFocus(section) }, header: header)
     }
 
     /// Between sections: a hairline across, with its room.
@@ -32,7 +31,7 @@ extension LookoutHub {
     /// The inbox as a header with its counts, when another section has the room.
     var collapsedInboxHeader: some View {
         let needs = store.unreadCount(.needsYou)
-        return sectionHeader("Inbox", status: needs > 0 ? [("\(needs) need you", AnyShapeStyle(Theme.amber))] : []) { focusButton(.inbox) }
+        return sectionHeader("Inbox", status: needs > 0 ? [("\(needs) need you", AnyShapeStyle(Theme.amber))] : [])
     }
 
     /// What the full view of the sides' lists may scroll within: what the screen's length leaves once the fixed parts
@@ -353,6 +352,52 @@ extension LookoutHub {
                     ForEach(rows.pending) { twoLineRow($0) }
                 }
             }
+        }
+    }
+}
+
+/// A section header made into the control that focuses its section (see `LookoutHub.headerSlot`).
+struct HeaderSlot<Header: View>: View {
+    let section: HubSection
+    let focused: Bool
+    let owns: Bool
+    let toggle: () -> Void
+    @ViewBuilder let header: Header
+    @State private var hovering = false
+    @State private var cursorPushed = false
+
+    var body: some View {
+        if owns {
+            header.frame(height: Theme.Metrics.pitch)
+        } else {
+            let help = focused ? "Back to all sections" : "Expand \(section.name)"
+            HStack(spacing: 0) {
+                header
+                if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary).padding(.trailing, Theme.Space.sm) }
+                // Always there, so the header's own controls never move when it shows.
+                Image(systemName: focused ? "chevron.up" : "chevron.down")
+                    .font(Theme.Typography.glyph(11, .semibold))
+                    .foregroundStyle(Theme.tertiary)
+                    .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
+                    .padding(.trailing, Theme.Space.hair)
+                    .opacity(hovering || focused ? 1 : 0)
+                    .tip(help)
+                    .accessibilityHidden(true)
+            }
+            .frame(height: Theme.Metrics.pitch)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggle)
+            .onHover { inside in
+                hovering = inside
+                // The pointing hand, pushed and popped in pairs.
+                guard inside != cursorPushed else { return }
+                if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                cursorPushed = inside
+            }
+            .onDisappear { if cursorPushed { NSCursor.pop(); cursorPushed = false } }
+            .motion(Theme.Motion.hover, value: hovering)
+            .accessibilityElement(children: .contain)
+            .accessibilityAction(named: focused ? "Back to all sections" : "Focus", toggle)
         }
     }
 }
