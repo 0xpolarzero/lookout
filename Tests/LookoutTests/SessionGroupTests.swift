@@ -544,6 +544,18 @@ import Testing
         #expect(s.projectOrder == ["/code/x", "/code/z", "/code/y"])
     }
 
+    @Test func aProjectIsNeverMovedBehindTheCutOfAListThatHidesIt() {
+        let a = (0..<8).map { session("a\($0)", folder: "/code/a") }, b = (0..<8).map { session("b\($0)", folder: "/code/b") }
+        let s = store(a + b, kept: (a + b).map(\.id))
+        let hub = HubState()
+        // The list is cut at eight, and shows only a: b is behind its "+8", so a has nowhere to go.
+        #expect(s.listedGroups(hub).groups.map(\.id) == ["project:/code/a"])
+        #expect(!hub.canMoveProject("/code/a", by: 1, store: s) && !hub.canMoveProject("/code/b", by: -1, store: s))
+        // Whole, it shows both.
+        hub.sessionsExpanded = true
+        #expect(hub.canMoveProject("/code/a", by: 1, store: s) && hub.canMoveProject("/code/b", by: -1, store: s))
+    }
+
     @Test func aFocusedSessionsListShowsEverySession() {
         let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
         let hub = HubState()

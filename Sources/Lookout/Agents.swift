@@ -781,13 +781,18 @@ extension Store {
         return true
     }
 
+    /// The sessions a list shows, in its order: all of them when it is whole, else what it cuts to eight (`BarSessions.arrange`).
+    private func listedSlots(frozen: [BarSessions.Slot]?, expanded: Bool) -> [BarSessions.Slot] {
+        expanded ? BarSessions.inOrder(barSlots, frozen: frozen) : BarSessions.arrange(barSlots, frozen: frozen).shown
+    }
+
     /// The session above (-1) or below (+1) this one in the project it is listed in, which is what Move up and Move down swap
     /// with. `frozen`: the order and groups the pointer holds the list in, so the neighbour is the row the list shows beside it,
     /// not the one the live order has there (a session that began to wait is still listed in its project under the freeze).
     /// `expanded`: whether the list shows every session; a list cut at eight has a row the neighbour is not, one it has hidden or
     /// one a late waiter took the place of, and the neighbour is only ever a row on screen.
     func neighbour(of id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> String? {
-        let slots = expanded ? BarSessions.inOrder(barSlots, frozen: frozen) : BarSessions.arrange(barSlots, frozen: frozen).shown
+        let slots = listedSlots(frozen: frozen, expanded: expanded)
         guard let at = slots.first(where: { $0.id == id }), let folder = claudeSessions[id]?.folderKey,
               at.group == "project:" + folder else { return nil }
         let own = slots.filter { $0.group == at.group && claudeSessions[$0.id]?.folderKey == folder }
@@ -823,10 +828,11 @@ extension Store {
     }
 
     /// The projects the list shows a group for, in its order: what Move project up and down trade places within. `frozen`:
-    /// the order the pointer holds the list in.
-    func listedProjects(frozen: [BarSessions.Slot]? = nil) -> [String] {
+    /// the order the pointer holds the list in. `expanded`: whether the list shows every session; a list cut at eight has a
+    /// project it has hidden behind its "+N", which is no neighbour.
+    func listedProjects(frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> [String] {
         var order: [String] = []
-        for slot in BarSessions.inOrder(barSlots, frozen: frozen) where slot.group.hasPrefix("project:") && slot.group != "project:" {
+        for slot in listedSlots(frozen: frozen, expanded: expanded) where slot.group.hasPrefix("project:") && slot.group != "project:" {
             let folder = String(slot.group.dropFirst("project:".count))
             if !order.contains(folder) { order.append(folder) }
         }
@@ -834,19 +840,19 @@ extension Store {
     }
 
     /// The project `step` places up (-1) or down (+1) from `folder` among the listed ones, which it trades places with.
-    func neighbouringProject(of folder: String, _ step: Int, frozen: [BarSessions.Slot]? = nil) -> String? {
-        let order = listedProjects(frozen: frozen)
+    func neighbouringProject(of folder: String, _ step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> String? {
+        let order = listedProjects(frozen: frozen, expanded: expanded)
         guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return nil }
         return order[i + step]
     }
 
-    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
-        neighbouringProject(of: folder, step, frozen: frozen) != nil
+    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> Bool {
+        neighbouringProject(of: folder, step, frozen: frozen, expanded: expanded) != nil
     }
 
     /// One place up (-1) or down (+1) among the projects.
-    func moveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) {
-        guard let target = neighbouringProject(of: folder, step, frozen: frozen) else { return }
+    func moveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
+        guard let target = neighbouringProject(of: folder, step, frozen: frozen, expanded: expanded) else { return }
         moveProject(folder, onto: target)
     }
 

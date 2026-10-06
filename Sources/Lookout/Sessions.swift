@@ -682,11 +682,11 @@ extension HubState {
     }
 
     func canMoveProject(_ folder: String, by step: Int, store: Store) -> Bool {
-        store.canMoveProject(folder, by: step, frozen: frozenSessions)
+        store.canMoveProject(folder, by: step, frozen: frozenSessions, expanded: listsAllSessions)
     }
 
     func moveProject(_ folder: String, by step: Int, store: Store) {
-        guard let target = store.neighbouringProject(of: folder, step, frozen: frozenSessions) else { return }
+        guard let target = store.neighbouringProject(of: folder, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
         moveProject(folder, onto: target, store: store)
     }
 
