@@ -397,6 +397,14 @@ enum AccessibilityTree {
         #expect(hub.pinned && hub.voiceOverRequest?.target == "h:ci" && hub.selection?.hasPrefix("c:") == true)
     }
 
+    @Test func showOnCIFromAnOpenSearchFieldClosesTheFieldSoReturnActsOnTheRow() {
+        hub.pinned = true
+        hub.beginSearch()
+        hub.query = "zig"
+        view.show(.ci)
+        #expect(hub.query.isEmpty && !hub.inbox.searchOpen && !hub.inbox.searchFocused && hub.selection?.hasPrefix("c:") == true)
+    }
+
     @Test func showStepsBackFromASectionFocusSoWhatIsShownIsThere() {
         hub.pinned = true
         hub.focus = .agents

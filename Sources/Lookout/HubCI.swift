@@ -478,7 +478,7 @@ extension HubState {
     /// screen's room, which can fold CI's rows away: CI is then the focused section.
     func showCI(_ store: Store, ui: UIState) {
         pinned = true
-        if !query.isEmpty { query = "" }
+        endSearch()
         if focus != nil, focus != .ci { LookoutHub.animate(LookoutHub.refocus) { focus = nil } }
         // A low bar folds CI to its header in the combined layout: its rows come back only as the focused section.
         if ciFolded {
