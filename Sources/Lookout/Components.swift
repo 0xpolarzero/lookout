@@ -607,7 +607,7 @@ struct CheckboxStyle: ToggleStyle {
                         .foregroundStyle(enabled ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: Theme.Metrics.menuRow)
+                .frame(minHeight: Theme.Metrics.formRow)
                 .contentShape(Rectangle())
             }
             .buttonStyle(UnfadedButtonStyle())

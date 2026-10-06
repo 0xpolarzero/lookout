@@ -281,7 +281,7 @@ private struct CINameRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: Theme.Metrics.menuRow - 12, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: Theme.Metrics.pitch - 12, alignment: .leading)
             .rowHighlight(hover: hover, picked: selected && !hover)
         }
         .buttonStyle(.plain)
@@ -367,7 +367,7 @@ extension LookoutHub {
             switch kind {
             case .attention: Theme.Metrics.twoLineRow
             case .passing: Theme.Metrics.pitch
-            case .quiet: Theme.Metrics.menuRow
+            case .quiet: Theme.Metrics.pitch
             }
         }
     }
