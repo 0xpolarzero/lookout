@@ -79,18 +79,21 @@ import Testing
         ]
     }
 
+    /// Each check is a colour laid over a surface, which must reach the minimum ratio against it.
+    private typealias Check = (name: String, color: Color, surface: RGB, minimum: Double)
+
+    private func expectContrast(_ checks: [Check]) {
+        let failures = checks.compactMap { check -> String? in
+            let value = ratio(over(check.color, check.surface), check.surface)
+            return value < check.minimum ? "\(check.name): \(String(format: "%.2f", value)) < \(check.minimum)" : nil
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+    }
+
     @Test(arguments: [false, true]) func tokensOverTheirSurfaces(contrast: Bool) {
         let resolved = Theme.Resolved(contrast: contrast)
         let surfaces = surfaces(resolved)
-        var failures: [String] = []
-        for pair in pairs(resolved) {
-            for name in pair.on {
-                let below = surfaces[name]!
-                let value = ratio(over(pair.color, below), below)
-                if value < pair.minimum { failures.append("\(pair.name) on \(name): \(String(format: "%.2f", value)) < \(pair.minimum)") }
-            }
-        }
-        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+        expectContrast(pairs(resolved).flatMap { pair in pair.on.map { ("\(pair.name) on \($0)", pair.color, surfaces[$0]!, pair.minimum) } })
     }
 
     @Test(arguments: [false, true]) func textOnAButtonInsideASettingsGroup(contrast: Bool) {
@@ -99,24 +102,16 @@ import Testing
         let resolved = Theme.Resolved(contrast: contrast)
         let bg = components(Theme.bg).rgb
         let group = over(resolved.fill(Theme.Fill.group), bg)
-        var failures: [String] = []
-        for (name, fill) in [("tile", Theme.Fill.tile), ("selected", Theme.Fill.selected), ("pressed", Theme.Fill.pressed)] {
+        expectContrast([("tile", Theme.Fill.tile), ("selected", Theme.Fill.selected), ("pressed", Theme.Fill.pressed)].flatMap { name, fill in
             let surface = over(resolved.fill(fill), group)
-            for (token, color) in [("text", Theme.text), ("secondary", resolved.secondary)] {
-                let value = ratio(over(color, surface), surface)
-                if value < 4.5 { failures.append("\(token) on \(name) over the group: \(String(format: "%.2f", value))") }
-            }
-        }
-        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+            return [("text", Theme.text), ("secondary", resolved.secondary)].map { ("\($0) on \(name) over the group", $1, surface, 4.5) }
+        })
     }
 
     @Test func textOnTintedFills() {
         // Amber, green and the accent (a checked checkbox) are solid, unaffected by Increase Contrast.
-        for fill in [Theme.amber, Theme.green, Theme.accent] {
-            let tint = over(fill, components(Theme.bg).rgb)
-            let value = ratio(over(Theme.onTint, tint), tint)
-            #expect(value >= 4.5, "onTint \(value)")
-        }
+        let bg = components(Theme.bg).rgb
+        expectContrast([("amber", Theme.amber), ("green", Theme.green), ("accent", Theme.accent)].map { ("onTint on \($0)", Theme.onTint, over($1, bg), 4.5) })
     }
 
     @Test(arguments: [false, true]) func badgeGlyphsOverTheirOwnFill(contrast: Bool) {
@@ -125,15 +120,11 @@ import Testing
         // its fill as it is (Increase Contrast doesn't multiply it); the badge's own fill is `resolved.fill`.
         let resolved = Theme.Resolved(contrast: contrast)
         let bg = components(Theme.bg).rgb
-        var failures: [String] = []
-        for (name, card) in [("page", bg), ("card", over(Theme.Fill.group, bg)), ("hovered card", over(Theme.Fill.hover, bg))] {
-            for level in [Theme.Fill.Tint.rest, .hover, .pressed] {
-                let fill = over(resolved.fill(Theme.Fill.tint(Theme.accent, level)), card)
-                let value = ratio(over(Theme.accent, fill), fill)
-                if value < 3 { failures.append("accent on \(level) fill over \(name): \(String(format: "%.2f", value))") }
+        expectContrast([("page", bg), ("card", over(Theme.Fill.group, bg)), ("hovered card", over(Theme.Fill.hover, bg))].flatMap { name, card in
+            [Theme.Fill.Tint.rest, .hover, .pressed].map { level in
+                ("accent on \(level) fill over \(name)", Theme.accent, over(resolved.fill(Theme.Fill.tint(Theme.accent, level)), card), 3)
             }
-        }
-        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+        })
     }
 
     @Test(arguments: [false, true]) func ringHoldsThreeToOneThroughItsWholeHeartbeat(contrast: Bool) {
@@ -142,15 +133,11 @@ import Testing
         // picked): it holds 3:1 there at both ends of its heartbeat (DESIGN.md 10.1), and so at every opacity between.
         let resolved = Theme.Resolved(contrast: contrast)
         let surfaces = surfaces(resolved)
-        var failures: [String] = []
-        for name in ["bg", "rail", "hover", "selected"] {
-            let surface = surfaces[name]!
-            for (end, opacity) in [("full opacity", Theme.Motion.heartbeat.from), ("its trough", Theme.Motion.heartbeat.to)] {
-                let value = ratio(over(resolved.workingRing.opacity(opacity), surface), surface)
-                if value < 3 { failures.append("ring at \(end) on \(name): \(String(format: "%.2f", value))") }
+        expectContrast(["bg", "rail", "hover", "selected"].flatMap { name in
+            [("full opacity", Theme.Motion.heartbeat.from), ("its trough", Theme.Motion.heartbeat.to)].map { end, opacity in
+                ("ring at \(end) on \(name)", resolved.workingRing.opacity(opacity), surfaces[name]!, 3)
             }
-        }
-        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+        })
     }
 
     @Test(arguments: [false, true]) func theDownloadArcHoldsThreeToOneAgainstTheTrackItLeavesBehind(contrast: Bool) {
@@ -158,15 +145,11 @@ import Testing
         // the strip, the layers a bar actually draws.
         let resolved = Theme.Resolved(contrast: contrast)
         let bg = components(Theme.bg).rgb
-        var failures: [String] = []
-        for (surface, base) in [("strip", bg), ("rail", over(Theme.rail, bg))] {
-            for (state, tile) in [("rest", Theme.Fill.tile), ("hovered", Theme.Fill.selected)] {
-                let track = over(Theme.downloadTrack, over(resolved.fill(tile), base))
-                let value = ratio(over(Theme.accent, track), track)
-                if value < 3 { failures.append("arc on the track, \(state) on the \(surface): \(String(format: "%.2f", value))") }
+        expectContrast([("strip", bg), ("rail", over(Theme.rail, bg))].flatMap { surface, base in
+            [("rest", Theme.Fill.tile), ("hovered", Theme.Fill.selected)].map { state, tile in
+                ("arc on the track, \(state) on the \(surface)", Theme.accent, over(Theme.downloadTrack, over(resolved.fill(tile), base)), 3)
             }
-        }
-        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+        })
     }
 
     @Test func tintedFillsAreNotMultiplied() {
@@ -206,12 +189,8 @@ import Testing
 
     @Test(arguments: [false, true]) func theSelectedTabIsToldApartByAnOutlineAtBorderContrast(contrast: Bool) {
         // The selected capsule's fill is 1.3:1 on the page, so the outline carries it: over the page, a group and the rail.
-        let resolved = Theme.Resolved(contrast: contrast)
-        let surfaces = surfaces(resolved)
-        for name in ["bg", "rail", "group"] {
-            let below = surfaces[name]!
-            #expect(ratio(over(TabStyle.selectedOutline, below), below) >= 3, "outline on \(name)")
-        }
+        let surfaces = surfaces(Theme.Resolved(contrast: contrast))
+        expectContrast(["bg", "rail", "group"].map { ("outline on \($0)", TabStyle.selectedOutline, surfaces[$0]!, 3) })
     }
 
     @Test func theSwitchKnobHoldsItsEdgeOnTheTrackAtRestAndHovered() {
@@ -220,8 +199,6 @@ import Testing
         let bg = components(Theme.bg).rgb
         let accent = over(Theme.accent, bg)
         let lifted = RGB(r: min(accent.r + 0.06, 1), g: min(accent.g + 0.06, 1), b: min(accent.b + 0.06, 1))  // `.brightness(0.06)`
-        for (state, track) in [("rest", accent), ("hovered", lifted)] {
-            #expect(ratio(over(SwitchKnob.edge, track), track) >= 3, "edge on the \(state) track")
-        }
+        expectContrast([("rest", accent), ("hovered", lifted)].map { ("edge on the \($0) track", SwitchKnob.edge, $1, 3) })
     }
 }
