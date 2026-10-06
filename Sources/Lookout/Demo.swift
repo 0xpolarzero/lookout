@@ -122,6 +122,7 @@ enum Demo {
             agents(store, now)
             manyCI(store, now)
         case .sessionsWaiting:
+            // w2's activity is what an AskUserQuestion call yields: its first question, as the transcript reader reports it.
             sessions(store, now, [
                 .init(session("w1", "LCU update notifications", "lcu", minutes: 2, blocked: true,
                               detail: "Should updates install silently, or ask first each time?"), unread: true),
