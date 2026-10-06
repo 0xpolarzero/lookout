@@ -73,6 +73,14 @@ import Testing
         #expect(a.duration == spec.duration && a.autoreverses && a.repeatCount == .infinity)
     }
 
+    @Test func theLoopAsksForNoMoreThanThirtyFramesASecond() throws {
+        let host = Window()
+        let view = host.add(at: 0)
+        view.set(spec, animated: true)
+        let range = try #require(loop(view)).preferredFrameRateRange
+        #expect(range.maximum <= 30 && range.preferred.map { $0 <= 30 } == true && range.minimum >= 10)
+    }
+
     @Test func aRefreshLeavesARunningLoopAlone() throws {
         let host = Window()
         let view = host.add(at: 0)

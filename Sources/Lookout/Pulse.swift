@@ -199,6 +199,9 @@ final class PulseView: NSView {
         a.autoreverses = true
         a.repeatCount = .infinity
         a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        // A slow fade of a 0.35 swing doesn't need the display's rate: at 120 Hz the render server would composite this
+        // layer 120 times a second for as long as any session works, which is all day with a busy agent (DESIGN.md 8).
+        a.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
         a.beginTime = layer.convertTime(Self.beginTime(cycle: spec.cycle, at: CACurrentMediaTime()), from: nil)
         layer.add(a, forKey: "pulse")
     }
