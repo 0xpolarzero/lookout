@@ -73,6 +73,35 @@ enum HubGeometry {
         return max(visibleHeight - anchor - inset, 0)
     }
 
+    /// The height along the top and bottom between the strip and the footer, for the columns: what the screen leaves
+    /// less both, the padding and the hairlines.
+    static func stripRoom(maxLength: CGFloat) -> CGFloat {
+        maxLength - Theme.Metrics.bar - Theme.Metrics.pitch - 2 * lead - 2
+    }
+
+    /// A hairline between sections, with its room.
+    static let stripRule = 2 * Theme.Space.xs + 1
+
+    /// What the two columns' lists may take of `room`, the strip's body. The inbox and CI are the first column: the
+    /// inbox takes what CI leaves (`leftFixed` is CI's block). The sessions never cut the inbox, but a column of
+    /// sessions taller than that one is cut to it, to whole rows with "+N more" under them, so the columns end together
+    /// (a gap of up to `tolerance`, a row, is left rather than a row cut for the sake of a few points). A column shorter
+    /// than the first one has nothing to fill the rest with: the void is at the end of its list. `rightFixed`: what the
+    /// sessions' column has besides the list (New session, the notice). Heights are as the lists measured themselves
+    /// (nil until they have: taken to use all the room).
+    static func stripCaps(room: CGFloat, leftFixed: CGFloat, inbox: ListHeights?, rightFixed: CGFloat, sessions: ListHeights?,
+                          tolerance: CGFloat = Theme.Metrics.twoLineRow) -> (inbox: CGFloat, sessions: CGFloat) {
+        let floor: CGFloat = 120
+        let inboxCap = max(room - leftFixed, floor)
+        let leftHeight = leftFixed + min(inbox?.shown ?? inboxCap, inboxCap)
+        let sessionsRoom = max(room - rightFixed, floor)
+        let rightHeight = rightFixed + min(sessions?.content ?? .infinity, sessionsRoom)
+        if rightHeight <= leftHeight + tolerance { return (inboxCap, sessionsRoom) }
+        // At least two rows and the line that says there are more.
+        let least = 2 * Theme.Metrics.twoLineRow + Theme.Metrics.pitch
+        return (inboxCap, min(max(leftHeight - rightFixed, least), sessionsRoom))
+    }
+
     /// The first cell's centre, along the bar's axis from the hub's own start: the same at rest and kept open, which is
     /// why the inbox tile stays where it is.
     static var firstCellCenter: CGFloat { lead + Theme.Metrics.pitch / 2 }

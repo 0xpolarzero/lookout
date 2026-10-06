@@ -300,25 +300,38 @@ extension LookoutHub {
     }
 
     @ViewBuilder func openStripBody(columns: Bool, width: CGFloat) -> some View {
-        let room = maxLength - Self.cell - Theme.Metrics.pitch - 2 * HubGeometry.lead - 2
+        let room = HubGeometry.stripRoom(maxLength: maxLength)
         if columns {
+            let caps = stripCaps(room: room)
             // Both columns hug the strip their headers are in: along the bottom the shorter one rests on it, so its
             // rows stay next to their header and any void is at the far end, beside the footer.
             HStack(alignment: edge == .bottom ? .bottom : .top, spacing: 0) {
-                leftColumn(room: room).frame(width: HubGeometry.leftColumn)
+                leftColumn(inboxCap: caps.inbox).frame(width: HubGeometry.leftColumn)
                 Hairline(axis: .vertical, inset: 12).frame(width: HubGeometry.gutter)
-                rightColumn(room: room).frame(width: width - HubGeometry.leftColumn - HubGeometry.gutter)
+                rightColumn(cap: caps.sessions).frame(width: width - HubGeometry.leftColumn - HubGeometry.gutter)
             }
         } else {
             singleColumn(room: room)
         }
     }
 
+    /// What CI takes of the left column under the inbox's list: its hairline, its header and its lines (none while
+    /// searching).
+    private var stripCIRoom: CGFloat {
+        searching ? 0 : HubGeometry.stripRule + Theme.Metrics.pitch + max(ciHeight, Theme.Metrics.pitch)
+    }
+
+    /// What the two columns' lists may take: the inbox what CI leaves, the sessions what the inbox column's height leaves
+    /// them (`HubGeometry.stripCaps`).
+    func stripCaps(room: CGFloat) -> (inbox: CGFloat, sessions: CGFloat) {
+        HubGeometry.stripCaps(room: room, leftFixed: stripCIRoom, inbox: listHeights[.inbox],
+                              rightFixed: Theme.Metrics.pitch + ClaudeNotice.room(store), sessions: listHeights[.agents])
+    }
+
     /// Inbox, then CI directly under it with its own header; along the bottom, the other way up (the lists keep
     /// their order, the header stays next to the strip it belongs to).
-    func leftColumn(room: CGFloat) -> some View {
+    func leftColumn(inboxCap: CGFloat) -> some View {
         let ci = ciBlock
-        let inboxCap = max(room - (searching ? 0 : Theme.Metrics.pitch + max(ciHeight, Theme.Metrics.pitch) + 9), 120)
         return VStack(alignment: .leading, spacing: 0) {
             if edge == .bottom {
                 if !searching { ci; Hairline().padding(.vertical, Theme.Space.xs) }
@@ -331,27 +344,31 @@ extension LookoutHub {
         .padding(.horizontal, Self.inset)
     }
 
-    func rightColumn(room: CGFloat) -> some View {
-        let cap = max(room - Theme.Metrics.pitch, 120)
-        return VStack(alignment: .leading, spacing: 0) {
+    func rightColumn(cap: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
             if edge == .bottom { newSession; stripAgents(cap: cap) } else { stripAgents(cap: cap); newSession }
         }
         .padding(.horizontal, Self.inset)
         .section("Sessions")
     }
 
-    /// Focused: the section has the whole column, the others are their headers; along the bottom the other way up.
+    /// Focused: the section has the whole column, the others are their headers; along the bottom the other way up. With
+    /// the sessions off the inbox and CI's lines share it: the inbox gets what CI's block leaves.
     func singleColumn(room: CGFloat) -> some View {
         let agents = store.agents.enabled
-        let headers = Theme.Metrics.pitch * CGFloat((searching ? 0 : 1) + (agents ? 1 : 0))
-        let inboxCap = max(room - headers, 120)
+        let pitch = Theme.Metrics.pitch
+        // CI's header, and its lines unless another section is focused.
+        let ci = searching ? 0 : pitch + (shrunk(.ci) ? 0 : max(ciHeight, pitch))
+        let sessionsHeader = agents ? pitch : 0
+        let inboxCap = max(room - ci - sessionsHeader, 120)
+        let agentsCap = max(room - ci - sessionsHeader - pitch - ClaudeNotice.room(store), 120)
         return VStack(alignment: .leading, spacing: 0) {
             let inbox = VStack(spacing: 0) { if !shrunk(.inbox) { stripInbox(cap: inboxCap) } }.section("Inbox")
             let ci = VStack(spacing: 0) { if !searching { ciBlock } }
             let sessions = VStack(alignment: .leading, spacing: 0) {
                 if agents {
                     headerSlot(.agents) { agentsHeader }
-                    if !shrunk(.agents) { stripAgents(cap: max(room - headers - Theme.Metrics.pitch, 120)); newSession }
+                    if !shrunk(.agents) { stripAgents(cap: agentsCap); newSession }
                 }
             }
             .section("Sessions")
@@ -375,8 +392,11 @@ extension LookoutHub {
     @ViewBuilder func stripInbox(cap: CGFloat) -> some View {
         if items.isEmpty {
             emptyInbox
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.inbox, ListHeights(shown: $0, content: $0)) }
+                .onDisappear { record(.inbox, nil) }
         } else {
-            CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count), cue: MoreCue(noun: "item")) {
+            CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count), cue: MoreCue(noun: "item"),
+                         onHeights: { record(.inbox, $0) }) {
                 AdaptiveStack(count: items.count, spacing: 1) { ForEach(items) { itemRow($0).id("i:" + $0.id) } }
                     .id(searching ? "search" : hub.filter.rawValue)
                     .transition(.opacity)
@@ -386,12 +406,12 @@ extension LookoutHub {
     }
 
     /// The sessions one per line, by project, then the new activity (tile and text in one row, as in a peek). `cap`:
-    /// what the notice above and the rows may take together.
+    /// what the rows may take, under the notice (when Claude's files are not there).
     @ViewBuilder func stripAgents(cap: CGFloat) -> some View {
         let rows = agentRows
         ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
-        CappedScroll(cap: cap - ClaudeNotice.room(store), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count),
-                     cue: MoreCue(noun: "session")) {
+        CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count),
+                     cue: MoreCue(noun: "session"), onHeights: { record(.agents, $0) }) {
             AdaptiveStack(count: rows.kept.count + rows.pending.count, alignment: .leading, spacing: 0) {
                 let starts = projectStarts(rows.kept)
                 ForEach(rows.kept) { r in

@@ -64,6 +64,30 @@ import Testing
         #expect(HubGeometry.peekStart(300, length: 900, reach: 714) == 0)
     }
 
+    @Test func theSessionsColumnIsCutToTheInboxColumnsHeight() {
+        // 500 of room; CI's block takes 150 and the inbox's rows 270 of what is left: the column is 420 tall.
+        let inbox = ListHeights(shown: 270, content: 270)
+        let rows = ListHeights(shown: 400, content: 800)
+        let caps = HubGeometry.stripCaps(room: 500, leftFixed: 150, inbox: inbox, rightFixed: 36, sessions: rows)
+        #expect(caps.inbox == 350.0)
+        // The sessions' list gets what is left of that column's height after New session.
+        #expect(caps.sessions == 384.0)
+        // A column that would end within a row of the first one is left whole.
+        let near = HubGeometry.stripCaps(room: 500, leftFixed: 150, inbox: inbox, rightFixed: 36, sessions: ListHeights(shown: 400, content: 400))
+        #expect(near.sessions == 464.0)
+        // Never cut to less than two rows and the "+N more" line; never more than the room.
+        let tiny = HubGeometry.stripCaps(room: 500, leftFixed: 150, inbox: ListHeights(shown: 20, content: 20), rightFixed: 36, sessions: rows)
+        #expect(tiny.sessions == 134.0)
+        let least = HubGeometry.stripCaps(room: 500, leftFixed: 100, inbox: ListHeights(shown: 20, content: 20), rightFixed: 36, sessions: rows)
+        #expect(least.sessions == 2 * Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
+        // The sessions never cut the inbox: it has what CI leaves, a longer list of them or not.
+        let long = HubGeometry.stripCaps(room: 500, leftFixed: 150, inbox: ListHeights(shown: 350, content: 3000), rightFixed: 36,
+                                         sessions: ListHeights(shown: 40, content: 40))
+        #expect(long.inbox == 350.0 && long.sessions == 464.0)
+        // Before the lists are measured, both are taken to use all their room.
+        #expect(HubGeometry.stripCaps(room: 500, leftFixed: 150, inbox: nil, rightFixed: 36, sessions: nil).sessions == 464.0)
+    }
+
     @Test func theFullViewFitsAnyScreen() {
         // The longest it may be leaves both insets; along the top and bottom it never outgrows the screen's width.
         #expect(HubGeometry.maxLength(visibleHeight: 695) == 683)
@@ -122,6 +146,20 @@ import Testing
                     if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return y - CGFloat(py) / scale }
                 }
                 py -= 1
+            }
+            return nil
+        }
+
+        /// How far below `y` (points) the nearest row with anything drawn over the surface colour is, within `x`.
+        func gapBelow(y: CGFloat, x: ClosedRange<CGFloat>, surface: (r: Int, g: Int, b: Int, a: Int)) -> CGFloat? {
+            let xs = Int(x.lowerBound * scale)...Int(x.upperBound * scale)
+            var py = Int(y * scale) + 1
+            while py < rep.pixelsHigh {
+                for px in xs {
+                    let p = pixel(px, py)
+                    if abs(p.r - surface.r) + abs(p.g - surface.g) + abs(p.b - surface.b) > 24 { return CGFloat(py) / scale - y }
+                }
+                py += 1
             }
             return nil
         }
@@ -288,6 +326,27 @@ import Testing
         #expect(right != nil && right! < 16, "session rows end \(right ?? -1)pt above the strip")
     }
 
+    private nonisolated static let columnScreens: [(DockEdge, CGFloat, Demo.Scenario)] = [DockEdge.top, .bottom].flatMap { edge in
+        [CGFloat(800), 720].flatMap { height in [Demo.Scenario.agents, .sessions12].map { (edge, height, $0) } }
+    }
+
+    @Test(arguments: columnScreens)
+    func noGapOpensBetweenTheFooterAndEitherColumnsFirstContent(edge: DockEdge, height: CGFloat, scenario: Demo.Scenario) {
+        // The far end of the columns is where their slack ends up: the taller column is cut to whole rows, so what is
+        // left is under one row (the tallest, a session with its task line), never a void beside the footer.
+        let screen = CGSize(width: 1280, height: height)
+        let (_, open) = render(edge: edge, position: 0.3, screen: screen, scenario: scenario)
+        let surface = open.pixel(Int((open.frame.minX + 100) * open.scale), Int((open.frame.minY + 4) * open.scale))
+        let lead = HubGeometry.lead, footer = Theme.Metrics.pitch
+        let columns = [("inbox", (open.frame.minX + 24)...(open.frame.minX + 380)), ("sessions", (open.frame.minX + 460)...(open.frame.maxX - 24))]
+        for (name, x) in columns {
+            let gap = edge == .top
+                ? open.gapAbove(y: open.frame.maxY - lead - footer - 1, x: x, surface: surface)
+                : open.gapBelow(y: open.frame.minY + lead + footer + 1, x: x, surface: surface)
+            #expect(gap != nil && gap! <= 60, "\(edge) \(scenario) \(height): \(name) column starts \(gap ?? -1)pt from the footer's hairline")
+        }
+    }
+
     @Test(arguments: [DockEdge.right, .left, .top, .bottom])
     func theViewFitsA720ScreenOnEveryEdge(edge: DockEdge) {
         let screen = CGSize(width: 1280, height: 720)
@@ -296,6 +355,17 @@ import Testing
             expectInside(rest.frame, edge: edge, screen: screen, "\(edge) \(position) at rest")
             expectInside(open.frame, edge: edge, screen: screen, "\(edge) \(position) open")
         }
+    }
+
+    @Test(arguments: [DockEdge.top, .bottom])
+    func aLongInboxWithSessionsOffFitsA720Screen(edge: DockEdge) {
+        // Sessions off and nothing focused: the inbox and the whole CI block share one column.
+        let screen = CGSize(width: 1280, height: 720)
+        let (_, open) = render(edge: edge, position: 0.3, screen: screen) {
+            $0.agents.enabled = false
+            longInbox($0)
+        }
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge) sessions off, long inbox")
     }
 
     @Test(arguments: [DockEdge.right, .left, .top, .bottom])
