@@ -274,6 +274,17 @@ import Testing
         #expect(BarSessions.arrange(slots, frozen: nil, room: 40 * pitch).hidden.count == 4)
     }
 
+    @Test func aBarDraggedWithOnlyItsOwnLengthKeepsTheTilesItShowed() {
+        // The window is just the bar while it is dragged: its length is the room, and it fits what it was showing.
+        let slots = [slot("a"), slot("b"), slot("c", "p:b"), slot("d", "p:b")]
+        let (shown, hidden) = BarSessions.arrange(slots, frozen: nil, room: 40 * Theme.Metrics.pitch)
+        let room = BarSessions.length(shown, more: !hidden.isEmpty)
+        #expect(BarSessions.arrange(slots, frozen: nil, room: room).shown == shown)
+        let cut = (0..<12).map { slot("s\($0)") }
+        let (some, rest) = BarSessions.arrange(cut, frozen: nil, room: 40 * Theme.Metrics.pitch)
+        #expect(BarSessions.arrange(cut, frozen: nil, room: BarSessions.length(some, more: !rest.isEmpty)).shown == some)
+    }
+
     @Test func waitingSessionsAreTheLastToLoseTheirTileToTheEdgesRoom() {
         let pitch = Theme.Metrics.pitch
         // Three waiting, then ten others: room for six cells keeps all three waiting and two others, never the reverse.

@@ -94,7 +94,9 @@ struct HubRoot: View {
 
     @ViewBuilder private func content(in size: CGSize) -> some View {
         let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: HubGeometry.maxLength(visibleHeight: size.height), openLength: openLength(in: size), maxWidth: size.width,
-                              barLength: (ui.edge.isHorizontal ? size.width : size.height) - 12)
+                              // Dragged, the window is only the bar: its own length is what the bar has, so the tiles it shows stay.
+                              barLength: layout.floating && layout.restLength > 0 ? layout.restLength
+                                  : (ui.edge.isHorizontal ? size.width : size.height) - 12)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
                 layout.frame = frame
