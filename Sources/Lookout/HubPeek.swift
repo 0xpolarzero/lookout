@@ -424,6 +424,11 @@ struct WholeRows<Content: View>: View {
     static func instantiated(_ cap: CGFloat) -> Int { Int(cap / Theme.Metrics.pitch) + 2 }
 
     var body: some View {
+        // No rows, no list: nothing to measure, so nothing of the cap is kept for it.
+        if total > 0 { list }
+    }
+
+    @ViewBuilder private var list: some View {
         // Nothing is cut before the rows are measured.
         let measured = !edges.isEmpty
         let fits = measured && edges.count >= total && (edges.last ?? 0) <= cap + 0.5

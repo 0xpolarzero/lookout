@@ -435,6 +435,10 @@ import Testing
         return h
     }
 
+    @Test func noRowsReserveNoRoom() {
+        #expect(height(total: 0, cap: 300) == 0)
+    }
+
     @Test func everythingThatFitsShowsWithoutAMoreRow() {
         #expect(abs(height(total: 3, cap: 150) - 132) < 1)
     }
