@@ -284,6 +284,23 @@ import Testing
         #expect(hub.focus == .agents)
     }
 
+    @Test func aPickedIconStaysWhenNoneCanBePickedToReplaceIt() {
+        let s = store([session("a")])
+        s.agents.entries[0].icon = "hammer"
+        // Icons off: the icon is kept (and shown), and cannot be repicked.
+        #expect(!s.canPickIcons)
+        s.repickIcon("a")
+        #expect(s.agents.entries[0].icon == "hammer" && s.agents.entries[0].rejectedIcons == nil)
+        s.agents.iconsEnabled = true
+        s.repickIcon("a")
+        #expect(s.agents.entries[0].icon == "hammer")
+        // On, with a key: the old one goes, and is not offered again.
+        s.hasTypesafeKey = true
+        #expect(s.canPickIcons)
+        s.repickIcon("a")
+        #expect(s.agents.entries[0].icon == nil && s.agents.entries[0].rejectedIcons == ["hammer"])
+    }
+
     @Test func newSessionOffersTheMostRecentProjectFirst() {
         let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1),
                        session("c", folder: nil, minutesAgo: 0)])

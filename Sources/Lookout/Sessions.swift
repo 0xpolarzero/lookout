@@ -718,8 +718,6 @@ struct LabelEditor: View {
     @FocusState private var focused: Bool
     @Environment(\.dismiss) private var dismiss
 
-    private var hasIcons: Bool { store.agents.iconsEnabled && store.hasTypesafeKey }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             Text("Label for \(row.session.title)").font(Theme.Typography.title).lineLimit(1)
@@ -736,13 +734,14 @@ struct LabelEditor: View {
                     }
                 }
             case .icon:
-                Text(row.entry.icon == nil ? "Jev picks an icon from the title and the first message." : "Jev picked this icon for it.")
-                    .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                Text(iconNote).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                 HStack(spacing: Theme.Space.sm) {
-                    BorderedButton(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") {
-                        store.setAgentLabel(row.id, nil)
-                        if row.entry.icon != nil { store.repickIcon(row.id) } else { store.pickIcons() }
-                        dismiss()
+                    if store.canPickIcons {
+                        BorderedButton(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") {
+                            store.setAgentLabel(row.id, nil)
+                            if row.entry.icon != nil { store.repickIcon(row.id) } else { store.pickIcons() }
+                            dismiss()
+                        }
                     }
                     if row.entry.label != nil, row.entry.icon != nil {
                         BorderedButton("Use it") { store.setAgentLabel(row.id, nil); dismiss() }
@@ -759,7 +758,13 @@ struct LabelEditor: View {
     }
 
     private var modes: [Tabs<Mode>.Tab] {
-        [.init(id: .letters, title: "Letters"), .init(id: .emoji, title: "Emoji")] + (hasIcons ? [.init(id: .icon, title: "Icon")] : [])
+        [.init(id: .letters, title: "Letters"), .init(id: .emoji, title: "Emoji")]
+            + (store.canPickIcons || row.entry.icon != nil ? [.init(id: .icon, title: "Icon")] : [])
+    }
+
+    private var iconNote: String {
+        if row.entry.icon == nil { return "Jev picks an icon from the title and the first message." }
+        return store.canPickIcons ? "Jev picked this icon for it." : "Jev picked this icon for it. To pick another, turn on Icons picked for you, and add its key, in Settings."
     }
 
     private func entry(prompt: String, help: String) -> some View {
@@ -774,6 +779,7 @@ struct LabelEditor: View {
             }
             Text(help).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
         }
+    /// An icon already picked stays available while picking is off: it just can't be replaced.
     }
 
     /// Empty goes back to letters from the title, or to the icon that was picked.
