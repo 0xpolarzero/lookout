@@ -13,18 +13,23 @@ final class InboxState {
     var searchFocused = false
     /// Bumped to ask the field for focus.
     var focusRequest = 0
+    /// The next focus is the typing's own: the key monitor put a first character in the field, so the caret goes after
+    /// it. Any other focus (a click, ⌘F, the magnifier) keeps what the field and the pointer decide.
+    var caretAtEnd = false
     var scrolled = false
     /// The rows below the last whole row a list cut short shows (what its `+N more` line says).
     var hiddenBelow = 0
 
-    func startSearch() {
+    func startSearch(seeded: Bool = false) {
         searchOpen = true
+        if seeded { caretAtEnd = true }
         focusRequest &+= 1
     }
 
     func endSearch() {
         searchOpen = false
         searchFocused = false
+        caretAtEnd = false
     }
 }
 
@@ -32,11 +37,11 @@ extension HubState {
     /// The one way into search (⌘F, the magnifier, typing): the results are the inbox's and the sessions', side by side,
     /// so it keeps the hub open (from a peek, which shows one section), gives up any section focus (which would
     /// shrink one of them or leave the field out), then asks the field for the keyboard.
-    func beginSearch() {
+    func beginSearch(seeded: Bool = false) {
         LookoutHub.animate(LookoutHub.refocus) {
             if !pinned { pinned = true }
             focus = nil
-            inbox.startSearch()
+            inbox.startSearch(seeded: seeded)
         }
     }
 
@@ -604,7 +609,10 @@ struct InboxSearchField: View {
         .onChange(of: hub.inbox.focusRequest) { requestFocus() }
         .onChange(of: focused) { _, isFocused in
             hub.inbox.searchFocused = isFocused
-            // A seeded first character: carry on after it instead of replacing it.
+            // Only a seeded first character moves the caret (carry on after it instead of replacing it): a click into the
+            // middle of the query, or Tab back into the field, keeps the selection the field made.
+            guard hub.inbox.caretAtEnd else { return }
+            hub.inbox.caretAtEnd = false
             if isFocused { DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil) } }
         }
         .onDisappear { hub.inbox.searchFocused = false }

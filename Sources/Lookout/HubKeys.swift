@@ -127,7 +127,7 @@ final class HubKeys {
             // The field shows while there is something in it, and goes with the query.
             if query.isEmpty { hub.inbox.endSearch() }
         }
-        if !query.isEmpty { hub.beginSearch() }
+        if !query.isEmpty { hub.beginSearch(seeded: true) }
         hub.pick(targets().first, ui: ui)
     }
 

@@ -135,6 +135,22 @@ import Testing
         window.orderOut(nil)
     }
 
+    @Test func onlyTypingMovesTheCaretAfterItsFirstCharacter() {
+        let r = rig()
+        r.hub.inbox.searchFocused = false
+        let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                                     characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: UInt16(kVK_ANSI_X))!
+        #expect(r.keys.key(typed))
+        #expect(r.hub.inbox.caretAtEnd)
+        // The field took it (or the search ended): a later focus, from a click in the query, is its own.
+        r.hub.inbox.caretAtEnd = false
+        r.hub.beginSearch()
+        #expect(!r.hub.inbox.caretAtEnd)
+        r.hub.inbox.startSearch(seeded: true)
+        r.hub.inbox.endSearch()
+        #expect(!r.hub.inbox.caretAtEnd)
+    }
+
     // MARK: Starting
 
     @Test func searchingFromAFocusedSectionOrAPeekShowsTheCombinedResults() {
