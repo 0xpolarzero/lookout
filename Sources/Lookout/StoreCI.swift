@@ -173,6 +173,90 @@ extension Store {
     /// move it, so rows can't look fresh while nothing is being checked. Nil until something has been checked.
     var ciFreshness: Date? { ciRepos.compactMap { lastCICheck($0.fullName) }.min() }
 
+    // MARK: Checking
+
+    /// Checks one repo's CI. A request while one is under way for the same repo waits for that one's answer instead
+    /// of asking again, so "Check now" pressed twice, or during a poll, is one round trip.
+    func syncCI(_ name: String) async throws {
+        if let running = ciChecks[name] { return try await running.value }
+        guard let repo = repos.first(where: { $0.fullName == name }), repo.events.contains(.ciMain) else { return }
+        let ticket = (ciTickets[name] ?? 0) + 1
+        ciTickets[name] = ticket
+        let check = Task { @MainActor [self] in
+            // A check `endCIChecks` already gave up on leaves what a newer one registered.
+            defer { if ciTickets[name] == ticket { ciChecks[name] = nil } }
+            let status = try await (ciFetch ?? fetchCI)(repo)
+            publishCI(name, status, ticket: ticket)
+        }
+        ciChecks[name] = check
+        try await check.value
+    }
+
+    /// Whatever is under way for a repo no longer counts: it was removed or its CI turned off, and what comes back
+    /// must not bring it back.
+    func endCIChecks(_ name: String) {
+        ciTickets[name, default: 0] += 1
+        ciChecks[name] = nil
+    }
+
+    /// Asks GitHub for a repo's CI, and the commit's headline.
+    private func fetchCI(_ repo: RepoConfig) async throws -> CIStatus {
+        let name = repo.fullName
+        var repo = repo
+        if repo.defaultBranch == nil {
+            let info: GHRepo = try await gh.get("/repos/\(name)")
+            updateRepo(name) { $0.defaultBranch = info.defaultBranch }
+            repo.defaultBranch = info.defaultBranch
+        }
+        let branch = repo.defaultBranch!
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        let ref = branch.addingPercentEncoding(withAllowedCharacters: allowed) ?? branch
+        // Only push-triggered Actions runs count: issue/comment-triggered workflows also run against the
+        // default branch HEAD and would otherwise make CI look red.
+        let actions: GHWorkflowRuns = try await gh.get("/repos/\(name)/actions/runs",
+                                                       ["branch": branch, "event": "push", "per_page": "30"])
+        let sha = actions.workflowRuns.first?.headSha
+        let target = sha ?? ref
+        async let checksReq: GHCheckRuns = gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
+        async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
+        let (checks, combined) = try await (checksReq, statusReq)
+        let reading = Self.readCI(runs: actions.workflowRuns, sha: sha, checks: checks.checkRuns, combined: combined)
+        let commit = sha ?? combined.sha
+        // The headline comes from the Actions run; a repo with only external CI asks the commit for it (once per commit).
+        let title = await ciHeadline(name, commit: commit, runTitle: actions.workflowRuns.first?.displayTitle)
+        return CIStatus(state: reading.state, branch: branch, sha: commit,
+                        url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
+                        failing: reading.failing, checkedAt: Date(), title: title, updatedAt: reading.changedAt)
+    }
+
+    /// Takes an answer in, unless a newer check or the repo's removal has overtaken it. Nothing here waits: what the
+    /// repo was before (for the mute and the notifications) is read in the same step that replaces it.
+    func publishCI(_ name: String, _ status: CIStatus, ticket: Int) {
+        guard ciTickets[name] == ticket else { return }
+        let previous = ci[name]?.state
+        unmuteCIIfChanged(name, to: status)
+        // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
+        ciCheckedAt[name] = status.checkedAt
+        if var old = ci[name] {
+            old.checkedAt = status.checkedAt
+            if old != status { ci[name] = status; save() }
+        } else {
+            ci[name] = status
+            save()
+        }
+
+        let (state, commit, branch) = (status.state, status.sha ?? "", status.branch)
+        if previous == .success || previous == .pending, state == .failure {
+            notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",
+                   subtitle: status.failing.prefix(3).joined(separator: ", "), body: "", quiet: false)
+            pulse += 1
+        } else if previous == .failure, state == .success {
+            notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI back to green",
+                   subtitle: branch, body: "", quiet: true)
+        }
+    }
+
     // MARK: Reading GitHub
 
     /// What CI's three sources say about one commit.

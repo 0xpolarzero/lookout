@@ -116,7 +116,12 @@ final class Store {
     /// When the one-shot Claude timer fires (it only ever moves earlier until it does).
     @ObservationIgnored private var claudeDeadline: Date?
     /// When each repo's CI was last checked, live (the persisted `checkedAt` only changes with the status).
-    @ObservationIgnored private(set) var ciCheckedAt: [String: Date] = [:]
+    @ObservationIgnored var ciCheckedAt: [String: Date] = [:]
+    /// CI checks under way, by repo, and the newest one each repo has started (StoreCI.swift).
+    @ObservationIgnored var ciChecks: [String: Task<Void, Error>] = [:]
+    @ObservationIgnored var ciTickets: [String: Int] = [:]
+    /// What a check asks GitHub, replaced by the tests.
+    @ObservationIgnored var ciFetch: ((RepoConfig) async throws -> CIStatus)?
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
@@ -621,6 +626,7 @@ final class Store {
         items.removeAll { $0.repo == repo.fullName && $0.kind != .reviewRequested }
         ci[repo.fullName] = nil
         mutedCI[repo.fullName] = nil
+        endCIChecks(repo.fullName)
         save()
     }
 
@@ -629,6 +635,7 @@ final class Store {
         if repos[i].events.contains(kind) {
             repos[i].events.remove(kind)
             removeItems { $0.repo == repo.fullName && $0.kind == kind }
+            if kind == .ciMain { endCIChecks(repo.fullName) }
         } else {
             repos[i].events.insert(kind)
         }
@@ -716,7 +723,7 @@ final class Store {
         }
     }
 
-    private func updateRepo(_ name: String, _ f: (inout RepoConfig) -> Void) {
+    func updateRepo(_ name: String, _ f: (inout RepoConfig) -> Void) {
         guard let i = repos.firstIndex(where: { $0.fullName == name }) else { return }
         var repo = repos[i]
         f(&repo)
@@ -946,58 +953,6 @@ final class Store {
         if changed { items = all }
     }
 
-    func syncCI(_ name: String) async throws {
-        guard var repo = repos.first(where: { $0.fullName == name }), repo.events.contains(.ciMain) else { return }
-        if repo.defaultBranch == nil {
-            let info: GHRepo = try await gh.get("/repos/\(name)")
-            updateRepo(name) { $0.defaultBranch = info.defaultBranch }
-            repo.defaultBranch = info.defaultBranch
-        }
-        let branch = repo.defaultBranch!
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove("/")
-        let ref = branch.addingPercentEncoding(withAllowedCharacters: allowed) ?? branch
-        // Only push-triggered Actions runs count: issue/comment-triggered workflows also run against the
-        // default branch HEAD and would otherwise make CI look red.
-        let actions: GHWorkflowRuns = try await gh.get("/repos/\(name)/actions/runs",
-                                                       ["branch": branch, "event": "push", "per_page": "30"])
-        let sha = actions.workflowRuns.first?.headSha
-        let target = sha ?? ref
-        async let checksReq: GHCheckRuns = gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
-        async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
-        let (checks, combined) = try await (checksReq, statusReq)
-        let reading = Self.readCI(runs: actions.workflowRuns, sha: sha, checks: checks.checkRuns, combined: combined)
-        let commit = sha ?? combined.sha
-        let state = reading.state
-        let failing = reading.failing
-
-        let previous = ci[name]?.state
-        // The headline comes from the Actions run; a repo with only external CI asks the commit for it (once per commit).
-        let title = await ciHeadline(name, commit: commit, runTitle: actions.workflowRuns.first?.displayTitle)
-        let status = CIStatus(state: state, branch: branch, sha: commit,
-                              url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
-                              failing: failing, checkedAt: Date(), title: title, updatedAt: reading.changedAt)
-        unmuteCIIfChanged(name, to: status)
-        // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
-        ciCheckedAt[name] = status.checkedAt
-        if var old = ci[name] {
-            old.checkedAt = status.checkedAt
-            if old != status { ci[name] = status; save() }
-        } else {
-            ci[name] = status
-            save()
-        }
-
-        if previous == .success || previous == .pending, state == .failure {
-            notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",
-                   subtitle: failing.prefix(3).joined(separator: ", "), body: "", quiet: false)
-            pulse += 1
-        } else if previous == .failure, state == .success {
-            notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI back to green",
-                   subtitle: branch, body: "", quiet: true)
-        }
-    }
-
     private func syncReviewRequests() async {
         guard let result: GHSearch<GHIssue> = try? await gh.get(
             "/search/issues", ["q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "50"]) else { return }
@@ -1056,7 +1011,7 @@ final class Store {
         }
     }
 
-    private func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool) {
+    func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool) {
         guard settings.notifications, !isSnoozed else { return }
         notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet)
     }

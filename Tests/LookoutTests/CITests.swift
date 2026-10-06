@@ -214,6 +214,95 @@ import Testing
         #expect(all.quietSpeech == "2 repositories")
     }
 
+    // MARK: Checking
+
+    /// A GitHub the test answers by hand, in the order it likes.
+    @MainActor private final class Answers {
+        var waiting: [CheckedContinuation<CIStatus, Error>] = []
+        var asked = 0
+
+        func fetch(_ repo: RepoConfig) async throws -> CIStatus {
+            asked += 1
+            return try await withCheckedThrowingContinuation { waiting.append($0) }
+        }
+
+        func settle(_ index: Int, with status: CIStatus) { waiting[index].resume(returning: status) }
+    }
+
+    private func quiet(_ store: Store) -> (Store, Answers) {
+        let answers = Answers()
+        store.settings.notifications = false
+        store.ciFetch = { try await answers.fetch($0) }
+        return (store, answers)
+    }
+
+    /// Lets the tasks the test started run until `condition` holds.
+    private func settle(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() { await Task.yield() }
+    }
+
+    @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async {
+        let (store, answers) = quiet(store([:], ["a/x"]))
+        async let first: () = { try? await store.syncCI("a/x") }()
+        async let second: () = { try? await store.syncCI("a/x") }()
+        await settle { answers.waiting.count == 1 }
+        async let third: () = { try? await store.syncCI("a/x") }()
+        for _ in 0..<20 { await Task.yield() }
+        #expect(answers.asked == 1)
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        _ = await (first, second, third)
+        #expect(store.ci["a/x"]?.sha == "s1")
+        // Once it has answered, the next check asks again.
+        async let next: () = { try? await store.syncCI("a/x") }()
+        await settle { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.success, sha: "s2"))
+        await next
+        #expect(store.ci["a/x"]?.sha == "s2")
+    }
+
+    @Test func anOlderAnswerThatArrivesLastDoesNotReplaceANewerOneOrItsMute() async {
+        let (store, answers) = quiet(store(["a/x": status(.failure, sha: "s0")], ["a/x"]))
+        let repo = store.repos[0]
+        async let older: () = { try? await store.syncCI("a/x") }()
+        await settle { answers.waiting.count == 1 }
+        // CI turned off and on again while that check was out: the check it starts is the newer one.
+        store.toggle(.ciMain, on: repo)
+        store.toggle(.ciMain, on: repo)
+        await settle { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.failure, sha: "s2"))
+        await settle { store.ci["a/x"]?.sha == "s2" }
+        store.muteCI(store.repos[0])
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        await older
+        #expect(store.ci["a/x"]?.sha == "s2")
+        #expect(store.mutedCI == ["a/x": "s2"])
+    }
+
+    @Test func aFailureIsNotifiedOnceWhenTwoChecksBothSeeIt() async {
+        let (store, answers) = quiet(store(["a/x": status(.success, sha: "s0")], ["a/x"]))
+        let repo = store.repos[0]
+        async let older: () = { try? await store.syncCI("a/x") }()
+        await settle { answers.waiting.count == 1 }
+        store.toggle(.ciMain, on: repo)
+        store.toggle(.ciMain, on: repo)
+        await settle { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.failure, sha: "s1"))
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        await older
+        await settle { store.ci["a/x"]?.state == .failure }
+        #expect(store.pulse == 1)
+    }
+
+    @Test func aCheckThatReturnsAfterTheRepoWasRemovedLeavesNothingBehind() async {
+        let (store, answers) = quiet(store([:], ["a/x"]))
+        async let check: () = { try? await store.syncCI("a/x") }()
+        await settle { answers.waiting.count == 1 }
+        store.removeRepo(store.repos[0])
+        answers.settle(0, with: status(.success))
+        await check
+        #expect(store.ci.isEmpty)
+    }
+
     // MARK: Freshness
 
     private func checked(_ ago: TimeInterval) -> CIStatus {
