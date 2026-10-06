@@ -206,7 +206,10 @@ extension LookoutHub {
         let width = HubGeometry.stripWidth(focus: hub.focus, sessions: store.agents.enabled, room: maxWidth)
         let strip = openStripRow(columns: columns, width: width)
         let body = openStripBody(columns: columns, width: width)
-        let footer = footerRow
+        // The columns' inset on the left, so its text starts on the content edge; on the right what puts the last
+        // button's centre on the gear's (the footer's own hair is part of it).
+        let gearColumn = HubGeometry.lead + (stripCell - Theme.Metrics.iconButton) / 2 - Theme.Space.hair
+        let footer = footerRow.padding(.leading, Self.inset).padding(.trailing, gearColumn)
         return VStack(alignment: .leading, spacing: 0) {
             // The strip stays at the screen's edge and the hub grows away from it; the footer is the far end.
             if edge == .bottom { footer.section("Controls"); Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); strip }
