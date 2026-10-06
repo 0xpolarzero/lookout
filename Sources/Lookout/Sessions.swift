@@ -1016,10 +1016,10 @@ struct LabelEditor: View {
             Tabs(label: "Label style", tabs: modes, selection: mode) { mode = $0; text = ""; focused = true }
             switch mode {
             case .letters:
-                entry(prompt: row.label, help: "Two letters; empty goes back to the title's")
+                entry(prompt: row.label, name: "Session letters", help: "Two letters; empty goes back to the title's")
             case .emoji:
                 HStack(spacing: Theme.Space.sm) {
-                    entry(prompt: "🙂", help: "One emoji; empty removes it")
+                    entry(prompt: "🙂", name: "Session emoji", help: "One emoji; empty removes it")
                     IconButton(symbol: "face.smiling", help: "Emoji") {
                         focused = true
                         NSApp.orderFrontCharacterPalette(nil)
@@ -1062,7 +1062,7 @@ struct LabelEditor: View {
         return store.canPickIcons ? "Jev picked this icon for it." : "Jev picked this icon for it. To pick another, turn on Icons picked for you, and add its key, in Settings."
     }
 
-    private func entry(prompt: String, help: String) -> some View {
+    private func entry(prompt: String, name: String, help: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
             HStack(spacing: Theme.Space.sm) {
                 TextField(prompt, text: $text)
