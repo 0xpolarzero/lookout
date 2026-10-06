@@ -174,7 +174,7 @@ Inbox tabs: **Needs you / Bots / Done**. Sessions: **Waiting / Working / Finishe
 | State | Tile | Mark | Non-colour cue |
 |---|---|---|---|
 | Waiting | solid `amber`, `onTint` label | none | whole-tile luminance jump (+ inner stroke under Differentiate) |
-| Working (also finished with tasks running) | `Fill.tile`, `text` | **270° arc**, 2 pt, `text`, hugging the tile edge at 1 pt inset, heartbeat | arc shape + motion (static opacity 1 under Reduce Motion) |
+| Working (also finished with tasks running) | `Fill.tile`, `text` | **outline ring** 1.5 pt `secondary`, 2 pt outside the tile, heartbeat (see §10.1) | ring shape + motion (static opacity 1 under Reduce Motion) |
 | Finished, unread | `Fill.tile`, `text` | 7 pt `accent` dot top-trailing (offset +3/−3) with 1.5 pt `bg`/`rail` halo | dot shape |
 | Idle / read | `Fill.tile`, `text` | none | |
 
@@ -410,3 +410,16 @@ Accept: keyboard tests in HubTests (targets rehome, Esc ladder, focused control 
 Accept: shot set matches the baseline names plus the new ones; README matches behaviour.
 
 **Merge order and review loops.** WP0 → (WP1, WP9 start) → WP2, WP3, WP4, WP5, WP7 in parallel → WP6 (touches shared geometry; rebases last of the surfaces) → WP8 → full-run gate (`swift test`, `design-lint.sh`, `idle-cpu.sh`, shots). Reviewers: design critique against section 1, accessibility against section 7, performance against section 8, regressions against the README. Loop review → fix until nothing substantive remains.
+
+
+---
+
+## 10. Lead decisions after the first integration (these override earlier sections)
+
+1. **Working mark is a ring, not an arc.** A 270° arc hugging the tile read as a bracket. Working (and finished with tasks running) = a full rounded-rect outline 1.5 pt, `secondary` (Increase Contrast: `text`), drawn 2 pt outside the tile (concentric radius 7 + 3.5), breathing on the shared heartbeat (opacity 1 ↔ 0.4, 1.2 s, one shared `beginTime`); static at opacity 1 under Reduce Motion. Waiting never has the ring. The unread dot sits on the ring's corner.
+2. **Peeks don't repeat the bar.** In a sessions peek the rows carry no tile column: the bar's tiles are right there. Hovering or picking a row lights its bar tile with `.focusRing(7)`; hovering a tile lights its row. Kept-open (where the rail tiles move beside their rows) is unchanged.
+3. **Peeks never scroll.** Every peek shows whole rows up to its cap and ends with one `+N more` row that keeps the hub open focused on that section. Kept-open lists scroll.
+4. **One overflow phrase and one cap rule.** `+N more` everywhere (no "Show all N"). The bar's `+N` tile and the lists use the same rule (waiting sessions are never collapsed; the remaining visible slots are shared in panel order), so the numbers agree.
+5. **Header phrases only when they add information.** "1 waiting" (Sessions) and "1 failing" (CI) appear in a section header only when that section is collapsed to its header (another section focused, or search). Expanded, the Waiting for you group and the failing rows already say it. Inbox tab counts stay (the list may be cut).
+6. **Search keeps the bar intact.** The CI block leaves the kept-open layout during search but its bar cell stays in the rail at its place.
+7. **Meta separators.** Every secondary line joins its parts with ` · ` (e.g. waiting rows: `lcu · Should updates install…`).
