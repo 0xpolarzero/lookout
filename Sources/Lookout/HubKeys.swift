@@ -105,8 +105,9 @@ final class HubKeys {
         if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
         guard hub.expanded, hub.page == .main else { return false }
         let bound = isBound(shortcut)
-        // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
-        if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
+        // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started (⌫ is a focused control's
+        // while the ring is on one: Clear, More).
+        if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty, !hub.controls.isActive {
             setQuery(String(hub.query.dropLast()))
             return true
         }

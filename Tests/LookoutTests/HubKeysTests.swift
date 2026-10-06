@@ -171,4 +171,16 @@ import Testing
         #expect(press(kVK_Delete, [], "\u{7F}"))
         #expect(!store.items[0].state.isOpen)
     }
+
+    @Test func deleteLeavesTheQueryAloneWhileAControlHasTheRing() {
+        hub.query = "swift"
+        let control = UUID()
+        hub.controls.set(control, focused: true)
+        #expect(!press(kVK_Delete, [], "\u{7F}"))
+        #expect(hub.query == "swift")
+        // Once the ring lets go, ⌫ edits the search again.
+        hub.controls.set(control, focused: false)
+        #expect(press(kVK_Delete, [], "\u{7F}"))
+        #expect(hub.query == "swif")
+    }
 }
