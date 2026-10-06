@@ -498,7 +498,7 @@ private struct ComponentSheet: View {
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 12) { rows; fills; controls; tabs; forms }
-            VStack(alignment: .leading, spacing: 12) { headers; banners; empties; undo }
+            VStack(alignment: .leading, spacing: 12) { headers; pageHeaders; banners; empties; undo }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -600,6 +600,17 @@ private struct ComponentSheet: View {
             SectionHeader(title: "Inbox", onFocus: {}) { IconButton(symbol: "magnifyingglass", help: "Search") {} }
             SectionHeader(title: "Sessions", status: ("1 waiting", AnyShapeStyle(Theme.amber)), onFocus: {}) { EmptyView() }
             SectionHeader(title: "CI", status: ("1 failing", AnyShapeStyle(Theme.red)), focused: true, onFocus: {}) { EmptyView() }
+        }
+    }
+
+    /// The page header's slot: a title, and Settings' four panes as tabs at the page's width, beside Done.
+    private var pageHeaders: some View {
+        group("Page header: a title, and the Settings panes in its slot") {
+            PageHeader(closes: "Repositories", onDone: {}) { PageTitle("Repositories") }
+            PageHeader(closes: "Settings", onDone: {}) {
+                Tabs(label: "Settings pane", tabs: ["General", "Notifications", "Shortcuts", "Claude"].enumerated().map { Tabs.Tab(id: $0.offset, title: $0.element) },
+                     selection: 1) { _ in }
+            }
         }
     }
 
