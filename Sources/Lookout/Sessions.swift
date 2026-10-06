@@ -75,7 +75,7 @@ struct SessionsList: View {
     var body: some View {
         let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
         let listed = store.listedGroups(expanded: hub.sessionsExpanded)
-        VStack(alignment: .leading, spacing: 0) {
+        AdaptiveStack(count: store.hubSessions(hub).count, alignment: .leading, spacing: 0) {
             if searching {
                 ForEach(store.hubSessions(hub)) { row($0, .search) }
             } else if listed.groups.isEmpty {
@@ -84,9 +84,9 @@ struct SessionsList: View {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
                     SessionGroupHeader(group: group, store: store, rail: rail).padding(.top, i == 0 ? 0 : Theme.Space.md)
                     ForEach(group.rows) { row($0, group.placement) }
-                    if group.kind == .newActivity, listed.hidden > 0 {
-                        MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail).id("s:more")
-                    }
+                }
+                if listed.hidden > 0 {
+                    MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail).id("s:more")
                 }
             }
         }
@@ -99,6 +99,23 @@ struct SessionsList: View {
             .transition(.opacity)
             .capEdge()
             .id("a:" + row.id)
+    }
+}
+
+/// The groups in a scroll view that stops on a whole row, lazy once the list is long.
+struct SessionsScroll: View {
+    let store: Store
+    let ui: UIState
+    let hub: HubState
+    let rail: HorizontalEdge
+    let cap: CGFloat
+    var inset: CGFloat = Theme.Metrics.inset
+
+    var body: some View {
+        // Read here, not in the hub's body: the list changing length doesn't redraw the hub.
+        CappedScroll(cap: cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count), fades: false, indicators: true) {
+            SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
+        }
     }
 }
 
@@ -274,12 +291,17 @@ struct SessionRow: View {
         }
     }
 
-    /// "Waiting" in amber, "Working 2m", "Finished 4m". Only a working session ticks by the second.
+    /// "Waiting" in amber, "Working 2m", "Finished 4m". The ages follow the 30-second clock; only a working session
+    /// under a minute old counts seconds, and only while it is on screen.
     @ViewBuilder private var status: some View {
         if row.isWaiting {
             Text("Waiting").font(Theme.Typography.numeral).foregroundStyle(Theme.amber)
+        } else if row.session.running {
+            Ticking(since: row.workingSince) { now in
+                Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
+            }
         } else {
-            Ticking(coarse: !row.session.running) { now in
+            Ticking(coarse: true) { now in
                 Text(row.statusLabel(now: now)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
             }
         }
@@ -557,9 +579,9 @@ extension LookoutHub {
         hub.pickFirstWaiting(in: store, ui: ui)
     }
 
-    /// The groups, scrolling once past `cap`.
+    /// The groups, scrolling once past `cap`, always on a whole row.
     func sessionsScroll(cap: CGFloat, inset: CGFloat = Theme.Metrics.inset) -> some View {
-        CappedScroll(cap: cap, hub: hub) { SessionsList(store: store, ui: ui, hub: hub, rail: railSide, inset: inset) }
+        SessionsScroll(store: store, ui: ui, hub: hub, rail: railSide, cap: cap, inset: inset)
     }
 
     /// New session, under the list (not while searching).

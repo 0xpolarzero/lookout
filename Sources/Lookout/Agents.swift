@@ -163,9 +163,12 @@ struct AgentRow: Identifiable, Hashable {
         }
     }
 
+    /// When the running turn began, if known.
+    var workingSince: Date? { session.lastUserMessage ?? activity?.since }
+
     /// How long the turn has been going.
     func elapsed(now: Date = Date()) -> String {
-        Self.duration(now.timeIntervalSince(session.lastUserMessage ?? activity?.since ?? now))
+        Self.duration(now.timeIntervalSince(workingSince ?? now))
     }
 
     /// The status column of a row: "Waiting", "Working 2m", "Finished 4m".
