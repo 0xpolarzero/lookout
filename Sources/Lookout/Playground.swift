@@ -670,7 +670,7 @@ private struct ComponentSheet: View {
     }
 
     private var forms: some View {
-        group("Switch (on, off, disabled) and field (rest, focused)") {
+        group("Switch and checkbox (on, off, disabled) and field (rest, focused)") {
             VStack(spacing: 0) {
                 Toggle("Launch at login", isOn: .constant(true))
                 Toggle("Desktop notifications", isOn: .constant(false))
@@ -680,6 +680,14 @@ private struct ComponentSheet: View {
             .font(Theme.Typography.body).foregroundStyle(Theme.text)
             .padding(.horizontal, Theme.Metrics.contentEdge - Theme.Metrics.inset)
             .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
+            VStack(spacing: 0) {
+                Toggle("Pull request comments", isOn: .constant(true))
+                Toggle("Issue comments", isOn: .constant(false))
+                Toggle("Every comment, not only the ones for me", isOn: .constant(false)).disabled(true)
+            }
+            .toggleStyle(CheckboxStyle())
+            .font(Theme.Typography.body).foregroundStyle(Theme.text)
+            .padding(.horizontal, Theme.Metrics.contentEdge)
             HStack(spacing: Theme.Space.md) {
                 TextField("owner/repo or GitHub URL", text: .constant("")).fieldStyle()
                 TextField("Search", text: .constant("zig")).fieldStyle(focused: true)

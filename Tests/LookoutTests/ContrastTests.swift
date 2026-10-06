@@ -85,8 +85,8 @@ import Testing
     }
 
     @Test func textOnTintedFills() {
-        // Amber and green are solid, unaffected by Increase Contrast.
-        for fill in [Theme.amber, Theme.green] {
+        // Amber, green and the accent (a checked checkbox) are solid, unaffected by Increase Contrast.
+        for fill in [Theme.amber, Theme.green, Theme.accent] {
             let tint = over(fill, components(Theme.bg).rgb)
             let value = ratio(over(Theme.onTint, tint), tint)
             #expect(value >= 4.5, "onTint \(value)")

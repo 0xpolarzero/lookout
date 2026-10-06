@@ -31,7 +31,7 @@ import SwiftUI
 //   HoverFillButtonStyle   Hover/active/pressed fill for any button and shape; disabled shows no fill.
 //   .rowHighlight(hover:picked:)  A hub row's padding and fill; picked (keyboard) adds the accent bar.
 //   .focusRing(radius)     The one focus ring: 1.5pt accent, offset 2 (inset for rows), from @FocusState.
-//   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
+//   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, CheckboxStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
 //   EmptyBlock, UndoLine (presentation only), Hairline, Avatar, FlowLayout, `.tip(_:_:)` (icon-only controls only).
 //   .tile(size) / Tile.shape(size)   A rounded square filled like a tile, radius 27% of its size.
 //   plural(n, "folder")    "1 folder", "2 folders"; third arg for irregulars: plural(2, "repository", "repositories").
@@ -500,6 +500,59 @@ struct SwitchStyle: ToggleStyle {
                 .brightness(hovering && enabled ? 0.06 : 0)
                 .frame(width: 32, height: 20)
                 .animation(reduce ? nil : Theme.Motion.hover, value: on)
+                .motion(Theme.Motion.hover, value: hovering)
+        }
+    }
+}
+
+/// A drawn checkbox for the options of a list (SwitchStyle is for a setting that is on or off): a 14pt box with a
+/// `fieldBorder` outline, accent and an `onTint` check when on. Drawn because the system's greys out in a panel that
+/// isn't key and its off box is a borderless fill below 3:1. The row is 28pt and all of it is the target.
+struct CheckboxStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CheckboxRow(configuration: configuration)
+    }
+
+    private struct CheckboxRow: View {
+        let configuration: ToggleStyleConfiguration
+        @State private var hovering = false
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.resolved) private var resolved
+
+        var body: some View {
+            let on = configuration.isOn
+            Button { configuration.isOn.toggle() } label: {
+                HStack(spacing: Theme.Space.md) {
+                    box(on: on)
+                    configuration.label
+                        .foregroundStyle(enabled ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: Theme.Metrics.menuRow)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusRing(Theme.Radius.small + Theme.Space.xs)
+            .onHover { hovering = $0 }
+            .accessibilityAddTraits(.isToggle)
+            .accessibilityValue(on ? "On" : "Off")
+        }
+
+        private func box(on: Bool) -> some View {
+            let shape = Theme.Radius.shape(Theme.Radius.small)
+            let filled = on && enabled
+            return shape
+                .fill(filled ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(resolved.fill(Theme.Fill.field)))
+                .overlay(shape.strokeBorder(filled ? .clear : enabled ? Theme.fieldBorder : resolved.divider, lineWidth: resolved.borderWidth))
+                .overlay {
+                    if on {
+                        Image(systemName: "checkmark").font(Theme.Typography.glyph(9, .heavy))
+                            .foregroundStyle(enabled ? AnyShapeStyle(Theme.onTint) : AnyShapeStyle(Theme.tertiary))
+                    }
+                }
+                .brightness(hovering && enabled ? 0.06 : 0)
+                .frame(width: 14, height: 14)
+                .motion(Theme.Motion.hover, value: on)
                 .motion(Theme.Motion.hover, value: hovering)
         }
     }

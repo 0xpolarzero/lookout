@@ -559,18 +559,18 @@ struct RepoRow: View {
         let hasComments = !repo.events.isDisjoint(with: RepoPreset.comments)
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(Self.checkboxes, id: \.kind) { box in
-                Toggle(box.title, isOn: binding(box.kind)).toggleStyle(.checkbox).frame(minHeight: Theme.Metrics.menuRow)
+                Toggle(box.title, isOn: binding(box.kind)).toggleStyle(CheckboxStyle())
             }
             Toggle("Every comment, not only the ones for me", isOn: Binding(get: { repo.allComments }, set: { _ in store.toggleAllComments(repo) }))
-                .toggleStyle(.checkbox)
-                .frame(minHeight: Theme.Metrics.menuRow)
+                .toggleStyle(CheckboxStyle())
                 .disabled(!hasComments)
             Text(hasComments
                  ? "Otherwise only comments on your issues and pull requests, mentioning you, or after you joined the conversation."
                  : "Turn on a kind of comment above first.")
                 .font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 20)
+                // Under the label, not the box: 14 + 8.
+                .padding(.leading, 22)
         }
         .font(Theme.Typography.body)
         .foregroundStyle(Theme.text)
