@@ -85,7 +85,9 @@ final class HubState {
     /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
     var expanded: Bool { pinned }
     /// In the full view, the section given all the room it needs; the others shrink to their header (and counts).
-    var focus: HubSection?
+    var focus: HubSection? {
+        didSet { if focus != oldValue { rehomeSelection() } }
+    }
 
     /// Settings and Repositories pin the view, so it stays put while you type or drag; back on the main view,
     /// the pin is what it was before.

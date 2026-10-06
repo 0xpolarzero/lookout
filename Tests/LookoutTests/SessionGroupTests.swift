@@ -343,6 +343,28 @@ import Testing
         }
     }
 
+    @Test func theKeysSkipRowsAFocusedSectionHides() {
+        let s = store([session("x1", folder: "/code/x")], kept: ["x1"])
+        var started: [String] = []
+        s.interceptOpen = { started.append($0) }
+        let (keys, hub) = hubKeys(s)
+        // Inbox focused: no session row is shown, so none is a target (not even New session).
+        hub.focus = .inbox
+        #expect(keys.key(key(kVK_DownArrow)) && hub.selection == nil)
+        #expect(keys.key(key(kVK_UpArrow)) && hub.selection == nil)
+        #expect(!keys.key(key(kVK_Return)) && started.isEmpty)
+        // Sessions focused: they are.
+        hub.focus = .agents
+        #expect(keys.key(key(kVK_DownArrow)) && hub.selection == "a:x1")
+        // Focusing another section lets go of a pick it hides.
+        hub.focus = .inbox
+        #expect(hub.selection == nil && hub.keyboardSelection == nil)
+        hub.focus = nil
+        hub.selection = "a:x1"
+        hub.focus = .agents
+        #expect(hub.selection == "a:x1")
+    }
+
     @Test func newSessionOffersTheMostRecentProjectFirst() {
         let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1),
                        session("c", folder: nil, minutesAgo: 0)])

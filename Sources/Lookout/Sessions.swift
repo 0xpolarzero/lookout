@@ -607,6 +607,19 @@ enum ProjectsMenu {
 }
 
 extension HubState {
+    /// Whether the row a key target ("i:" an inbox item, "a:" a session, "s:" the list's own rows) is on screen: a
+    /// focused section shrinks the others to their headers.
+    func shows(_ target: String) -> Bool {
+        focus == nil || focus == (target.hasPrefix("i:") ? .inbox : .agents)
+    }
+
+    /// A pick on a row that focusing another section has hidden is let go: the arrows start over from the rows shown.
+    func rehomeSelection() {
+        guard let selection, !shows(selection) else { return }
+        self.selection = nil
+        keyboardSelection = nil
+    }
+
     /// Picks the first session waiting on you and scrolls to it. A search that left it out, or another section
     /// focused, would hide the row: both go first, so there is a row to scroll to.
     func pickFirstWaiting(in store: Store, ui: UIState) {

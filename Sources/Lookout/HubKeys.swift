@@ -117,9 +117,11 @@ final class HubKeys {
         return false
     }
 
-    /// Every row the arrows walk through, top to bottom: inbox items, then sessions, then the list's own rows.
+    /// Every row the arrows walk through, top to bottom: inbox items, then sessions, then the list's own rows; only
+    /// those on screen (a focused section shrinks the others).
     private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id } + store.sessionExtraTargets(hub)
+        (store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id } + store.sessionExtraTargets(hub))
+            .filter(hub.shows)
     }
 
     /// A new search picks its first result, so ↩ opens it straight away.
