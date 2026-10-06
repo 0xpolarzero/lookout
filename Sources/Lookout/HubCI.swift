@@ -306,7 +306,8 @@ extension LookoutHub {
     }
 
     /// The rows under the header: one per failing or running repo, then the Passing row (open in place on request),
-    /// all in one list that scrolls within `ciCap`. Without any CI, one calm line with the way to turn it on.
+    /// all in one list that scrolls within `ciCap`, ending between rows (each marks its edge). Without any CI, one
+    /// calm line with the way to turn it on.
     var ciRows: some View {
         let list = store.ciList
         return VStack(alignment: .leading, spacing: 0) {
@@ -330,14 +331,16 @@ extension LookoutHub {
         let open = hub.ciPassingOpen || hub.focus == .ci
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(list.attention) { entry in
-                CIRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub).id("c:" + entry.id)
+                CIRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub)
+                    .capEdge().id("c:" + entry.id)
             }
             if !list.quiet.isEmpty {
-                CIQuietRow(list: list, open: open, ui: ui, hub: hub) { hub.setCIPassingOpen(!open) }.id("c:passing")
+                CIQuietRow(list: list, open: open, ui: ui, hub: hub) { hub.setCIPassingOpen(!open) }
+                    .capEdge().id("c:passing")
                 if open {
                     ForEach(list.quiet) { entry in
                         CINameRow(entry: entry, title: list.title(entry.repo), store: store, ui: ui, hub: hub)
-                            .id("c:" + entry.id)
+                            .capEdge().id("c:" + entry.id)
                     }
                     .transition(.opacity)
                 }
