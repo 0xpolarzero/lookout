@@ -316,6 +316,8 @@ struct ReposView: View {
                         .onSubmit(submit)
                         .onKeyPress(.downArrow) { move(1) }
                         .onKeyPress(.upArrow) { move(-1) }
+                        // Tab leaves the field for the rows under the suggestions: a pointer resting on them keeps nothing up.
+                        .onKeyPress(.tab) { overList = false; return .ignored }
                         .accessibilityLabel("Repository to watch")
                     // Static: nothing in the hub spins but the working ring.
                     if adding { Text("Adding…").font(Theme.Typography.meta).foregroundStyle(Theme.secondary) }
