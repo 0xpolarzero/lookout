@@ -66,8 +66,9 @@ struct AdaptiveStack<Content: View>: View {
 }
 
 /// Scrolls only once its content is taller than `cap`; otherwise exactly as tall as the content. Cut short, it stops
-/// at the last row that fits whole (rows mark themselves with `.capEdge()`), its fade saying "more below". Follows
-/// the keyboard selection (never the pointer's: hovering a row mustn't move the list under it).
+/// at the last row that fits whole (rows mark themselves with `.capEdge()`), the system's scroller saying "more
+/// below" (never a fade over live rows). Follows the keyboard selection (never the pointer's: hovering a row mustn't
+/// move the list under it).
 struct CappedScroll<Content: View>: View {
     let cap: CGFloat
     /// Read here, in this view's own body, so the parent doesn't depend on it.
@@ -113,19 +114,11 @@ struct CappedScroll<Content: View>: View {
                     settle()
                 }
             }
-            // No scroller: a legacy one ("Show scroll bars: Always") would take its width out of the rows and push
-            // them off the bar's cells they line up with.
-            .scrollIndicators(.never)
+            // The system's scrollers, overlay as a rule. A legacy one ("Show scroll bars: Always") takes its width out of
+            // the rows, as it does in any list.
+            .scrollIndicators(.automatic)
             .scrollDisabled(!cut)
             .frame(height: max(shown, 1))
-            // Cut short: the last visible row fades out, so it reads as "more below" rather than clipped.
-            .mask {
-                VStack(spacing: 0) {
-                    Color.black
-                    LinearGradient(colors: [.black, .black.opacity(cut ? 0.15 : 1)], startPoint: .top, endPoint: .bottom)
-                        .frame(height: 14)
-                }
-            }
             .onChange(of: hub?.keyboardSelection) { _, request in
                 if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
             }
