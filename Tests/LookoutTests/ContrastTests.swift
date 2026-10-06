@@ -36,6 +36,9 @@ import Testing
             "bg": bg, "rail": over(Theme.rail, bg), "hover": fill(Theme.Fill.hover), "field": fill(Theme.Fill.field),
             "tile": fill(Theme.Fill.tile), "selected": fill(Theme.Fill.selected), "pressed": fill(Theme.Fill.pressed),
             "group": fill(Theme.Fill.group), "popover": components(Theme.popover).rgb,
+            // A picked or pressed row of a list that floats (the repository suggestions) is a fill over the popover.
+            "popover picked": over(r.fill(Theme.Fill.selected), components(Theme.popover).rgb),
+            "popover pressed": over(r.fill(Theme.Fill.pressed), components(Theme.popover).rgb),
         ]
     }
 
@@ -50,6 +53,8 @@ import Testing
     private static let rows = ["bg", "rail", "hover", "field", "tile", "selected"]
     /// A button's fills, pressed included: the chips' red check count lands on all of them.
     private static let buttons = rows + ["pressed"]
+    /// The suggestions' rows, at rest, picked and pressed.
+    private static let popoverRows = ["popover", "popover picked", "popover pressed"]
 
     private func pairs(_ r: Theme.Resolved) -> [Pair] {
         [
@@ -57,6 +62,8 @@ import Testing
             Pair(name: "text", color: Theme.text, on: Self.all, minimum: 4.5),
             Pair(name: "secondary", color: r.secondary, on: Self.all, minimum: 4.5),
             Pair(name: "tertiary", color: r.tertiary, on: Self.all, minimum: 4.5),
+            Pair(name: "suggestion owner", color: r.secondary, on: Self.popoverRows, minimum: 4.5),
+            Pair(name: "suggestion name", color: Theme.text, on: Self.popoverRows, minimum: 4.5),
             Pair(name: "accentText", color: Theme.accentText, on: Self.rows, minimum: 4.5),
             Pair(name: "amber text", color: Theme.amber, on: Self.all, minimum: 4.5),
             // `resolved.red` on a chip (any fill it takes); `Theme.red` for the rest, on the page and its groups.
@@ -64,6 +71,8 @@ import Testing
             Pair(name: "red text", color: Theme.red, on: ["bg", "rail", "group", "popover"], minimum: 4.5),
             // Glyphs, rings and borders.
             Pair(name: "accent", color: Theme.accent, on: Self.rows + ["popover"], minimum: 3),
+            // The suggestions' pick bar, lighter than the rest because the popover under the fills is.
+            Pair(name: "suggestion pick bar", color: Theme.accentText, on: ["popover", "popover picked"], minimum: 3),
             Pair(name: "amber glyph", color: Theme.amber, on: Self.all, minimum: 3),
             Pair(name: "red glyph", color: Theme.red, on: Self.buttons, minimum: 3),
             Pair(name: "fieldBorder", color: Theme.fieldBorder, on: ["bg", "rail", "group"], minimum: 3),

@@ -412,7 +412,8 @@ private struct SuggestionRow: View {
             HStack(spacing: Theme.Space.md) {
                 Image(systemName: "book.closed").font(Theme.Typography.glyph(11, .regular)).foregroundStyle(Theme.secondary)
                     .accessibilityHidden(true)
-                (Text(name.split(separator: "/").first.map { "\($0)/" } ?? "").foregroundStyle(Theme.tertiary)
+                // secondary: tertiary falls under 4.5:1 on a picked or pressed row over the popover.
+                (Text(name.split(separator: "/").first.map { "\($0)/" } ?? "").foregroundStyle(Theme.secondary)
                     + Text(name.split(separator: "/").last.map(String.init) ?? "").foregroundStyle(Theme.text))
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
@@ -424,6 +425,11 @@ private struct SuggestionRow: View {
         }
         .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.tile), rest: picked ? Theme.Fill.selected : Theme.Fill.rest,
                                           hover: picked ? Theme.Fill.selected : Theme.Fill.hover))
+        // The keyboard's pick, as in every list: its fill and the bar (DESIGN.md 3.5), in the lighter blue because the popover
+        // under the fills is lighter than the page (the accent holds 3:1 there only without Increase Contrast).
+        .overlay(alignment: .leading) {
+            if picked { Capsule().fill(Theme.accentText).frame(width: 2, height: 24).padding(.leading, 2).allowsHitTesting(false) }
+        }
         .accessibilityLabel("Watch \(name)")
         .accessibilityAddTraits(picked ? .isSelected : [])
     }
