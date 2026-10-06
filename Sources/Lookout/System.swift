@@ -61,6 +61,8 @@ final class HotKeys {
     static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
     private static var handlers: [UInt32: () -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
+    /// The key each registration in `refs` is for.
+    private var held: [UInt32: Shortcut] = [:]
     private var taps: [UInt32: (key: UInt16, handler: () -> Void)] = [:]
     /// Mouse button shortcuts, caught (and kept from the app under the pointer) by an event tap.
     private var buttons: [UInt32: (button: Int, flags: NSEvent.ModifierFlags, handler: () -> Void)] = [:]
@@ -85,32 +87,44 @@ final class HotKeys {
         }, 1, &spec, nil, nil)
     }
 
-    /// `nil` unregisters, and so does a shortcut that was cleared (nothing is registered for it).
-    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) {
+    /// `nil` unregisters, and so does a shortcut that was cleared (nothing is registered for it). A system-wide key that
+    /// another app holds is refused (`false`), and what the action had stays registered until a replacement is.
+    @discardableResult
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) -> Bool {
+        defer { updateMonitors(); updateButtonTap() }
+        let wanted = shortcut.flatMap { $0.isUnassigned ? nil : $0 }
+        if let wanted, wanted.mouseButton == nil, !wanted.isModifierTap {
+            if held[id] == wanted, refs[id] != nil {
+                HotKeys.handlers[id] = handler
+                return true
+            }
+            var ref: EventHotKeyRef?
+            let status = RegisterEventHotKey(UInt32(wanted.keyCode), wanted.carbonModifiers,
+                                             EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
+                                             GetApplicationEventTarget(), 0, &ref)
+            guard status == noErr, let ref else {
+                NSLog("Lookout: global shortcut \(wanted.display) unavailable (\(status))")
+                return false
+            }
+            release(id)
+            refs[id] = ref
+            held[id] = wanted
+            HotKeys.handlers[id] = handler
+            return true
+        }
+        release(id)
+        guard let wanted else { return true }
+        if let button = wanted.mouseButton { buttons[id] = (button, wanted.flags, handler) } else { taps[id] = (wanted.keyCode, handler) }
+        return true
+    }
+
+    /// Lets go of whatever `id` holds, of every kind.
+    private func release(_ id: UInt32) {
         if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
+        held[id] = nil
         HotKeys.handlers[id] = nil
         taps[id] = nil
         buttons[id] = nil
-        defer { updateMonitors(); updateButtonTap() }
-        guard let shortcut, !shortcut.isUnassigned else { return }
-        if let button = shortcut.mouseButton {
-            buttons[id] = (button, shortcut.flags, handler)
-            return
-        }
-        if shortcut.isModifierTap {
-            taps[id] = (shortcut.keyCode, handler)
-            return
-        }
-        var ref: EventHotKeyRef?
-        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers,
-                                         EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
-                                         GetApplicationEventTarget(), 0, &ref)
-        if status == noErr, let ref {
-            refs[id] = ref
-            HotKeys.handlers[id] = handler
-        } else {
-            NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))")
-        }
     }
 
     private func updateMonitors() {

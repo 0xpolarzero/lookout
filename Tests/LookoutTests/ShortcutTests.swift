@@ -63,7 +63,7 @@ import Testing
         let store = Store()
         store.persists = false
         var registered: Shortcut?
-        store.onGlobalShortcutChange = { _, shortcut in registered = shortcut }
+        store.onGlobalShortcutChange = { _, shortcut in registered = shortcut; return true }
         let custom = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
         store.setShortcut(custom, for: .togglePanel)
         #expect(store.shortcut(.togglePanel) == custom)
@@ -98,7 +98,7 @@ import Testing
         let store = Store()
         store.persists = false
         var registered: [ShortcutAction] = []
-        store.onGlobalShortcutChange = { action, _ in registered.append(action) }
+        store.onGlobalShortcutChange = { action, _ in registered.append(action); return true }
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
         store.setShortcut(.unassigned, for: .discard)
         #expect(store.hasCustomShortcuts)
@@ -151,7 +151,7 @@ import Testing
         #expect(store.shortcutConflict(keepDefault, for: .sessionSwitcher) == nil)
         store.setShortcut(keepDefault, for: .sessionSwitcher)
         registrar.refused = []
-        #expect(store.resetShortcut(for: .togglePanel) == .sessionSwitcher)
+        #expect(store.resetShortcut(for: .togglePanel) == .usedBy(.sessionSwitcher))
         #expect(store.shortcut(.togglePanel) == moved)
         #expect(store.shortcut(.sessionSwitcher) == keepDefault)
         #expect(registrar.registered == [1: moved, 2: keepDefault])
@@ -161,6 +161,28 @@ import Testing
         #expect(store.resetShortcut(for: .togglePanel) == nil)
         #expect(store.shortcut(.togglePanel) == keepDefault)
         #expect(registrar.registered == [1: keepDefault, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func aKeyAnotherAppHoldsIsRefusedAndTheWorkingOneStays() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keep = ShortcutAction.togglePanel.defaultShortcut
+        let held = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        registrar.taken = [held]
+        let refusal = store.setShortcut(held, for: .togglePanel)
+        #expect(refusal == .unavailable(held))
+        #expect(refusal?.message == "⌃⌘G is used by another app. Lookout keeps the old shortcut")
+        // Stored and registered as before: nothing shows a key that does nothing, and the old one still works.
+        #expect(store.shortcut(.togglePanel) == keep && store.settings.shortcuts == nil)
+        #expect(registrar.registered[1] == keep)
+        // A refused reset of a custom key keeps the custom one too.
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])
+        #expect(store.setShortcut(moved, for: .togglePanel) == nil)
+        registrar.taken = [keep]
+        #expect(store.resetShortcut(for: .togglePanel) == .unavailable(keep))
+        #expect(store.shortcut(.togglePanel) == moved && registrar.registered[1] == moved)
         withExtendedLifetime(globals) {}
     }
 
@@ -189,17 +211,23 @@ import Testing
     }
 }
 
-/// Stands in for the system: one registration per id, and a key another id holds is refused, as Carbon does.
+/// Stands in for the system: one registration per id, and a key another id (or another app) holds is refused, as Carbon
+/// does, with what the id held left as it was.
 private final class FakeRegistrar: HotKeyRegistrar {
     var registered: [UInt32: Shortcut] = [:]
     var refused: [Shortcut] = []
     var received: [Shortcut?] = []
+    /// Keys that other apps hold.
+    var taken: Set<Shortcut> = []
 
-    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) {
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool {
         received.append(shortcut)
-        registered[id] = nil
-        guard let shortcut, !shortcut.isUnassigned else { return }
-        if registered.values.contains(shortcut) { refused.append(shortcut); return }
+        guard let shortcut, !shortcut.isUnassigned else { registered[id] = nil; return true }
+        if taken.contains(shortcut) || registered.contains(where: { $0.key != id && $0.value == shortcut }) {
+            refused.append(shortcut)
+            return false
+        }
         registered[id] = shortcut
+        return true
     }
 }

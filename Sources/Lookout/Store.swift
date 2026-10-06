@@ -142,7 +142,8 @@ final class Store {
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
-    @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Void)?
+    /// Registers a global shortcut system-wide; `false` when the system refuses it.
+    @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Bool)?
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
     @ObservationIgnored let activityReader = Claude.ActivityReader()
     @ObservationIgnored lazy var claudeFeed = ClaudeFeed(activityReader: activityReader)
@@ -593,12 +594,20 @@ final class Store {
         settings.shortcuts?[action.rawValue] ?? action.defaultShortcut
     }
 
-    /// `nil` resets to the default.
-    func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) {
-        var all = settings.shortcuts ?? [:]
+    /// `nil` resets to the default. A global one the system refuses is not kept: the one that works stays stored and
+    /// registered, and the refusal is returned.
+    @discardableResult
+    func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) -> ShortcutRefusal? {
+        let before = settings.shortcuts
+        var all = before ?? [:]
         all[action.rawValue] = shortcut == action.defaultShortcut ? nil : shortcut
         settings.shortcuts = all.isEmpty ? nil : all
-        if action.isGlobal { onGlobalShortcutChange?(action, self.shortcut(action)) }
+        if action.isGlobal, onGlobalShortcutChange?(action, self.shortcut(action)) == false {
+            let refused = self.shortcut(action)
+            settings.shortcuts = before
+            return .unavailable(refused)
+        }
+        return nil
     }
 
     func addBot(_ handle: String) {

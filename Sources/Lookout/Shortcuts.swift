@@ -189,13 +189,12 @@ extension Store {
         return ShortcutAction.allCases.first { $0 != action && self.shortcut($0) == shortcut }
     }
 
-    /// Back to the default, unless another action has taken that key since: the reset would give both the same key,
-    /// and the system would drop one of them. Returns the action in the way, with nothing changed.
+    /// Back to the default, unless another action has taken that key since (the reset would give both the same key, and the
+    /// system would drop one of them) or another app has. Returns what stood in the way, with nothing changed.
     @discardableResult
-    func resetShortcut(for action: ShortcutAction) -> ShortcutAction? {
-        if let other = shortcutConflict(action.defaultShortcut, for: action) { return other }
-        setShortcut(nil, for: action)
-        return nil
+    func resetShortcut(for action: ShortcutAction) -> ShortcutRefusal? {
+        if let other = shortcutConflict(action.defaultShortcut, for: action) { return .usedBy(other) }
+        return setShortcut(nil, for: action)
     }
 
     /// Every shortcut back to its default. The global ones are unregistered first and registered again after: with
@@ -203,16 +202,31 @@ extension Store {
     /// would show a default that does nothing.
     func restoreDefaultShortcuts() {
         let globals = ShortcutAction.allCases.filter(\.isGlobal)
-        for action in globals { onGlobalShortcutChange?(action, .unassigned) }
+        for action in globals { _ = onGlobalShortcutChange?(action, .unassigned) }
         settings.shortcuts = nil
-        for action in globals { onGlobalShortcutChange?(action, shortcut(action)) }
+        for action in globals { _ = onGlobalShortcutChange?(action, shortcut(action)) }
+    }
+}
+
+/// Why a shortcut wasn't taken: the sentence under its recorder, which says so aloud too.
+enum ShortcutRefusal: Equatable {
+    case usedBy(ShortcutAction)
+    /// Another app holds a system-wide key: Lookout keeps the one it had.
+    case unavailable(Shortcut)
+
+    var message: String {
+        switch self {
+        case .usedBy(let other): "Already used by \(other.title)"
+        case .unavailable(let shortcut): "\(shortcut.display) is used by another app. Lookout keeps the old shortcut"
+        }
     }
 }
 
 /// Where a system-wide shortcut is registered: `HotKeys`, or a stand-in under test.
 protocol HotKeyRegistrar: AnyObject {
-    /// `nil` unregisters.
-    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void)
+    /// `nil` unregisters. A shortcut that can't be registered is refused (`false`), and what `id` held stays held.
+    @discardableResult
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool
 }
 
 extension HotKeys: HotKeyRegistrar {}
@@ -240,16 +254,17 @@ final class GlobalShortcuts {
     /// Registers both and follows the store from here on.
     func start() {
         for action in ShortcutAction.allCases where action.isGlobal { register(action) }
-        store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) }
+        store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) ?? true }
         store.onAgentsEnabledChange = { [weak self] _ in self?.register(.sessionSwitcher) }
     }
 
-    /// `shortcut` is what the store has just set, or its current one.
-    func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) {
-        guard action.isGlobal else { return }
+    /// `shortcut` is what the store has just set, or its current one. `false` when the system refused it.
+    @discardableResult
+    func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) -> Bool {
+        guard action.isGlobal else { return true }
         let shortcut = shortcut ?? store.shortcut(action)
         let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
-        registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
+        return registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
             DispatchQueue.main.async { perform(action) }
         }
     }
@@ -274,7 +289,7 @@ struct ShortcutRecorder: View {
                 if customized && !recording {
                     IconButton(symbol: "arrow.uturn.backward", help: "Reset", label: "Reset \(action.title) to default",
                                detail: "Back to \(action.defaultShortcut.display)") {
-                        error = store.resetShortcut(for: action).map { "Already used by \($0.title)" }
+                        error = store.resetShortcut(for: action)?.message
                     }
                 } else {
                     Color.clear.frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
@@ -363,9 +378,10 @@ struct ShortcutRecorder: View {
 
     private func accept(_ shortcut: Shortcut) {
         if let other = store.shortcutConflict(shortcut, for: action) {
-            error = "Already used by \(other.title)"
+            error = ShortcutRefusal.usedBy(other).message
+        } else if let refusal = store.setShortcut(shortcut, for: action) {
+            error = refusal.message
         } else {
-            store.setShortcut(shortcut, for: action)
             stop()
         }
     }
