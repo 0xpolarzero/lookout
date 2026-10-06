@@ -11,6 +11,10 @@ struct PlaygroundView: View {
     let store: Store
     @Bindable var ui: UIState
     @Bindable var hub: HubState
+    /// The "Lookout playground" card with the edge picker and key hints: for trying it, not for screenshots.
+    var showsExplainer = true
+    /// The window's least size; screenshots at another size (1280×720) set their own.
+    var minSize = CGSize(width: 1280, height: 820)
     @State private var behindClicks = 0
     @State private var leaveTask: Task<Void, Never>?
 
@@ -22,8 +26,10 @@ struct PlaygroundView: View {
                 LinearGradient(colors: [Color(red: 0.20, green: 0.27, blue: 0.42), Color(red: 0.47, green: 0.38, blue: 0.52),
                                         Color(red: 0.70, green: 0.52, blue: 0.50)], startPoint: .topLeading, endPoint: .bottomTrailing)
                 behindApp.position(x: geo.size.width - 330, y: 260)
-                controls.position(x: geo.size.width / 2 - (ui.edge == .right ? 140 : ui.edge == .left ? -140 : 0),
-                                  y: geo.size.height / 2 + (ui.edge == .top ? 120 : ui.edge == .bottom ? -120 : 0))
+                if showsExplainer {
+                    controls.position(x: geo.size.width / 2 - (ui.edge == .right ? 140 : ui.edge == .left ? -140 : 0),
+                                      y: geo.size.height / 2 + (ui.edge == .top ? 120 : ui.edge == .bottom ? -120 : 0))
+                }
                 fakeMenuBar.frame(maxHeight: .infinity, alignment: .top)
                 docked(geo.size)
                 if let toast = hub.toast {
@@ -35,7 +41,7 @@ struct PlaygroundView: View {
                 }
             }
         }
-        .frame(minWidth: 1280, minHeight: 820)
+        .frame(minWidth: minSize.width, minHeight: minSize.height)
         // As in the app: tooltips over the whole window, outside the hub's clipped shape.
         .tipSpace()
         .animation(.easeOut(duration: 0.2), value: hub.toast)
@@ -188,57 +194,268 @@ final class Playground: NSObject, NSWindowDelegate {
     }
 }
 
-/// `--playground-shots <dir>`: the playground pinned open on each edge, and at rest, as PNGs.
-@MainActor
-enum PlaygroundShots {
-    static func run(to dir: String) {
-        var windows: [(String, NSWindow)] = []
-        for edge in [DockEdge.right, .top, .left, .bottom] {
-            for (state, pinned, page) in [("rest", false, HubPage.main), ("open", true, .main), ("settings", true, .settings),
-                                          ("repos", true, .repos), ("search", true, .main), ("tip", true, .main),
-                                          ("peek-inbox", false, .main), ("peek-ci", false, .main), ("peek-agents", false, .main),
-                                          ("peek-controls", false, .main), ("picked", true, .main),
-                                          ("focus-inbox", true, .main), ("focus-agents", true, .main)] {
-                if (state == "picked" || state.hasPrefix("focus")) && edge != .right && edge != .top { continue }
-                if (state == "repos" || state == "tip") && edge != .right && edge != .top { continue }
-                let store = Store()
-                Demo.populate(store, .agents)
-                store.agents.expanded = true
-                let ui = UIState(persists: false, edge: edge)
-                let hub = HubState()
-                hub.pinned = pinned
-                hub.page = page
-                if state == "search" { hub.query = "sand" }
-                // "peek-…": just that section open beside the bar, as when it's hovered.
-                hub.focus = ["focus-inbox": HubSection.inbox, "focus-agents": .agents][state]
-                // "picked": an inbox item and a session picked, their actions showing, to compare them.
-                if state == "picked" {
-                    hub.selection = store.list(.needsYou).first.map { "i:" + $0.id }
-                    ui.drawerSelection = "local_demo-ci"
-                }
-                hub.section = ["peek-inbox": HubSection.inbox, "peek-ci": .ci, "peek-agents": .agents, "peek-controls": .controls][state]
-                // "tip": the settings button's tooltip, shown at once, to check it isn't clipped against the edge.
-                let hosting = NSHostingView(rootView: PlaygroundView(store: store, ui: ui, hub: hub)
-                    .environment(\.previewTip, state == "tip" ? "Settings" : nil)
-                    .frame(width: 1280, height: 820))
-                hosting.frame.size = NSSize(width: 1280, height: 820)
-                let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
-                window.contentView = hosting
-                window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
-                window.orderFrontRegardless()
-                windows.append(("\(edge.rawValue)-\(state)", window))
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            for (name, window) in windows {
-                guard let view = window.contentView else { continue }
-                view.layoutSubtreeIfNeeded()
-                guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-                view.cacheDisplay(in: view.bounds, to: rep)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
-            }
-            exit(0)
+
+// MARK: - Screenshots
+
+/// Overrides for the accessibility settings a shot renders under, applied through SwiftUI's environment. Only a set
+/// flag overrides; the others keep what the system says.
+///
+/// How the theme reads them: `\.colorSchemeContrast`, `\.accessibilityReduceMotion` and
+/// `\.accessibilityDifferentiateWithoutColor` return these values inside a shot, so anything that resolves them
+/// from the environment (the `Theme.Resolved` value, `.motion`, `Pulse`'s hosting view) follows the shot. Reads that
+/// bypass the environment do not: `NSWorkspace.shared.accessibilityDisplayShould…`, `LookoutHub.reduceNow` and
+/// anything in a window of its own. Those always show the system's setting, so a shot for them needs the view to take
+/// the value from its environment.
+struct ShotEnvironment: Equatable {
+    var increaseContrast = false
+    var reduceMotion = false
+    var differentiateWithoutColor = false
+
+    static let contrast = ShotEnvironment(increaseContrast: true)
+    static let motion = ShotEnvironment(reduceMotion: true)
+    static let differentiate = ShotEnvironment(differentiateWithoutColor: true)
+    static let all = ShotEnvironment(increaseContrast: true, reduceMotion: true, differentiateWithoutColor: true)
+}
+
+private extension View {
+    /// SwiftUI declares these environment values get-only; the underscored keys are the settable ones behind them.
+    func shotEnvironment(_ shot: ShotEnvironment) -> some View {
+        transformEnvironment(\._colorSchemeContrast) { if shot.increaseContrast { $0 = .increased } }
+            .transformEnvironment(\._accessibilityReduceMotion) { if shot.reduceMotion { $0 = true } }
+            .transformEnvironment(\._accessibilityDifferentiateWithoutColor) { if shot.differentiateWithoutColor { $0 = true } }
+    }
+}
+
+extension [DockEdge] {
+    static let all: [DockEdge] = [.right, .top, .left, .bottom]
+    /// The side bar and the strip: where a state differs between them, and the two the old shots covered.
+    static let rightAndTop: [DockEdge] = [.right, .top]
+}
+
+/// What a shot has picked, for the row actions and the keyboard pick to show.
+enum ShotSelection {
+    /// The newest inbox item that needs you.
+    case firstNeedsYou
+    case item(String)
+    case session(String)
+}
+
+/// One screenshot: the playground in a given state, rendered offscreen to `<name>.png`. Add one by adding a line to
+/// `PlaygroundShots.catalog`; everything but `name` has a default.
+struct Shot {
+    static let standard = CGSize(width: 1280, height: 820)
+    /// A 1280×720 screen: the hub must fit its edge without overflowing.
+    static let hd = CGSize(width: 1280, height: 720)
+
+    var name: String
+    var edge = DockEdge.right
+    /// The data (see `Demo.Scenario`).
+    var scenario = Demo.Scenario.agents
+    /// Kept open (as when pinned) rather than at rest.
+    var pinned = false
+    var page = HubPage.main
+    /// Just this section open beside the bar, as when it is hovered.
+    var section: HubSection?
+    /// The section filling the view, as when its header is clicked.
+    var focus: HubSection?
+    var filter: InboxFilter?
+    var query = ""
+    var selection: ShotSelection?
+    /// A session row under the pointer.
+    var hoveredSession: String?
+    /// A tooltip shown at once, by title (see `Tip`).
+    var tip: String?
+    var size = Shot.standard
+    var environment = ShotEnvironment()
+    /// The playground's own "Lookout playground" card: hidden, as it is not part of what is being designed.
+    var showsExplainer = false
+    /// Anything the fields above don't cover, after they are applied.
+    var setup: ((Store, UIState, HubState) -> Void)?
+
+    /// The same shot on each of these edges, named `<edge>-<state>`.
+    static func edges(_ state: String, on edges: [DockEdge] = .all,
+                      _ configure: (inout Shot) -> Void = { _ in }) -> [Shot] {
+        edges.map { edge in
+            var shot = Shot(name: "\(edge.rawValue)-\(state)", edge: edge)
+            configure(&shot)
+            return shot
         }
     }
 }
 
+/// `--playground-shots <dir> [substring…]`: the real views, on the demo data, rendered offscreen as PNGs. Shots
+/// whose name contains one of the substrings are rendered (all of them without any), so a change is checked in a few
+/// seconds: `.build/debug/Lookout --playground-shots /tmp/shots right-open`.
+///
+/// Names are `<edge>-<state>`, the edge being right, top, left or bottom. "Every edge" is all four; "right and
+/// top" the two that stand for the sides and the strip.
+///
+/// Baseline, every edge
+///   rest, open, settings, search, peek-inbox, peek-ci, peek-agents, peek-controls
+/// Baseline, right and top
+///   repos, tip, picked, focus-inbox, focus-agents
+/// Inbox, right and top
+///   open-bots, open-done, search-none, search-sessions, focus-ci
+/// Causes, open on right and top; at rest on every edge (the bar's own state)
+///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
+///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
+/// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
+///   no-ci, all-passing, many-ci (15 repositories)
+/// Sessions: `rest-`, `open-`, `peek-agents-` plus
+///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
+///   sessions-12 (also `focus-agents-sessions-12`)
+/// Update: `rest-`, `open-` plus
+///   update-available, update-downloading, update-ready
+/// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y)
+///   rest-contrast, rest-reduce-motion, rest-differentiate, rest-a11y on every edge;
+///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
+/// 1280×720, every edge
+///   open-720, settings-720, repos-720, rest-sessions-12-720
+@MainActor
+enum PlaygroundShots {
+    /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
+    private static let causes: [(String, Demo.Scenario)] = [
+        ("signed-out", .signedOut), ("repos-failed", .reposFailed), ("rate-limited", .rateLimited), ("snoozed", .snoozed),
+        ("error", .error), ("needs-you-empty", .needsYouEmpty), ("first-sync", .firstSync), ("sync-fault", .syncFault),
+    ]
+    private static let ci: [(String, Demo.Scenario)] = [("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI)]
+    private static let sessions: [(String, Demo.Scenario)] = [
+        ("sessions-waiting", .sessionsWaiting), ("sessions-working", .sessionsWorking), ("sessions-unread", .sessionsUnread),
+        ("sessions-new-activity", .sessionsNewActivity), ("sessions-scratch", .sessionsScratch),
+        ("sessions-none", .sessionsNone), ("sessions-12", .sessions12),
+    ]
+    private static let updates: [(String, Demo.Scenario)] = [
+        ("update-available", .updateAvailable), ("update-downloading", .updateDownloading), ("update-ready", .updateReady),
+    ]
+
+    /// Every shot, in the order they are rendered. One line each.
+    static let catalog: [Shot] = [
+        // The baseline.
+        Shot.edges("rest"),
+        Shot.edges("open") { $0.pinned = true },
+        Shot.edges("settings") { $0.pinned = true; $0.page = .settings },
+        Shot.edges("repos", on: .rightAndTop) { $0.pinned = true; $0.page = .repos },
+        Shot.edges("search") { $0.pinned = true; $0.query = "sand" },
+        Shot.edges("tip", on: .rightAndTop) { $0.pinned = true; $0.tip = "Settings" },
+        Shot.edges("peek-inbox") { $0.section = .inbox },
+        Shot.edges("peek-ci") { $0.section = .ci },
+        Shot.edges("peek-agents") { $0.section = .agents },
+        Shot.edges("peek-controls") { $0.section = .controls },
+        // An inbox item and a session picked, their actions showing, to compare them.
+        Shot.edges("picked", on: .rightAndTop) { $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci" },
+        Shot.edges("focus-inbox", on: .rightAndTop) { $0.pinned = true; $0.focus = .inbox },
+        Shot.edges("focus-agents", on: .rightAndTop) { $0.pinned = true; $0.focus = .agents },
+        // Inbox.
+        Shot.edges("open-bots", on: .rightAndTop) { $0.pinned = true; $0.filter = .bots },
+        Shot.edges("open-done", on: .rightAndTop) { $0.pinned = true; $0.filter = .done },
+        Shot.edges("search-none", on: .rightAndTop) { $0.pinned = true; $0.query = "zzzz" },
+        Shot.edges("search-sessions", on: .rightAndTop) { $0.pinned = true; $0.query = "lcu" },
+        Shot.edges("focus-ci", on: .rightAndTop) { $0.pinned = true; $0.focus = .ci },
+        // Causes: why a list is empty or the sync is not healthy.
+        causes.flatMap { slug, scenario in scenarioShots(slug, scenario) },
+        Shot.edges("open-no-repos", on: .rightAndTop) { $0.pinned = true; $0.scenario = .empty },
+        Shot.edges("open-bots-empty", on: .rightAndTop) { $0.pinned = true; $0.scenario = .botsEmpty; $0.filter = .bots },
+        Shot.edges("open-done-empty", on: .rightAndTop) { $0.pinned = true; $0.scenario = .doneEmpty; $0.filter = .done },
+        // CI, sessions and the update cell.
+        ci.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .ci) },
+        Shot.edges("focus-ci-many-ci", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.focus = .ci },
+        sessions.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .agents) },
+        Shot.edges("focus-agents-sessions-12", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents },
+        updates.flatMap { slug, scenario in scenarioShots(slug, scenario) },
+        // Accessibility variants.
+        Shot.edges("rest-contrast") { $0.environment = .contrast },
+        Shot.edges("rest-reduce-motion") { $0.environment = .motion },
+        Shot.edges("rest-differentiate") { $0.environment = .differentiate },
+        Shot.edges("rest-a11y") { $0.environment = .all },
+        Shot.edges("open-contrast", on: .rightAndTop) { $0.pinned = true; $0.environment = .contrast },
+        Shot.edges("open-reduce-motion", on: .rightAndTop) { $0.pinned = true; $0.environment = .motion },
+        Shot.edges("open-differentiate", on: .rightAndTop) { $0.pinned = true; $0.environment = .differentiate },
+        Shot.edges("picked-contrast", on: .rightAndTop) {
+            $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci"; $0.environment = .contrast
+        },
+        Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
+        // A 1280×720 screen.
+        Shot.edges("open-720") { $0.pinned = true; $0.size = Shot.hd },
+        Shot.edges("settings-720") { $0.pinned = true; $0.page = .settings; $0.size = Shot.hd },
+        Shot.edges("repos-720") { $0.pinned = true; $0.page = .repos; $0.size = Shot.hd },
+        Shot.edges("rest-sessions-12-720") { $0.scenario = .sessions12; $0.size = Shot.hd },
+    ].flatMap { $0 }
+
+    /// A scenario at rest on every edge, open and (when it has a section) as that section's peek on right and top.
+    private static func scenarioShots(_ slug: String, _ scenario: Demo.Scenario, peek: HubSection? = nil) -> [Shot] {
+        Shot.edges("rest-\(slug)") { $0.scenario = scenario }
+            + Shot.edges("open-\(slug)", on: .rightAndTop) { $0.pinned = true; $0.scenario = scenario }
+            + (peek.map { section in
+                Shot.edges("peek-\(section == .ci ? "ci" : "agents")-\(slug)", on: .rightAndTop) { $0.section = section; $0.scenario = scenario }
+            } ?? [])
+    }
+
+    /// `--playground-shots <dir> [substring…]`.
+    static func run(to dir: String) {
+        let arguments = CommandLine.arguments
+        let start = (arguments.firstIndex(of: "--playground-shots") ?? 0) + 2
+        let filters = arguments.dropFirst(start).filter { !$0.hasPrefix("--") }.map { $0.lowercased() }
+        let shots = catalog.filter { shot in filters.isEmpty || filters.contains { shot.name.contains($0) } }
+        guard !shots.isEmpty else {
+            print("No shot matches \(filters.joined(separator: ", ")). \(catalog.count) shots, e.g. \(catalog[0].name)")
+            exit(1)
+        }
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        Task {
+            // Some at a time: every window is a live SwiftUI hierarchy, and a full set is too much to hold at once.
+            for batch in stride(from: 0, to: shots.count, by: 10).map({ Array(shots[$0..<min($0 + 10, shots.count)]) }) {
+                let windows = batch.map { (name: $0.name, window: open($0)) }
+                try? await Task.sleep(for: .seconds(2.5))
+                for (name, window) in windows {
+                    capture(window, to: "\(dir)/\(name).png")
+                    window.close()
+                }
+            }
+            print("\(shots.count) shots in \(dir)")
+            exit(0)
+        }
+    }
+
+    /// The shot's window, offscreen and showing.
+    private static func open(_ shot: Shot) -> NSWindow {
+        let store = Store()
+        Demo.populate(store, shot.scenario)
+        store.agents.expanded = true
+        let ui = UIState(persists: false, edge: shot.edge)
+        let hub = HubState()
+        hub.pinned = shot.pinned
+        hub.page = shot.page
+        hub.query = shot.query
+        hub.section = shot.section
+        hub.focus = shot.focus
+        if let filter = shot.filter { hub.filter = filter }
+        switch shot.selection {
+        case .firstNeedsYou: hub.selection = store.list(.needsYou).first.map { "i:" + $0.id }
+        case .item(let id): hub.selection = "i:" + id
+        case .session(let id): hub.selection = "a:" + id
+        case nil: break
+        }
+        ui.drawerSelection = shot.hoveredSession
+        shot.setup?(store, ui, hub)
+        let root = PlaygroundView(store: store, ui: ui, hub: hub, showsExplainer: shot.showsExplainer, minSize: shot.size)
+            .environment(\.previewTip, shot.tip)
+            .shotEnvironment(shot.environment)
+            .frame(width: shot.size.width, height: shot.size.height)
+        let hosting = NSHostingView(rootView: root)
+        hosting.frame.size = NSSize(width: shot.size.width, height: shot.size.height)
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        return window
+    }
+
+    private static func capture(_ window: NSWindow, to path: String) {
+        guard let view = window.contentView else { return }
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+}
