@@ -1,33 +1,30 @@
 import AppKit
 import SwiftUI
 
-// The bar's own pieces: at rest, the same cells in the same order on every edge (`restBar`); kept open, the rows
-// of the full view beside the bar on the sides and the strip along the top and bottom, each cell next to the
-// content it stands for.
+// The bar's own pieces: at rest, and beside a page, the same cells in the same order on every edge (`restBar`);
+// kept open, the rows of the full view beside the bar on the sides and the strip along the top and bottom, each
+// cell next to the content it stands for.
 
 extension LookoutHub {
-    /// The bar column on the sides: the rail of cells at rest, the rows of the full view otherwise.
+    /// The bar column on the sides: the rows of the full view, else the rail of cells (as at rest, with a page
+    /// beside it: the cells are the same and never dimmed, the gear lit).
     @ViewBuilder var barColumn: some View {
-        if expanded { openColumn } else { restBar }
+        if showsDetail { openColumn } else { restBar }
     }
 
-    /// The strip along the top and bottom: the same cells at rest, the full view's segments otherwise.
+    /// The strip along the top and bottom: the full view's segments, else the same cells as at rest.
     @ViewBuilder var strip: some View {
-        if expanded { openStrip } else { restBar }
+        if showsDetail { openStrip } else { restBar }
     }
 
-    /// The rows: the bar's cells on the screen side, their content beside them. With a page open, the same cells
-    /// as at rest, dimmed, and settings lit at the bottom.
+    /// The rows: the bar's cells on the screen side, their content beside them.
     var openColumn: some View {
         VStack(alignment: side, spacing: 0) {
             VStack(alignment: side, spacing: 0) { mainRows }
-                .opacity(pageOpen ? 0.5 : 1)
-            // Last, the controls: a gear at rest (hover for pin, repositories, settings), settings and the
-            // footer once open. In the full view, dragging the line above them sizes the sessions' list.
+            // Last, settings and the footer. Dragging the line above them sizes the sessions' list.
             sectionDivider
             VStack(alignment: side, spacing: 0) {
-                row(cell: { Group { if expanded { settingsCell } else { controlsCell } }.padding(.vertical, 9) },
-                    detail: { footerDetail })
+                row(cell: { settingsCell.padding(.vertical, 9) }, detail: { footerDetail })
             }
             .modifier(probe(.controls))
         }
@@ -178,103 +175,74 @@ extension LookoutHub {
             .padding(.leading, twoLines ? 10 : 8)
     }
 
-    /// Across the whole view when expanded; a short rule centred in the bar at rest.
+    /// Across the whole view.
     var sectionDivider: some View {
-        Hairline()
-            .frame(width: showsDetail ? Self.cell + Self.detail : Self.cell - 24)
-            .frame(width: rowWidth)
-            .padding(.vertical, 4)
+        Hairline().frame(width: rowWidth).padding(.vertical, 4)
     }
 
-    /// The bar along the top or bottom: each segment as wide as the column under it once expanded; with a page
-    /// open, back to their size at rest, dimmed.
+    /// The bar along the top or bottom, kept open: each segment as wide as the column under it.
     @ViewBuilder var openStrip: some View {
-        let wide = showsDetail
-        Group {
-            HStack(spacing: 8) {
-                inboxIcon
-                if wide && !shrunk(.inbox) { inboxHeader.transition(.hubReveal) }
-                if wide && shrunk(.inbox) { Spacer(minLength: 0); focusButton(.inbox) }
-            }
-            .padding(.leading, Self.inset + 1)
-            .padding(.trailing, Self.inset)
-            .frame(width: wide ? columnWidth(.inbox) : nil, alignment: .leading)
-            .frame(maxHeight: .infinity)
-            .modifier(probe(.inbox))
-            stripDivider
-            // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
-            HStack(spacing: 8) {
-                ciCell
-                if wide && shrunk(.ci) {
-                    // Shrunk: the counts fit where the header's words wouldn't.
-                    HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
-                    Spacer(minLength: 0)
-                    focusButton(.ci)
-                } else if wide {
-                    ciHeader.transition(.hubReveal)
-                } else {
-                    HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
-                }
-            }
-            .padding(.leading, Self.inset + 1)
-            .padding(.trailing, Self.inset)
-            .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
-            .frame(maxHeight: .infinity)
-            .modifier(probe(.ci))
-            .opacity(searching ? 0.4 : 1)
-            if store.agents.enabled {
-                stripDivider
-                HStack(spacing: 8) {
-                    claudeMark
-                    if wide {
-                        agentsHeader.transition(.hubReveal)
-                    } else {
-                        // (At rest: the tiles.)
-                        let rows = agentRows
-                        ForEach(rows.kept) { tile($0, size: 26) }
-                        if !rows.pending.isEmpty {
-                            Capsule().fill(Theme.Fill.selected).frame(width: 1.5, height: 14)
-                            ForEach(rows.pending) { tile($0, size: 26) }
-                        }
-                    }
-                }
-                // The asterisk over the column's session tiles (inset, the row's 10, half a 24pt tile).
-                .padding(.leading, Self.inset + 10 + 12 - 15)
-                .padding(.trailing, Self.inset)
-                .frame(width: wide ? columnWidth(.agents) : nil, alignment: .leading)
-                .frame(maxHeight: .infinity)
-                .modifier(probe(.agents))
+        HStack(spacing: 8) {
+            inboxIcon
+            if !shrunk(.inbox) { inboxHeader.transition(.hubReveal) }
+            if shrunk(.inbox) { Spacer(minLength: 0); focusButton(.inbox) }
+        }
+        .padding(.leading, Self.inset + 1)
+        .padding(.trailing, Self.inset)
+        .frame(width: columnWidth(.inbox), alignment: .leading)
+        .frame(maxHeight: .infinity)
+        .modifier(probe(.inbox))
+        stripDivider
+        // CI: its icon, then the same header as the others (title, status, one expand button).
+        HStack(spacing: 8) {
+            ciCell
+            if shrunk(.ci) {
+                // Shrunk: the counts fit where the header's words wouldn't.
+                HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
+                Spacer(minLength: 0)
+                focusButton(.ci)
+            } else {
+                ciHeader.transition(.hubReveal)
             }
         }
-        .opacity(pageOpen ? 0.5 : 1)
-        if !expanded {
+        .padding(.leading, Self.inset + 1)
+        .padding(.trailing, Self.inset)
+        .frame(width: columnWidth(.ci), alignment: .leading)
+        .frame(maxHeight: .infinity)
+        .modifier(probe(.ci))
+        .opacity(searching ? 0.4 : 1)
+        if store.agents.enabled {
             stripDivider
-            controlsCell
-                .padding(.horizontal, Self.inset)
-                .frame(maxHeight: .infinity)
-                .modifier(probe(.controls))
+            HStack(spacing: 8) {
+                claudeMark
+                agentsHeader.transition(.hubReveal)
+            }
+            // The asterisk over the column's session tiles (inset, the row's 10, half a 24pt tile).
+            .padding(.leading, Self.inset + 10 + 12 - 15)
+            .padding(.trailing, Self.inset)
+            .frame(width: columnWidth(.agents), alignment: .leading)
+            .frame(maxHeight: .infinity)
+            .modifier(probe(.agents))
         }
-        if expanded { Spacer(minLength: 0) }
+        Spacer(minLength: 0)
         HStack(spacing: 0) {
-            if expanded {
-                // The rate limit shows here whatever's focused (the sync status itself is in the controls' panel).
-                RateNotice(store: store, fill: false).lineLimit(1).padding(.trailing, Self.inset)
-                stripDivider
-                HStack(spacing: 2) {
-                    pinButton
-                    reposButton
-                    settingsCell
-                }
-                .padding(.horizontal, Self.inset + 2)
-                .transition(.hubReveal)
+            // The rate limit shows here whatever's focused (the sync status itself is in the controls' panel).
+            RateNotice(store: store, fill: false).lineLimit(1).padding(.trailing, Self.inset)
+            stripDivider
+            HStack(spacing: 2) {
+                pinButton
+                reposButton
+                settingsCell
             }
+            .padding(.horizontal, Self.inset + 2)
+            .transition(.hubReveal)
             if store.updater.showsInPill {
                 stripDivider
                 UpdateButton(updater: store.updater, horizontal: true).padding(.horizontal, 6)
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-            if expanded, stripTrailingWidth != width { stripTrailingWidth = width }
+            if stripTrailingWidth != width { stripTrailingWidth = width }
         }
     }
 
@@ -309,7 +277,9 @@ extension LookoutHub {
         if axis == .vertical {
             VStack(spacing: 0) { restCells }
                 .padding(.vertical, Self.barEnd)
+                // Beside a page, the rail runs the page's height; the cells stay where they were.
                 .frame(width: Self.cell)
+                .frame(maxHeight: pageOpen ? .infinity : nil, alignment: .top)
                 .background(Theme.rail)
         } else {
             HStack(spacing: 0) { restCells }

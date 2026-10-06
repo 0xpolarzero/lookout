@@ -291,11 +291,6 @@ extension LookoutHub {
         .frame(width: (section == .ci ? Self.ciWidth : Self.detail) - 2 * Self.peekPad, alignment: .leading)
     }
 
-    /// The bar's last cell at rest: a gear. Hovering shows the controls; a click goes to Settings.
-    var controlsCell: some View {
-        ControlsGear(active: hub.page != .main) { hub.go(.settings) }
-    }
-
     /// The controls: how syncing is going, then keep open, repositories and settings, each with its key.
     var peekControls: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -345,30 +340,5 @@ extension LookoutHub {
                 hub.quiet = false
             }
         }
-    }
-}
-
-/// The gear at the end of the bar, without a tooltip: hovering it opens the controls.
-struct ControlsGear: View {
-    let active: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) { ControlsGearLabel(active: active) }
-            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, active: Theme.Fill.selected, isActive: active))
-            .accessibilityLabel("Controls")
-            .accessibilityHint("Settings, repositories and keeping the hub open")
-    }
-}
-
-private struct ControlsGearLabel: View {
-    let active: Bool
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
-        Image(systemName: "gearshape.fill")
-            .font(Theme.Typography.glyph(13))
-            .foregroundStyle(hover || active ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.tertiary))
-            .frame(width: Theme.Metrics.iconHit, height: Theme.Metrics.iconHit)
     }
 }

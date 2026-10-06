@@ -318,6 +318,7 @@ struct Shot {
 /// shows the waiting tile's outline, the one cue drawn so far)
 ///   rest-contrast, rest-reduce-motion, rest-differentiate, rest-a11y on every edge;
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
+/// A page open: settings-sync-fault on right and top (the gear lit, with its badge)
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// 1280×720, every edge
@@ -387,6 +388,8 @@ enum PlaygroundShots {
             $0.pinned = true; $0.selection = .firstNeedsYou; $0.hoveredSession = "local_demo-ci"; $0.environment = .contrast
         },
         Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
+        // The bar beside a page: the same cells, undimmed, the gear lit and still badged.
+        Shot.edges("settings-sync-fault", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.scenario = .syncFault },
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
         // A 1280×720 screen.
