@@ -103,6 +103,7 @@ extension LookoutHub {
         withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
             hub.go(.main)
             hub.query = ""
+            hub.inbox.endSearch()
             hub.filter = .needsYou
         }
         if let first = store.list(.needsYou).first {

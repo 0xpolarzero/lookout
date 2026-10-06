@@ -268,6 +268,14 @@ enum AccessibilityTree {
         #expect(hub.pinned && hub.selection == "a:" + id && hub.voiceOverRequest?.target == "a:" + id)
     }
 
+    @Test func theInboxCellEndsASearchSoItsTabsAndActionsComeBack() {
+        hub.pinned = true
+        hub.beginSearch()
+        #expect(hub.inbox.searchOpen)
+        view.openInbox()
+        #expect(hub.query.isEmpty && !hub.inbox.searchOpen && hub.filter == .needsYou)
+    }
+
     @Test func showOnCIGoesToItsHeader() {
         view.show(.ci)
         #expect(hub.pinned && hub.voiceOverRequest?.target == "h:ci" && hub.selection?.hasPrefix("c:") == true)
