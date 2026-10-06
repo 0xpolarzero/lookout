@@ -25,4 +25,13 @@ import Testing
         updater.preview(.failed("The download didn't finish"))
         #expect(updater.shownError == "The download didn't finish")
     }
+
+    @Test func aFailureThatRepeatsIsCountedAgainSoItIsSaidAgain() {
+        let updater = Updater()
+        updater.preview(.failed("The download didn't finish"))
+        let first = updater.failures
+        updater.preview(.downloading)
+        updater.preview(.failed("The download didn't finish"))
+        #expect(updater.failures == first + 1)
+    }
 }
