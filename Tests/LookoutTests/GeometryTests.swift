@@ -76,6 +76,8 @@ import Testing
         let scale: CGFloat
         /// The hub's frame in the window (`HubLayout`), top-left origin.
         let frame: CGRect
+        /// The hover panel's, when one is open (zero otherwise).
+        let panel: CGRect
 
         func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int, a: Int) {
             guard x >= 0, y >= 0, x < rep.pixelsWide, y < rep.pixelsHigh, let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return (0, 0, 0, 0) }
@@ -124,11 +126,14 @@ import Testing
         }
     }
 
-    /// The hub at rest, then kept open (on `page` when one is given), in a window of `screen`.
-    private func render(edge: DockEdge, position: Double, screen: CGSize, page: HubPage? = nil) -> (rest: Shot, open: Shot) {
+    /// The hub at rest, then kept open (on `page` when one is given, with `focus` on a section) or, given a `section`,
+    /// with just that panel open as when it is hovered, in a window of `screen`.
+    private func render(edge: DockEdge, position: Double, screen: CGSize, page: HubPage? = nil, scenario: Demo.Scenario = .agents,
+                        focus: HubSection? = nil, section: HubSection? = nil, setup: ((Store) -> Void)? = nil) -> (rest: Shot, open: Shot) {
         let store = Store()
-        Demo.populate(store, .agents)
+        Demo.populate(store, scenario)
         store.agents.expanded = true
+        setup?(store)
         let ui = UIState(persists: false, edge: edge)
         ui.position = position
         let hub = HubState()
@@ -153,12 +158,13 @@ import Testing
             hosting.layoutSubtreeIfNeeded()
             let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
             hosting.cacheDisplay(in: hosting.bounds, to: rep)
-            return Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width, frame: layout.frame)
+            return Shot(rep: rep, scale: CGFloat(rep.pixelsWide) / screen.width, frame: layout.frame, panel: hub.panelFrame)
         }
         settle(0.7)
         let rest = capture()
-        hub.pinned = true
+        if let section { hub.section = section } else { hub.pinned = true }
         if let page { hub.page = page }
+        if let focus { hub.focus = focus }
         settle(1.0)
         let open = capture()
         window.contentView = nil
@@ -254,5 +260,24 @@ import Testing
         if edge.isHorizontal { #expect(rest.frame.minX == open.frame.minX, "\(edge): \(rest.frame) then \(open.frame)") }
         else { #expect(rest.frame.minY == open.frame.minY, "\(edge): \(rest.frame) then \(open.frame)") }
         expectInside(open.frame, edge: edge, screen: screen, "\(edge) with a page")
+    }
+
+    @Test(arguments: [DockEdge.top, .bottom])
+    func aFocusedSessionsListFitsWithItsNewSessionRowAndNotice(edge: DockEdge) {
+        let screen = CGSize(width: 1280, height: 720)
+        let (_, open) = render(edge: edge, position: 0.3, screen: screen, scenario: .sessions12, focus: .agents) { $0.claudeLink = .missing }
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge) focused sessions")
+        // The list takes what the screen leaves, whole rows to within one of them.
+        #expect(open.frame.height > screen.height - 2 * HubGeometry.inset - 70, "\(edge): \(open.frame)")
+    }
+
+    @Test(arguments: [DockEdge.right, .left])
+    func theSidesListsUseWhatTheScreenLeaves(edge: DockEdge) {
+        // Both lists are cut here; each ends on a whole row, so what is left under the hub is less than one.
+        let screen = CGSize(width: 1280, height: 720)
+        let (_, open) = render(edge: edge, position: 0.3, screen: screen, scenario: .sessions12)
+        expectInside(open.frame, edge: edge, screen: screen, "\(edge)")
+        let left = screen.height - HubGeometry.inset - open.frame.maxY
+        #expect(left >= -0.5 && left < 2 * Theme.Metrics.twoLineRow, "\(edge): \(left)pt unused under \(open.frame)")
     }
 }

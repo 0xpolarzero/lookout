@@ -36,6 +36,24 @@ import Testing
         #expect(CappedScrollSpace.fit(cap: 300, edges: [43, 87]) == 300)
     }
 
+    @Test func theCueCountsTheRowsBelowTheViewport() {
+        let edges: [CGFloat] = [44, 88, 132, 176, 220, 264, 308]
+        // Three whole rows showing: four end below.
+        #expect(CappedScrollSpace.rowsBelow(edges: edges, offset: 0, viewport: 132) == 4)
+        // Scrolled to row three's top, the viewport reaches row five's bottom.
+        #expect(CappedScrollSpace.rowsBelow(edges: edges, offset: 88, viewport: 132) == 2)
+        #expect(CappedScrollSpace.rowsBelow(edges: edges, offset: 176, viewport: 132) == 0)
+    }
+
+    @Test func theCueScrollsToTheLastRowOfTheNextPage() {
+        let edges: [CGFloat] = [44, 88, 132, 176, 220, 264, 308]
+        // From the top, one more page of 132 ends on row six (264); the next row if none fits whole.
+        #expect(CappedScrollSpace.nextPage(edges: edges, offset: 0, viewport: 132) == 5)
+        #expect(CappedScrollSpace.nextPage(edges: edges, offset: 88, viewport: 132) == 6)
+        #expect(CappedScrollSpace.nextPage(edges: edges, offset: 0, viewport: 20) == 0)
+        #expect(CappedScrollSpace.nextPage(edges: edges, offset: 176, viewport: 132) == nil)
+    }
+
     @Test func fallsBackToTheCap() {
         #expect(CappedScrollSpace.fit(cap: 20, edges: [36, 72]) == 20)
         #expect(CappedScrollSpace.fit(cap: 100, edges: []) == 100)

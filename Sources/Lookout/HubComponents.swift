@@ -31,6 +31,19 @@ enum CappedScrollSpace {
         return edges.filter { $0 <= cap + 0.5 }.max().map { min($0, cap) } ?? cap
     }
 
+    /// How many rows end below a viewport `viewport` tall that is `offset` down the content: the rows a cut list's cue counts.
+    static func rowsBelow(edges: [CGFloat], offset: CGFloat, viewport: CGFloat) -> Int {
+        edges.filter { $0 > offset + viewport + 0.5 }.count
+    }
+
+    /// The row to scroll to for the next page of them: the last whose bottom edge fits whole in one more viewport (at
+    /// least the next row), nil with none below.
+    static func nextPage(edges: [CGFloat], offset: CGFloat, viewport: CGFloat) -> Int? {
+        let reach = offset + viewport + 0.5
+        let below = edges.indices.filter { edges[$0] > reach }
+        return below.last { edges[$0] <= reach + viewport } ?? below.first
+    }
+
     /// `fit` for a lazy list, which only measures the rows it has realized (and may report a stray edge far past the
     /// rest while it settles): the rows beyond the last measured edge within the cap are taken to repeat the measured
     /// pitch (the gaps between consecutive edges within it, which must agree within a point), and the cap snaps down to a whole number of them.
@@ -65,6 +78,105 @@ struct AdaptiveStack<Content: View>: View {
     }
 }
 
+/// How far a `CappedScroll`'s content has scrolled, read by its cue alone (a scroll redraws that and nothing else).
+@Observable
+@MainActor
+final class ScrollTrack {
+    var offset: CGFloat = 0
+}
+
+/// Reports how far the scroll view around it has scrolled, as the clip view's bounds move: SwiftUI says nothing of it
+/// before macOS 15, and a geometry preference is not sent again as a scroll moves.
+private struct ScrollOffsetReader: NSViewRepresentable {
+    let change: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ScrollOffsetView { ScrollOffsetView() }
+
+    func updateNSView(_ view: ScrollOffsetView, context: Context) { view.change = change }
+}
+
+private final class ScrollOffsetView: NSView {
+    var change: (CGFloat) -> Void = { _ in }
+    private var observer: NSObjectProtocol?
+
+    /// Clicks pass through to the content.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    deinit { observer.map(NotificationCenter.default.removeObserver) }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observer.map(NotificationCenter.default.removeObserver)
+        observer = nil
+        guard let clip = enclosingScrollView?.contentView else { return }
+        clip.postsBoundsChangedNotifications = true
+        observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.change(clip.bounds.origin.y) }
+        }
+    }
+}
+
+/// What a cut `CappedScroll` says under its rows: how many are below, and a button that brings them in.
+struct MoreCue {
+    /// What the rows are ("session"), for VoiceOver.
+    let noun: String
+    /// What the rows leave free on either side, so the cue sits on their text.
+    var insets = EdgeInsets()
+}
+
+/// How tall a `CappedScroll` is (its cue included) and how tall its rows are altogether, for the lists around it to
+/// share what is left of the screen.
+struct ListHeights: Equatable {
+    var shown: CGFloat = 0
+    var content: CGFloat = 0
+}
+
+/// "+N more" under a list that shows only some of its rows: one line, as tall as every one-line row.
+struct MoreRow: View {
+    let text: String
+    let label: String
+    let hint: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(text).font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                .padding(.horizontal, Theme.Metrics.rowPadding)
+                .frame(maxWidth: .infinity, minHeight: Theme.Metrics.pitch, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusRing(Theme.Radius.row)
+        .accessibilityLabel(label)
+        .accessibilityHint(hint)
+    }
+}
+
+/// The cue under a cut list: "+N more" while rows are below, which scrolls to the next page of them; once at the end,
+/// "Back to top". It always takes its line, so the hub never changes height as the list scrolls.
+private struct ScrollCue: View {
+    let cue: MoreCue
+    let track: ScrollTrack
+    /// The rows' bottom edges in the content's space, and how tall the viewport is.
+    let edges: [CGFloat]
+    let viewport: CGFloat
+    let scroll: (_ edge: Int?) -> Void
+
+    var body: some View {
+        let below = CappedScrollSpace.rowsBelow(edges: edges, offset: track.offset, viewport: viewport)
+        Group {
+            if below > 0 {
+                MoreRow(text: "+\(below) more", label: plural(below, "more " + cue.noun), hint: "Shows the next ones") {
+                    scroll(CappedScrollSpace.nextPage(edges: edges, offset: track.offset, viewport: viewport))
+                }
+            } else {
+                MoreRow(text: "Back to top", label: "Back to top", hint: "Scrolls the list up") { scroll(nil) }
+            }
+        }
+        .padding(cue.insets)
+    }
+}
+
 /// Scrolls only once its content is taller than `cap`; otherwise exactly as tall as the content. Cut short, it stops
 /// at the last row that fits whole (rows mark themselves with `.capEdge()`), the system's scroller saying "more
 /// below" (never a fade over live rows). Follows the keyboard selection (never the pointer's: hovering a row mustn't
@@ -76,54 +188,95 @@ struct CappedScroll<Content: View>: View {
     /// The content is a lazy stack or grid: it only measures the rows its viewport reaches, so the list starts at the
     /// cap (a full viewport) and only shrinks once content measured *at the cap* turns out shorter.
     var lazy = false
+    /// Cut short, a line under the rows says how many are below and scrolls to them. Not for a lazy list: it hasn't
+    /// measured the rows it doesn't show.
+    var cue: MoreCue?
+    /// Told how tall the list is, for whatever shares the screen with it.
+    var onHeights: ((ListHeights?) -> Void)?
     @ViewBuilder let content: () -> Content
     @State private var height: CGFloat = 0
     @State private var viewport: CGFloat = 0
     /// Lazy only: the content's height, once measured in a viewport as tall as the cap and found shorter than it.
     @State private var lazyShort: CGFloat?
     @State private var edges: [CGFloat] = []
+    @State private var track = ScrollTrack()
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        // Whole rows only; with no rows marked (or none ending within the cap) the plain cap.
-        let limit = lazy ?CappedScrollSpace.fitLazy(cap: cap, edges: edges) : CappedScrollSpace.fit(cap: cap, edges: edges)
-        // A lazy list's measured height can lag behind the rows it has since laid out: they count too.
+        // A list that doesn't fit gives its cue the last line of its room.
         let cut = lazy ? lazyShort == nil : max(height, edges.last ?? 0) > cap + 0.5
+        let band = cut && cue != nil && !lazy ? Theme.Metrics.pitch : 0
+        // Whole rows only; with no rows marked (or none ending within the cap) the plain cap.
+        let limit = lazy ? CappedScrollSpace.fitLazy(cap: cap - band, edges: edges) : CappedScrollSpace.fit(cap: cap - band, edges: edges)
         let shown = cut ? limit : lazy ? lazyShort ?? cap : height
         ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                content()
-                    .coordinateSpace(.named(CappedScrollSpace.name))
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
-                        // The first measure lands as is (the hub's own spring reveals it); later ones glide.
-                        if height == 0 { height = h } else { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { height = h } }
-                        settle()
-                    }
-            }
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
-                viewport = h
-                settle()
-            }
-            .onPreferenceChange(CapEdges.self) { new in
-                let sorted = Array(Set(new.map { ($0 * 2).rounded() / 2 })).sorted()
-                if sorted != edges {
-                    edges = sorted
-                    // Rows came or went: measure again at the cap.
-                    if lazy, lazyShort != nil { lazyShort = nil }
-                    // The content's height may already be known at the cap (a list that shrank): settle on it now.
+            VStack(alignment: .leading, spacing: 0) {
+                ScrollView(.vertical) {
+                    content()
+                        .coordinateSpace(.named(CappedScrollSpace.name))
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                            // The first measure lands as is (the hub's own spring reveals it); later ones glide.
+                            if height == 0 { height = h } else { withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { height = h } }
+                            settle()
+                        }
+                        .background(alignment: .top) { marks }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                    viewport = h
                     settle()
                 }
+                .onPreferenceChange(CapEdges.self) { new in
+                    let sorted = Array(Set(new.map { ($0 * 2).rounded() / 2 })).sorted()
+                    if sorted != edges {
+                        edges = sorted
+                        // Rows came or went: measure again at the cap.
+                        if lazy, lazyShort != nil { lazyShort = nil }
+                        // The content's height may already be known at the cap (a list that shrank): settle on it now.
+                        settle()
+                    }
+                }
+                // The system's scrollers, overlay as a rule, shown for a moment as the list appears; a legacy one ("Show
+                // scroll bars: Always") takes its width out of the rows, as it does in any list.
+                .scrollIndicators(.automatic)
+                .scrollIndicatorsFlash(onAppear: true)
+                .scrollDisabled(!cut)
+                .frame(height: max(shown, 1))
+                .onChange(of: hub?.keyboardSelection) { _, request in
+                    if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
+                }
+                if band > 0, let cue {
+                    ScrollCue(cue: cue, track: track, edges: edges, viewport: max(shown, 1)) { edge in
+                        withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
+                            if let edge { proxy.scrollTo(ScrollMark(edge: edge), anchor: .bottom) } else { proxy.scrollTo(ScrollMark(edge: 0), anchor: .top) }
+                        }
+                    }
+                }
             }
-            // The system's scrollers, overlay as a rule. A legacy one ("Show scroll bars: Always") takes its width out of
-            // the rows, as it does in any list.
-            .scrollIndicators(.automatic)
-            .scrollDisabled(!cut)
-            .frame(height: max(shown, 1))
-            .onChange(of: hub?.keyboardSelection) { _, request in
-                if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
+            // Not before the content is measured, and withdrawn when the list goes.
+            .onChange(of: ListHeights(shown: max(shown, 1) + band, content: height), initial: true) { _, new in
+                if new.content > 0 { onHeights?(new) }
+            }
+            .onDisappear { onHeights?(nil) }
+        }
+    }
+
+    /// Behind the content: where it has scrolled to, and (for the cue) a mark at the bottom of every row to scroll to.
+    @ViewBuilder private var marks: some View {
+        ZStack(alignment: .top) {
+            ScrollOffsetReader { track.offset = $0 }.frame(width: 0, height: 0)
+            if cue != nil, !lazy {
+                let gaps = zip([0] + edges.dropLast(), edges).map { $1 - $0 }
+                VStack(spacing: 0) {
+                    ForEach(gaps.indices, id: \.self) { Color.clear.frame(height: gaps[$0]).id(ScrollMark(edge: $0)) }
+                }
             }
         }
     }
+}
+
+/// A row of a `CappedScroll`'s content to scroll to, by the order of its bottom edge.
+private struct ScrollMark: Hashable {
+    let edge: Int
 }
 
 extension CappedScroll {

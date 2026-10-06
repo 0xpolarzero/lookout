@@ -172,6 +172,8 @@ struct LookoutHub: View {
     @State var hubTop: CGFloat = 0
     /// The CI block's measured height, for what the lists have left of the full view's length.
     @State var ciHeight: CGFloat = 0
+    /// What the sides' lists measured of themselves, for the one below to take what the one above leaves.
+    @State var listHeights: [HubSection: ListHeights] = [:]
     /// The strip's trailing group (update button, gear) as laid out; a first guess until it is measured.
     @State var stripTrailingWidth: CGFloat = 140
     @Environment(\.accessibilityReduceMotion) var reduce
@@ -431,17 +433,24 @@ struct GroupRule: ViewModifier {
 /// Under the Sessions header: Claude's session files missing or unreadable (nothing when all is well).
 struct ClaudeNotice: View {
     let store: Store
+    /// Its one line's room, for the lists around it to leave.
+    static let height: CGFloat = 24
+
+    /// What it takes of a list's room: its line, or nothing.
+    static func room(_ store: Store) -> CGFloat {
+        switch store.claudeLink {
+        case .missing, .unreadable: height
+        default: 0
+        }
+    }
 
     var body: some View {
-        switch store.claudeLink {
-        case .missing, .unreadable:
+        if Self.room(store) > 0 {
             HStack(spacing: 6) { ClaudeLinkStatus(store: store) }
                 .font(Theme.Typography.meta)
                 .foregroundStyle(Theme.red)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, Theme.Space.xs)
-        default:
-            EmptyView()
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .leading)
         }
     }
 }
