@@ -1104,14 +1104,14 @@ struct LabelEditor: View {
         mode == .letters && hasIcon ? AgentLabel.candidates(title, folder: folder).first : nil
     }
 
-    /// Empty resets what the mode in front of you holds: Letters go back to the title's (and over an icon that was picked,
-    /// since the icon is what clearing the label alone would bring back), an emoji is removed.
+    /// Empty (or only spaces) resets what the mode in front of you holds: Letters go back to the title's (and over an icon
+    /// that was picked, since the icon is what clearing the label alone would bring back), an emoji is removed.
     private func save() {
-        if text.isEmpty {
-            store.setAgentLabel(row.id, Self.reset(mode, title: row.session.title, folder: row.session.folderName, hasIcon: row.entry.icon != nil))
-        } else if let label = AgentLabel.sanitize(text) {
+        if let label = AgentLabel.sanitize(text) {
             guard AgentLabel.isEmoji(label) == (mode == .emoji) else { return }
             store.setAgentLabel(row.id, label)
+        } else {
+            store.setAgentLabel(row.id, Self.reset(mode, title: row.session.title, folder: row.session.folderName, hasIcon: row.entry.icon != nil))
         }
         dismiss()
     }
