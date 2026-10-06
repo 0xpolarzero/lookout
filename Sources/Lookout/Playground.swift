@@ -370,6 +370,24 @@ enum PlaygroundShots {
         // CI, sessions and the update cell.
         ci.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .ci) },
         Shot.edges("focus-ci-many-ci", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.focus = .ci },
+        // CI rows: Passing open in place, a row picked, a muted repo, stale data, Increase Contrast.
+        Shot.edges("open-ci-passing-open", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.ciPassingOpen = true } },
+        Shot.edges("open-ci-picked", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" } },
+        Shot.edges("open-ci-muted", on: .rightAndTop) {
+            $0.pinned = true
+            $0.scenario = .manyCI
+            $0.setup = { store, _, hub in
+                if let vapor = store.repos.first(where: { $0.fullName == "vapor/vapor" }) { store.muteCI(vapor) }
+                hub.ciPassingOpen = true
+            }
+        },
+        Shot.edges("open-ci-stale", on: .rightAndTop) { $0.pinned = true; $0.setup = { store, _, _ in store.lastSync = Date().addingTimeInterval(-3 * 3600) } },
+        Shot.edges("open-ci-contrast", on: .rightAndTop) {
+            $0.pinned = true
+            $0.environment = .contrast
+            $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" }
+        },
+        Shot.edges("open-ci-many-ci-720", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
         sessions.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .agents) },
         Shot.edges("focus-agents-sessions-12", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents },
         updates.flatMap { slug, scenario in scenarioShots(slug, scenario) },
