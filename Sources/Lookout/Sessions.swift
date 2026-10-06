@@ -652,12 +652,14 @@ struct SessionRow: View {
 /// the order the pointer holds the list in moves with it, so a move shows at once instead of when the pointer leaves.
 extension HubState {
     func canMoveSession(_ id: String, by step: Int, store: Store) -> Bool {
-        store.canMoveAgent(id, by: step, frozen: frozenSessions)
+        store.canMoveAgent(id, by: step, frozen: frozenSessions, expanded: listsAllSessions)
     }
 
     /// One place up (-1) or down (+1) within its project.
     func moveSession(_ id: String, by step: Int, store: Store) {
-        if let target = store.neighbour(of: id, step, frozen: frozenSessions) { moveSession(id, onto: target, store: store) }
+        guard let neighbour = store.neighbour(of: id, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
+        let (mover, target) = Store.swap(id, with: neighbour, step)
+        moveSession(mover, onto: target, store: store)
     }
 
     func moveSession(_ id: String, onto target: String, store: Store) {

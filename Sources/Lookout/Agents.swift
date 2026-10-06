@@ -782,8 +782,10 @@ extension Store {
     /// The session above (-1) or below (+1) this one in the project it is listed in, which is what Move up and Move down swap
     /// with. `frozen`: the order and groups the pointer holds the list in, so the neighbour is the row the list shows beside it,
     /// not the one the live order has there (a session that began to wait is still listed in its project under the freeze).
-    func neighbour(of id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil) -> String? {
-        let slots = BarSessions.inOrder(barSlots, frozen: frozen)
+    /// `expanded`: whether the list shows every session; a list cut at eight has a row the neighbour is not, one it has hidden or
+    /// one a late waiter took the place of, and the neighbour is only ever a row on screen.
+    func neighbour(of id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> String? {
+        let slots = expanded ? BarSessions.inOrder(barSlots, frozen: frozen) : BarSessions.arrange(barSlots, frozen: frozen).shown
         guard let at = slots.first(where: { $0.id == id }), let folder = claudeSessions[id]?.folderKey,
               at.group == "project:" + folder else { return nil }
         let own = slots.filter { $0.group == at.group && claudeSessions[$0.id]?.folderKey == folder }
@@ -791,13 +793,22 @@ extension Store {
         return own[i + step].id
     }
 
-    func canMoveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
-        neighbour(of: id, step, frozen: frozen) != nil
+    func canMoveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> Bool {
+        neighbour(of: id, step, frozen: frozen, expanded: expanded) != nil
     }
 
-    /// One place up (-1) or down (+1) within its project.
-    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil) {
-        if let target = neighbour(of: id, step, frozen: frozen) { moveAgent(id, onto: target) }
+    /// One place up (-1) or down (+1) within its project: the two trade places as the list shows them.
+    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
+        guard let neighbour = neighbour(of: id, step, frozen: frozen, expanded: expanded) else { return }
+        let (mover, target) = Self.swap(id, with: neighbour, step)
+        moveAgent(mover, onto: target)
+    }
+
+    /// Which of two rows lands on the other's place for them to trade places in the list. The later one takes the earlier one's
+    /// place: with rows between them in the order that the list doesn't show (a late waiter took the place of one it had cut),
+    /// the row shown behind goes ahead, and both stay on the screen, which the earlier one moved behind them would not.
+    static func swap(_ id: String, with neighbour: String, _ step: Int) -> (mover: String, target: String) {
+        step > 0 ? (neighbour, id) : (id, neighbour)
     }
 
     // MARK: Project order

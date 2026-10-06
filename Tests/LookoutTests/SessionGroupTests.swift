@@ -219,6 +219,30 @@ import Testing
         #expect(s.listedGroups(hub).groups.map(\.id) == ["waiting", "project:/code/y", "project:/code/x"])
     }
 
+    @Test func moveActionsNeverTargetARowTheCutListHides() {
+        let s = store((0..<12).map { session("a\($0)", folder: "/code/x") }, kept: (0..<12).map { "a\($0)" })
+        let hub = HubState()
+        hub.frozenSessions = s.barSlots
+        // The last one starts waiting while the pointer holds the list: it takes the place of the eighth row, so the list shows
+        // a0 to a6 and then a11, and a7 is behind the cut.
+        s.claudeActivity = ["a11": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["a11"]?.running = true
+        #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a11"])
+        #expect(!hub.listsAllSessions)
+        #expect(s.neighbour(of: "a6", 1, frozen: hub.frozenSessions) == "a7")
+        #expect(s.neighbour(of: "a6", 1, frozen: hub.frozenSessions, expanded: false) == "a11")
+        #expect(s.neighbour(of: "a11", -1, frozen: hub.frozenSessions, expanded: false) == "a6")
+        // The keys, the menu and the VoiceOver action all ask the hub, which asks for what the list shows.
+        #expect(hub.canMoveSession("a6", by: 1, store: s) && !hub.canMoveSession("a7", by: -1, store: s))
+        // Move down trades a6 with a11 as the list shows them, and both stay on the screen.
+        hub.moveSession("a6", by: 1, store: s)
+        #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a11", "a6"])
+        #expect(s.agents.entries.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a11", "a6", "a7", "a8", "a9", "a10"])
+        // The list that shows everything has a7 beside a6.
+        hub.sessionsExpanded = true
+        #expect(s.neighbour(of: "a6", 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions) == "a7")
+    }
+
     @Test func dropsOnAnotherProjectAreIgnored() {
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y")], kept: ["x1", "y1"])
         s.moveAgent("y1", onto: "x1")
