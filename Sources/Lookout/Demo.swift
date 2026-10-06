@@ -17,6 +17,8 @@ enum Demo {
         case sessionsWaiting, sessionsWorking, sessionsUnread, sessionsNewActivity, sessionsScratch, sessionsNone, sessions12
         // The update cell.
         case updateAvailable, updateDownloading, updateReady
+        // The bar's other states: CI with nothing failing, CI with no run yet, every session waiting.
+        case ciRunning, ciNoRuns, sessionsWaiting10
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -176,6 +178,14 @@ enum Demo {
         case .updateReady:
             agents(store, now)
             store.updater.preview(.ready, version: "0.5.0")
+        case .ciRunning:
+            agents(store, now)
+            for key in store.ci.keys where store.ci[key]?.state == .failure { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+        case .ciNoRuns:
+            agents(store, now)
+            store.ci = [:]
+        case .sessionsWaiting10:
+            sessionsWaiting10(store, now)
         }
     }
 
@@ -301,6 +311,16 @@ enum Demo {
                                          detail: "Finished turn \(i)."), kept: i < 10, unread: i % 3 == 0))
         }
         sessions(store, now, listed, activity: ["t1": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-90))])
+    }
+
+    /// Twelve sessions, ten of them waiting for you: more than the bar has room for, and none of them may be hidden.
+    private static func sessionsWaiting10(_ store: Store, _ now: Date) {
+        let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
+        let listed = (0..<12).map { i in
+            Listed(session("q\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 7 + 1), blocked: i < 10,
+                           detail: i < 10 ? "Which one should it be?" : "Finished turn \(i)."), unread: i < 10)
+        }
+        sessions(store, now, listed)
     }
 
     private static func items(_ now: Date) -> [InboxItem] {

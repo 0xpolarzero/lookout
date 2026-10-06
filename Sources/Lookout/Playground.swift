@@ -308,10 +308,10 @@ struct Shot {
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
 ///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
 /// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
-///   no-ci, all-passing, many-ci (15 repositories)
+///   no-ci, all-passing, many-ci (15 repositories), ci-running, ci-no-runs
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus
 ///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
-///   sessions-12 (also `focus-agents-sessions-12`)
+///   sessions-12 (also `focus-agents-sessions-12`), sessions-waiting-10 (ten waiting: none folds into the +N)
 /// Update: `rest-`, `open-` plus
 ///   update-available, update-downloading, update-ready
 /// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y; Differentiate
@@ -329,11 +329,13 @@ enum PlaygroundShots {
         ("signed-out", .signedOut), ("repos-failed", .reposFailed), ("rate-limited", .rateLimited), ("snoozed", .snoozed),
         ("error", .error), ("needs-you-empty", .needsYouEmpty), ("first-sync", .firstSync), ("sync-fault", .syncFault),
     ]
-    private static let ci: [(String, Demo.Scenario)] = [("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI)]
+    private static let ci: [(String, Demo.Scenario)] = [
+        ("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI), ("ci-running", .ciRunning), ("ci-no-runs", .ciNoRuns),
+    ]
     private static let sessions: [(String, Demo.Scenario)] = [
         ("sessions-waiting", .sessionsWaiting), ("sessions-working", .sessionsWorking), ("sessions-unread", .sessionsUnread),
         ("sessions-new-activity", .sessionsNewActivity), ("sessions-scratch", .sessionsScratch),
-        ("sessions-none", .sessionsNone), ("sessions-12", .sessions12),
+        ("sessions-none", .sessionsNone), ("sessions-12", .sessions12), ("sessions-waiting-10", .sessionsWaiting10),
     ]
     private static let updates: [(String, Demo.Scenario)] = [
         ("update-available", .updateAvailable), ("update-downloading", .updateDownloading), ("update-ready", .updateReady),
