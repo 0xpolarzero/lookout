@@ -9,6 +9,7 @@ struct AgentTile: View {
     let row: AgentRow
     var size: CGFloat = 26
     var selected = false
+    @Environment(\.resolved) private var resolved
 
     var body: some View {
         // Busy (Claude answering, or a subagent or command still running after it): the tile fades and pulses,
@@ -16,11 +17,11 @@ struct AgentTile: View {
         let busy = (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty
         Group {
             if busy {
-                Pulse(from: 0.6, to: 0.28, duration: 1.1, id: AgentTileFace.Key(row: row, size: size)) {
-                    AgentTileFace(row: row, size: size)
+                Pulse(from: 0.6, to: 0.28, duration: 1.1, id: AgentTileFace.Key(row: row, size: size, differentiate: resolved.differentiate)) {
+                    AgentTileFace(row: row, size: size, differentiate: resolved.differentiate)
                 }
             } else {
-                AgentTileFace(row: row, size: size)
+                AgentTileFace(row: row, size: size, differentiate: resolved.differentiate)
             }
         }
             .accessibilityElement(children: .ignore)
@@ -42,6 +43,8 @@ struct AgentTile: View {
 private struct AgentTileFace: View {
     let row: AgentRow
     var size: CGFloat
+    /// Differentiate Without Colour, passed in rather than read: `Pulse` renders this outside the environment.
+    var differentiate = false
 
     /// What the face depends on.
     struct Key: Hashable {
@@ -50,8 +53,10 @@ private struct AgentTileFace: View {
         let tint: Color?
         let pending: Bool
         let size: CGFloat
-        init(row: AgentRow, size: CGFloat) {
+        let differentiate: Bool
+        init(row: AgentRow, size: CGFloat, differentiate: Bool) {
             label = row.label; icon = row.icon; tint = row.tint; pending = row.pending; self.size = size
+            self.differentiate = differentiate
         }
     }
 
@@ -73,6 +78,8 @@ private struct AgentTileFace: View {
             .foregroundStyle(row.tint == nil ? Theme.text.opacity(0.88) : Theme.onTint)
             .frame(width: size, height: size)
             .background(shape.fill(row.tint ?? Theme.Fill.tile))
+            // Waiting is amber, which a colour-blind eye may not tell from the grey tile: a dark outline says it too.
+            .overlay { if differentiate, row.tint == Theme.amber { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
             .opacity(row.pending ? 0.55 : 1)
     }
 }

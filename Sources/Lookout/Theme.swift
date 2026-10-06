@@ -65,6 +65,8 @@ enum Theme {
     /// values, so the tokens' Increase Contrast set can be tested.
     struct Resolved: Equatable {
         var contrast = false
+        /// Drawn by the waiting tile (an `onTint` inner stroke). TODO: the unread dot's 1pt white ring, with the dot
+        /// itself (WP2).
         var differentiate = false
 
         var stroke: Color { Color.white.opacity(contrast ? 0.28 : 0.12) }
@@ -105,17 +107,14 @@ enum Theme {
 
 extension EnvironmentValues {
     @Entry var resolved = Theme.Resolved()
-    /// Previews and shots: Differentiate Without Colour on, whatever the system says (it can't be set directly).
-    @Entry var previewDifferentiate = false
 }
 
 private struct ThemeResolver: ViewModifier {
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
-    @Environment(\.previewDifferentiate) private var preview
 
     func body(content: Content) -> some View {
-        content.environment(\.resolved, Theme.Resolved(contrast: contrast == .increased, differentiate: differentiate || preview))
+        content.environment(\.resolved, Theme.Resolved(contrast: contrast == .increased, differentiate: differentiate))
     }
 }
 
