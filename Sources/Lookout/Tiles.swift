@@ -104,3 +104,19 @@ struct BarTile: View {
         }
     }
 }
+
+/// The working mark: a 270° arc hugging the tile's edge, 1pt in. A static stub: the motion package draws it with a
+/// heartbeat and puts it on working tiles; nothing shows it yet.
+struct WorkingArc: View {
+    var size: CGFloat = Theme.Metrics.tile
+    @Environment(\.resolved) private var resolved
+
+    var body: some View {
+        Tile.shape(size).inset(by: 1)
+            .trim(from: 0, to: 0.75)
+            .stroke(Theme.text, style: StrokeStyle(lineWidth: resolved.arcWidth, lineCap: .round))
+            .frame(width: size, height: size)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
