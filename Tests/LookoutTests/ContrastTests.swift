@@ -153,6 +153,22 @@ import Testing
         #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
     }
 
+    @Test(arguments: [false, true]) func theDownloadArcHoldsThreeToOneAgainstTheTrackItLeavesBehind(contrast: Bool) {
+        // The finished arc is the progress: against the unfinished track, itself over the tile (at rest or hovered) over the rail or
+        // the strip, the layers a bar actually draws.
+        let resolved = Theme.Resolved(contrast: contrast)
+        let bg = components(Theme.bg).rgb
+        var failures: [String] = []
+        for (surface, base) in [("strip", bg), ("rail", over(Theme.rail, bg))] {
+            for (state, tile) in [("rest", Theme.Fill.tile), ("hovered", Theme.Fill.selected)] {
+                let track = over(Theme.downloadTrack, over(resolved.fill(tile), base))
+                let value = ratio(over(Theme.accent, track), track)
+                if value < 3 { failures.append("arc on the track, \(state) on the \(surface): \(String(format: "%.2f", value))") }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "; "))")
+    }
+
     @Test func tintedFillsAreNotMultiplied() {
         // Increase Contrast strengthens white fills only: a hue's fill stays what the glyph was checked against.
         let increased = Theme.Resolved(contrast: true)

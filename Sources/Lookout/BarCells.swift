@@ -171,7 +171,7 @@ struct UpdateBarCell: View {
             let ready = phase == .ready
             ZStack {
                 if phase == .downloading {
-                    Circle().stroke(resolved.fill(Theme.Fill.selected), lineWidth: 1.5).frame(width: 22, height: 22)
+                    Circle().stroke(Theme.downloadTrack, lineWidth: 1.5).frame(width: 22, height: 22)
                     Circle().trim(from: 0, to: max(0.03, updater.fraction))
                         .stroke(Theme.accent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))

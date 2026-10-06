@@ -10,6 +10,9 @@ enum Theme {
     static let rail = Color.white.opacity(0.025)
     /// Tooltip bubbles and menus, a step above `bg` (#2B2B2D).
     static let popover = Color(red: 0.169, green: 0.169, blue: 0.176)
+    /// The update download's unfinished ring, on the tile: a groove darker than the tile, in both modes. A lighter track
+    /// (a white fill, ×1.6 under Increase Contrast) left the finished arc 2:1 to 2.9:1 from it.
+    static let downloadTrack = Color.black.opacity(0.4)
     /// The hub's outline: decorative, exempt from 3:1.
     static let stroke = Ink(\.stroke)
     static let divider = Ink(\.divider)
