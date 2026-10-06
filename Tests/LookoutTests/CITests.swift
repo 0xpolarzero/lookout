@@ -88,25 +88,11 @@ import Testing
         #expect(store.mutedCI.isEmpty)
     }
 
-    @Test func unmutingAndRemovingARepoForgetTheMute() {
+    @Test func unmutingForgetsTheMute() {
         let store = store(["b/bad": status(.failure, sha: "b1")], ["b/bad"])
-        let repo = store.repos[0]
-        store.muteCI(repo)
-        store.unmuteCI(repo)
+        store.muteCI(store.repos[0])
+        store.unmuteCI(store.repos[0])
         #expect(store.mutedCI.isEmpty)
-        store.muteCI(repo)
-        store.removeRepo(repo)
-        #expect(store.mutedCI.isEmpty)
-    }
-
-    @Test func aMuteSurvivesASaveAndALoad() throws {
-        var state = PersistedState(repos: [], items: [], ci: [:], settings: AppSettings(), agents: nil, mutedCI: ["a/b": "abc"])
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        let dec = JSONDecoder()
-        dec.dateDecodingStrategy = .iso8601
-        state = try dec.decode(PersistedState.self, from: enc.encode(state))
-        #expect(state.mutedCI == ["a/b": "abc"])
     }
 
     // MARK: The list

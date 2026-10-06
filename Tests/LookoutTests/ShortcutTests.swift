@@ -105,7 +105,7 @@ import Testing
         #expect(ShortcutAction.sessionSwitcher.defaultShortcut == Shortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.control, .option]))
     }
 
-    @MainActor private func connected(_ store: Store, _ registrar: FakeRegistrar) -> GlobalShortcuts {
+    private func connected(_ store: Store, _ registrar: FakeRegistrar) -> GlobalShortcuts {
         store.persists = false
         store.agents.enabled = true
         let globals = GlobalShortcuts(store: store, registrar: registrar) { _ in }
@@ -113,7 +113,7 @@ import Testing
         return globals
     }
 
-    @MainActor @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {
+    @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -131,7 +131,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func restoreDefaultsRefusedByAnotherAppChangesNothing() {
+    @Test func restoreDefaultsRefusedByAnotherAppChangesNothing() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -155,7 +155,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
+    @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -179,7 +179,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func aKeyAnotherAppHoldsIsRefusedAndTheWorkingOneStays() {
+    @Test func aKeyAnotherAppHoldsIsRefusedAndTheWorkingOneStays() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -201,7 +201,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
+    @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
@@ -215,7 +215,7 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
-    @MainActor @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
+    @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
         let store = Store()
         let registrar = FakeRegistrar()
         let globals = connected(store, registrar)
