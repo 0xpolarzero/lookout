@@ -79,7 +79,7 @@ enum Demo {
             store.lastSync = nil
             store.rateRemaining = nil
             store.authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
-            store.items = []
+            // The rows it had stay cached; the message replaces them.
             store.ci = [:]
         case .reposFailed:
             agents(store, now)

@@ -36,6 +36,8 @@ final class HubKeys {
 
     /// Returns whether the key was handled. Typing in a text field is left alone, except Esc.
     func key(_ event: NSEvent) -> Bool {
+        // An input method is composing in a text field: Esc, the arrows and Return are the composition's.
+        if (event.window?.firstResponder as? NSTextView)?.hasMarkedText() == true { return false }
         if hub.inbox.searchFocused, hub.page == .main, let handled = searchKey(event) { return handled }
         let editing = event.window?.firstResponder is NSText
         if editing, event.keyCode != UInt16(kVK_Escape) { return false }
@@ -57,7 +59,7 @@ final class HubKeys {
         if flags == .command, event.charactersIgnoringModifiers == "z" { return store.undoLast() }
         guard hub.expanded, hub.page == .main else { return false }
         if flags == .command, event.charactersIgnoringModifiers == "f" {
-            hub.inbox.startSearch()
+            hub.beginSearch()
             return true
         }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
@@ -80,7 +82,8 @@ final class HubKeys {
             LookoutHub.animate { store.markAllRead(hub.filter) }
             return true
         }
-        guard let selection = hub.selection else { return false }
+        // Row commands act only on a row the lists show (a pick the search has since filtered out is not one).
+        guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
             if shortcut == store.shortcut(.openItem) { store.open(item) }
@@ -104,9 +107,7 @@ final class HubKeys {
     }
 
     /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
-    private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
-    }
+    private func targets() -> [String] { store.hubTargets(hub) }
 
     private func move(down: Bool, in targets: [String]) {
         let i = targets.firstIndex(of: hub.selection ?? "") ?? (down ? -1 : targets.count)
@@ -118,20 +119,15 @@ final class HubKeys {
     private func setQuery(_ query: String) {
         LookoutHub.animate {
             hub.query = query
-            // The field shows while there is something in it, takes the focus, and goes with the query.
-            if query.isEmpty { hub.inbox.endSearch() } else { hub.inbox.startSearch() }
-            // Searching looks everywhere, and what you type shows in the inbox's header: nothing stays shrunk.
-            if !query.isEmpty { hub.focus = nil }
+            // The field shows while there is something in it, and goes with the query.
+            if query.isEmpty { hub.inbox.endSearch() }
         }
-        if let first = targets().first { select(first) } else { hub.selection = nil; hub.keyboardSelection = nil; ui.drawerSelection = nil }
+        if !query.isEmpty { hub.beginSearch() }
+        hub.pick(targets().first, ui: ui)
     }
 
     /// Picks a row from the keyboard: the lists follow it.
-    func select(_ target: String) {
-        hub.selection = target
-        hub.requestScroll(target)
-        ui.drawerSelection = target.hasPrefix("a:") ? String(target.dropFirst(2)) : nil
-    }
+    func select(_ target: String) { hub.pick(target, ui: ui) }
 }
 
 // MARK: Search field
@@ -148,7 +144,8 @@ extension HubKeys {
         case kVK_UpArrow, kVK_DownArrow:
             move(down: Int(event.keyCode) == kVK_DownArrow, in: targets())
         case kVK_Return:
-            guard let selection = hub.selection else { return nil }
+            // Only a row the results show: a pick the typing has since filtered out is not opened.
+            guard let selection = hub.selection, targets().contains(selection) else { return nil }
             let id = String(selection.dropFirst(2))
             if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) { store.open(item) }
             else if selection.hasPrefix("a:") { store.openAgent(id) }

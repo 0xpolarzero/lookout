@@ -26,6 +26,40 @@ final class InboxState {
     }
 }
 
+extension HubState {
+    /// The one way into search (⌘F, the magnifier, typing): the results are the inbox's and the sessions', side by side,
+    /// so it keeps the hub open (from a peek, which shows one section), gives up any section focus (which would
+    /// shrink one of them or leave the field out), then asks the field for the keyboard.
+    func beginSearch() {
+        LookoutHub.animate(LookoutHub.refocus) {
+            if !pinned { pinned = true }
+            focus = nil
+            inbox.startSearch()
+        }
+    }
+
+    /// Picks a row from the keyboard (or nothing): the lists follow it.
+    func pick(_ target: String?, ui: UIState) {
+        selection = target
+        if let target { requestScroll(target) } else { keyboardSelection = nil }
+        ui.drawerSelection = target.flatMap { $0.hasPrefix("a:") ? String($0.dropFirst(2)) : nil }
+    }
+
+    /// The results changed under the typing: the pick stays if it is still shown, else it moves to the first result,
+    /// so ↩ never opens a row that has gone from the list.
+    func reconcileSelection(among targets: [String], ui: UIState) {
+        guard !query.isEmpty, !targets.contains(selection ?? "") else { return }
+        pick(targets.first, ui: ui)
+    }
+}
+
+extension Store {
+    /// Every row the arrows walk through, top to bottom: the inbox's, then the sessions'.
+    func hubTargets(_ hub: HubState) -> [String] {
+        hubItems(hub).map { "i:" + $0.id } + hubSessions(hub).map { "a:" + $0.id }
+    }
+}
+
 /// Why the inbox has nothing to list, in the order DESIGN.md 5.9 gives them: the first that applies wins.
 enum InboxEmpty: Equatable {
     case signedOut, noRepos, firstSync
@@ -59,9 +93,12 @@ extension Store {
         lastSync.map { now.timeIntervalSince($0) > settings.pollInterval * 3 } ?? false
     }
 
+    /// What replaces the list whatever rows it has: a sign-in problem leaves the cached rows stale, so they aren't shown.
+    var inboxReplacement: InboxEmpty? { authError != nil ? .signedOut : nil }
+
     /// The cause to show when the list under `filter` is empty.
     func inboxEmpty(_ filter: InboxFilter, now: Date = Date()) -> InboxEmpty {
-        if authError != nil { return .signedOut }
+        if let replacement = inboxReplacement { return replacement }
         if repos.isEmpty { return .noRepos }
         if lastSync == nil { return .firstSync }
         switch filter {
@@ -207,7 +244,7 @@ extension LookoutHub {
     }
 
     var searchField: some View {
-        InboxSearchField(hub: hub, summary: searchCount)
+        InboxSearchField(hub: hub, ui: ui, summary: searchCount, targets: store.hubTargets(hub))
     }
 
     /// What the search found, by kind: "3 items · 2 sessions".
@@ -226,7 +263,7 @@ extension LookoutHub {
             tabs.fixedSize().layoutPriority(2)
             Spacer(minLength: 0)
             if rows {
-                IconButton(symbol: "magnifyingglass", help: "Search", detail: "⌘F") { hub.inbox.startSearch() }
+                IconButton(symbol: "magnifyingglass", help: "Search", detail: "⌘F") { hub.beginSearch() }
                 inboxMenu
             } else {
                 // Their room, so the tabs and the right edge don't jump when the first item arrives.
@@ -298,7 +335,7 @@ extension LookoutHub {
                     }
                 }
             }
-            if items.isEmpty {
+            if store.inboxReplacement != nil || items.isEmpty {
                 emptyInbox
             } else {
                 InboxList(items: items, cap: cap, listKey: listKey, scopeID: searching ? "search" : hub.filter.rawValue,
@@ -314,10 +351,10 @@ extension LookoutHub {
         }
     }
 
-    /// The list is empty: the cause, said once, with at most one way out. Searching, only when sessions found nothing
-    /// either (they are listed beside the inbox's results).
+    /// The list is empty, or replaced: the cause, said once, with at most one way out. Searching, only when sessions
+    /// found nothing either (they are listed beside the inbox's results).
     @ViewBuilder var emptyInbox: some View {
-        if searching {
+        if searching && store.inboxReplacement == nil {
             if !store.agents.enabled || store.hubSessions(hub).isEmpty { EmptyBlock("No match") }
         } else {
             switch store.inboxEmpty(hub.filter) {
@@ -428,7 +465,10 @@ private struct ScrollOffset: PreferenceKey {
 /// while it has focus.
 struct InboxSearchField: View {
     @Bindable var hub: HubState
+    let ui: UIState
     let summary: String
+    /// The rows the results show: when they change, the pick follows (edits to the field don't go through the keys).
+    let targets: [String]
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -457,6 +497,7 @@ struct InboxSearchField: View {
             if isFocused { DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil) } }
         }
         .onDisappear { hub.inbox.searchFocused = false }
+        .onChange(of: targets) { hub.reconcileSelection(among: targets, ui: ui) }
         // What was found, said once the typing has paused.
         .task(id: hub.query) {
             guard !hub.query.isEmpty else { return }
