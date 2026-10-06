@@ -456,6 +456,14 @@ enum PlaygroundShots {
         },
         Shot.edges("repos-drop", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.dropTarget = "ziglang/zig" },
         Shot.edges("repos-custom", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.preview.expandedRepo = "ziglang/zig" },
+        // Names too long for the line beside the controls take a line of their own.
+        Shot.edges("repos-long-names", on: [.right]) {
+            $0.pinned = true; $0.page = .repos
+            $0.setup = { store, _, _ in
+                store.repos.append(contentsOf: ["pointfreeco/swift-composable-architecture", "superradiantlabs/sandbox-runtime-images"]
+                    .map { RepoConfig(fullName: $0) })
+            }
+        },
         Shot.edges("repos-failure", on: [.right]) { $0.pinned = true; $0.page = .repos; $0.scenario = .reposFailed },
         Shot.edges("repos-add", on: [.right]) {
             $0.pinned = true; $0.page = .repos; $0.preview.addQuery = "swift"; $0.preview.addHighlight = 1

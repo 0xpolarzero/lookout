@@ -447,14 +447,20 @@ struct RepoRow: View {
     var body: some View {
         let twoLines = failure != nil || shown == .custom
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Theme.Space.md) {
-                name
-                Spacer(minLength: Theme.Space.md)
-                preset
-                Toggle(isOn: binding(.ciMain)) { Text("CI").font(Theme.Typography.body).foregroundStyle(Theme.text) }
-                    .toggleStyle(SwitchStyle())
-                    .fixedSize()
-                    .accessibilityLabel("CI")
+            // The name and its controls on one line; when the name would be cut short, it takes a line to itself.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.md) {
+                    name.fixedSize()
+                    Spacer(minLength: Theme.Space.md)
+                    controls
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    name.frame(minHeight: Self.line + Theme.Space.sm).padding(.top, Theme.Space.xs)
+                    HStack(spacing: Theme.Space.md) {
+                        Spacer(minLength: 0)
+                        controls
+                    }
+                }
             }
             .frame(minHeight: twoLines ? Self.firstLine : Theme.Metrics.formRow)
             if let failure { failureLine(failure) }
@@ -500,12 +506,23 @@ struct RepoRow: View {
     /// The first line of a row with a second one: a pop-up's height and a hairline of margin.
     private static let firstLine: CGFloat = Theme.Metrics.button + 2
 
-    /// `owner/` quiet, the name in bold; the middle gives way first.
+    /// `owner/` quiet, the name in bold; the middle gives way first, and only on a line of its own (see `body`).
     private var name: some View {
         (Text("\(repo.owner)/").foregroundStyle(Theme.tertiary) + Text(repo.name).fontWeight(.semibold).foregroundStyle(Theme.text))
             .font(Theme.Typography.body)
             .lineLimit(1)
             .truncationMode(.middle)
+            .help(repo.fullName)
+    }
+
+    private var controls: some View {
+        HStack(spacing: Theme.Space.md) {
+            preset
+            Toggle(isOn: binding(.ciMain)) { Text("CI").font(Theme.Typography.body).foregroundStyle(Theme.text) }
+                .toggleStyle(SwitchStyle())
+                .fixedSize()
+                .accessibilityLabel("CI")
+        }
     }
 
     // MARK: Preset
