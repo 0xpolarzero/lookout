@@ -39,6 +39,9 @@ final class HubKeys {
     func key(_ event: NSEvent) -> Bool {
         // An input method is composing in a text field: Esc, the arrows and Return are the composition's.
         if (event.window?.firstResponder as? NSTextView)?.hasMarkedText() == true { return false }
+        // What a field or overlay has open (a token, suggestions, a tooltip) is the first thing Esc closes, the search field's
+        // focus included: a tooltip over a picked result goes before the query does.
+        if event.keyCode == UInt16(kVK_Escape), event.modifierFlags.intersection(Shortcut.relevant).isEmpty, EscapeRoute.run() { return true }
         if hub.inbox.searchFocused, hub.page == .main, let handled = searchKey(event) { return handled }
         // A focused control (Clear, More, Undo) takes Space and Return: they are not the search's or the row's.
         if hub.controls.isActive, event.modifierFlags.intersection(Shortcut.relevant).isEmpty,
@@ -49,9 +52,8 @@ final class HubKeys {
         // A field keeps what it types, and the chords it has no use for stay the hub's: Settings, Check now, the focus keys.
         if editing, event.keyCode != UInt16(kVK_Escape) { return chord(event, flags: flags, shortcut: shortcut, editing: true) }
         if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
-            // The Esc ladder, first match wins: what a field or overlay has open (a token, suggestions), the field
-            // itself, the controls menu, the search, the page, the focused section, then the hub.
-            if EscapeRoute.run() { return true }
+            // The Esc ladder, first match wins: what a field or overlay has open (above), the field itself, the controls
+            // menu, the search, the page, the focused section, then the hub.
             if editing { event.window?.makeFirstResponder(nil) }
             else if hub.menuKeys, !hub.expanded { closeMenu() }
             // The search is only on the main view: a query left behind a page is not the next thing to clear.

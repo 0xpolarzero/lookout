@@ -129,6 +129,21 @@ import Testing
         #expect(r.opened.titles.isEmpty)
     }
 
+    @Test func anOpenTooltipTakesEscapeBeforeTheQuery() {
+        let r = rig()
+        r.hub.query = "swift"
+        r.hub.selection = "i:1"
+        let id = UUID()
+        var closed = 0
+        EscapeRoute.register(id) { closed += 1; EscapeRoute.unregister(id) }
+        defer { EscapeRoute.unregister(id) }
+        #expect(r.keys.key(key(kVK_Escape)))
+        #expect(closed == 1 && r.hub.query == "swift")
+        // With nothing open, Esc clears the search as before.
+        #expect(r.keys.key(key(kVK_Escape)))
+        #expect(r.hub.query.isEmpty)
+    }
+
     // MARK: Focused controls
 
     @Test func aFocusedControlKeepsSpaceAndReturn() {
