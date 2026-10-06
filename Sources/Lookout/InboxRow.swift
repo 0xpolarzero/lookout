@@ -53,8 +53,6 @@ struct InboxRow: View {
     /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
     private var selected: Bool { hub.selection == key }
     private var key: String { "i:" + item.id }
-    /// What the row is filled with: the pointer's, or the keyboard's pick.
-    private var rowFill: Color { selected && !hover ? Theme.Fill.selected : hover ? Theme.Fill.hover : Theme.Fill.rest }
     /// The content's height: the row is `twoLineRow` whatever line 2 holds (the highlight pads 6 above and below).
     private static let contentHeight = Theme.Metrics.twoLineRow - 12
     private var unread: Bool { item.state == .unread }
@@ -70,10 +68,8 @@ struct InboxRow: View {
                 .focusRing(Theme.Radius.row, inset: true, isFocused: focused)
                 .help(tooltip)
             if showsAction {
+                // In the room line 2 keeps for it (`secondLine`), level with it and with the age above.
                 action
-                    // Over the end of line 2, which gives it no room of its own: the row's own fill behind it keeps
-                    // the text from showing through.
-                    .background(Circle().fill(Theme.bg).overlay(Circle().fill(resolved.fill(rowFill))))
                     .padding(.trailing, Theme.Metrics.rowPadding)
                     .padding(.bottom, 1)
                     .transition(.opacity)
@@ -143,7 +139,8 @@ struct InboxRow: View {
 
     /// The kind's glyph and the meta line; then, for Addressed and Resolved, what became of it. The author matters
     /// more than the rest: the state gives up its word, then goes, then the kind's word (its glyph stays) before the
-    /// author is cut.
+    /// author is cut. The action's room is always kept at the end (whether it shows or not), so what the line says
+    /// never changes under the pointer.
     @ViewBuilder private var secondLine: some View {
         HStack(spacing: Theme.Space.xs) {
             glyph(item.kind.rowSymbol)
@@ -161,6 +158,7 @@ struct InboxRow: View {
                 }
             }
         }
+        .padding(.trailing, Theme.Metrics.iconButton + Theme.Space.xs)
         .foregroundStyle(Theme.tertiary)
     }
 

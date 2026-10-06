@@ -323,7 +323,7 @@ struct Shot {
 ///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
 ///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none,
 ///   inbox-search-from-focus, inbox-many, inbox-peek-many,
-///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done,
+///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
@@ -432,6 +432,24 @@ enum PlaygroundShots {
             $0.pinned = true
             $0.filter = .done
             $0.setup = { store, _, hub in hub.selection = store.list(.done).first.map { "i:" + $0.id } }
+        },
+        // The longest meta lines on the Done tab, the first picked: the action has its own room, nothing under it is cut.
+        Shot.edges("inbox-picked-done-long", on: .rightAndTop) {
+            $0.pinned = true
+            $0.filter = .done
+            $0.setup = { store, _, hub in
+                func row(_ id: String, _ author: String, _ state: ItemState, minutes: Double) -> InboxItem {
+                    var item = InboxItem(id: id, repo: "apple/swift-format", kind: .reviewComment, number: 1042,
+                                         title: "Respect trailing comma config in collection literals", snippet: "", author: author,
+                                         avatar: nil, authorIsApp: author.hasSuffix("[bot]"), url: URL(string: "https://github.com/apple/swift-format/pull/1042")!,
+                                         createdAt: Date().addingTimeInterval(-3600), state: state)
+                    item.clearedAt = Date().addingTimeInterval(-minutes * 60)
+                    return item
+                }
+                store.items += [row("long-1", "coderabbitai[bot]", .resolved, minutes: 1), row("long-2", "coderabbitai[bot]", .discarded, minutes: 2),
+                                row("long-3", "jessesquires-the-long-named", .addressed, minutes: 3)]
+                hub.selection = "i:long-1"
+            }
         },
         // More rows than fit: the last whole row, then "+N more".
         Shot.edges("inbox-many", on: .rightAndTop) { $0.pinned = true; $0.scenario = .inboxMany },

@@ -148,3 +148,53 @@ import Testing
         #expect(height(cap: cap, banner: true, undo: true) > cap - InboxList.pitch)
     }
 }
+
+@MainActor
+@Suite struct InboxRowActionRoom {
+    private func item() -> InboxItem {
+        InboxItem(id: "1", repo: "apple/swift-format", kind: .reviewComment, number: 1042, title: "Respect trailing comma", snippet: "",
+                  author: "coderabbitai[bot]", avatar: nil, authorIsApp: true, url: URL(string: "https://github.com/a/b")!,
+                  createdAt: Date(), state: .resolved)
+    }
+
+    /// How far right line 2's text reaches (in points), with the row at rest or picked (its action showing).
+    private func reach(picked: Bool, width: CGFloat) -> CGFloat {
+        let store = Store()
+        store.persists = false
+        let hub = HubState()
+        hub.filter = .done
+        if picked { hub.selection = "i:1" }
+        let hosting = NSHostingView(rootView: InboxRow(item: item(), store: store, ui: UIState(), hub: hub).frame(width: width, height: 44)
+            .background(Theme.bg).environment(\.colorScheme, .dark))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 44), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        for _ in 0..<6 { RunLoop.current.run(until: Date().addingTimeInterval(0.04)); hosting.layoutSubtreeIfNeeded(); hosting.displayIfNeeded() }
+        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        window.contentView = nil
+        window.orderOut(nil)
+        let scale = CGFloat(rep.pixelsWide) / width
+        var right = 0
+        // Line 2 is the lower half's text; the pick's accent bar is on the left, the action (when shown) on the right.
+        for y in Int(26 * scale)..<Int(36 * scale) {
+            for x in Int(16 * scale)..<Int((width - Theme.Metrics.rowPadding - (picked ? Theme.Metrics.iconButton : 0)) * scale)
+            where (rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)?.brightnessComponent ?? 0) > 0.5 { right = max(right, x) }
+        }
+        return CGFloat(right) / scale
+    }
+
+    @Test func theMetaLineStopsBeforeTheActionsRoomAndReadsTheSameWithOrWithoutIt() {
+        // Narrow enough that the line is cut: what it keeps must not depend on the action appearing. Picked,
+        // only what lies left of the action's own 24 pt is measured.
+        for width in [260, 300, 400] as [CGFloat] {
+            let rest = reach(picked: false, width: width)
+            let picked = reach(picked: true, width: width)
+            #expect(rest > 100, "width \(width): nothing drawn")
+            #expect(abs(rest - picked) < 1, "width \(width): \(rest) at rest, \(picked) picked")
+            // At rest too, nothing is drawn where the action will be.
+            #expect(rest <= width - Theme.Metrics.rowPadding - Theme.Metrics.iconButton, "width \(width): \(rest)")
+        }
+    }
+}
