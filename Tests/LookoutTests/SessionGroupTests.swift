@@ -210,7 +210,7 @@ import Testing
         #expect(s.listedGroups(hub).groups.map(\.id) == ["waiting", "project:/code/y", "project:/code/x"])
     }
 
-    @Test func moveActionsNeverTargetARowTheCutListHides() {
+    @Test func moveActionsNeverTargetARowTheCutListHides() throws {
         let s = store((0..<12).map { session("a\($0)", folder: "/code/x") }, kept: (0..<12).map { "a\($0)" })
         let hub = HubState()
         hub.frozenSessions = s.barSlots
@@ -225,6 +225,9 @@ import Testing
         #expect(s.neighbour(of: "a11", -1, frozen: hub.frozenSessions, expanded: false) == "a6")
         // The keys, the menu and the VoiceOver action all ask the hub, which asks for what the list shows.
         #expect(hub.canMoveSession("a6", by: 1, store: s) && !hub.canMoveSession("a7", by: -1, store: s))
+        // The accessibility actions come from the group's own rows: the last one shown has nothing to move down to, as in the menu.
+        let shown = try #require(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" })
+        #expect(shown.moves(of: shown.rows[6]) == .init(up: true, down: true) && shown.moves(of: shown.rows[7]) == .init(up: true, down: false))
         // Move down trades a6 with a11 as the list shows them, and both stay on the screen.
         hub.moveSession("a6", by: 1, store: s)
         #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a11", "a6"])

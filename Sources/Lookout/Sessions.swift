@@ -326,8 +326,8 @@ extension SessionGroup {
         }
     }
 
-    /// Whether a row can trade places with the one above or below it in its project: the rows the group draws and those its
-    /// cut leaves out below them, a row held here from another project (a frozen group's) has no neighbour.
+    /// Whether a row can trade places with the one above or below it in its project: a row the group draws (a cut's hidden
+    /// ones are no neighbour, as for `Store.neighbour`), a row held here from another project (a frozen group's) has none.
     struct Moves: Equatable {
         var up = false
         var down = false
@@ -337,7 +337,7 @@ extension SessionGroup {
         guard case .project = kind else { return Moves() }
         let own = rows.filter { placement(of: $0) == .project }
         guard let i = own.firstIndex(where: { $0.id == row.id }) else { return Moves() }
-        return Moves(up: i > 0, down: i + 1 < own.count + max(total - rows.count, 0))
+        return Moves(up: i > 0, down: i + 1 < own.count)
     }
 
     /// What `row` is listed under here: a project's own rows say nothing of their project, but a row held in a frozen group
