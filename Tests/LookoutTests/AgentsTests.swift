@@ -88,6 +88,20 @@ import Testing
         #expect(s.agentRows.pending.map(\.id) == ["a"])
     }
 
+    @Test func aSessionSearchFoundButNeverOfferedTakesWhatIsDoneToIt() {
+        // Older than the first read offers: only search lists it.
+        let s = store([session("old", minutesAgo: 3 * 24 * 60)])
+        #expect(s.agents.entries.isEmpty)
+        s.toggleAgentRead("old")
+        s.setAgentLabel("old", "OL")
+        #expect(entry(s, "old")?.unread == true && entry(s, "old")?.label == "OL")
+        s.dismissAgent("old")
+        #expect(entry(s, "old")?.hiddenAt != nil)
+        // Kept in its entry, and not offered as new activity.
+        #expect(s.agentRows.pending.isEmpty && s.agentRows.kept.isEmpty)
+        #expect(s.row(s.claudeSessions["old"]!).unread)
+    }
+
     @Test func removedKeptSessionReturnsAsPending() {
         let s = store([session("a")])
         s.keepAgent("a")

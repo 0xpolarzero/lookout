@@ -684,7 +684,18 @@ extension Store {
         Claude.newSession(in: folder)
     }
 
+    /// The entry of a session search found that Lookout never offered, so what is done to it has somewhere to stay: hidden
+    /// as it is, not offered as new activity.
+    private func ensureEntry(_ id: String) {
+        guard !agents.entries.contains(where: { $0.id == id }), let session = claudeSessions[id] else { return }
+        var entry = AgentEntry(id: id, seen: session.activity, focusedAt: session.lastFocused)
+        entry.hiddenAt = session.activity
+        agents.entries.append(entry)
+        agents.assignColor(session.folderKey)
+    }
+
     func toggleAgentRead(_ id: String) {
+        ensureEntry(id)
         mutateAgent(id) { $0.unread.toggle() }
     }
 
@@ -725,6 +736,7 @@ extension Store {
     /// Pending: hidden until its next activity. Kept: leaves your list (and comes back as pending on new activity).
     /// Offers an undo.
     func dismissAgent(_ id: String) {
+        ensureEntry(id)
         guard let before = agents.entries.first(where: { $0.id == id }) else { return }
         mutateAgent(id) {
             $0.kept = false
@@ -944,6 +956,7 @@ extension Store {
     }
 
     func setAgentLabel(_ id: String, _ label: String?) {
+        ensureEntry(id)
         mutateAgent(id) { $0.label = label.flatMap(AgentLabel.sanitize) }
     }
 
