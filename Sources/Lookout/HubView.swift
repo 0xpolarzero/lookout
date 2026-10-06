@@ -273,6 +273,7 @@ struct LookoutHub: View {
         .environment(\.tipBeside, edge == .right ? .leading : edge == .left ? .trailing : nil)
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
+        .background(SessionFreeze(store: store, hub: hub))
         .background(HubAnnouncer(store: store, hub: hub))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lookout")

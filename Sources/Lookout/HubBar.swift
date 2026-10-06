@@ -187,11 +187,24 @@ struct RestSessionCells: View {
             NewSessionBarCell(axis: axis, store: store) { show(nil) }
         }
         .animation(reduce ? nil : Theme.Motion.fade, value: shown.map { $0.id + $0.group })
-        .onAppear { if hub.hovering { freeze() } }
-        .onDisappear { hub.frozenSessions = nil }
-        .onChange(of: hub.hovering) { _, over in
-            if over { freeze() } else { hub.frozenSessions = nil }
-        }
+    }
+}
+
+/// Holds the sessions' order and groups while the pointer is over the hub (`HubState.frozenSessions`): the bar's tiles,
+/// the peek's rows and the kept-open list all follow it, and it is applied once the pointer leaves. It sits at the hub's
+/// own boundary, not in the bar's cells, so opening the full view (which replaces them) doesn't let go of it. A view of its
+/// own: only this body reads whether the pointer is over the hub.
+struct SessionFreeze: View {
+    let store: Store
+    let hub: HubState
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .onAppear { if hub.hovering { freeze() } }
+            .onDisappear { hub.frozenSessions = nil }
+            .onChange(of: hub.hovering) { _, over in
+                if over { freeze() } else { hub.frozenSessions = nil }
+            }
     }
 
     /// Keeps the order and the groups as they are now, whatever the sessions do until the pointer leaves.

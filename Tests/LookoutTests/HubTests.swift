@@ -948,3 +948,36 @@ import Testing
         #expect(bodyChanges(pinned: true) { store.items = [] })
     }
 }
+
+/// DESIGN.md 5.1: the sessions' order is held while the pointer is over the hub, kept open too (which replaces the bar's cells).
+@MainActor
+@Suite struct SessionFreezeAcrossLayouts {
+    @Test func openingTheFullViewUnderThePointerKeepsTheFreeze() async throws {
+        let store = Store()
+        Demo.populate(store, .agents)
+        let hub = HubState()
+        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: .right), hub: hub, maxLength: 700, openLength: 700,
+                              maxWidth: 900, barLength: 700)
+            .frame(width: 900, height: 800, alignment: .topLeading)
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame.size = CGSize(width: 900, height: 800)
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        try await Task.sleep(for: .seconds(0.3))
+        hub.hovering = true
+        try await Task.sleep(for: .seconds(0.3))
+        let held = try #require(hub.frozenSessions)
+        #expect(!held.isEmpty)
+        // Kept open with the pointer still there: the bar's cells are replaced, the order is not let go of.
+        hub.pinned = true
+        try await Task.sleep(for: .seconds(0.5))
+        #expect(hub.frozenSessions == held)
+        hub.hovering = false
+        try await Task.sleep(for: .seconds(0.3))
+        #expect(hub.frozenSessions == nil)
+    }
+}
