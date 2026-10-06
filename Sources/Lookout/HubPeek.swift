@@ -265,14 +265,31 @@ extension LookoutHub {
         }
     }
 
-    /// CI: its header, then its rows (all of them: there are few).
+    /// CI: its header, then its rows, as many whole ones as fit and "+N more" under them, like the inbox and the sessions.
     @ViewBuilder var peekCI: some View {
         if store.ciRepos.isEmpty {
             linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) }.frame(height: Theme.Metrics.pitch)
         } else {
+            let cap = max(peekRoom(.ci) - 2 * HubGeometry.lead - Theme.Metrics.pitch, 88)
             ciHeader.frame(height: Theme.Metrics.pitch)
-            ciColumn.padding(.horizontal, -Self.peekPad)
+            let rows = ciPeekRows
+            WholeRows(total: rows.count, cap: cap, noun: rows.noun, onMore: keepOpen) {
+                rows.content(WholeRows<EmptyView>.instantiated(cap))
+            }
         }
+    }
+
+    /// CI's rows as the peek lays them out: how many there are, what one is called, and (given how many may be
+    /// instantiated) a view of them whose rows each mark their bottom edge, so the cap cuts between rows. The CI
+    /// section is the only one that knows its rows: restyling them never touches the peek.
+    var ciPeekRows: (count: Int, noun: String, content: (Int) -> AnyView) {
+        let states = Self.ciLineOrder.filter { $0 != CIState.none || !ciRepos(listedIn: .none).isEmpty }
+        return (states.count, "state", { limit in
+            AnyView(VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(states.prefix(limit)), id: \.self) { ciLine($0, compact: true).capEdge() }
+            }
+            .padding(.vertical, 6))
+        })
     }
 
     /// The sessions as the full view lists them, as many whole rows as fit, then New session.

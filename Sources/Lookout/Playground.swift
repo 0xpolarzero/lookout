@@ -394,6 +394,7 @@ enum PlaygroundShots {
         // The chrome on a 1280×720 screen: every peek, a focused section and the fullest views, on every edge.
         Shot.edges("peek-inbox-720") { $0.section = .inbox; $0.size = Shot.hd },
         Shot.edges("peek-ci-720") { $0.section = .ci; $0.size = Shot.hd },
+        Shot.edges("peek-ci-many-ci-720") { $0.section = .ci; $0.scenario = .manyCI; $0.size = Shot.hd },
         Shot.edges("peek-agents-720") { $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd },
         Shot.edges("peek-controls-720") { $0.section = .controls; $0.size = Shot.hd },
         Shot.edges("focus-inbox-720") { $0.pinned = true; $0.focus = .inbox; $0.size = Shot.hd },
