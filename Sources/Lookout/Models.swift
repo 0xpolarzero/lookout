@@ -195,6 +195,9 @@ struct AppSettings: Codable {
     var reviewRequests = true
     var snoozeUntil: Date?
     var didInitialReviewSync = false
+    /// When the first review search, if it couldn't list everything, took its answer: requests last touched before it are
+    /// backlog that turned up late, not news. Nil once a complete search has listed them all.
+    var reviewBaselineAt: Date?
     /// Customized shortcuts by ShortcutAction raw value; missing ones use the defaults.
     var shortcuts: [String: Shortcut]?
     /// Look for new releases in the background (default on).

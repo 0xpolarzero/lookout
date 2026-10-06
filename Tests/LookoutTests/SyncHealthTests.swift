@@ -150,6 +150,26 @@ import Testing
         #expect(s.reviewRequestsError == nil && s.items.isEmpty)
     }
 
+    @Test func aFirstSearchThatIsCutShortStillArmsTheNotificationsForWhatComesLater() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        // GitHub cuts the first search short: the baseline is what it listed.
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"total_count": 5, "incomplete_results": true, "items": [\#(Self.issue(1))]}"#) }
+        await s.syncReviewRequests()
+        #expect(s.settings.didInitialReviewSync && s.reviewRequestsIncomplete && s.pulse == 0)
+        // Backlog that turns up late (last touched before the baseline) is quiet; a request made since is news.
+        let fresh = Self.issue(3, updated: "2999-01-01T00:00:00Z")
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"total_count": 5, "incomplete_results": true, "items": [\#(Self.issue(1)), \#(Self.issue(2)), \#(fresh)]}"#) }
+        await s.syncReviewRequests()
+        #expect(s.items.filter { $0.kind == .reviewRequested }.count == 3 && s.pulse == 1)
+        #expect(s.items.first { $0.id == "rr#2" }?.createdAt == s.items.first { $0.id == "rr#1" }?.createdAt)
+        // A complete search has listed everything: the baseline is no longer needed.
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"total_count": 3, "incomplete_results": false, "items": [\#(Self.issue(1)), \#(Self.issue(2)), \#(fresh)]}"#) }
+        await s.syncReviewRequests()
+        #expect(s.settings.reviewBaselineAt == nil && !s.reviewRequestsIncomplete)
+    }
+
     @Test func anIncompleteReviewSearchIsOneFaultOnEverySurface() {
         let s = Store()
         s.persists = false
