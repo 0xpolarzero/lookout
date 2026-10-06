@@ -83,12 +83,6 @@ struct HubRoot: View {
             .tipSpace { hub.tipRegion = $0 }
     }
 
-    /// The hub may take the screen's whole usable length less both insets, never a floor: it grows from the bar's
-    /// place and only the screen's end moves it (see `HubGeometry.along`).
-    private func length(in size: CGSize) -> CGFloat {
-        HubGeometry.maxLength(visibleHeight: size.height)
-    }
-
     /// On the sides the full view stays below the bar's rest anchor, so the inbox tile never moves.
     private func openLength(in size: CGSize) -> CGFloat? {
         guard !ui.edge.isHorizontal, layout.restLength > 0 else { return nil }
@@ -99,7 +93,7 @@ struct HubRoot: View {
     static func position(_ ui: UIState, _ store: Store) -> Double { store.settings.centerPill == true ? 0.5 : ui.position }
 
     @ViewBuilder private func content(in size: CGSize) -> some View {
-        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: length(in: size), openLength: openLength(in: size), maxWidth: size.width,
+        let view = LookoutHub(store: store, ui: ui, hub: hub, maxLength: HubGeometry.maxLength(visibleHeight: size.height), openLength: openLength(in: size), maxWidth: size.width,
                               barLength: (ui.edge.isHorizontal ? size.width : size.height) - 12)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(LookoutHub.rootSpace)) } action: { frame in
                 if HubController.debug { NSLog("Lookout hub frame \(frame)") }
@@ -443,8 +437,6 @@ final class HubController {
             ImageCache.shared.prefetch(urls)
         }
     }
-
-    func agentsChanged() {}
 
     // MARK: Dragging to another edge
 

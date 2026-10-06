@@ -276,8 +276,6 @@ struct LookoutHub: View {
     @State var ciHeight: CGFloat = 0
     /// What the sides' lists measured of themselves, for the one below to take what the one above leaves.
     @State var listHeights: [HubSection: ListHeights] = [:]
-    /// The strip's trailing group (update button, gear) as laid out; a first guess until it is measured.
-    @State var stripTrailingWidth: CGFloat = 140
     @Environment(\.accessibilityReduceMotion) var reduce
 
     /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
@@ -291,7 +289,6 @@ struct LookoutHub: View {
     /// Animations: pass through `.motion` / `.resolved(reduce:)`, which follow Reduce Motion live.
     static let opening = Theme.Motion.move
     static let closing = Theme.Motion.close
-    static let pageSpring = Theme.Motion.move
     static let refocus = Theme.Motion.move
     /// The system's current setting, for code with no view (key handlers): read only through `animate`.
     private static var reduceNow: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -338,7 +335,7 @@ struct LookoutHub: View {
         .fixedSize()
         // Opening and closing are springs without a bounce, so it never overshoots back past the bar.
         .motion(expanded ? Self.opening : Self.closing, value: expanded)
-        .motion(Self.pageSpring, value: hub.page)
+        .motion(Theme.Motion.move, value: hub.page)
         .motion(Self.refocus, value: hub.focus)
         .contextMenu { barMenu }
         .environment(\.colorScheme, .dark)
