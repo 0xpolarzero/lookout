@@ -103,17 +103,18 @@ private final class ScrollOffsetView: NSView {
     /// Clicks pass through to the content.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    deinit {
-        observer.map(NotificationCenter.default.removeObserver)
-        styleObserver.map(NotificationCenter.default.removeObserver)
-    }
+    deinit { stopObserving() }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
+    private func stopObserving() {
         observer.map(NotificationCenter.default.removeObserver)
         styleObserver.map(NotificationCenter.default.removeObserver)
         observer = nil
         styleObserver = nil
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopObserving()
         // Overlay scrollers whatever "Show scroll bars" says: a legacy one takes its width out of the rows and, over the rail,
         // moves the tiles off the bar's axis (DESIGN.md 5.3). The "+N below" cue says what the scroller would.
         enclosingScrollView?.scrollerStyle = .overlay

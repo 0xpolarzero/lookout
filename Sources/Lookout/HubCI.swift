@@ -16,11 +16,12 @@ extension Store {
     /// The context menu's groups, and the same actions for VoiceOver (plus the link, which ⌘C copies).
     fileprivate func ciActions(for entry: CIEntry) -> [[CIAction]] {
         let repo = entry.repo
+        let hasCommit = entry.status?.sha != nil
         var opens = [CIAction(title: "Open checks", symbol: "checklist") { self.openChecks(repo) }]
-        if entry.status?.sha != nil { opens.append(CIAction(title: "Open commit", symbol: "arrow.triangle.branch") { self.openCommit(repo) }) }
+        if hasCommit { opens.append(CIAction(title: "Open commit", symbol: "arrow.triangle.branch") { self.openCommit(repo) }) }
         opens.append(CIAction(title: "Open repository", symbol: "book.closed") { self.openRepository(repo) })
         var groups = [opens]
-        if entry.status?.sha != nil { groups.append([CIAction(title: "Copy commit SHA", symbol: "doc.on.doc") { self.copyCommitSHA(repo) }]) }
+        if hasCommit { groups.append([CIAction(title: "Copy commit SHA", symbol: "doc.on.doc") { self.copyCommitSHA(repo) }]) }
         var changes = [CIAction(title: "Check now", symbol: "arrow.clockwise") { self.checkCINow(repo) }]
         if entry.muted {
             changes.append(CIAction(title: "Unmute", symbol: "bell") { self.unmuteCI(repo) })
@@ -93,13 +94,11 @@ enum CISpeech {
 
     /// The bar cell's value: "1 failing, 1 running, 2 passing".
     static func summary(_ list: CIList) -> String {
+        let (passing, muted, noRuns, unchecked) = list.quietCounts
         let counts: [(Int, String)] = [
             (list.attention.filter { $0.state == .failure }.count, CIState.failure.label),
             (list.attention.filter { $0.state == .pending }.count, CIState.pending.label),
-            (list.quiet.filter { $0.state == .success && !$0.muted }.count, CIState.success.label),
-            (list.quiet.filter(\.muted).count, "muted"),
-            (list.quietCounts.noRuns, CIState.none.label),
-            (list.quietCounts.unchecked, "not checked"),
+            (passing, CIState.success.label), (muted, "muted"), (noRuns, CIState.none.label), (unchecked, "not checked"),
         ]
         return counts.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: ", ")
     }
@@ -356,8 +355,7 @@ extension LookoutHub {
         var height: CGFloat {
             switch kind {
             case .attention: Theme.Metrics.twoLineRow
-            case .passing: Theme.Metrics.pitch
-            case .quiet: Theme.Metrics.pitch
+            case .passing, .quiet: Theme.Metrics.pitch
             }
         }
     }
@@ -450,7 +448,7 @@ extension LookoutHub {
     private var staleLine: some View {
         Ticking(coarse: true) { now in
             VStack(spacing: 0) {
-                if let checked = staleChecked(now) {
+                if store.isCIStale(at: now), let checked = store.ciFreshness {
                     Text("Last checked \(checked.formatted(date: .omitted, time: .shortened))")
                         .font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
                         .padding(.horizontal, Theme.Metrics.rowPadding)
@@ -461,11 +459,6 @@ extension LookoutHub {
     }
 
     private static let staleHeight: CGFloat = 20
-
-    /// When CI was last checked, if that is too long ago to call the rows fresh.
-    private func staleChecked(_ now: Date) -> Date? {
-        store.isCIStale(at: now) ? store.ciFreshness : nil
-    }
 }
 
 /// A row of a list that scrolls marks its bottom edge; a peek's, which never does, needs no mark.

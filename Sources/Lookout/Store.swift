@@ -179,7 +179,7 @@ final class Store {
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?
     @ObservationIgnored private var dotsWatcher: FolderWatcher?
-    @ObservationIgnored var claudeTimer: Timer?
+    @ObservationIgnored private var claudeTimer: Timer?
     /// `--demo --lifecycle`: the real watchers and reads run over an empty folder while the demo's sessions stay.
     @ObservationIgnored var demoLifecycle = false
     @ObservationIgnored private var claudeObservers: [NSObjectProtocol] = []
@@ -293,9 +293,7 @@ final class Store {
         sessionsWatcher = nil
         dotsWatcher = nil
         transcriptWatcher = nil
-        claudeTimer?.invalidate()
-        claudeTimer = nil
-        claudeDeadline = nil
+        cancelClaudeTick()
         let center = NSWorkspace.shared.notificationCenter
         claudeObservers.forEach { center.removeObserver($0) }
         claudeObservers = []
@@ -327,9 +325,7 @@ final class Store {
         claudeObservers.append(center.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.screensAsleep = true
-                self?.claudeTimer?.invalidate()
-                self?.claudeTimer = nil
-                self?.claudeDeadline = nil
+                self?.cancelClaudeTick()
             }
         })
         claudeObservers.append(center.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -347,12 +343,7 @@ final class Store {
     /// message, and a background subagent that stopped writing is given up on. One timer, set after each read for the
     /// first moment something can expire (and none while the screens are asleep or nothing is running).
     func scheduleClaudeTick() {
-        guard agents.enabled, persists || demoLifecycle, !screensAsleep else {
-            claudeTimer?.invalidate()
-            claudeTimer = nil
-            claudeDeadline = nil
-            return
-        }
+        guard agents.enabled, persists || demoLifecycle, !screensAsleep else { return cancelClaudeTick() }
         var next: TimeInterval?
         let now = Date()
         for session in claudeSessions.values where session.running {
@@ -380,6 +371,12 @@ final class Store {
         timer.tolerance = max(next, 1) * 0.1 + 2
         RunLoop.main.add(timer, forMode: .common)
         claudeTimer = timer
+    }
+
+    private func cancelClaudeTick() {
+        claudeTimer?.invalidate()
+        claudeTimer = nil
+        claudeDeadline = nil
     }
 
     func restartPolling() {
@@ -949,7 +946,7 @@ final class Store {
                 }
                 let kind: EventKind = c.htmlUrl.path.contains("/pull/") ? .prComment : .issueComment
                 guard ev.contains(kind), c.createdAt >= cursor("comments").addingTimeInterval(-1) else { continue }
-                if mentionsMe(c.body, me) { mentioned.insert("\(name)#c#\(c.id)") }
+                if Self.mentions(c.body, me) { mentioned.insert("\(name)#c#\(c.id)") }
                 fresh.append(InboxItem(
                     id: "\(name)#c#\(c.id)", repo: name, kind: kind, number: number,
                     title: title(for: number, in: name, titles), snippet: snippet(c.body), author: user.login,
@@ -968,7 +965,7 @@ final class Store {
                     continue
                 }
                 guard c.createdAt >= cursor("review").addingTimeInterval(-1) else { continue }
-                if mentionsMe(c.body, me) { mentioned.insert("\(name)#r#\(c.id)") }
+                if Self.mentions(c.body, me) { mentioned.insert("\(name)#r#\(c.id)") }
                 fresh.append(InboxItem(
                     id: "\(name)#r#\(c.id)", repo: name, kind: .reviewComment, number: number,
                     title: title(for: number, in: name, titles), snippet: snippet(c.body), author: user.login,
@@ -1041,22 +1038,25 @@ final class Store {
         var reviewActivity: [Int: [Date]] = [:]
     }
 
+    private static func repositoryQuery(_ name: String, _ fields: String) -> String {
+        let parts = name.split(separator: "/")
+        return "query { repository(owner: \"\(parts[0])\", name: \"\(parts[1])\") {\(fields) } }"
+    }
+
     /// One GraphQL call for the threads new comments landed on: titles, authors and my participation.
     func fetchThreads(_ name: String, _ numbers: [Int], participation: Bool, reviewThreads: Set<Int>,
-                              me: String) async throws -> [Int: ThreadInfo] {
-        let parts = name.split(separator: "/")
+                      me: String) async throws -> [Int: ThreadInfo] {
         let common = participation ? "title author { login } comments(last: 100) { nodes { author { login } createdAt } }" : "title"
-        var q = "query { repository(owner: \"\(parts[0])\", name: \"\(parts[1])\") {"
+        var fields = ""
         for n in numbers.sorted().suffix(40) {
             var pr = common
             if participation { pr += " reviews(last: 50) { nodes { author { login } submittedAt } }" }
             if reviewThreads.contains(n) {
                 pr += " reviewThreads(last: 60) { nodes { comments(first: 50) { nodes { databaseId author { login } createdAt } } } }"
             }
-            q += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { \(common) } ... on PullRequest { \(pr) } }"
+            fields += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { \(common) } ... on PullRequest { \(pr) } }"
         }
-        q += " } }"
-        let json = try await gh.graphql(q)
+        let json = try await gh.graphql(Self.repositoryQuery(name, fields))
         guard let repoObj = (json["data"] as? [String: Any])?["repository"] as? [String: Any] else {
             throw GitHubError(message: "Couldn't load threads for \(name)")
         }
@@ -1100,24 +1100,16 @@ final class Store {
         return body.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
-    private func mentionsMe(_ body: String?, _ me: String) -> Bool {
-        Self.mentions(body, me)
-    }
-
-
     /// Review threads: resolution state lives only in GraphQL.
     private func syncThreads(_ name: String) async throws {
         let recent = Date().addingTimeInterval(-21 * 86400)
         let tracked = items.filter { $0.repo == name && $0.kind == .reviewComment && $0.state != .discarded && $0.createdAt > recent }
         let numbers = Array(Set(tracked.map(\.number))).sorted().suffix(20)
         guard !numbers.isEmpty else { return }
-        let parts = name.split(separator: "/")
-        var q = "query { repository(owner: \"\(parts[0])\", name: \"\(parts[1])\") {"
-        for n in numbers {
-            q += " pr\(n): pullRequest(number: \(n)) { reviewThreads(first: 100) { nodes { isResolved comments(first: 1) { nodes { databaseId } } } } }"
-        }
-        q += " } }"
-        let json = try await gh.graphql(q)
+        let fields = numbers.map {
+            " pr\($0): pullRequest(number: \($0)) { reviewThreads(first: 100) { nodes { isResolved comments(first: 1) { nodes { databaseId } } } } }"
+        }.joined()
+        let json = try await gh.graphql(Self.repositoryQuery(name, fields))
         guard let repoObj = (json["data"] as? [String: Any])?["repository"] as? [String: Any] else { return }
 
         var resolved: [Int: Bool] = [:]
