@@ -99,6 +99,41 @@ import Testing
         let _: Counted = try await client.get("/search/issues")
         #expect(asked.withLock { $0 } == ["/repos/o/r/issues", "/search/issues"])
     }
+
+    /// Holds a request until the test lets it through.
+    private actor AsyncGate {
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var isOpen = false
+        func wait() async { if !isOpen { await withCheckedContinuation { waiting.append($0) } } }
+        func open() { isOpen = true; waiting.forEach { $0.resume() }; waiting = [] }
+    }
+
+    @Test func anotherTokenStartsWithItsOwnBudgetAndNothingTheOldOneAskedForReachesIt() async throws {
+        let client = GitHubClient()
+        let reset = Date().addingTimeInterval(600)
+        let gate = AsyncGate()
+        client.token = "a"
+        client.transport = { request in
+            let url = request.url!
+            // The old account's last answer is still on its way when the token changes.
+            if url.path == "/search/slow" { await gate.wait() }
+            let limits = ["x-ratelimit-resource": "core", "x-ratelimit-remaining": "0", "ETag": "\"e\"",
+                          "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970))]
+            return (Data(#"{"id": 7}"#.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: limits)!)
+        }
+        let _: Counted = try await client.get("/repos/o/r/issues")
+        #expect(client.rateRemaining == 0 && client.remembered == 1)
+        let late = Task { let _: Counted = try await client.get("/search/slow") }
+        await Task.yield()
+        client.token = "b"
+        #expect(client.rateRemaining == nil && client.rateResetsAt == nil && client.remembered == 0)
+        let _: Counted = try await client.get("/user")
+        #expect(client.rateRemaining == 0)
+        client.token = "c"
+        await gate.open()
+        _ = try await late.value
+        #expect(client.rateRemaining == nil && client.remembered == 0)
+    }
 }
 
 /// The answers the idle gate's polling run serves (`--canned`): a poll through them gets every source of every repository, the

@@ -119,7 +119,21 @@ struct GitHubError: LocalizedError {
 
 /// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
 final class GitHubClient: @unchecked Sendable {
-    var token: String?
+    /// A different token is a different account: its quota and the answers it was given are not this one's, and what a request
+    /// that went out with the old one brings back is dropped (`credentials`).
+    var token: String? {
+        didSet {
+            guard token != oldValue else { return }
+            lock.withLock {
+                credentials += 1
+                coreRemaining = nil
+                coreResetsAt = nil
+                etags = [:]
+            }
+        }
+    }
+    /// Counts the changes of token, so an answer can tell it was asked for under another.
+    private var credentials = 0
     /// Stands in for the network (the idle gate's lifecycle run answers every request with a failure).
     var transport: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
     /// Remaining calls in the core (REST) bucket.
@@ -201,6 +215,7 @@ final class GitHubClient: @unchecked Sendable {
             comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
         let url = comps.url!
+        let asked = lock.withLock { credentials }
         var req = request(url)
         // Without the moving `since` cursor: each poll replaces the entry instead of adding one (a changed query
         // that returns the same body still gets its 304).
@@ -218,13 +233,14 @@ final class GitHubClient: @unchecked Sendable {
 
         let (data, resp) = try await send(req)
         let http = resp as! HTTPURLResponse
-        trackRate(http)
+        trackRate(http, asked: asked)
         if http.statusCode == 304, let cached {
             return Answer(data: cached.data, key: key, etag: cached.etag, notModified: true, decoded: cached.decoded)
         }
         try check(http, data)
         guard let etag = http.value(forHTTPHeaderField: "ETag") else { return Answer(data: data) }
         lock.withLock {
+            guard credentials == asked else { return }
             etagClock += 1
             let family = Self.family(of: key)
             // A newer commit's answers replace the older commit's: those are never asked for again.
@@ -272,11 +288,12 @@ final class GitHubClient: @unchecked Sendable {
         return req
     }
 
-    private func trackRate(_ http: HTTPURLResponse) {
+    private func trackRate(_ http: HTTPURLResponse, asked: Int) {
         guard http.value(forHTTPHeaderField: "x-ratelimit-resource") == "core",
               let remaining = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) else { return }
         let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset").flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) }
         lock.withLock {
+            guard credentials == asked else { return }
             coreRemaining = remaining
             coreResetsAt = reset
         }
