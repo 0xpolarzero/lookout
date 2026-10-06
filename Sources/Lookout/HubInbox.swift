@@ -75,6 +75,7 @@ enum InboxEmpty: Equatable {
 /// What to tell above the list while it stays: one at a time, the most pressing first.
 enum InboxNotice: Equatable {
     case reposFailed(Int)
+    case reviewRequestsFailed
     case rateLimited(until: Date?)
     case snoozed(until: Date)
 
@@ -82,6 +83,7 @@ enum InboxNotice: Equatable {
         func time(_ date: Date) -> String { date.formatted(date: .omitted, time: .shortened) }
         return switch self {
         case .reposFailed(let n): "\(plural(n, "repository", "repositories")) didn't sync"
+        case .reviewRequestsFailed: "Review requests didn't sync"
         case .rateLimited(let until?): "GitHub is rate limiting. Checking again at \(time(until))."
         case .rateLimited: "GitHub is rate limiting. Checking again soon."
         case .snoozed(let until): "Snoozed until \(time(until))"
@@ -98,13 +100,19 @@ extension Store {
     /// What replaces the list whatever rows it has: a sign-in problem leaves the cached rows stale, so they aren't shown.
     var inboxReplacement: InboxEmpty? { authError != nil ? .signedOut : nil }
 
+    /// Whether review requests are on and the last search for them failed.
+    var reviewRequestsFailing: Bool { settings.reviewRequests && reviewRequestsError != nil }
+
     /// The cause to show when the list under `filter` is empty.
     func inboxEmpty(_ filter: InboxFilter, now: Date = Date()) -> InboxEmpty {
         if let replacement = inboxReplacement { return replacement }
         if repos.isEmpty { return .noRepos }
         if lastSync == nil { return .firstSync }
         switch filter {
-        case .needsYou: return repoErrors.isEmpty && rateRemaining != 0 && !syncIsStale(now: now) ? .caughtUp : .nothingNew
+        case .needsYou:
+            // Every source checked: the repositories (and the quota they need) and the review-request search.
+            let healthy = repoErrors.isEmpty && rateRemaining != 0 && !reviewRequestsFailing && !syncIsStale(now: now)
+            return healthy ? .caughtUp : .nothingNew
         case .bots: return .botsQuiet
         case .done: return .doneEmpty
         }
@@ -115,6 +123,7 @@ extension Store {
         guard authError == nil, !repos.isEmpty else { return nil }
         if !repoErrors.isEmpty { return .reposFailed(repoErrors.count) }
         if rateRemaining == 0 { return .rateLimited(until: rateResetsAt.flatMap { $0 > now ? $0 : nil }) }
+        if reviewRequestsFailing { return .reviewRequestsFailed }
         if isSnoozed, let until = settings.snoozeUntil { return .snoozed(until: until) }
         return nil
     }
@@ -331,7 +340,7 @@ extension LookoutHub {
             if let notice {
                 StatusBanner(symbol: notice.symbol, tint: notice.tint, message: notice.message) {
                     switch notice {
-                    case .reposFailed: InboxLink("Retry") { store.refreshNow() }
+                    case .reposFailed, .reviewRequestsFailed: InboxLink("Retry") { store.refreshNow() }
                     case .snoozed: InboxLink("Resume") { store.snooze(for: nil) }
                     case .rateLimited: EmptyView()
                     }

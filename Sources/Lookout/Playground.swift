@@ -320,7 +320,7 @@ struct Shot {
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
 /// Inbox, right and top
 ///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
-///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
+///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
 ///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none,
 ///   inbox-search-from-focus, inbox-many, inbox-peek-many,
 ///   inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done,
@@ -339,7 +339,7 @@ enum PlaygroundShots {
     /// Why the inbox is empty or has a banner, as `(name, scenario, tab)`.
     private static let inboxCauses: [(String, Demo.Scenario, InboxFilter?)] = [
         ("signed-out", .signedOut, nil), ("no-repos", .empty, nil), ("repos-failed", .reposFailed, nil),
-        ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
+        ("review-requests-failed", .reviewRequestsFailed, nil), ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
         ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil),
     ]
     private static let ci: [(String, Demo.Scenario)] = [("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI)]

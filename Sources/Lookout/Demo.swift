@@ -10,7 +10,7 @@ enum Demo {
     enum Scenario: String, CaseIterable {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
         // Inbox and sync causes.
-        case signedOut, reposFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        case signedOut, reposFailed, reviewRequestsFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
         // An inbox longer than any list shows: the rest is "+N more".
         case inboxMany
         // CI.
@@ -97,6 +97,12 @@ enum Demo {
         case .reposFailed:
             agents(store, now)
             store.repoErrors = ["ziglang/zig": "Not found (or no access)", "e2b-dev/runtime": "Forbidden"]
+        case .reviewRequestsFailed:
+            // The repositories synced and nothing is for you, but the search for review requests failed: no claim.
+            agents(store, now)
+            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            passing(store)
+            store.reviewRequestsError = "API rate limit exceeded"
         case .rateLimited:
             agents(store, now)
             store.rateRemaining = 0

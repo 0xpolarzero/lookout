@@ -91,6 +91,9 @@ final class Store {
     var tokenSource: TokenSource?
     var authError: String?
     var repoErrors: [String: String] = [:]
+    /// Why the last search for review requests failed, if it did (a rate limit of its own bucket, say): the other
+    /// source of the inbox, besides the repositories.
+    var reviewRequestsError: String?
     var isSyncing = false
     var lastSync: Date?
     var rateRemaining: Int?
@@ -721,6 +724,8 @@ final class Store {
         }
         if settings.reviewRequests {
             await syncReviewRequests()
+        } else if reviewRequestsError != nil {
+            reviewRequestsError = nil
         }
     }
 
@@ -1031,8 +1036,15 @@ final class Store {
     }
 
     private func syncReviewRequests() async {
-        guard let result: GHSearch<GHIssue> = try? await gh.get(
-            "/search/issues", ["q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "50"]) else { return }
+        let result: GHSearch<GHIssue>
+        do {
+            result = try await gh.get("/search/issues", ["q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "50"])
+        } catch {
+            // Said, not swallowed: the inbox can't claim to be caught up on a source it couldn't check.
+            reviewRequestsError = error.localizedDescription
+            return
+        }
+        if reviewRequestsError != nil { reviewRequestsError = nil }
         let first = !settings.didInitialReviewSync
         var current = Set<String>()
         var added: [InboxItem] = []
