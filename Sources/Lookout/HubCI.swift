@@ -554,15 +554,17 @@ extension HubKeys {
     func ciKey(_ event: NSEvent, id: String, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool {
         let open = hub.ciPassingOpen || hub.focus == .ci
         let repo = store.repos.first { $0.fullName == id }
+        // What is bound comes first, an arrow bound to Open included: its own meaning below is for the arrow left unbound.
+        if shortcut == store.shortcut(.openItem) {
+            if id == "passing" { hub.setCIPassingOpen(!open) } else if let repo { store.openChecks(repo) }
+            return true
+        }
         if flags.isEmpty, event.keyCode == 124 || event.keyCode == 123 {
+            guard !isBound(shortcut) else { return false }
             // → opens it from its row; ← closes it from there or from a name under it, back on its row.
             if event.keyCode == 124, id == "passing", !open { hub.setCIPassingOpen(true); return true }
             if event.keyCode == 123, open, hub.focus != .ci { hub.setCIPassingOpen(false); select("c:passing"); return true }
             return false
-        }
-        if shortcut == store.shortcut(.openItem) {
-            if id == "passing" { hub.setCIPassingOpen(!open) } else if let repo { store.openChecks(repo) }
-            return true
         }
         if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "c", let repo {
             store.copyChecksURL(repo)

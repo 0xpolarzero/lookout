@@ -140,4 +140,26 @@ import Testing
         hub.selection = "s:new"
         #expect(!press(kVK_ContextualMenu, [], ""))
     }
+
+    @Test func aBindingOnAMenuChordActsInsteadOfOpeningTheMenu() {
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_Return), modifiers: [.control]), for: .toggleRead)
+        #expect(press(kVK_Return, [.control], "\r"))
+        #expect(store.items[0].state == .read && hub.rowMenuRequest == nil)
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_F10), modifiers: [.shift]), for: .discard)
+        #expect(press(kVK_F10, [.shift], ""))
+        #expect(!store.items[0].state.isOpen && hub.rowMenuRequest == nil)
+    }
+
+    @Test func aFocusedControlLetsGoOfTheRowCommandsAndTheArrowsTakeTheRowsBack() {
+        let control = UUID()
+        hub.controls.set(control, focused: true)
+        // ⌫ and a bound letter are not the picked row's while the ring is on a control.
+        #expect(!press(kVK_Delete, [], "\u{7F}"))
+        #expect(store.items[0].state == .unread)
+        // An arrow walks the rows again: the ring lets go (the control reports it when its focus goes).
+        #expect(press(kVK_DownArrow, [], ""))
+        hub.controls.set(control, focused: false)
+        #expect(press(kVK_Delete, [], "\u{7F}"))
+        #expect(!store.items[0].state.isOpen)
+    }
 }

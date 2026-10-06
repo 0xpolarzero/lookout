@@ -74,7 +74,7 @@ final class HubKeys {
     }
 
     /// Whether an in-hub action (not a global one) is bound to `shortcut`.
-    private func isBound(_ shortcut: Shortcut) -> Bool {
+    func isBound(_ shortcut: Shortcut) -> Bool {
         ShortcutAction.allCases.contains { !$0.isGlobal && store.shortcut($0) == shortcut }
     }
 
@@ -108,7 +108,6 @@ final class HubKeys {
         if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
         guard hub.expanded, hub.page == .main else { return false }
         let bound = isBound(shortcut)
-        if Self.opensRowMenu(event, flags: flags) { return openRowMenu() }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
             setQuery(String(hub.query.dropLast()))
@@ -117,6 +116,8 @@ final class HubKeys {
         let targets = targets()
         // A configured action comes before the arrows' own meaning: Right bound to "Mark read / unread" does that.
         if event.keyCode == 125 || event.keyCode == 126, flags.isEmpty, !bound {
+            // The arrows walk the rows, so a control the Tab ring was on lets go: Space and Return are the pick's again.
+            if hub.controls.isActive { event.window?.makeFirstResponder(nil) }
             move(down: event.keyCode == 125, in: targets)
             return true
         }
@@ -127,6 +128,8 @@ final class HubKeys {
             return true
         }
         if rowCommand(shortcut, targets: targets, event: event, flags: flags) { return true }
+        // The menu key's chords are the last of the keys' own meanings: one bound to an action is that action's.
+        if Self.opensRowMenu(event, flags: flags) { return openRowMenu() }
         // What no action took: ⌘F, and typing, which starts the search (a letter someone bound to an action is that action's,
         // while a row is picked to act on).
         if searchKey(event, flags: flags) { return true }
@@ -149,7 +152,8 @@ final class HubKeys {
     /// What the bound actions do to the row that is picked. Row commands act only on a row the lists show: a pick the search
     /// has since filtered out, or one in a section that shrank, is not one. False when `shortcut` is none of them.
     private func rowCommand(_ shortcut: Shortcut, targets: [String], event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
-        guard let selection = hub.selection, targets.contains(selection) else { return false }
+        // A control the Tab ring is on is the one being driven: the keys are not the picked row's meanwhile.
+        guard !hub.controls.isActive, let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
             if shortcut == store.shortcut(.openItem) { store.open(item) }

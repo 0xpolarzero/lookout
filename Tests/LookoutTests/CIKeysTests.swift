@@ -120,4 +120,12 @@ import Testing
         #expect(keys.key(press(kVK_Return)))
         #expect(opened() == ["Open checks · b/bad"])
     }
+
+    @Test func anArrowBoundToOpenOpensTheChecksInsteadOfMeaningPassing() {
+        let (keys, hub, opened) = pickedHub()
+        keys.store.setShortcut(Shortcut(keyCode: UInt16(kVK_RightArrow)), for: .openItem)
+        #expect(keys.key(press(kVK_RightArrow)))
+        #expect(opened() == ["Open checks · b/bad"])
+        #expect(hub.selection == "c:b/bad")
+    }
 }
