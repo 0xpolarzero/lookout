@@ -300,7 +300,7 @@ struct ShortcutRecorder: View {
                 if customized && !recording {
                     IconButton(symbol: "arrow.uturn.backward", help: "Reset", label: "Reset \(action.title) to default",
                                detail: "Back to \(action.defaultShortcut.display)") {
-                        error = store.resetShortcut(for: action)?.message
+                        refuse(store.resetShortcut(for: action)?.message)
                     }
                 } else {
                     Color.clear.frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
@@ -328,8 +328,6 @@ struct ShortcutRecorder: View {
             error = preview.recorderError
         }
         .onChange(of: current) { error = nil }
-        // A conflict or a refusal appears under the key and is said when it does (WCAG 4.1.3).
-        .onChange(of: error) { _, new in if let new { Announce.say(new) } }
         .onDisappear(perform: stop)
     }
 
@@ -360,7 +358,7 @@ struct ShortcutRecorder: View {
                 if action.isGlobal {
                     accept(Shortcut.mouse(event.buttonNumber, modifiers: event.modifierFlags))
                 } else {
-                    error = "Mouse buttons work for the shortcuts that work from any app"
+                    refuse("Mouse buttons work for the shortcuts that work from any app")
                 }
                 return nil
             }
@@ -379,7 +377,7 @@ struct ShortcutRecorder: View {
                 store.setShortcut(.unassigned, for: action)
                 stop()
             } else if action.isGlobal && !shortcut.hasCommandLikeModifier {
-                error = "Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere"
+                refuse("Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere")
             } else {
                 accept(shortcut)
             }
@@ -387,11 +385,17 @@ struct ShortcutRecorder: View {
         }
     }
 
+    /// A conflict or a refusal appears under the key and is said at each attempt, a repeated one too (WCAG 4.1.3).
+    private func refuse(_ message: String?) {
+        error = message
+        if let message { Announce.say(message) }
+    }
+
     private func accept(_ shortcut: Shortcut) {
         if let other = store.shortcutConflict(shortcut, for: action) {
-            error = ShortcutRefusal.usedBy(other).message
+            refuse(ShortcutRefusal.usedBy(other).message)
         } else if let refusal = store.setShortcut(shortcut, for: action) {
-            error = refusal.message
+            refuse(refusal.message)
         } else {
             stop()
         }

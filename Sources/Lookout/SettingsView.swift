@@ -547,13 +547,15 @@ struct SettingsView: View {
                     Text(restoreError).font(Theme.Typography.meta).foregroundStyle(Theme.red)
                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
                 }
-                BorderedButton("Restore defaults") { restoreError = store.restoreDefaultShortcuts()?.message }
+                BorderedButton("Restore defaults") {
+                    // A refusal appears beside the button and is said at each attempt, a repeated one too (WCAG 4.1.3).
+                    restoreError = store.restoreDefaultShortcuts()?.message
+                    if let restoreError { Announce.say(restoreError) }
+                }
                     .disabled(!store.hasCustomShortcuts)
             }
             .padding(.horizontal, Theme.Metrics.rowPadding)
             .onAppear { restoreError = preview.restoreError }
-            // A refusal appears beside the button and is said when it does (WCAG 4.1.3).
-            .onChange(of: restoreError) { _, new in if let new { Announce.say(new) } }
             .onChange(of: store.hasCustomShortcuts) { restoreError = nil }
         }
         // The notice that appears is said, once.
