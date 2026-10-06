@@ -331,17 +331,10 @@ extension LookoutHub {
         }
     }
 
-    /// CI in a panel: its header, then a line per state, each as tall as its count in the bar.
+    /// CI in a panel: its header, then its rows.
     @ViewBuilder var peekCI: some View {
-        if store.ciRepos.isEmpty {
-            linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) }.frame(height: Self.peekLine)
-        } else {
-            ciHeader.frame(height: Self.peekLine)
-            ForEach(Self.ciLineOrder, id: \.self) { state in
-                // Repos without a run only get their line when there are some.
-                if state != CIState.none || !ciRepos(listedIn: .none).isEmpty { ciLine(state).frame(minHeight: Self.peekLine) }
-            }
-        }
+        ciHeader.frame(height: Self.peekLine)
+        ciRows
     }
 
     /// The pointer left the bar and its panel: close the panel (a moment later, so going from one to the other,

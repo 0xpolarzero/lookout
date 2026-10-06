@@ -75,6 +75,10 @@ struct CappedScroll<Content: View>: View {
     /// The content is a lazy stack or grid: it only measures the rows its viewport reaches, so the list starts at the
     /// cap (a full viewport) and only shrinks once content measured *at the cap* turns out shorter.
     var lazy = false
+    /// The last visible row fades out when the list is cut short (the sessions' lists still do; the inbox's doesn't).
+    var fades = true
+    /// The system's scroll indicators (the inbox's, whose rows aren't lined up with the bar's cells).
+    var indicators = false
     @ViewBuilder let content: () -> Content
     @State private var height: CGFloat = 0
     @State private var viewport: CGFloat = 0
@@ -115,20 +119,34 @@ struct CappedScroll<Content: View>: View {
             }
             // No scroller: a legacy one ("Show scroll bars: Always") would take its width out of the rows and push
             // them off the bar's cells they line up with.
-            .scrollIndicators(.never)
+            .scrollIndicators(indicators ? .automatic : .never)
             .scrollDisabled(!cut)
             .frame(height: max(shown, 1))
             // Cut short: the last visible row fades out, so it reads as "more below" rather than clipped.
-            .mask {
+            .modifier(CutFade(on: fades, cut: cut))
+            .onChange(of: hub?.keyboardSelection) { _, request in
+                if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
+            }
+        }
+    }
+}
+
+/// The fade at the bottom of a list that is cut short.
+private struct CutFade: ViewModifier {
+    let on: Bool
+    let cut: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if on {
+            content.mask {
                 VStack(spacing: 0) {
                     Color.black
                     LinearGradient(colors: [.black, .black.opacity(cut ? 0.15 : 1)], startPoint: .top, endPoint: .bottom)
                         .frame(height: 14)
                 }
             }
-            .onChange(of: hub?.keyboardSelection) { _, request in
-                if let id = request?.id { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id) } }
-            }
+        } else {
+            content
         }
     }
 }
@@ -214,12 +232,6 @@ extension Store {
         memo.queryRevision = itemsRevision
         hub.searchMemo = memo
         return memo.result
-    }
-
-    /// A repo's latest CI run on GitHub (its Actions page until a run is known); the playground reports it instead.
-    func openChecks(_ repo: RepoConfig) {
-        let url = ci[repo.fullName]?.url ?? repo.url.appendingPathComponent("actions")
-        if let interceptOpen { interceptOpen("Open checks · \(repo.fullName)") } else { NSWorkspace.shared.open(url) }
     }
 
     /// A scratch Claude session (no folder), through the same interception as every other open.

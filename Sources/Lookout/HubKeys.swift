@@ -47,11 +47,16 @@ final class HubKeys {
             else { close() }
             return true
         }
+        // A control the Tab ring is on takes Return and Space itself; they don't act on the row that is picked.
+        if hub.controls.isActive, flags.isEmpty, [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) {
+            return false
+        }
         if flags == .command, event.charactersIgnoringModifiers == "," {
             hub.go(.settings)
             return true
         }
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
+        if flags == .command, event.charactersIgnoringModifiers == "z" { return store.undoLast() }
         guard hub.expanded, hub.page == .main else { return false }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
@@ -76,7 +81,8 @@ final class HubKeys {
             LookoutHub.animate { store.markAllRead(hub.filter) }
             return true
         }
-        guard let selection = hub.selection else { return false }
+        // Row commands only act on a row that is listed: a pick that turned passing, was muted or lost its CI is gone.
+        guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
             if shortcut == store.shortcut(.openItem) { store.open(item) }
@@ -88,6 +94,7 @@ final class HubKeys {
             } else { return false }
             return true
         }
+        if selection.hasPrefix("c:") { return ciKey(event, id: id, flags: flags, shortcut: shortcut) }
         if selection.hasPrefix("a:") {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
@@ -99,9 +106,9 @@ final class HubKeys {
         return false
     }
 
-    /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
+    /// Every row the arrows walk through, top to bottom: inbox items, CI, then sessions.
     private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
+        store.hubItems(hub).map { "i:" + $0.id } + hub.ciTargets(store) + store.hubSessions(hub).map { "a:" + $0.id }
     }
 
     /// A new search picks its first result, so ↩ opens it straight away.

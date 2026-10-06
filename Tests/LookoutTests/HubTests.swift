@@ -4,29 +4,6 @@ import SwiftUI
 import Testing
 @testable import Lookout
 
-@Suite struct HubCI {
-    private func status(_ state: CIState) -> CIStatus {
-        CIStatus(state: state, branch: "main", sha: nil, url: nil, failing: [], checkedAt: Date(), title: nil, updatedAt: nil)
-    }
-
-    private let repos = ["a/missing", "b/stored-none", "c/ok", "d/broken"].map { RepoConfig(fullName: $0) }
-
-    private func names(_ state: CIState) -> [String] {
-        let ci = ["b/stored-none": status(CIState.none), "c/ok": status(.success), "d/broken": status(.failure)]
-        return LookoutHub.ciRepos(listedIn: state, in: repos, status: ci).map(\.fullName)
-    }
-
-    @Test func noRunsIncludesMissingAndStoredNone() {
-        #expect(names(CIState.none) == ["a/missing", "b/stored-none"])
-    }
-
-    @Test func otherStatesAreExact() {
-        #expect(names(.success) == ["c/ok"])
-        #expect(names(.failure) == ["d/broken"])
-        #expect(names(.pending).isEmpty)
-    }
-}
-
 @Suite struct CappedScrollFit {
     @Test func stopsOnTheLastRowThatFits() {
         #expect(CappedScrollSpace.fit(cap: 100, edges: [36, 72, 108, 144]) == 72)

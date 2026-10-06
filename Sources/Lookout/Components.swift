@@ -233,6 +233,42 @@ private struct RowHighlight: ViewModifier {
 
 // MARK: - Focus
 
+/// Which controls have keyboard focus (the Tab ring), so the hub's key monitor can leave Return and Space to them
+/// instead of the picked row (DESIGN.md 6.2). Every control with a ring reports here; the hub owns one (`HubState.controls`).
+@MainActor
+final class ControlFocus {
+    private var holders: Set<UUID> = []
+    /// A control has focus.
+    var isActive: Bool { !holders.isEmpty }
+
+    func set(_ holder: UUID, focused: Bool) {
+        if focused { holders.insert(holder) } else { holders.remove(holder) }
+    }
+}
+
+private struct ControlFocusReport: ViewModifier {
+    let focused: Bool
+    @Environment(\.controlFocus) private var controlFocus
+    @State private var holder = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: focused) { _, now in controlFocus?.set(holder, focused: now) }
+            .onDisappear { controlFocus?.set(holder, focused: false) }
+    }
+}
+
+extension View {
+    /// Reports that this control has keyboard focus (its own `@FocusState`, not a row's pick) to the hub's key
+    /// monitor. `.focusRing` does it for the controls whose focus it keeps; one that keeps its own calls this.
+    func reportsControlFocus(_ focused: Bool) -> some View { modifier(ControlFocusReport(focused: focused)) }
+}
+
+extension EnvironmentValues {
+    /// Nil outside the hub (a sheet of components, a settings pane in isolation): nobody is listening.
+    @Entry var controlFocus: ControlFocus? = nil
+}
+
 private struct FocusRingDrawing: ViewModifier {
     let radius: CGFloat
     let inset: Bool
@@ -264,6 +300,7 @@ private struct FocusRing: ViewModifier {
 
     func body(content: Content) -> some View {
         content.focused($focused).modifier(FocusRingDrawing(radius: radius, inset: inset, focused: focused))
+            .reportsControlFocus(focused)
     }
 }
 
@@ -357,6 +394,7 @@ struct IconButton: View {
             .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
             .focused($focused)
             .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
+            .reportsControlFocus(focused)
             .accessibilityLabel(label ?? help)
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
@@ -588,50 +626,65 @@ struct Tabs<ID: Hashable>: View {
 // MARK: - Sections
 
 /// A section's header, 36pt: its title, one status phrase, then its actions. The whole header is the control that
-/// gives the section the room (click, or the key; the chevron only shows on hover or focus, as a hint). Reserve the
-/// trailing slots per section, so nothing in the header jumps.
+/// gives the section the room (a button behind it: click, Tab and Space, VoiceOver; the chevron only shows on hover or
+/// focus, as a hint). Reserve the trailing slots per section, so nothing in the header jumps.
 struct SectionHeader<Trailing: View>: View {
     let title: String
     var status: (text: String, color: AnyShapeStyle)? = nil
     /// This section is the focused one: `esc` shows beside the title, the chevron points back.
     var focused = false
-    /// What the chevron's tooltip says: "Expand Inbox", or "Back to all sections".
+    /// What the tooltip and VoiceOver say: "Expand Inbox", or "Back to all sections".
     var expandHelp = ""
     /// Click anywhere on the header; nil for a header that isn't a control.
     var onFocus: (() -> Void)? = nil
     @ViewBuilder var trailing: Trailing
     @State private var hovering = false
+    @FocusState private var keyboardFocus: Bool
 
     var body: some View {
         HStack(spacing: Theme.Space.md) {
-            Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
-            if let status {
-                Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
-                    .transition(.opacity)
+            Group {
+                Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                if let status {
+                    Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
+                        .transition(.opacity)
+                }
+                if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
+                Spacer(minLength: 0)
             }
-            if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
-            Spacer(minLength: 0)
+            // What is drawn over the button doesn't take its clicks; the trailing actions do.
+            .allowsHitTesting(false)
             trailing
             if onFocus != nil {
                 Image(systemName: focused ? "chevron.up" : "chevron.down")
                     .font(Theme.Typography.glyph(11, .semibold))
                     .foregroundStyle(Theme.tertiary)
                     .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
-                    .opacity(hovering || focused ? 1 : 0)
-                    .tip(expandHelp)
+                    .opacity(hovering || focused || keyboardFocus ? 1 : 0)
+                    .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
         .padding(.leading, Theme.Metrics.contentEdge - Theme.Metrics.inset)
         .padding(.trailing, Theme.Space.hair)
         .frame(minHeight: Theme.Metrics.pitch)
-        .contentShape(Rectangle())
+        .background { if let onFocus { activation(onFocus) } }
         .onHover { hovering = $0 }
-        .onTapGesture { onFocus?() }
         .motion(Theme.Motion.hover, value: hovering)
+        .motion(Theme.Motion.hover, value: keyboardFocus)
         .motion(Theme.Motion.fade, value: status?.text)
-        .accessibilityAction(named: "Focus") { onFocus?() }
+    }
+
+    /// The header's own button: no fill (the chevron is its hover cue), the shared ring when Tab lands on it.
+    private func activation(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Color.clear.contentShape(Rectangle()) }
+            .buttonStyle(.plain)
+            .focused($keyboardFocus)
+            .focusRing(Theme.Radius.row, inset: true, isFocused: keyboardFocus)
+            .reportsControlFocus(keyboardFocus)
+            .tip(expandHelp, focused: keyboardFocus)
+            .accessibilityLabel(expandHelp)
     }
 }
 
@@ -662,14 +715,22 @@ extension StatusBanner where Actions == EmptyView {
     }
 }
 
-/// A list with nothing in it, and why: two centred lines and at most one action.
+/// A list with nothing in it, and why: two centred lines and at most one action (and a glyph when it says why).
 struct EmptyBlock<Action: View>: View {
     let title: String
     var detail: String? = nil
+    /// Only when it carries the cause: the red icon of a sign-in problem, the hollow check of "All caught up".
+    var symbol: String? = nil
+    var symbolTint = AnyShapeStyle(Theme.tertiary)
     @ViewBuilder var action: Action
 
     var body: some View {
         VStack(spacing: Theme.Space.xs) {
+            if let symbol {
+                Image(systemName: symbol).font(Theme.Typography.glyph(22, .regular)).foregroundStyle(symbolTint)
+                    .padding(.bottom, Theme.Space.xs)
+                    .accessibilityHidden(true)
+            }
             Text(title).font(Theme.Typography.body.weight(.medium)).foregroundStyle(Theme.secondary)
             if let detail { Text(detail).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary) }
             action.padding(.top, Theme.Space.sm)

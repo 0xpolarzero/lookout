@@ -75,26 +75,16 @@ extension LookoutHub {
             .transition(.hubReveal)
         }
         sectionDivider
-        // CI: its header, then one line per state, its count in the bar beside the repos in it.
+        // CI: its cell in the bar beside the header, then its rows (none while searching, which doesn't look in CI).
         VStack(alignment: side, spacing: 0) {
-            if store.ciRepos.isEmpty {
-                row(cell: { ciCell }, detail: { linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) } })
-            } else {
-                row(cell: { ciCell }, detail: { ciHeader })
-                if !shrunk(.ci) {
-                    ForEach(Self.ciLineOrder, id: \.self) { state in
-                        if state != CIState.none || !ciRepos(listedIn: .none).isEmpty {
-                            row(cell: { ciCount(state) }, detail: { ciLine(state) })
-                        }
-                    }
+            row(cell: { ciCell }, detail: { if showsCI { ciHeader } })
+            if showsCI && !shrunk(.ci) {
+                row(cell: { EmptyView() }, detail: { ciRows })
                     .transition(.hubReveal)
-                }
             }
         }
         .modifier(probe(.ci))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
-        // A search doesn't look in CI.
-        .opacity(searching ? 0.4 : 1)
         if store.agents.enabled {
             sectionDivider
             VStack(alignment: side, spacing: 0) { agentRowsView }
@@ -190,27 +180,20 @@ extension LookoutHub {
             .frame(width: wide ? columnWidth(.inbox) : nil, alignment: .leading)
             .frame(maxHeight: .infinity)
             .modifier(probe(.inbox))
-            stripDivider
-            // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
-            HStack(spacing: 8) {
-                ciCell
-                if wide && shrunk(.ci) {
-                    // Shrunk: the counts fit where the header's words wouldn't.
-                    HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
-                    Spacer(minLength: 0)
-                    focusButton(.ci)
-                } else if wide {
-                    ciHeader.transition(.hubReveal)
-                } else {
-                    HStack(spacing: 2) { ForEach(Self.ciOrder, id: \.self) { ciCount($0) } }
+            // Without CI there is no cell, so no segment (and no second divider beside it).
+            if !store.ciRepos.isEmpty {
+                stripDivider
+                // CI: its icon, then the same header as the others (title, status, one expand button); its counts at rest.
+                HStack(spacing: 8) {
+                    ciCell
+                    if wide && showsCI && stripShowsCIHeader { ciHeader.transition(.hubReveal) }
                 }
+                .padding(.leading, Self.inset + 1)
+                .padding(.trailing, Self.inset)
+                .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
+                .frame(maxHeight: .infinity)
+                .modifier(probe(.ci))
             }
-            .padding(.leading, Self.inset + 1)
-            .padding(.trailing, Self.inset)
-            .frame(width: wide ? columnWidth(.ci) : nil, alignment: .leading)
-            .frame(maxHeight: .infinity)
-            .modifier(probe(.ci))
-            .opacity(searching ? 0.4 : 1)
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {

@@ -312,7 +312,7 @@ struct Shot {
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
 ///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
 /// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
-///   no-ci, all-passing, many-ci (15 repositories)
+///   no-ci, all-passing, many-ci (15 repositories); open-no-ci and open-all-passing also on the bottom edge
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus
 ///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
 ///   sessions-12 (also `focus-agents-sessions-12`)
@@ -335,7 +335,7 @@ enum PlaygroundShots {
         ("signed-out", .signedOut), ("repos-failed", .reposFailed), ("rate-limited", .rateLimited), ("snoozed", .snoozed),
         ("error", .error), ("needs-you-empty", .needsYouEmpty), ("first-sync", .firstSync), ("sync-fault", .syncFault),
     ]
-    private static let ci: [(String, Demo.Scenario)] = [("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI)]
+    private static let ci: [(String, Demo.Scenario)] = [("all-passing", .allPassing), ("many-ci", .manyCI)]
     private static let sessions: [(String, Demo.Scenario)] = [
         ("sessions-waiting", .sessionsWaiting), ("sessions-working", .sessionsWorking), ("sessions-unread", .sessionsUnread),
         ("sessions-new-activity", .sessionsNewActivity), ("sessions-scratch", .sessionsScratch),
@@ -375,7 +375,63 @@ enum PlaygroundShots {
         Shot.edges("open-done-empty", on: .rightAndTop) { $0.pinned = true; $0.scenario = .doneEmpty; $0.filter = .done },
         // CI, sessions and the update cell.
         ci.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .ci) },
+        // No CI has no cell on the strip to hover, so its peek is the side bar's only.
+        scenarioShots("no-ci", .noCI),
+        Shot.edges("peek-ci-no-ci", on: [.right]) { $0.section = .ci; $0.scenario = .noCI },
+        // The calm CI states, kept open where the block is short beside a taller column (the strip's other edge).
+        Shot.edges("open-all-passing", on: [.bottom]) { $0.pinned = true; $0.scenario = .allPassing },
+        Shot.edges("open-no-ci", on: [.bottom]) { $0.pinned = true; $0.scenario = .noCI },
         Shot.edges("focus-ci-many-ci", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.focus = .ci },
+        // CI rows: Passing open in place, a row picked, a muted repo, stale data, Increase Contrast.
+        Shot.edges("open-ci-passing-open", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.ciPassingOpen = true } },
+        // The bar's CI cell names the repository a click opens.
+        Shot.edges("rest-ci-tip", on: .rightAndTop) { $0.tip = "CI" },
+        Shot.edges("open-ci-picked", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" } },
+        Shot.edges("open-ci-muted", on: .rightAndTop) {
+            $0.pinned = true
+            $0.scenario = .manyCI
+            $0.setup = { store, _, hub in
+                if let vapor = store.repos.first(where: { $0.fullName == "vapor/vapor" }) { store.muteCI(vapor) }
+                hub.ciPassingOpen = true
+            }
+        },
+        // Stale: the last answers for CI are old, whatever the last (failed) poll says.
+        Shot.edges("open-ci-stale", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in
+                for key in store.ci.keys { store.ci[key]?.checkedAt = Date().addingTimeInterval(-3 * 3600) }
+                store.lastSync = Date()
+            }
+        },
+        // Muting offers an undo line in the CI section.
+        Shot.edges("open-ci-mute-undo", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in
+                if let repo = store.repos.first(where: { $0.fullName == "apple/swift-format" }) { store.muteCI(repo) }
+            }
+        },
+        // Stopping CI on the last repository that had it: the undo line is all the section has to say.
+        Shot.edges("open-ci-stop-undo", on: .rightAndTop) {
+            $0.pinned = true
+            $0.setup = { store, _, _ in
+                for repo in store.repos.filter({ $0.events.contains(.ciMain) }) { store.stopShowingCI(repo) }
+            }
+        },
+        Shot.edges("open-ci-contrast", on: .rightAndTop) {
+            $0.pinned = true
+            $0.environment = .contrast
+            $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" }
+        },
+        Shot.edges("open-ci-many-ci-720", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
+        // Fifteen failing repositories on a 720 pt screen: the list scrolls, nothing overflows.
+        Shot.edges("open-ci-failing-15-720", on: .rightAndTop) {
+            $0.pinned = true
+            $0.scenario = .manyCI
+            $0.size = Shot.hd
+            $0.setup = { store, _, _ in
+                for key in store.ci.keys { store.ci[key]?.state = .failure; store.ci[key]?.failing = ["Linux / build"] }
+            }
+        },
         sessions.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .agents) },
         Shot.edges("focus-agents-sessions-12", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents },
         updates.flatMap { slug, scenario in scenarioShots(slug, scenario) },
@@ -438,7 +494,7 @@ enum PlaygroundShots {
     }
 
     /// The shot's window, offscreen and showing.
-    private static func open(_ shot: Shot) -> NSWindow {
+    static func open(_ shot: Shot) -> NSWindow {
         let store = Store()
         Demo.populate(store, shot.scenario)
         store.agents.expanded = true
@@ -479,12 +535,17 @@ enum PlaygroundShots {
         return window
     }
 
-    private static func capture(_ window: NSWindow, to path: String) {
-        guard let view = window.contentView else { return }
+    /// What the window shows, as pixels (tests read them too).
+    static func bitmap(of window: NSWindow) -> NSBitmapImageRep? {
+        guard let view = window.contentView else { return nil }
         view.layoutSubtreeIfNeeded()
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        return rep
+    }
+
+    private static func capture(_ window: NSWindow, to path: String) {
+        try? bitmap(of: window)?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 }
 

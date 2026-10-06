@@ -20,11 +20,17 @@ final class HubState {
     /// No hover panels until the pointer has left the bar (set when the full view closes).
     var quiet = false
     var page: HubPage = .main
-    /// "i:<item id>" or "a:<session id>": the row the keys act on.
+    /// "i:<item id>", "c:<repo>" or "a:<session id>": the row the keys act on.
     var selection: String?
     /// The last row the keyboard (or a click on the inbox) picked: the lists scroll to it. Never set by hovering, so
     /// the pointer moving over a row doesn't move the list.
     var keyboardSelection: ScrollRequest?
+    /// CI's Passing row is open in place (it also is while CI is the focused section).
+    var ciPassingOpen = false
+    /// The bar's CI cell asked VoiceOver to move into CI's section (`showCI`); the section's header answers it.
+    var ciFocusPending = false
+    /// Which controls have the Tab ring: the key monitor leaves them Return and Space (see `HubKeys.key`).
+    @ObservationIgnored let controls = ControlFocus()
     var filter: InboxFilter = .needsYou {
         didSet { selection = nil; keyboardSelection = nil }
     }
@@ -216,6 +222,7 @@ struct LookoutHub: View {
             Button("Quit Lookout") { NSApp.terminate(nil) }
         }
         .environment(\.colorScheme, .dark)
+        .environment(\.controlFocus, hub.controls)
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
     }
@@ -301,10 +308,9 @@ struct LookoutHub: View {
                             focusedBody(focus).frame(minWidth: Self.ciWidth, idealWidth: Self.ciWidth, maxWidth: .infinity, alignment: .topLeading)
                         } else {
                             HStack(alignment: .top, spacing: 0) {
-                                // CI at the bottom (level with the new session row): the room between is the inbox's.
+                                // CI directly under the inbox, however short either is: no pinned spacer, no dead band.
                                 VStack(alignment: .leading, spacing: 0) {
                                     inboxColumn
-                                    Spacer(minLength: 0)
                                     Hairline(inset: 12)
                                     ciColumn
                                 }
@@ -396,7 +402,8 @@ struct LookoutHub: View {
     /// them; the sessions' (with the controls after it) spans theirs.
     func columnWidth(_ section: HubSection) -> CGFloat {
         switch section {
-        case .inbox: return Self.inboxSegment
+        // Without CI the inbox's segment spans the column (there is no cell for a segment of its own).
+        case .inbox: return store.ciRepos.isEmpty ? Self.githubWidth : Self.inboxSegment
         case .ci: return Self.githubWidth - Self.inboxSegment - 1
         default:
             // As much as the screen has left after the measured controls and update button, and the margins.
