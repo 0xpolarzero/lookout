@@ -177,6 +177,9 @@ final class Store {
     @ObservationIgnored var typesafeKeyCache: String?
     /// What keeps a key in the Keychain (tests answer for it).
     @ObservationIgnored var keychainWrite: ((String, String) -> Bool)?
+    /// A token was just saved or taken away: the next sign-in that fails is its result and is said aloud (a poll's isn't).
+    @ObservationIgnored private(set) var awaitingSignIn = false
+    @ObservationIgnored var announceSignIn: (String) -> Void = { Announce.say($0) }
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?
     @ObservationIgnored private var dotsWatcher: FolderWatcher?
@@ -700,9 +703,8 @@ final class Store {
     func authenticate() async {
         let resolved = await Task.detached { TokenProvider.resolve() }.value
         guard let (token, source) = resolved else {
-            me = nil
             tokenSource = nil
-            authError = SignInFailure.missingToken
+            signInFailed(SignInFailure.missingToken)
             return
         }
         gh.token = token
@@ -710,10 +712,20 @@ final class Store {
         do {
             me = try await gh.get("/user", as: GHUser.self)
             authError = nil
+            awaitingSignIn = false
         } catch {
-            me = nil
-            authError = error.localizedDescription
+            signInFailed(error.localizedDescription)
         }
+    }
+
+    /// Signing in failed. The Keychain took a token and GitHub then refused it, say, which the form can't tell: the result of
+    /// the attempt the user made is announced once, with the sentence the account row shows.
+    func signInFailed(_ reason: String) {
+        me = nil
+        authError = reason
+        guard awaitingSignIn else { return }
+        awaitingSignIn = false
+        announceSignIn(SignInFailure.sentence(reason))
     }
 
     /// Keeps `token` in the Keychain, or removes it with nothing, and signs in again with what is there. False when the
@@ -726,6 +738,7 @@ final class Store {
             Keychain.delete()
         }
         me = nil
+        awaitingSignIn = true
         refreshNow()
         return true
     }

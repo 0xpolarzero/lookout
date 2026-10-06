@@ -450,6 +450,24 @@ import Testing
         // Nothing was refreshed with the token that was not kept.
         #expect(s.lastSync == nil && !s.isSyncing)
     }
+
+    @Test func aTokenGitHubRejectsIsAnnouncedOnceForTheAttemptThatSavedIt() {
+        let s = Store()
+        s.persists = false
+        s.keychainWrite = { _, _ in true }
+        s.interceptRefresh = {}
+        var said: [String] = []
+        s.announceSignIn = { said.append($0) }
+        // A poll that fails to sign in with nobody having tried anything says nothing.
+        s.signInFailed("Bad credentials")
+        #expect(said.isEmpty)
+        #expect(s.setToken("ghp_revoked"))
+        s.signInFailed("The token was rejected: Bad credentials")
+        #expect(said == ["GitHub rejected your token."] && s.authError != nil)
+        // The next poll's failure is not the attempt's.
+        s.signInFailed("The token was rejected: Bad credentials")
+        #expect(said.count == 1)
+    }
 }
 
 @MainActor
