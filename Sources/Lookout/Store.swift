@@ -998,7 +998,7 @@ final class Store {
     /// GitHub's search returns at most 1000 results, 100 a page.
     private static let reviewRequestPages = 10
 
-    private func syncReviewRequests() async {
+    func syncReviewRequests() async {
         var found: [GHIssue] = []
         var complete = false
         do {
@@ -1013,8 +1013,10 @@ final class Store {
                 }
             }
         } catch {
-            // Said, not swallowed: the inbox can't claim to be caught up on a source it couldn't check.
+            // Said, not swallowed: the inbox can't claim to be caught up on a source it couldn't check. The pages that did
+            // arrive are real requests: kept, as a search that stopped short (nothing can be told missing from it).
             reviewRequestsError = error.localizedDescription
+            if !found.isEmpty { applyReviewRequests(found, complete: false) }
             return
         }
         if reviewRequestsError != nil { reviewRequestsError = nil }

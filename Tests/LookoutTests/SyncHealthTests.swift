@@ -42,4 +42,22 @@ import Testing
         await s.pollAll()
         #expect(s.repoErrors.isEmpty)
     }
+
+    @Test func aLaterReviewPageFailingKeepsTheRequestsAlreadyFetched() async {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.settings.didInitialReviewSync = true
+        let page1 = "[" + (1...100).map(Self.issue).joined(separator: ",") + "]"
+        s.gh.transport = { request in
+            let page = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "page" }?.value
+            if page == "1" { return SyncHealth.reply(200, #"{"total_count": 101, "incomplete_results": false, "items": \#(page1)}"#) }
+            return SyncHealth.reply(500, #"{"message": "Timed out"}"#)
+        }
+        await s.syncReviewRequests()
+        #expect(s.items.filter { $0.kind == .reviewRequested }.count == 100)
+        #expect(s.reviewRequestsError != nil && s.syncFault(stale: false) == .reviewRequests)
+        // Nothing the failed page might have held is taken for gone: a request that was there stays.
+        #expect(s.items.allSatisfy { $0.state.isOpen })
+    }
 }
