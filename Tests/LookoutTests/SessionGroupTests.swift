@@ -11,8 +11,7 @@ import Testing
     /// A store that lists `sessions`: the ids in `kept` kept (in that order), the rest new activity, `unread` unread.
     private func store(_ sessions: [ClaudeSession], kept: [String] = [], unread: Set<String> = [],
                        asking: Set<String> = []) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         // Seeded already (a first read offers only eight), so every session below is new activity.

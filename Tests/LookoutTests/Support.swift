@@ -80,3 +80,29 @@ func session(_ id: String, turns: Int = 3, folder: String? = "/code/app", minute
                   lastUserMessage: sessionsNow.addingTimeInterval(-(messageMinutesAgo ?? minutesAgo + 1) * 60),
                   summary: running ? nil : .init(blocked: blocked, detail: "Detail \(id)"), running: running)
 }
+
+/// An inbox item with nothing in it that a test does not ask for.
+func inboxItem(_ id: String = "1", repo: String = "a/b", kind: EventKind = .issueComment, number: Int = 1, title: String = "t",
+               author: String = "x", authorIsApp: Bool = false, at createdAt: Date = Date(), state: ItemState = .unread,
+               forYou: Bool? = nil, threadRoot: Int? = nil) -> InboxItem {
+    InboxItem(id: id, repo: repo, kind: kind, number: number, title: title, snippet: "", author: author, avatar: nil,
+              authorIsApp: authorIsApp, url: URL(string: "https://github.com/\(repo)")!, createdAt: createdAt, state: state,
+              threadRoot: threadRoot, forYou: forYou)
+}
+
+/// A status for a repository's default branch: a failure fails `build` unless `failing` says otherwise, and its runs last
+/// changed when it was checked unless `updatedAt` says so.
+func ciStatus(_ state: CIState, sha: String? = "a1", failing: [String]? = nil, checkedAt: Date = Date(), updatedAt: Date? = nil) -> CIStatus {
+    CIStatus(state: state, branch: "main", sha: sha, failing: failing ?? (state == .failure ? ["build"] : []), checkedAt: checkedAt,
+             updatedAt: updatedAt ?? checkedAt)
+}
+
+extension Store {
+    /// A store that writes nothing to disk, signed in as `login` when one is given.
+    @MainActor static func unsaved(signedInAs login: String? = nil) -> Store {
+        let store = Store()
+        store.persists = false
+        store.me = login.map { GHUser(login: $0, avatarUrl: nil, type: "User") }
+        return store
+    }
+}

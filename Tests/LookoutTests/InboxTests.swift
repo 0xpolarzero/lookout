@@ -7,11 +7,9 @@ import Testing
 @MainActor
 @Suite struct InboxCauses {
     private func healthy() -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved(signedInAs: "me")
         s.repos = [RepoConfig(fullName: "a/b")]
         s.lastSync = Date()
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
         return s
     }
 
@@ -170,8 +168,7 @@ import Testing
 @MainActor
 @Suite struct SnoozeExpiry {
     @Test func aSnoozeEndsForWhatReadsItAtItsDeadline() async throws {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.settings.snoozeUntil = Date().addingTimeInterval(0.3)
         let flag = Flag()
         withObservationTracking { _ = store.isSnoozed } onChange: { flag.set() }
@@ -182,8 +179,7 @@ import Testing
     }
 
     @Test func resumingEarlyLeavesNothingToFire() async throws {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.settings.snoozeUntil = Date().addingTimeInterval(0.3)
         store.snooze(for: nil)
         let revision = store.snoozeRevision

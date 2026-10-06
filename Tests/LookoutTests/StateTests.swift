@@ -5,9 +5,7 @@ import Testing
 @MainActor
 @Suite struct State {
     private func item(_ id: String, state: ItemState = .unread) -> InboxItem {
-        InboxItem(id: id, repo: "a/b", kind: .issueComment, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
-                  authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(timeIntervalSince1970: 1000),
-                  state: state)
+        inboxItem(id, at: Date(timeIntervalSince1970: 1000), state: state)
     }
 
     private func encoder() -> JSONEncoder {
@@ -48,8 +46,7 @@ import Testing
     }
 
     @Test func storeStampsDiscardedItemsAndClearsRestoredOnes() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.items = [item("1")]
         s.discard(s.items[0])
         #expect(s.items[0].clearedAt != nil)
@@ -117,8 +114,7 @@ import Testing
     }
 
     @Test func removingARepoForgetsItsMute() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one")]
         s.mutedCI = ["a/one": "abc", "a/two": "def"]
         s.removeRepo(s.repos[0])

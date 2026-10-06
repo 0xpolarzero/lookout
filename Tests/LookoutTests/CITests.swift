@@ -7,15 +7,13 @@ import Testing
     private let now = Date(timeIntervalSince1970: 1_000_000)
 
     private func status(_ state: CIState, sha: String? = "aaa", failing: [String] = [], changed: TimeInterval = 0) -> CIStatus {
-        CIStatus(state: state, branch: "main", sha: sha, url: nil, failing: failing, checkedAt: now, title: nil,
-                 updatedAt: now.addingTimeInterval(-changed))
+        ciStatus(state, sha: sha, failing: failing, checkedAt: now, updatedAt: now.addingTimeInterval(-changed))
     }
 
     private func repos(_ names: String...) -> [RepoConfig] { names.map { RepoConfig(fullName: $0) } }
 
     private func store(_ ci: [String: CIStatus], _ names: [String]) -> Store {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = names.map { RepoConfig(fullName: $0) }
         store.ci = ci
         return store

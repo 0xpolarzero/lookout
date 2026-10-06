@@ -5,17 +5,13 @@ import Testing
 @MainActor
 @Suite struct RepoPresets {
     private func store(_ repo: RepoConfig) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [repo]
         return s
     }
 
     private func comment(_ id: String, forYou: Bool?) -> InboxItem {
-        var item = InboxItem(id: id, repo: "a/one", kind: .issueComment, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
-                             authorIsApp: false, url: URL(string: "https://github.com/a/one")!, createdAt: Date(), state: .unread)
-        item.forYou = forYou
-        return item
+        inboxItem(id, repo: "a/one", forYou: forYou)
     }
 
     /// A repository's flags as the presets define them: every kind but CI, and All comments.
@@ -184,8 +180,7 @@ import Testing
     }
 
     @Test func stoppingAndResumingBringsEverythingBackInPlace() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one"), RepoConfig(fullName: "a/two", events: [.prComment]), RepoConfig(fullName: "a/three")]
         s.items = [comment("c1", forYou: true)]
         let status = CIStatus(state: .failure, branch: "main", sha: "abc", failing: ["build"], checkedAt: Date())
@@ -202,8 +197,7 @@ import Testing
     }
 
     @Test func movingByOneStopsAtTheEnds() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = ["a", "b", "c"].map { RepoConfig(fullName: "x/\($0)") }
         s.moveRepo("x/a", by: -1)
         #expect(s.repos.map(\.name) == ["a", "b", "c"])

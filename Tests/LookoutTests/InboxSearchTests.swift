@@ -7,14 +7,12 @@ import Testing
 @MainActor
 @Suite struct InboxSearch {
     private func item(_ id: String, title: String) -> InboxItem {
-        InboxItem(id: id, repo: "a/b", kind: .issueComment, number: 1, title: title, snippet: "", author: "x", avatar: nil,
-                  authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(), state: .unread)
+        inboxItem(id, title: title)
     }
 
     /// A store with two items, a hub that is open on the search, and the keys, with opening reported not done.
     private func rig() -> (store: Store, hub: HubState, keys: HubKeys, opened: Opened) {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.items = [item("1", title: "Format ranges"), item("2", title: "Crash on wake")]
         let opened = Opened()
         store.interceptOpen = { opened.titles.append($0) }
@@ -246,13 +244,10 @@ import Testing
 @MainActor
 @Suite struct InboxSignedOut {
     @Test func aSignInProblemReplacesTheListEvenWithRowsRetained() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/b")]
         s.lastSync = Date()
-        s.items = [InboxItem(id: "1", repo: "a/b", kind: .issueComment, number: 1, title: "Cached", snippet: "", author: "x",
-                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(),
-                             state: .unread)]
+        s.items = [inboxItem(title: "Cached")]
         #expect(s.inboxReplacement == nil)
         s.authError = "Bad credentials"
         #expect(s.list(.needsYou).count == 1)
@@ -263,16 +258,13 @@ import Testing
     }
 
     @Test func rowsThatAreNotDrawnAreNeitherTargetsNorResults() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         // No CI: its rows are targets too, and this is about the inbox's.
         var repo = RepoConfig(fullName: "a/b")
         repo.events.remove(.ciMain)
         s.repos = [repo]
         s.lastSync = Date()
-        s.items = [InboxItem(id: "1", repo: "a/b", kind: .issueComment, number: 1, title: "Cached", snippet: "", author: "x",
-                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!, createdAt: Date(),
-                             state: .unread)]
+        s.items = [inboxItem(title: "Cached")]
         let hub = HubState()
         hub.pinned = true
         #expect(s.hubTargets(hub) == ["i:1"])

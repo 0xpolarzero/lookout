@@ -14,8 +14,7 @@ import Testing
         store.persists = false
         store.undoStack.announce = { _ in }
         keys = HubKeys(store: store, ui: UIState(persists: false, edge: .right), hub: hub)
-        store.items = [InboxItem(id: "one", repo: "a/one", kind: .issueComment, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
-                                 authorIsApp: false, url: URL(string: "https://github.com/a/one")!, createdAt: Date(), state: .read)]
+        store.items = [inboxItem("one", repo: "a/one", state: .read)]
         hub.pinned = true
         hub.selection = "i:one"
     }
@@ -81,8 +80,7 @@ import Testing
         store.persists = false
         store.undoStack.announce = { _ in }
         keys = HubKeys(store: store, ui: UIState(persists: false, edge: .right), hub: hub)
-        store.items = [InboxItem(id: "one", repo: "a/one", kind: .issueComment, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
-                                 authorIsApp: false, url: URL(string: "https://github.com/a/one")!, createdAt: Date(), state: .unread)]
+        store.items = [inboxItem("one", repo: "a/one")]
         hub.pinned = true
         hub.selection = "i:one"
     }

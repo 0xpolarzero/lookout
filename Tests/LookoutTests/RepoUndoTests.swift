@@ -5,8 +5,7 @@ import Testing
 @MainActor
 @Suite struct RepoUndoTests {
     @Test func stoppingWatchingOffersUndoFromAnywhere() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.undoStack.announce = { _ in }
         s.repos = [RepoConfig(fullName: "a/one"), RepoConfig(fullName: "a/two")]
         s.stopWatching(s.repos[0])

@@ -54,8 +54,7 @@ import Testing
     }
 
     @Test func customizeAndReset() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         var registered: Shortcut?
         store.onGlobalShortcutChange = { _, shortcut in registered = shortcut; return true }
         let custom = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
@@ -74,8 +73,7 @@ import Testing
     }
 
     @Test func aClearedShortcutMatchesNothingAndComesBackWithReset() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.setShortcut(.unassigned, for: .markAllRead)
         #expect(store.shortcut(.markAllRead).isUnassigned)
         #expect(store.shortcut(.markAllRead).display == "None")
@@ -89,8 +87,7 @@ import Testing
     }
 
     @Test func restoreDefaultsResetsEveryShortcutAndRegistersTheGlobalOnesAgain() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         var registered: [ShortcutAction] = []
         store.onGlobalShortcutChange = { action, _ in registered.append(action); return true }
         store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)

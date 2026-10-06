@@ -9,8 +9,7 @@ import Testing
     private let now = sessionsNow
 
     private func status(_ state: CIState, sha: String = "a1", minutesAgo: Double = 10) -> CIStatus {
-        CIStatus(state: state, branch: "main", sha: sha, failing: state == .failure ? ["build"] : [],
-                 checkedAt: now, updatedAt: now.addingTimeInterval(-minutesAgo * 60))
+        ciStatus(state, sha: sha, checkedAt: now, updatedAt: now.addingTimeInterval(-minutesAgo * 60))
     }
 
     // MARK: CI cell
@@ -76,8 +75,7 @@ import Testing
     // MARK: Gear
 
     @Test func syncFaultsRankSignInFirstAndHealthyHasNone() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         #expect(s.syncFault(stale: false) == nil)
         #expect(s.syncFault(stale: true) == .stale)
         s.rateRemaining = 0
@@ -93,8 +91,7 @@ import Testing
     // MARK: Sessions
 
     private func store(_ sessions: [ClaudeSession], seeded: Bool = false) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         s.agents.seeded = seeded

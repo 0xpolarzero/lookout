@@ -124,8 +124,7 @@ import Testing
     }
 
     @Test func theLifecycleReportIsTheLineTheIdleScriptReads() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         let line = store.lifecycleLine()
         let pattern = #"^lifecycle: sessions=\d+ working=\d+ rings=\d+ showing=[01] reduceMotion=[01]\n$"#
         #expect(line.range(of: pattern, options: .regularExpression) != nil, "\(line)")

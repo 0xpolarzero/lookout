@@ -57,13 +57,9 @@ import Testing
     }
 
     @Test func showKeepsTheHubOpenOnCIWithItsFirstRowPicked() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = [RepoConfig(fullName: "a/ok"), RepoConfig(fullName: "b/bad")]
-        let now = Date()
-        store.ci = ["a/ok": CIStatus(state: .success, branch: "main", sha: "a1", url: nil, failing: [], checkedAt: now, title: nil, updatedAt: now),
-                    "b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
-                                      updatedAt: now)]
+        store.ci = ["a/ok": ciStatus(.success), "b/bad": ciStatus(.failure, sha: "b1")]
         let (hub, ui) = state(selecting: "i:1", keyboard: false)
         // From a search, with another section filling the view: CI's rows have to come back first.
         hub.query = "zig"
@@ -78,12 +74,9 @@ import Testing
     }
 
     @Test func showOnCIWhereTheRoomFoldsItsRowsFocusesCIInsteadOfPickingNothing() {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = [RepoConfig(fullName: "b/bad")]
-        let now = Date()
-        store.ci = ["b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
-                                      updatedAt: now)]
+        store.ci = ["b/bad": ciStatus(.failure, sha: "b1")]
         let (hub, ui) = state(selecting: "i:1", keyboard: false)
         // A low bar on the side: CI is only its header, and has no rows to pick.
         hub.ciFolded = true
@@ -95,12 +88,9 @@ import Testing
 
     /// A pinned hub with one failing repo, its row picked, and what the store was asked to open.
     private func pickedHub() -> (HubKeys, HubState, () -> [String]) {
-        let store = Store()
-        store.persists = false
+        let store = Store.unsaved()
         store.repos = [RepoConfig(fullName: "b/bad")]
-        let now = Date()
-        store.ci = ["b/bad": CIStatus(state: .failure, branch: "main", sha: "b1", url: nil, failing: ["build"], checkedAt: now, title: nil,
-                                      updatedAt: now)]
+        store.ci = ["b/bad": ciStatus(.failure, sha: "b1")]
         var opened: [String] = []
         store.interceptOpen = { opened.append($0) }
         let hub = HubState()

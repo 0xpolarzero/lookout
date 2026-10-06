@@ -9,8 +9,7 @@ import Testing
 
     /// A store that has already seen `sessions` once (seeded), so later reads are "new activity".
     private func store(_ sessions: [ClaudeSession], dots: Set<String> = []) -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.agents.enabled = true
         s.agents.enabledAt = now.addingTimeInterval(-3600)
         s.ingest(sessions, appUnread: dots, claudeFrontmost: false, now: now)
@@ -430,8 +429,7 @@ import Testing
 @MainActor
 @Suite struct TokenSaving {
     @Test func aGitHubTokenTheKeychainRefusedIsNotSavedAndIsNotSignedInWith() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         var written: [(String, String)] = []
         s.keychainWrite = { key, account in written.append((key, account)); return false }
         s.lastSync = nil
@@ -442,8 +440,7 @@ import Testing
     }
 
     @Test func aTokenGitHubRejectsIsAnnouncedOnceForTheAttemptThatSavedIt() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.keychainWrite = { _, _ in true }
         s.interceptRefresh = {}
         var said: [String] = []
@@ -463,8 +460,7 @@ import Testing
 @MainActor
 @Suite struct TypesafeKeySaving {
     @Test func aKeyTheKeychainRefusedIsNotSavedAndSaysSo() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         var written: [String] = []
         s.keychainWrite = { key, _ in written.append(key); return false }
         #expect(!s.setTypesafeKey("  sk-test \n"))
@@ -474,8 +470,7 @@ import Testing
     }
 
     @Test func aKeyTheKeychainKeptIsSavedTrimmed() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.keychainWrite = { _, _ in true }
         #expect(s.setTypesafeKey(" sk-test "))
         #expect(s.hasTypesafeKey && s.typesafeKey == "sk-test" && s.iconError == nil)
@@ -512,8 +507,7 @@ import Testing
     }
 
     @MainActor @Test func theNamesAreOnlyWorkedOutAgainWhenTheFoldersChange() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         func session(_ id: String, _ folder: String) -> ClaudeSession {
             ClaudeSession(id: id, title: id, folder: folder, lastActivity: Date())
         }

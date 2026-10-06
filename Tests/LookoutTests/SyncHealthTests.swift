@@ -19,8 +19,7 @@ import Testing
     }
 
     @Test func stoppingAFailedRepositoryClearsItsFault() {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one"), RepoConfig(fullName: "a/two")]
         s.repoErrors = ["a/one": "Forbidden"]
         #expect(s.syncFault(stale: false) == .partial)
@@ -29,9 +28,7 @@ import Testing
     }
 
     @Test func aRequestThatOutlivesItsRepositoryPublishesNoFault() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.settings.reviewRequests = false
         let repo = RepoConfig(fullName: "a/one")
         s.repos = [repo]
@@ -45,9 +42,7 @@ import Testing
     }
 
     @Test func anAnswerThatArrivesAfterTheRepositoryWasStoppedLeavesNothingInTheInbox() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.settings.reviewRequests = false
         var repo = RepoConfig(fullName: "a/one")
         repo.events = [.issueOpened]
@@ -72,17 +67,11 @@ import Testing
         #expect(s.pulse == pulse)
     }
 
-    private func ciAnswer(_ sha: String) -> CIStatus {
-        CIStatus(state: .success, branch: "main", sha: sha, url: nil, failing: [], checkedAt: Date(), title: nil, updatedAt: Date())
-    }
-
     @Test func aCIChecksOwnFailureIsInTheHealthAndSoIsItsRecovery() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.repos = [RepoConfig(fullName: "a/x")]
         nonisolated(unsafe) var offline = true
-        let answer = ciAnswer("s1")
+        let answer = ciStatus(.success, sha: "s1")
         s.ciFetch = { _ in
             if offline { throw GitHubError(message: "The Internet connection appears to be offline") }
             return answer
@@ -97,12 +86,10 @@ import Testing
     }
 
     @Test func aCIThatAnswersDoesNotClearTheConversationsFailure() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.settings.reviewRequests = false
         s.repos = [RepoConfig(fullName: "a/x")]
-        let answer = ciAnswer("s1")
+        let answer = ciStatus(.success, sha: "s1")
         s.ciFetch = { _ in answer }
         s.gh.transport = { _ in SyncHealth.reply(500, #"{"message": "Server error"}"#) }
         await s.pollAll()
@@ -112,9 +99,7 @@ import Testing
     }
 
     @Test func theConversationsHealthIsPublishedWithCIOffToo() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.settings.reviewRequests = false
         var repo = RepoConfig(fullName: "a/x")
         repo.events.remove(.ciMain)
@@ -132,9 +117,7 @@ import Testing
     }
 
     @Test func aLaterReviewPageFailingKeepsTheRequestsAlreadyFetched() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.settings.didInitialReviewSync = true
         let page1 = "[" + (1...100).map { Self.issue($0) }.joined(separator: ",") + "]"
         s.gh.transport = { request in
@@ -150,9 +133,7 @@ import Testing
     }
 
     @Test func aSearchThatOutlivesTheSwitchAddsNothingAndSaysNothing() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.settings.didInitialReviewSync = true
         s.gh.transport = { _ in
             // Review requests is turned off while the page is out.
@@ -172,9 +153,7 @@ import Testing
     }
 
     @Test func aFirstSearchThatIsCutShortStillArmsTheNotificationsForWhatComesLater() async {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         // GitHub cuts the first search short: the baseline is what it listed.
         s.gh.transport = { _ in SyncHealth.reply(200, #"{"total_count": 5, "incomplete_results": true, "items": [\#(Self.issue(1))]}"#) }
         await s.syncReviewRequests()
@@ -192,9 +171,7 @@ import Testing
     }
 
     @Test func anIncompleteReviewSearchIsOneFaultOnEverySurface() {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.repos = [RepoConfig(fullName: "a/b")]
         s.lastSync = Date()
         #expect(s.syncFault(stale: false) == nil && s.inboxNotice() == nil)
@@ -212,14 +189,11 @@ import Testing
     }
 
     @Test func aSyncThatLeftCIBehindIsNotHealthy() {
-        let s = Store()
-        s.persists = false
-        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let s = Store.unsaved(signedInAs: "me")
         s.repos = [RepoConfig(fullName: "a/b")]
         let now = Date()
         s.lastSync = now
-        s.ci = ["a/b": CIStatus(state: .success, branch: "main", sha: "s1", url: nil, failing: [], checkedAt: now.addingTimeInterval(-3 * 3600),
-                                title: nil, updatedAt: now.addingTimeInterval(-3 * 3600))]
+        s.ci = ["a/b": ciStatus(.success, sha: "s1", checkedAt: now.addingTimeInterval(-3 * 3600))]
         // The inbox was checked a moment ago; CI's answer is three hours old. One health, on every surface.
         #expect(!s.isStale(at: now) && s.isCIStale(at: now))
         #expect(s.syncFault(stale: s.isStale(at: now), ciStale: s.isCIStale(at: now)) == .ciStale)

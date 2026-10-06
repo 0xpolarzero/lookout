@@ -5,14 +5,11 @@ import Testing
 @MainActor
 @Suite struct Prune {
     private func item(_ id: String, _ repo: String, _ kind: EventKind, forYou: Bool? = nil, state: ItemState = .unread) -> InboxItem {
-        InboxItem(id: id, repo: repo, kind: kind, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
-                  authorIsApp: false, url: URL(string: "https://github.com/\(repo)")!, createdAt: Date(), state: state,
-                  forYou: forYou)
+        inboxItem(id, repo: repo, kind: kind, state: state, forYou: forYou)
     }
 
     private func store() -> Store {
-        let s = Store()
-        s.persists = false
+        let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one", allComments: true), RepoConfig(fullName: "a/two")]
         s.items = [
             item("1", "a/one", .prComment, forYou: true),
