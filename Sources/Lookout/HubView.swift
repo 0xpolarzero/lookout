@@ -128,6 +128,8 @@ final class HubState {
     /// A tooltip's bubble and the way to it from its control, in the window: the pointer on its way to it is still on the hub
     /// (WCAG 1.4.13, hoverable), though it is outside the hub's own frame.
     @ObservationIgnored var tipRegion: CGRect = .zero
+    /// The pointer is on a tooltip's bubble, which can reach out of a peek's panel: the peek stays while it is there.
+    var overTip = false
 
     /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
     var expanded: Bool { pinned }
@@ -328,6 +330,7 @@ struct LookoutHub: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size in if !hub.expanded, barSize != size { barSize = size } }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { if !hub.expanded, hubTop != $0 { hubTop = $0 } }
         .onHover { overBar = $0; hoverChanged() }
+        .onChange(of: hub.overTip) { hoverChanged() }
         .clipShape(barOutline)
         // The hovered section's panel, outside the bar's clip; the bar's own size doesn't change.
         .overlay(alignment: .topLeading) { peekPanel }

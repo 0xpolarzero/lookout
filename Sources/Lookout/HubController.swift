@@ -80,7 +80,7 @@ struct HubRoot: View {
         GeometryReader { geo in content(in: geo.size) }
             .coordinateSpace(.named(LookoutHub.rootSpace))
             // Tooltips are drawn over the whole window, outside the hub's clipped shape, so they're never cut off.
-            .tipSpace { hub.tipRegion = $0 }
+            .tipSpace(region: { hub.tipRegion = $0 }, bubble: { hub.overTip = $0 })
     }
 
     /// On the sides the full view stays below the bar's rest anchor, so the inbox tile never moves.

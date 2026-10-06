@@ -323,11 +323,11 @@ extension LookoutHub {
         ControlsSyncRow(store: store, picked: picked == .sync, onFocus: { follow(.sync) })
     }
 
-    /// The pointer left the bar and its panel: close the panel (a moment later, so going from one to the other,
-    /// side by side, doesn't count).
+    /// The pointer left the bar, its panel and a tooltip's bubble: close the panel (a moment later, so going from one to
+    /// another, side by side, doesn't count).
     func hoverChanged() {
         peekLeave?.cancel()
-        guard !overBar, !overPanel else { return }
+        guard !overBar, !overPanel, !hub.overTip else { return }
         let hub = hub
         hub.cancelDwell()
         peekLeave = Task { @MainActor in

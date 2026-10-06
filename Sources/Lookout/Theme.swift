@@ -398,6 +398,8 @@ private struct TipBubble: View {
     let bounds: CGSize
     /// Tells the window where the bubble is, and the way to it from its control, as it moves.
     let report: (CGRect) -> Void
+    /// Tells the window whether the pointer is on the bubble.
+    let hover: (Bool) -> Void
     @State private var size = CGSize.zero
 
     /// How wide the text may be: what the window leaves the bubble, and a sentence's worth at most. A long title wraps.
@@ -450,7 +452,10 @@ private struct TipBubble: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
         // The bubble keeps itself open while the pointer is on it (it can be read and magnified), and closes a moment after
         // the pointer leaves it. Invisible until it is measured, so it takes no pointer before then.
-        .onHover { inside in if inside { center.hold(bubble: true) } else { center.releaseBubble(request.id) } }
+        .onHover { inside in
+            hover(inside)
+            if inside { center.hold(bubble: true) } else { center.releaseBubble(request.id) }
+        }
         .offset(placement)
         .opacity(size == .zero ? 0 : 1)
         .allowsHitTesting(size != .zero)
@@ -497,6 +502,8 @@ extension EnvironmentValues {
 private struct TipSpaceModifier: ViewModifier {
     /// Where a bubble and the way to it are in this space, for a window that takes the mouse there (`.zero`: none).
     let region: (CGRect) -> Void
+    /// Whether the pointer is on the bubble: a window that closes when the pointer leaves it keeps it for that too.
+    let bubble: (Bool) -> Void
     /// Where an open tip is the first thing Esc closes: the one every window shares unless a test gives its own.
     let escape: EscapeRoute?
     @State private var center = TipCenter()
@@ -510,7 +517,7 @@ private struct TipSpaceModifier: ViewModifier {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
             .overlay(alignment: .topLeading) {
                 if let request = center.current {
-                    TipBubble(request: request, center: center, bounds: size, report: region)
+                    TipBubble(request: request, center: center, bounds: size, report: region, hover: bubble)
                         .transition(.opacity.animation(Theme.Motion.hover))
                 }
             }
@@ -518,17 +525,18 @@ private struct TipSpaceModifier: ViewModifier {
             .onChange(of: center.current?.id, initial: true) { _, id in
                 let route = escape ?? .shared
                 if id != nil { route.add(escapeID) { center.dismiss() } } else { route.remove(escapeID) }
-                if id == nil { region(.zero) }
+                if id == nil { region(.zero); bubble(false) }
             }
-            .onDisappear { (escape ?? .shared).remove(escapeID); region(.zero) }
+            .onDisappear { (escape ?? .shared).remove(escapeID); region(.zero); bubble(false) }
     }
 }
 
 extension View {
     /// Hosts tooltips for everything inside (use once, at the root of the panel).
-    /// `region` hears where the bubble and the way to it lie (`.zero` when none is up).
-    func tipSpace(region: @escaping (CGRect) -> Void = { _ in }, escape: EscapeRoute? = nil) -> some View {
-        modifier(TipSpaceModifier(region: region, escape: escape))
+    /// `region` hears where the bubble and the way to it lie (`.zero` when none is up), `bubble` whether the pointer is on it.
+    func tipSpace(region: @escaping (CGRect) -> Void = { _ in }, bubble: @escaping (Bool) -> Void = { _ in },
+                  escape: EscapeRoute? = nil) -> some View {
+        modifier(TipSpaceModifier(region: region, bubble: bubble, escape: escape))
     }
 
     /// A tooltip for an icon-only control: `detail` is its key, or a short sentence. `focused` (the control's own
