@@ -54,25 +54,7 @@ extension LookoutHub {
         }
         .modifier(probe(.inbox))
         if showsDetail && !shrunk(.inbox) {
-            Group {
-                if items.isEmpty {
-                    row(cell: { EmptyView() }, detail: { emptyInbox })
-                }
-                CappedScroll(cap: caps.inbox, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
-                    AdaptiveStack(count: items.count, alignment: side, spacing: 1) {
-                        ForEach(items) { item in
-                            row(cell: { EmptyView() }, detail: { itemRow(item) }).capEdge().id("i:" + item.id)
-                        }
-                    }
-                    .padding(.bottom, 4)
-                    .id(searching ? "search" : hub.filter.rawValue)
-                    .transition(.opacity)
-                    .motion(Theme.Motion.fade, value: listKey)
-                }
-                // Its own width, so a scroller can't widen it and push its rows off the bar's column.
-                .frame(width: Self.cell + Self.detail)
-            }
-            .transition(.hubReveal)
+            row(cell: { EmptyView() }, detail: { inboxBody(cap: caps.inbox) }).padding(.bottom, 4)
         }
         sectionDivider
         // CI: its header, then one line per state, its count in the bar beside the repos in it.

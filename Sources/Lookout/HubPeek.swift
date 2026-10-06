@@ -321,14 +321,7 @@ extension LookoutHub {
 
     /// The inbox list in a panel: scrolls once it's long.
     @ViewBuilder var peekInbox: some View {
-        if items.isEmpty {
-            emptyInbox
-        } else {
-            CappedScroll(cap: 330, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
-                AdaptiveStack(count: items.count, spacing: 1) { ForEach(items) { itemRow($0).id("i:" + $0.id) } }
-                    .motion(Theme.Motion.fade, value: listKey)
-            }
-        }
+        inboxBody(cap: 330)
     }
 
     /// CI in a panel: its header, then a line per state, each as tall as its count in the bar.

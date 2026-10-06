@@ -38,6 +38,8 @@ final class HubState {
     var toast: String?
     /// Typed while the hub has the keyboard: narrows the inbox and finds sessions, kept or not.
     var query = ""
+    /// The inbox header's search field and scroll state (see HubInbox.swift).
+    let inbox = InboxState()
     /// Which way the last page change went, so pages slide in from the side you're heading to.
     var forward = true
     /// The page you came from, so going back retraces your steps (Repositories opened from Settings goes back
@@ -416,15 +418,9 @@ struct LookoutHub: View {
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
-                          alignment: .leading, spacing: 1) {
-                    ForEach(items) { itemRow($0).id("i:" + $0.id) }
-                }
+            inboxBody(cap: maxLength - Self.cell - 16 - 2 * 8)
                 .padding(.horizontal, Self.inset)
                 .padding(.vertical, 8)
-            }
-            .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
         case .ci:
             ciColumn
         default:
