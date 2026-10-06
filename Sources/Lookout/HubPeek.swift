@@ -29,6 +29,9 @@ extension HubState {
     /// The controls for the keyboard and VoiceOver: at rest, the peek, first row highlighted, the keys acting on it; kept
     /// open, where the footer holds them, VoiceOver's cursor goes to the footer's first control. Either way it lands there.
     func showControls() {
+        // A page has no controls of its own: back to the main view, kept open or not as it was before the page, which is
+        // where they are (the page itself would only have returned at once, with nothing shown).
+        if page != .main { go(.main) }
         moveVoiceOver(to: "h:controls")
         if expanded { return }
         quiet = false

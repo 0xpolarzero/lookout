@@ -266,6 +266,20 @@ enum AccessibilityTree {
         store.agents.expanded = true
     }
 
+    @Test func showControlsOnAPageGoesBackToTheMainViewsControls() {
+        // Opened from the bare bar: back to it, and the peek of the controls has the keys.
+        hub.go(.settings)
+        hub.showControls()
+        #expect(hub.page == .main && !hub.pinned && hub.section == .controls && hub.menuKeys)
+        // Kept open before the page: still kept open, and the cursor goes to the footer.
+        hub.closePeek()
+        hub.menuKeys = false
+        hub.pinned = true
+        hub.go(.repos)
+        hub.showControls()
+        #expect(hub.page == .main && hub.pinned && hub.voiceOverRequest?.target == "h:controls")
+    }
+
     @Test func clickingTheInboxWithAnotherSectionFocusedPicksARowThatIsThere() {
         for focus in [HubSection.ci, .agents] {
             hub.focus = focus
