@@ -179,6 +179,11 @@ enum AccessibilityTree {
         #expect(tabs.children.filter(\.selected).map(\.label) == ["General"])
         #expect(page.first("AXButton", "Done")?.help == "Closes Settings")
         #expect(page.all.contains { $0.role == "AXHeading" && $0.label == "GitHub" })
+        // The open pane is a heading too, whichever pane it is.
+        for pane in SettingsPane.allCases {
+            let tree = try root(try await AccessibilityTree.render { _, hub in hub.go(.settings); hub.settingsPane = pane })
+            #expect(tree.all.contains { $0.role == "AXHeading" && $0.label == pane.title }, "\(pane.title)")
+        }
         // The bar beside it is the same bar, its gear saying what it now does.
         #expect(settings.first("AXButton", "Close Settings") != nil)
         let repos = try root(try await AccessibilityTree.render { _, hub in hub.go(.repos) })
@@ -218,6 +223,32 @@ enum AccessibilityTree {
         view.show(.inbox)
         let first = "i:" + store.list(.needsYou)[0].id
         #expect(hub.pinned && hub.selection == first && hub.voiceOverRequest?.target == first)
+    }
+
+    @Test func showControlsOnTheGearOpensTheMenuAtRestWithoutPinningAndSendsVoiceOverToItsFirstRow() {
+        view.show(.controls)
+        #expect(hub.section == .controls && hub.menuKeys && !hub.pinned && hub.voiceOverRequest?.target == "h:controls")
+    }
+
+    @Test func showControlsKeptOpenSendsVoiceOverToTheFootersFirstControl() {
+        hub.pinned = true
+        view.show(.controls)
+        // The footer is the controls there: no menu to take the keys, nothing to unpin.
+        #expect(hub.pinned && !hub.menuKeys && hub.section == nil && hub.voiceOverRequest?.target == "h:controls")
+    }
+
+    @Test func reopeningOnAFocusedSectionSendsVoiceOverToTheHeaderThatIsShowing() {
+        hub.focus = .ci
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "h:ci")
+        hub.voiceOverRequest = nil
+        hub.focus = .agents
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "h:agents")
+        hub.voiceOverRequest = nil
+        hub.focus = nil
+        hub.moveVoiceOverIntoHub()
+        #expect(hub.voiceOverRequest?.target == "h:inbox")
     }
 
     @Test func showOnASessionSendsVoiceOverToThatSession() {
@@ -266,17 +297,21 @@ enum AccessibilityTree {
         #expect(store.openingAnnouncement == "Lookout, nothing needs you")
     }
 
-    @Test func ciChangingUnderTheOpenHubIsSaidByName() {
-        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI failing: swift-format")
-        // The latest change first, as the rows are.
+    @Test func ciChangingUnderTheOpenHubIsSaidByNameAndEachRepositoryCounts() {
+        let before = store.ciStates
+        // Nothing moved.
+        #expect(store.ciChangeAnnouncement(from: before, to: store.ciStates) == nil)
+        // One repository stays failing while another goes from running to passing: that is a change too.
+        store.ci["ziglang/zig"]?.state = .success
+        #expect(store.ciChangeAnnouncement(from: before, to: store.ciStates) == "CI passing: zig")
+        // Several at once are one announcement, the failing first.
+        var states = before
         store.ci["ziglang/zig"]?.state = .failure
         store.ci["ziglang/zig"]?.failing = ["Linux / test"]
-        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI failing: zig and swift-format")
-        for key in store.ci.keys { store.ci[key]?.state = .pending }
-        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI running")
-        for key in store.ci.keys { store.ci[key]?.state = .success }
-        #expect(store.ciAnnouncement(for: store.ciWorst) == "CI passing")
-        for key in store.ci.keys { store.ci[key]?.state = CIState.none }
-        #expect(store.ciAnnouncement(for: store.ciWorst) == nil)
+        store.ci["apple/swift-format"]?.state = .success
+        states["ziglang/zig"] = .pending
+        #expect(store.ciChangeAnnouncement(from: states, to: store.ciStates) == "CI failing: zig. CI passing: swift-format")
+        // A repository with no earlier answer is not a change.
+        #expect(store.ciChangeAnnouncement(from: [:], to: store.ciStates) == nil)
     }
 }

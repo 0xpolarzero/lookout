@@ -271,6 +271,9 @@ struct Shot {
     var showsExplainer = false
     /// Anything the fields above don't cover, after they are applied.
     var setup: ((Store, UIState, HubState) -> Void)?
+    /// What happens once the hub has opened to the shot's state (its pin, page and focus), where `setup` runs before: a
+    /// change made by something that comes after the open, such as search from a focused section.
+    var afterOpen: ((Store, UIState, HubState) -> Void)?
 
     /// The same shot on each of these edges, named `<edge>-<state>`.
     static func edges(_ state: String, on edges: [DockEdge] = .all,
@@ -446,7 +449,7 @@ enum PlaygroundShots {
         // CI rows: Passing open in place, a row picked, a muted repo, stale data, Increase Contrast.
         Shot.edges("open-ci-passing-open", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.ciPassingOpen = true } },
         // The bar's CI cell names the repository a click opens.
-        Shot.edges("rest-ci-tip", on: .rightAndTop) { $0.tip = "CI" },
+        Shot.edges("rest-ci-tip", on: .all) { $0.tip = "CI" },
         Shot.edges("open-ci-picked", on: .rightAndTop) { $0.pinned = true; $0.setup = { _, _, hub in hub.selection = "c:apple/swift-format" } },
         Shot.edges("open-ci-muted", on: .rightAndTop) {
             $0.pinned = true
@@ -546,7 +549,7 @@ enum PlaygroundShots {
             $0.pinned = true
             $0.focus = .ci
             $0.query = "format"
-            $0.setup = { _, _, hub in hub.beginSearch() }
+            $0.afterOpen = { _, _, hub in hub.beginSearch() }
         },
         Shot.edges("inbox-undo", on: .rightAndTop) {
             $0.pinned = true
@@ -825,6 +828,7 @@ enum PlaygroundShots {
         return (window, {
             if let pane = shot.preview.pane { hub.settingsPane = pane }
             hub.pinned = shot.pinned; hub.page = shot.page; hub.focus = shot.focus
+            shot.afterOpen?(store, ui, hub)
         })
     }
 

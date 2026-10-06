@@ -166,12 +166,12 @@ extension Store {
         let message = "\(repo.name): \(preset.title)" + (removed.isEmpty ? "" : ", \(plural(removed.count, "item")) removed")
         registerUndo(message, in: .controls, announcement: "\(repo.fullName) set to \(preset.title). Undo available") { [self] in
             guard let i = repos.firstIndex(where: { $0.id == before.id }) else { return }
-            for kind in moved {
-                if before.events.contains(kind) { repos[i].events.insert(kind) } else { repos[i].events.remove(kind) }
-            }
-            if movedAllComments { repos[i].allComments = before.allComments }
+            // Through the calls the checkboxes make, so a flag turned off by undoing drops what it no longer follows (items
+            // fetched under the broader preset), and what comes back is only what the settings as they are now would keep.
+            for kind in moved where repos[i].events.contains(kind) != before.events.contains(kind) { toggle(kind, on: repos[i]) }
+            if movedAllComments, repos[i].allComments != before.allComments { toggleAllComments(repos[i]) }
             let known = Set(items.map(\.id))
-            items.append(contentsOf: removed.filter { !known.contains($0.id) })
+            items.append(contentsOf: removed.filter { !known.contains($0.id) && isWanted($0) })
             save()
         }
     }
@@ -317,10 +317,11 @@ struct ReposView: View {
                         .onKeyPress(.downArrow) { move(1) }
                         .onKeyPress(.upArrow) { move(-1) }
                         .accessibilityLabel("Repository to watch")
-                    if adding { ProgressView().controlSize(.mini) }
+                    // Static: nothing in the hub spins but the working ring.
+                    if adding { Text("Adding…").font(Theme.Typography.meta).foregroundStyle(Theme.secondary) }
                 }
                 .fieldStyle(focused: fieldFocused)
-                BorderedButton("Add") { add(input) }
+                BorderedButton("Add", action: submit)
                     .disabled(input.isEmpty || adding)
             }
             if let failure {

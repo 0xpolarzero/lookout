@@ -1,12 +1,23 @@
 #!/bin/bash
-# Gate 1 of DESIGN.md section 8: idle is 0%. Launches the release build on the demo data (`--demo agents`: working
-# sessions, so the rings are breathing), lets it settle, then reads the process's cumulative CPU time at the start and
-# end of a window and asserts the average stays under the limit, once with the bar at rest and once kept open
-# (`--open`). WindowServer's share over the same window is printed apart: it draws the rings, and is not part of the
-# verdict. This puts the bar on screen for about two minutes, so it is for the final gate, not for every change.
+# Gate 5 of DESIGN.md section 9 (the rules are section 8): idle is 0%. Launches the release build on the demo data with
+# its real lifecycle (`--demo agents --lifecycle`: working sessions, so the rings are breathing; polling, with every
+# request failing at once; the Claude watchers and their timers on an empty temporary folder), lets it settle, then reads
+# the process's cumulative CPU time at the start and end of a window and asserts the average stays under the limit, at
+# rest and kept open (`--open`), on the right edge and along the top (the full-width strip is where the window grew).
+# WindowServer's share over the same window is printed apart: it draws the rings, and is not part of the verdict.
 #
-#   scripts/idle-cpu.sh                 build (release) and measure both
-#   LIMIT=0.2 WINDOW=60 scripts/idle-cpu.sh
+# It needs the bar on screen: with the screen locked or asleep, or the bar covered, the ring's animation is removed and
+# any number would be about 0%. So the script checks that the bar's window is on screen and fails when it is not (a
+# verdict from a bar nobody could see proves nothing); ALLOW_HIDDEN=1 turns that into a warning.
+#
+# What it does not measure: the network (every request fails at once, so nothing is parsed or drawn from an answer),
+# notifications, the updater's loop, a real Claude app's files changing under the watchers, a transcript being read,
+# typing, hovering and scrolling. Those are covered by the rules of section 8 and by Instruments by hand.
+#
+# This puts the bar on screen for about two and a half minutes, so it is for the final gate, not for every change.
+#
+#   scripts/idle-cpu.sh                 build (release) and measure
+#   LIMIT=0.2 WINDOW=60 EDGES="right top bottom left" scripts/idle-cpu.sh
 #   SKIP_BUILD=1 scripts/idle-cpu.sh    use the release build as it is
 set -u
 cd "$(dirname "$0")/.."
@@ -14,6 +25,7 @@ cd "$(dirname "$0")/.."
 limit=${LIMIT:-0.1}     # percent of one core
 settle=${SETTLE:-5}     # seconds between launch and the first sample
 window=${WINDOW:-30}    # seconds between the two samples
+edges=${EDGES:-"right top"}
 bin=.build/release/Lookout
 
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
@@ -30,37 +42,59 @@ cpu_seconds() {
     }'
 }
 
+# on_screen <pid>: how many windows of the process are on screen and not transparent (0 when the screen is locked).
+on_screen() {
+    osascript -l JavaScript -e '
+        function run(argv) {
+            ObjC.import("CoreGraphics")
+            const pid = Number(argv[0])
+            const windows = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)))
+            return String(windows.filter(w => w.kCGWindowOwnerPID === pid && w.kCGWindowAlpha > 0).length)
+        }' "$1" 2>/dev/null || echo 0
+}
+
+# The Claude app's folders, empty: the watchers have something to watch and nothing happens in it.
+claude_root=$(mktemp -d)
+mkdir -p "$claude_root/claude-code-sessions" "$claude_root/Local Storage/leveldb"
+
 pid=
-cleanup() { [ -n "$pid" ] && kill "$pid" 2>/dev/null; }
+cleanup() {
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null
+    rm -rf "$claude_root"
+}
 trap cleanup EXIT
 
 failed=0
 
-# measure <label> [launch argument]: one launch, one verdict.
+# measure <label> <edge> [launch argument]: one launch, one verdict.
 measure() {
-    local label=$1; shift
-    "$bin" --demo agents "$@" >/dev/null 2>&1 &
+    local label=$1 edge=$2; shift 2
+    LOOKOUT_CLAUDE_ROOT=$claude_root "$bin" --demo agents --lifecycle --edge "$edge" "$@" >/dev/null 2>&1 &
     pid=$!
     sleep "$settle"
     if ! kill -0 "$pid" 2>/dev/null; then
-        echo "idle-cpu: $label: Lookout exited during the first $settle seconds"
+        echo "idle-cpu: $label $edge: Lookout exited during the first $settle seconds"
         failed=1
         return
+    fi
+    if [ "$(on_screen "$pid")" = "0" ]; then
+        echo "idle-cpu: $label $edge: the bar's window is not on screen (locked or asleep screen, or covered): the rings aren't drawing, so a number would mean nothing"
+        [ "${ALLOW_HIDDEN:-0}" = "1" ] || failed=1
     fi
     local ws; ws=$(pgrep -x WindowServer | head -1)
     local app0 app1 ws0 ws1
     app0=$(cpu_seconds "$pid"); ws0=$(cpu_seconds "${ws:-0}")
     sleep "$window"
     if ! kill -0 "$pid" 2>/dev/null; then
-        echo "idle-cpu: $label: Lookout exited while it was measured"
+        echo "idle-cpu: $label $edge: Lookout exited while it was measured"
         failed=1
         return
     fi
     app1=$(cpu_seconds "$pid"); ws1=$(cpu_seconds "${ws:-0}")
-    awk -v label="$label" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v w0="${ws0:-0}" -v w1="${ws1:-0}" 'BEGIN {
+    awk -v label="$label $edge" -v window="$window" -v limit="$limit" -v a0="$app0" -v a1="$app1" -v w0="${ws0:-0}" -v w1="${ws1:-0}" 'BEGIN {
         app = (a1 - a0) / window * 100; server = (w1 - w0) / window * 100
         verdict = app < limit ? "ok" : "FAIL"
-        printf "%-8s Lookout %.3f%% (limit %s%%)  WindowServer %.2f%% (all clients)  %s\n", label, app, limit, server, verdict
+        printf "%-12s Lookout %.3f%% (limit %s%%)  WindowServer %.2f%% (all clients)  %s\n", label, app, limit, server, verdict
         exit app < limit ? 0 : 1
     }' || failed=1
     kill "$pid" 2>/dev/null
@@ -70,7 +104,9 @@ measure() {
     sleep 1
 }
 
-measure rest
-measure open --open
+for edge in $edges; do
+    measure rest "$edge"
+    measure open "$edge" --open
+done
 
 exit $failed

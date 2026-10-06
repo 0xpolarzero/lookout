@@ -6,7 +6,7 @@ import SwiftUI
 
 /// Where VoiceOver should move: asked for by `HubState.moveVoiceOver(to:)`, answered by the view that has that key.
 struct VoiceOverRequest: Equatable {
-    /// "i:<item>" and "a:<session>" are rows (the keyboard's own keys); "h:inbox", "h:ci" and "h:agents" a section's header.
+    /// "i:<item>" and "a:<session>" are rows (the keyboard's own keys); "h:inbox", "h:ci" and "h:agents" a section's header, "h:controls" the controls (the peek's first row, the footer's first control).
     let target: String
     let at: Date
 }
@@ -21,10 +21,11 @@ extension HubState {
         voiceOverRequest = VoiceOverRequest(target: target, at: Date())
     }
 
-    /// The hub opened from the keyboard or an action that named no row: the picked row, else the inbox's header.
+    /// The hub opened from the keyboard or an action that named no row: the picked row, else the header of the section
+    /// that is showing (the inbox's tabs are not there while another section has the room).
     func moveVoiceOverIntoHub() {
         if let request = voiceOverRequest, Date().timeIntervalSince(request.at) < Self.voiceOverPatience { return }
-        moveVoiceOver(to: selection ?? "h:inbox")
+        moveVoiceOver(to: selection ?? (focus == .ci ? "h:ci" : focus == .agents ? "h:agents" : "h:inbox"))
     }
 }
 
@@ -87,51 +88,86 @@ extension Store {
         return parts.joined(separator: ", ")
     }
 
-    /// What CI changing under an open hub says: "CI failing: swift-format and zig", "CI passing". Nothing when no
-    /// repository has a run.
-    func ciAnnouncement(for worst: CIWorst) -> String? {
-        switch worst.state {
-        case .failure:
-            let names = ciList.attention.filter { $0.state == .failure }.map { ciList.title($0.repo) }
-            return "CI failing: \(CISpeech.list(names))"
-        case .pending: return "CI running"
-        case .success: return "CI passing"
-        case .none: return nil
+    /// Each repository's state that counts (CI on, checked, not muted): what a change is told from.
+    var ciStates: [String: CIState] {
+        var states: [String: CIState] = [:]
+        for entry in ciList.entries where entry.checked && !entry.muted { states[entry.id] = entry.state }
+        return states
+    }
+
+    /// What CI changing under an open hub says, by repository and what each became: "CI failing: swift-format and zig.
+    /// CI passing: lookout". Only repositories that were already known (a first answer is not a change). nil when none.
+    func ciChangeAnnouncement(from old: [String: CIState], to new: [String: CIState]) -> String? {
+        let list = ciList
+        let words: [(CIState, String)] = [(.failure, "failing"), (.pending, "running"), (.success, "passing")]
+        let parts = words.compactMap { state, word -> String? in
+            let names = list.entries.filter { new[$0.id] == state && old[$0.id] != nil && old[$0.id] != state }.map { list.title($0.repo) }
+            return names.isEmpty ? nil : "CI \(word): \(CISpeech.list(names))"
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ". ")
+    }
+}
+
+/// What Lookout says to VoiceOver on its own, from one place: the hub's summary, CI changes, notices that just appeared.
+/// The same words twice within a few seconds are said once.
+@MainActor
+enum Announce {
+    private static var last: (text: String, at: Date)?
+
+    static var voiceOverIsOn: Bool { NSApp != nil && NSWorkspace.shared.isVoiceOverEnabled }
+
+    /// A moment after what moved the cursor, so the window taking the keyboard doesn't talk over it.
+    static func say(_ text: String, after delay: Duration = .milliseconds(300)) {
+        guard voiceOverIsOn else { return }
+        if let last, last.text == text, Date().timeIntervalSince(last.at) < 3 { return }
+        last = (text, Date())
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            AccessibilityNotification.Announcement(text).post()
         }
     }
 }
 
 /// Says what the hub has to say on its own, to VoiceOver (DESIGN.md 6.3): its summary when it is kept open, CI changing
-/// under it while it is, and "Back to bar" when it goes. From a view of its own, so only this body reads what it needs.
+/// under it while it is (changes close together are one announcement), a Claude notice that appears, and "Back to bar"
+/// when it goes. From a view of its own, so only this body reads what it needs.
 struct HubAnnouncer: View {
     let store: Store
     let hub: HubState
+    /// The CI states before the changes now waiting to be said, and the wait that gathers them.
+    @State private var ciBase: [String: CIState]?
+    @State private var ciWait: Task<Void, Never>?
 
     var body: some View {
         Color.clear
             .onChange(of: hub.pinned) { _, pinned in
                 // A page pins the hub too, and a drag puts it away: neither is the hub opening or going.
-                guard hub.page == .main, !hub.dragging, Self.voiceOverIsOn else { return }
+                guard hub.page == .main, !hub.dragging, Announce.voiceOverIsOn else { return }
                 if pinned {
                     hub.moveVoiceOverIntoHub()
-                    Self.say(store.openingAnnouncement)
+                    Announce.say(store.openingAnnouncement)
                 } else {
-                    Self.say("Back to bar")
+                    Announce.say("Back to bar")
                 }
             }
-            .onChange(of: store.ciWorst) { _, worst in
-                guard hub.expanded, Self.voiceOverIsOn, let text = store.ciAnnouncement(for: worst) else { return }
-                Self.say(text)
+            .onChange(of: store.ciStates) { old, _ in ciChanged(from: old) }
+            .onChange(of: store.claudeLink) { _, link in
+                guard store.agents.enabled, hub.expanded, link == .missing || link == .unreadable else { return }
+                let line = ClaudeLinkStatus.describe(link)
+                Announce.say("\(line.text). \(line.detail)")
             }
     }
 
-    private static var voiceOverIsOn: Bool { NSApp != nil && NSWorkspace.shared.isVoiceOverEnabled }
-
-    /// A moment after what moved the cursor, so the window taking the keyboard doesn't talk over it.
-    private static func say(_ text: String) {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(300))
-            AccessibilityNotification.Announcement(text).post()
+    /// Repositories that change within a moment of one another are told together, by name.
+    private func ciChanged(from old: [String: CIState]) {
+        guard hub.expanded, Announce.voiceOverIsOn else { return }
+        if ciBase == nil { ciBase = old }
+        ciWait?.cancel()
+        ciWait = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let base = ciBase else { return }
+            ciBase = nil
+            if let text = store.ciChangeAnnouncement(from: base, to: store.ciStates) { Announce.say(text) }
         }
     }
 }

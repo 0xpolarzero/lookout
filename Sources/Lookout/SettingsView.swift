@@ -78,6 +78,38 @@ enum SignInFailure {
     }
 }
 
+/// What the gear's badge is about, in the GitHub group: the fault, when the last check got through and a way to check
+/// again. Nothing while syncing is healthy (a sign-in problem is the account row's own).
+private struct SyncStatusRow: View {
+    let store: Store
+
+    var body: some View {
+        Ticking(coarse: true) { now in
+            let stale = store.lastSync.map { now.timeIntervalSince($0) > store.settings.pollInterval * 3 } ?? false
+            if let fault = store.syncFault(stale: stale), fault != .signIn {
+                FormDivider()
+                FormRow(label: fault.phrase, control: {
+                    BorderedButton("Check now") { store.refreshNow() }.disabled(store.isSyncing)
+                }, detail: {
+                    Text(detail(fault))
+                })
+            }
+        }
+    }
+
+    /// Which repositories, or why, then the last time anything got through.
+    private func detail(_ fault: SyncFault) -> String {
+        let reason = switch fault {
+        case .partial: store.repoErrors.keys.sorted().joined(separator: ", ")
+        case .reviewRequests: store.reviewRequestsError ?? ""
+        case .rateLimited: store.rateResetsAt.map { "Checking again at \($0.formatted(date: .omitted, time: .shortened))." } ?? ""
+        default: ""
+        }
+        let last = store.lastSync.map { "Last checked at \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not checked yet"
+        return [reason, last].filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+}
+
 struct SettingsView: View {
     @Bindable var store: Store
     /// The open pane, when the page header owns it.
@@ -130,6 +162,14 @@ struct SettingsView: View {
     private func paneStack<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xl + Theme.Space.xs) { content() }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // The pane's title is the selected tab above; the heading VoiceOver's heading navigation finds is this one,
+            // at the top of the pane, which draws nothing and takes no room.
+            .overlay(alignment: .topLeading) {
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel(title)
+                    .accessibilityAddTraits(.isHeader)
+            }
             .accessibilityElement(children: .contain)
             .accessibilityLabel(title)
     }
@@ -144,6 +184,7 @@ struct SettingsView: View {
                     FormDivider()
                     tokenField
                 }
+                SyncStatusRow(store: store)
                 FormDivider()
                 FormButtonRow(action: openRepos) {
                     HStack(spacing: Theme.Space.md) {
@@ -443,6 +484,8 @@ struct SettingsView: View {
             }
             .padding(.horizontal, Theme.Metrics.rowPadding)
         }
+        // The notice that appears is said, once.
+        .onChange(of: needsAccess, initial: true) { _, now in if now { Announce.say("Needs Accessibility access") } }
     }
 
     private func shortcutRows(_ actions: [ShortcutAction]) -> some View {
@@ -528,8 +571,16 @@ struct SettingsView: View {
                     BorderedButton("Remove") { store.setTypesafeKey(nil) }
                 }
             } else {
-                SecretField(prompt: "Paste a TypeSafe API key", text: $typesafeKey, save: saveTypesafeKey)
-                    .padding(.bottom, Theme.Space.md)
+                // Icons are on and can't pick without a key: setting it is the one thing left to do, so it says how it is saved.
+                VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                    HStack(spacing: Theme.Space.sm) {
+                        SecretField(prompt: "Paste a TypeSafe API key", text: $typesafeKey, save: saveTypesafeKey)
+                        if !typesafeKey.isEmpty { BorderedButton("Save", action: saveTypesafeKey) }
+                    }
+                    Text("Icons need a key. Save it, or press Return: it is kept in the Keychain.")
+                        .font(Theme.Typography.meta).foregroundStyle(Theme.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.bottom, Theme.Space.md)
             }
             if let error = store.iconError {
                 Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.red)
@@ -542,6 +593,7 @@ struct SettingsView: View {
         guard !typesafeKey.isEmpty else { return }
         store.setTypesafeKey(typesafeKey)
         typesafeKey = ""
+        Announce.say("TypeSafe key saved")
     }
 }
 
