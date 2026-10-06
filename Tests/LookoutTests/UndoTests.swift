@@ -145,6 +145,59 @@ final class Sleeper {
         #expect(state.droppedRequests == ["rr#1"])
     }
 
+    // MARK: Review requests beyond the first page
+
+    private func request(_ id: Int) -> GHIssue {
+        let json = """
+        {"id": \(id), "number": \(id), "title": "PR \(id)", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
+         "html_url": "https://github.com/a/b/pull/\(id)", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z",
+         "pull_request": null, "repository_url": "https://api.github.com/repos/a/b"}
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
+        return try! decoder.decode(GHIssue.self, from: Data(json.utf8))
+    }
+
+    @Test func aClearedRequestKeepsItsSuppressionWhileOffThePageFetched() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        s.discard(s.items[0])
+        s.clearDone()
+        #expect(s.droppedRequests == ["rr#1"])
+        // It slides off the page that was fetched, then back on: still cleared, not unread again.
+        s.applyReviewRequests([request(2)], complete: false)
+        #expect(s.droppedRequests == ["rr#1"])
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        #expect(s.droppedRequests == ["rr#1"])
+        #expect(!s.items.contains { $0.id == "rr#1" })
+    }
+
+    @Test func aRequestOffThePageFetchedIsNotMarkedAddressed() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1), request(2)], complete: true)
+        s.applyReviewRequests([request(2)], complete: false)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
+        s.applyReviewRequests([request(2)], complete: true)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .addressed)
+    }
+
+    @Test func aSuppressionEndsOnceTheSearchListedEverythingWithoutIt() {
+        let s = store([])
+        s.settings.didInitialReviewSync = true
+        s.applyReviewRequests([request(1)], complete: true)
+        s.discard(s.items[0])
+        s.clearDone()
+        #expect(s.droppedRequests == ["rr#1"])
+        s.applyReviewRequests([], complete: true)
+        #expect(s.droppedRequests.isEmpty)
+        // The same PR asks for a review again.
+        s.applyReviewRequests([request(1)], complete: true)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
+    }
+
     // MARK: Undo after the configuration changed
 
     private func configured() -> Store {

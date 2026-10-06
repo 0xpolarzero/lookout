@@ -1035,20 +1035,39 @@ final class Store {
         }
     }
 
+    /// GitHub's search returns at most 1000 results, 100 a page.
+    private static let reviewRequestPages = 10
+
     private func syncReviewRequests() async {
-        let result: GHSearch<GHIssue>
+        var found: [GHIssue] = []
+        var complete = false
         do {
-            result = try await gh.get("/search/issues", ["q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "50"])
+            for page in 1...Self.reviewRequestPages {
+                let result: GHSearch<GHIssue> = try await gh.get("/search/issues", [
+                    "q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "100", "page": "\(page)"])
+                found += result.items
+                if result.incompleteResults == true { break }
+                if result.items.count < 100 || found.count >= (result.totalCount ?? .max) {
+                    complete = true
+                    break
+                }
+            }
         } catch {
             // Said, not swallowed: the inbox can't claim to be caught up on a source it couldn't check.
             reviewRequestsError = error.localizedDescription
             return
         }
         if reviewRequestsError != nil { reviewRequestsError = nil }
+        applyReviewRequests(found, complete: complete)
+    }
+
+    /// `complete`: `found` is every pending request. Only then can a missing one be told from one that moved off the
+    /// page (past 100 results, or a search GitHub cut short), which must keep its row and its place in `droppedRequests`.
+    func applyReviewRequests(_ found: [GHIssue], complete: Bool) {
         let first = !settings.didInitialReviewSync
         var current = Set<String>()
         var added: [InboxItem] = []
-        for pr in result.items {
+        for pr in found {
             let id = "rr#\(pr.id)"
             current.insert(id)
             guard !items.contains(where: { $0.id == id }), !droppedRequests.contains(id), let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
@@ -1059,14 +1078,17 @@ final class Store {
             items.append(item)
             added.append(item)
         }
-        // Cleared requests are forgotten once GitHub stops listing them, so a new request on the same PR shows again.
-        if !droppedRequests.isSubset(of: current) { droppedRequests.formIntersection(current) }
-        // Request disappeared: I reviewed it (or it was withdrawn/closed).
-        for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
-            items[i].state = .addressed
+        if complete {
+            // Cleared requests are forgotten once GitHub stops listing them, so a new request on the same PR shows again.
+            if !droppedRequests.isSubset(of: current) { droppedRequests.formIntersection(current) }
+            // Request disappeared: I reviewed it (or it was withdrawn/closed).
+            for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
+                items[i].state = .addressed
+            }
         }
         if first {
-            settings.didInitialReviewSync = true
+            // The rest of a partial first sync is still "what was already there", not news.
+            if complete { settings.didInitialReviewSync = true }
         } else {
             announce(added)
         }
