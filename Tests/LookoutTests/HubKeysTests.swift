@@ -128,4 +128,16 @@ import Testing
         #expect(press(kVK_ANSI_3, [.command], "3"))
         #expect(hub.focus == .agents)
     }
+
+    @Test func theMenuKeyAsksThePickedRowForItsMenu() {
+        #expect(press(kVK_ContextualMenu, [], ""))
+        #expect(hub.rowMenuRequest?.target == "i:one")
+        #expect(press(kVK_Return, [.control], "\r") && hub.rowMenuRequest?.seq == 2)
+        #expect(press(kVK_F10, [.shift], ""))
+        // Nothing picked, nothing to open; and New session has no menu of its own to open this way.
+        hub.selection = nil
+        #expect(!press(kVK_ContextualMenu, [], ""))
+        hub.selection = "s:new"
+        #expect(!press(kVK_ContextualMenu, [], ""))
+    }
 }

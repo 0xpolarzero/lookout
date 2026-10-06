@@ -62,6 +62,9 @@ final class HubState {
     /// Every session is listed: "+N more" was asked for, or Sessions is the focused section (only an unfocused list is cut
     /// at eight, DESIGN.md 5.3).
     var listsAllSessions: Bool { sessionsExpanded || focus == .agents }
+    /// The row whose context menu the keyboard asked for (see `HubKeys.openRowMenu`); the row with that key answers it.
+    private(set) var rowMenuRequest: RowMenuRequest?
+    func openRowMenu(_ target: String) { rowMenuRequest = RowMenuRequest(target: target, seq: (rowMenuRequest?.seq ?? 0) + 1) }
     /// Asks New session to open its menu of projects (→ on that row); a new request every time.
     private(set) var projectsMenuRequest = 0
     func openProjectsMenu() { projectsMenuRequest += 1 }

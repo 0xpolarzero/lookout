@@ -400,3 +400,40 @@ struct SelectionSync: View {
             }
     }
 }
+
+/// The keyboard's way to a row's context menu (the Menu key, ⇧F10 or ⌃Return on the row you picked): the same menu the
+/// right button opens, with the system's own navigation. A request names a row; the row answers it by sending the
+/// right-click it would have had, to its own centre, which SwiftUI turns into its context menu. Nothing is rebuilt.
+struct RowMenuRequest: Equatable {
+    let target: String
+    let seq: Int
+}
+
+private struct RowMenuTarget: ViewModifier {
+    let target: String
+    let hub: HubState
+    @State private var anchor = MenuAnchor()
+
+    func body(content: Content) -> some View {
+        content
+            .background(MenuAnchorView(anchor: anchor))
+            .onChange(of: hub.rowMenuRequest) { _, request in
+                guard request?.target == target else { return }
+                // A moment later: not from inside the key handler that asked, which a menu's tracking would hold up.
+                Task { @MainActor in present() }
+            }
+    }
+
+    private func present() {
+        guard let view = anchor.view, let window = view.window else { return }
+        let centre = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        guard let click = NSEvent.mouseEvent(with: .rightMouseDown, location: centre, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return }
+        window.sendEvent(click)
+    }
+}
+
+extension View {
+    /// A row that opens its context menu when the keyboard asks for the one it is (`HubState.openRowMenu`).
+    func rowMenuTarget(_ target: String, hub: HubState) -> some View { modifier(RowMenuTarget(target: target, hub: hub)) }
+}

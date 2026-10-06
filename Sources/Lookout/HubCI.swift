@@ -156,6 +156,7 @@ struct CIRow: View {
         // The keyboard's pick shows what a tooltip would (the failing checks and the headline are cut to one line).
         .tip(title, tipDetail, focused: selected && hub.keyboardSelection?.id == "c:" + entry.id, hover: false)
         .ciActions(entry, store: store)
+        .rowMenuTarget("c:" + entry.id, hub: hub)
         .voiceOverTarget("c:" + entry.id, hub: hub)
         .onHover { hover = $0; hub.pointer($0, over: "c:" + entry.id, ui: ui) }
     }
@@ -289,6 +290,7 @@ private struct CINameRow: View {
         .accessibilityValue(CISpeech.value(entry, now: now))
         .accessibilityHint("Opens its checks. More actions available.")
         .ciActions(entry, store: store)
+        .rowMenuTarget("c:" + entry.id, hub: hub)
         .voiceOverTarget("c:" + entry.id, hub: hub)
         .onHover { hover = $0; hub.pointer($0, over: "c:" + entry.id, ui: ui) }
     }

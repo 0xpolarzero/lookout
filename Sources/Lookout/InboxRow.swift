@@ -94,6 +94,7 @@ struct InboxRow: View {
         .onHover(perform: hovered)
         .motion(Theme.Motion.hover, value: showsAction)
         .contextMenu { InboxRowMenu(item: item, store: store, low: low) }
+        .rowMenuTarget(key, hub: hub)
         // One element: the visible action is reached through the actions below.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenLabel(now))

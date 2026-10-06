@@ -508,6 +508,7 @@ struct SessionRow: View {
         .help(help)
         .tip(row.session.title, plainHeadline.isEmpty ? nil : plainHeadline, focused: picked, hover: false)
         .sessionMenu(row, store)
+        .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
         .accessibilityValue(row.spokenValue(now: now))
@@ -747,7 +748,7 @@ private struct Swatch: View {
     weak var view: NSView?
 }
 
-private struct MenuAnchorView: NSViewRepresentable {
+struct MenuAnchorView: NSViewRepresentable {
     let anchor: MenuAnchor
 
     func makeNSView(context: Context) -> NSView {

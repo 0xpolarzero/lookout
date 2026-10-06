@@ -108,6 +108,7 @@ final class HubKeys {
         if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
         guard hub.expanded, hub.page == .main else { return false }
         let bound = isBound(shortcut)
+        if Self.opensRowMenu(event, flags: flags) { return openRowMenu() }
         // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
             setQuery(String(hub.query.dropLast()))
@@ -183,6 +184,25 @@ final class HubKeys {
             return true
         }
         return false
+    }
+
+    /// The Menu key, ⇧F10 and ⌃Return: the row's context menu, as the right button opens it.
+    private static func opensRowMenu(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        switch Int(event.keyCode) {
+        case kVK_ContextualMenu: flags.isEmpty
+        case kVK_F10: flags == .shift
+        case kVK_Return, kVK_ANSI_KeypadEnter: flags == .control
+        default: false
+        }
+    }
+
+    /// The picked row's context menu (the Menu key, ⇧F10 or ⌃Return): every row with one has the same actions in it for
+    /// the mouse and the keyboard. False with no row picked, or one that has none (Passing, "+N more", New session).
+    private func openRowMenu() -> Bool {
+        guard let selection = hub.selection, targets().contains(selection), selection != "c:passing",
+              ["i:", "c:", "a:"].contains(String(selection.prefix(2))) else { return false }
+        hub.openRowMenu(selection)
+        return true
     }
 
     /// ← is -1 and → is +1; nil for any other key.
