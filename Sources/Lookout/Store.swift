@@ -178,6 +178,8 @@ final class Store {
     @ObservationIgnored var keychainWrite: ((String, String) -> Bool)?
     /// Finds the token to sign in with (the Keychain, the environment, `gh`); the tests count the asks.
     @ObservationIgnored var resolveToken: @Sendable () -> (String, TokenSource)? = { TokenProvider.resolve() }
+    /// The last look for a token (`resolveToken`) found none.
+    @ObservationIgnored private var noTokenFound = false
     /// A token was just saved or taken away: the next sign-in that fails is its result and is said aloud (a poll's isn't).
     @ObservationIgnored private(set) var awaitingSignIn = false
     @ObservationIgnored var announceSignIn: (String) -> Void = { Announce.say($0) }
@@ -390,7 +392,7 @@ final class Store {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if !self.systemAsleep { await self.pollAll() }
+                if !self.systemAsleep { await self.pollAll(automatic: true) }
                 await self.sleepUntilNextPoll()
             }
         }
@@ -704,11 +706,15 @@ final class Store {
 
     /// Signs in with the token held, else the one `resolveToken` finds. A token already held is asked about as it is: finding one
     /// reads the Keychain and may run `gh`, which a poll that fails (offline, a VPN down, GitHub's own trouble) would do every
-    /// minute. Only no token, one GitHub refused, or a change in Settings (`setToken`) looks again.
-    func authenticate() async {
+    /// minute. Only no token, one GitHub refused, or a change in Settings (`setToken`) looks again; and when the last look found
+    /// nothing, a poll on the timer (`automatic`) doesn't repeat it: something the user does (Check now, opening the hub) does.
+    func authenticate(automatic: Bool = false) async {
         if gh.token == nil {
+            if automatic, noTokenFound { return }
             let find = resolveToken
-            guard let (token, source) = await Task.detached(operation: find).value else {
+            let found = await Task.detached(operation: find).value
+            noTokenFound = found == nil
+            guard let (token, source) = found else {
                 tokenSource = nil
                 signInFailed(SignInFailure.missingToken)
                 return
@@ -842,7 +848,8 @@ final class Store {
 
     // MARK: Polling
 
-    func pollAll() async {
+    /// `automatic`: the timer's poll, not something asked for.
+    func pollAll(automatic: Bool = false) async {
         guard !isSyncing else { return }
         isSyncing = true
         defer {
@@ -853,7 +860,7 @@ final class Store {
             prune()
             if persistedRevision != savedRevision { save() }
         }
-        if me == nil { await authenticate() }
+        if me == nil { await authenticate(automatic: automatic) }
         guard me != nil else { return }
         gh.reserveETags(forRepositories: repos.count)
         await withTaskGroup(of: Void.self) { group in

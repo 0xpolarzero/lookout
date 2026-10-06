@@ -42,12 +42,21 @@ import Testing
         #expect(asks.withLock { $0 } == 3 && s.me != nil)
     }
 
-    @Test func signedOutPollsLookForATokenEachTimeSoALoginIsNoticed() async {
+    @Test func signedOutPollsOnTheTimerDoNotLookForATokenAgainButAskedOnesDo() async {
         let s = Store.unsaved()
         let asks = OSAllocatedUnfairLock(initialState: 0)
         s.resolveToken = { asks.withLock { $0 += 1 }; return nil }
-        for _ in 0..<2 { await s.pollAll() }
-        #expect(asks.withLock { $0 } == 2 && s.authError == SignInFailure.missingToken)
+        // A login is noticed when something the user does asks (Check now, the hub opening), not by the timer: gh is not run each minute.
+        for _ in 0..<3 { await s.pollAll(automatic: true) }
+        #expect(asks.withLock { $0 } == 1 && s.authError == SignInFailure.missingToken)
+        await s.pollAll()
+        #expect(asks.withLock { $0 } == 2)
+        s.resolveToken = { asks.withLock { $0 += 1 }; return ("token", .environment) }
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"login": "me", "avatar_url": null, "type": "User"}"#) }
+        await s.pollAll(automatic: true)
+        #expect(asks.withLock { $0 } == 2 && s.me == nil)
+        await s.pollAll()
+        #expect(asks.withLock { $0 } == 3 && s.me?.login == "me")
     }
 
     @Test func stoppingAFailedRepositoryClearsItsFault() {
