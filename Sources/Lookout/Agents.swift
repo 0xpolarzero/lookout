@@ -99,10 +99,6 @@ enum ClaudeLink: Equatable {
 
 // MARK: - Rows
 
-enum AgentStatus {
-    case running, blocked, finished, idle
-}
-
 struct AgentRow: Identifiable, Hashable {
     var session: ClaudeSession
     var entry: AgentEntry
@@ -130,36 +126,18 @@ struct AgentRow: Identifiable, Hashable {
     /// Mid-turn but stopped on you (a question, a plan): counts as waiting, not as working.
     var waitsForYou: Bool { session.running && activity?.waitsForYou == true }
 
-    var status: AgentStatus {
-        if waitsForYou { return .blocked }
-        if session.running { return .running }
-        if session.summary?.blocked == true { return .blocked }
-        return entry.unread ? .finished : .idle
-    }
-
     /// Needs you: stopped mid-turn on a question, or finished on one you haven't read yet.
     var isWaiting: Bool { waitsForYou || (!session.running && unread && session.summary?.blocked == true) }
-
-    /// What the strip shows: amber waiting, blue done and unread, grey otherwise.
-    var tint: Color? {
-        if waitsForYou { return Theme.amber }
-        guard !session.running, entry.unread else { return nil }
-        return session.summary?.blocked == true ? Theme.amber : Theme.accent
-    }
-
-    static func duration(_ t: TimeInterval) -> String {
-        let s = max(0, Int(t))
-        if s < 60 { return "\(s)s" }
-        if s < 3600 { return "\(s / 60)m" }
-        return "\(s / 3600)h \(s % 3600 / 60)m"
-    }
 
     /// When the running turn began, if known.
     var workingSince: Date? { session.lastUserMessage ?? activity?.since ?? session.lastActivity }
 
     /// How long the turn has been going.
-    func elapsed(now: Date = Date()) -> String {
-        Self.duration(now.timeIntervalSince(workingSince ?? now))
+    private func elapsed(now: Date) -> String {
+        let s = max(0, Int(now.timeIntervalSince(workingSince ?? now)))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
     /// The status column of a row: "Waiting", "Working 2m", "Finished 4m".
@@ -176,6 +154,8 @@ struct AgentRow: Identifiable, Hashable {
         return summaryText
     }
 
+    var headlineText: String { String(headline.characters) }
+
     /// For VoiceOver: "waiting, lcu, 2 minutes", and "3 running" for what a finished turn left behind.
     func spokenValue(now: Date = Date()) -> String {
         let state = isWaiting ? "waiting" : session.running ? "working" : "finished"
@@ -188,9 +168,8 @@ struct AgentRow: Identifiable, Hashable {
     /// For VoiceOver, after the value: the question or summary, then everything it left running by name (the row
     /// shows the first and a count).
     var spokenHint: String {
-        let said = String(headline.characters)
         let running = tasks.isEmpty ? "" : "Running: " + tasks.map(\.title).joined(separator: ", ") + "."
-        return [said, running].filter { !$0.isEmpty }.joined(separator: " ")
+        return [headlineText, running].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     static func spokenAge(_ t: TimeInterval) -> String {
@@ -374,8 +353,6 @@ struct AgentCache {
 }
 
 extension Store {
-    var agentsEnabled: Bool { agents.enabled }
-
     /// Derived rows, memoized: views read these dozens of times per render. The getters still read the observed
     /// properties, so SwiftUI keeps tracking them; `agentCache` is dropped whenever one of them changes.
     private var cache: AgentCache {
@@ -802,18 +779,17 @@ extension Store {
         neighbour(of: id, step, frozen: frozen, expanded: expanded) != nil
     }
 
-    /// One place up (-1) or down (+1) within its project: the two trade places as the list shows them.
-    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
-        guard let neighbour = neighbour(of: id, step, frozen: frozen, expanded: expanded) else { return }
-        let (mover, target) = Self.swap(id, with: neighbour, step)
-        moveAgent(mover, onto: target)
+    /// Which row lands on which one's place for `id` and its neighbour to trade places in the list. The later one takes the
+    /// earlier one's place: with rows between them in the order that the list doesn't show (a late waiter took the place of one
+    /// it had cut), the row shown behind goes ahead, and both stay on the screen, which the earlier one moved behind them would not.
+    func trade(_ id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> (mover: String, target: String)? {
+        neighbour(of: id, step, frozen: frozen, expanded: expanded).map { step > 0 ? ($0, id) : (id, $0) }
     }
 
-    /// Which of two rows lands on the other's place for them to trade places in the list. The later one takes the earlier one's
-    /// place: with rows between them in the order that the list doesn't show (a late waiter took the place of one it had cut),
-    /// the row shown behind goes ahead, and both stay on the screen, which the earlier one moved behind them would not.
-    static func swap(_ id: String, with neighbour: String, _ step: Int) -> (mover: String, target: String) {
-        step > 0 ? (neighbour, id) : (id, neighbour)
+    /// One place up (-1) or down (+1) within its project: the two trade places as the list shows them.
+    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
+        guard let (mover, target) = trade(id, step, frozen: frozen, expanded: expanded) else { return }
+        moveAgent(mover, onto: target)
     }
 
     // MARK: Project order
@@ -837,17 +813,21 @@ extension Store {
         return order
     }
 
-    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
+    /// The project `step` places up (-1) or down (+1) from `folder` among the listed ones, which it trades places with.
+    func neighbouringProject(of folder: String, _ step: Int, frozen: [BarSessions.Slot]? = nil) -> String? {
         let order = listedProjects(frozen: frozen)
-        guard let i = order.firstIndex(of: folder) else { return false }
-        return order.indices.contains(i + step)
+        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return nil }
+        return order[i + step]
+    }
+
+    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
+        neighbouringProject(of: folder, step, frozen: frozen) != nil
     }
 
     /// One place up (-1) or down (+1) among the projects.
     func moveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) {
-        let order = listedProjects(frozen: frozen)
-        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
-        moveProject(folder, onto: order[i + step])
+        guard let target = neighbouringProject(of: folder, step, frozen: frozen) else { return }
+        moveProject(folder, onto: target)
     }
 
     /// Puts a project where `target` is, its sessions together and in their own order: the projects' order is the order

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 // Sessions in the hub: the list (groups, rows, "+N more", the New session row), a session's menus and label
-// editor; then the update button, the inbox item menu and the status lines the hub also uses.
+// editor, and the status lines the hub also uses.
 
 // MARK: - The list
 
@@ -69,6 +69,13 @@ struct RailRow<Tile: View, Content: View>: View {
     }
 }
 
+private extension View {
+    /// The hub's own inset on the side away from the tile.
+    func awayFromRail(_ rail: HorizontalEdge?, _ inset: CGFloat) -> some View {
+        padding(rail == .leading ? .trailing : .leading, inset)
+    }
+}
+
 /// The groups of the sessions list under one another, or (searching) the sessions that match, flat. Rows mark their
 /// bottom edge for `CappedScroll` and their id for scrolling to them. A peek (`peekCap`) lists whole groups and rows
 /// up to that height, then "+N more", and never scrolls.
@@ -105,7 +112,7 @@ struct SessionsList: View {
                 }
             }
         }
-        .padding(rail == .leading ? .trailing : .leading, inset)
+        .awayFromRail(rail, inset)
         .listMotion(value: store.agentsRevision)
     }
 
@@ -157,12 +164,12 @@ struct SessionsScroll: View {
                             end: searching ? matches.last.map { "a:" + $0.id } : listed.hidden > 0 ? "s:more" : listed.groups.last?.rows.last.map { "a:" + $0.id },
                             top: searching ? matches.first.map { "a:" + $0.id } : "s:top",
                             viewport: viewport, reach: reach, hub: hub, rail: rail)
-                    .padding(rail == .leading ? .trailing : .leading, inset)
+                    .awayFromRail(rail, inset)
             } else if cut {
                 let more = SessionGroup.below(listed.groups, hidden: listed.hidden, reach: viewport)
                 MoreSessionsRow(hidden: more, waiting: SessionGroup.waitingBelow(listed.groups, reach: viewport), hub: hub, rail: rail,
                                 pickable: false, action: showAll)
-                    .padding(rail == .leading ? .trailing : .leading, inset)
+                    .awayFromRail(rail, inset)
             }
         }
     }
@@ -370,7 +377,8 @@ struct SessionGroupHeader: View {
             }
         }
         .contentShape(Rectangle())
-        .modifier(ReorderableProject(folder: folder.flatMap { $0.isEmpty ? nil : $0 }, store: store, hub: hub, dropTarget: $dropTarget))
+        .modifier(Reorderable(kind: "project:", id: folder.flatMap { $0.isEmpty ? nil : $0 }, name: title,
+                              drop: { dragged in if let folder { hub.moveProject(dragged, onto: folder, store: store) } }, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
         .contextMenu { if let folder { ProjectMenu(folder: folder, store: store, hub: hub) } }
         .accessibilityElement(children: .contain)
@@ -528,7 +536,8 @@ struct SessionRow: View {
             if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset)) }
         }
         .motion(Theme.Motion.hover, value: showsAction)
-        .modifier(Reorderable(enabled: placement == .project, row: row, store: store, hub: hub, dropTarget: $dropTarget))
+        .modifier(Reorderable(kind: "agent:", id: placement == .project && !row.pending ? row.id : nil, name: row.session.title,
+                              drop: { hub.moveSession($0, onto: row.id, store: store) }, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
         .onHover { inside in
             if inside {
@@ -540,7 +549,7 @@ struct SessionRow: View {
             }
         }
         .help(help)
-        .tip(row.session.title, tipDetail, focused: picked, hover: false)
+        .tip(row.session.title, Self.tipDetail(row), focused: picked, hover: false)
         .sessionMenu(row, store, hub)
         .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
@@ -598,10 +607,8 @@ struct SessionRow: View {
         let text = Text(row.headline).foregroundStyle(Theme.secondary)
         guard placement.namesProject else { return text }
         let project = Text(row.projectName).foregroundStyle(Theme.tertiary)
-        return plainHeadline.isEmpty ? project : project + Text(" · ").foregroundStyle(Theme.tertiary) + text
+        return row.headlineText.isEmpty ? project : project + Text(" · ").foregroundStyle(Theme.tertiary) + text
     }
-
-    private var plainHeadline: String { String(row.headline.characters) }
 
     /// The first thing it left running, in full, and how many more there are; the whole list on hover.
     private func taskLine(_ first: ClaudeTask) -> some View {
@@ -635,11 +642,8 @@ struct SessionRow: View {
 
     /// What the row the keyboard picked says under the title: the question or summary, then everything it left running (the
     /// row's line has the first, and a count).
-    private var tipDetail: String? { Self.tipDetail(row) }
-
     static func tipDetail(_ row: AgentRow) -> String? {
-        let headline = String(row.headline.characters)
-        let lines = (headline.isEmpty ? [] : [headline]) + row.tasks.map(\.title)
+        let lines = (row.headlineText.isEmpty ? [] : [row.headlineText]) + row.tasks.map(\.title)
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
@@ -657,8 +661,7 @@ extension HubState {
 
     /// One place up (-1) or down (+1) within its project.
     func moveSession(_ id: String, by step: Int, store: Store) {
-        guard let neighbour = store.neighbour(of: id, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
-        let (mover, target) = Store.swap(id, with: neighbour, step)
+        guard let (mover, target) = store.trade(id, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
         moveSession(mover, onto: target, store: store)
     }
 
@@ -675,9 +678,8 @@ extension HubState {
     }
 
     func moveProject(_ folder: String, by step: Int, store: Store) {
-        let order = store.listedProjects(frozen: frozenSessions)
-        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
-        moveProject(folder, onto: order[i + step], store: store)
+        guard let target = store.neighbouringProject(of: folder, step, frozen: frozenSessions) else { return }
+        moveProject(folder, onto: target, store: store)
     }
 
     /// The project's sessions go with it: its group's run of the held order trades places with the target's.
@@ -691,60 +693,31 @@ extension HubState {
     }
 }
 
-/// Your sessions in a project can be dragged onto one another to reorder them; everything else stays put.
-struct Reorderable: ViewModifier {
-    let enabled: Bool
-    let row: AgentRow
-    let store: Store
-    let hub: HubState
-    @Binding var dropTarget: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduce
-
-    func body(content: Content) -> some View {
-        if !enabled || row.pending {
-            content
-        } else {
-            content
-                .draggable("agent:" + row.id) {
-                    Text(row.session.title)
-                        .font(Theme.Typography.title)
-                        .padding(.horizontal, 10)
-                        .frame(height: Theme.Metrics.tile)
-                        .background(Capsule().fill(Theme.bg))
-                        .foregroundStyle(Theme.text)
-                }
-                .dropDestination(for: String.self) { ids, _ in
-                    guard let id = ids.first, id.hasPrefix("agent:") else { return false }
-                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.moveSession(String(id.dropFirst(6)), onto: row.id, store: store) }
-                    return true
-                } isTargeted: { dropTarget = $0 }
-        }
-    }
-}
-
-/// A project's header can be dragged onto another's to put it there (its sessions go with it); the same is in its menu and
-/// VoiceOver's actions. Scratch has no place to move to.
-struct ReorderableProject: ViewModifier {
-    let folder: String?
-    let store: Store
-    let hub: HubState
+/// Your sessions in a project can be dragged onto one another to reorder them, and a project's header onto another's to put
+/// it there (its sessions go with it, as in its menu and VoiceOver's actions); everything else stays put, scratch included. A
+/// drag carries `kind` and the `id` of what is dragged; `id` nil is not draggable. `drop` gets the id of what was dropped on it.
+private struct Reorderable: ViewModifier {
+    let kind: String
+    let id: String?
+    let name: String
+    let drop: (String) -> Void
     @Binding var dropTarget: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     @ViewBuilder func body(content: Content) -> some View {
-        if let folder {
+        if let id {
             content
-                .draggable("project:" + folder) {
-                    Text(store.folderName(folder))
+                .draggable(kind + id) {
+                    Text(name)
                         .font(Theme.Typography.title)
                         .padding(.horizontal, 10)
                         .frame(height: Theme.Metrics.tile)
                         .background(Capsule().fill(Theme.bg))
                         .foregroundStyle(Theme.text)
                 }
-                .dropDestination(for: String.self) { ids, _ in
-                    guard let id = ids.first, id.hasPrefix("project:") else { return false }
-                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.moveProject(String(id.dropFirst(8)), onto: folder, store: store) }
+                .dropDestination(for: String.self) { tokens, _ in
+                    guard let token = tokens.first, token.hasPrefix(kind) else { return false }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { drop(String(token.dropFirst(kind.count))) }
                     return true
                 } isTargeted: { dropTarget = $0 }
         } else {
@@ -785,7 +758,7 @@ struct NewSessionRow: View {
         .accessibilityHint("Starts a chat with no folder. The menu picks a project.")
         .overlay(alignment: .trailing) { projects.padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset) - 6) }
         .onHover { hovering = $0 }
-        .padding(rail == .leading ? .trailing : .leading, inset)
+        .awayFromRail(rail, inset)
         .onChange(of: hub.projectsMenuRequest) { _, _ in presentProjects() }
     }
 
@@ -796,7 +769,7 @@ struct NewSessionRow: View {
                 .font(Theme.Typography.glyph(11, .semibold))
                 .foregroundStyle(Theme.secondary)
                 .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
-                // The icon buttons' own 28pt to hit, drawn as it was.
+                // The icon buttons' own 28pt hit area.
                 .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
         }
         .buttonStyle(.plain)

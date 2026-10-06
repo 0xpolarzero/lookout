@@ -16,16 +16,14 @@ struct TileMarks: Equatable {
 
 extension AgentRow {
     var tileMarks: TileMarks {
-        let waiting = waitsForYou || (!session.running && unread && session.summary?.blocked == true)
-        // Never while it waits for you, however it waits: what a finished question left running behind it is not work
+        // Never a ring while it waits for you, however it waits: what a finished question left running behind it is not work
         // until you have read it (then the tile is not amber any more, and the ring says what is still going).
-        return TileMarks(waiting: waiting, working: !waiting && (session.running || !tasks.isEmpty), unread: unread && !waiting)
+        TileMarks(waiting: isWaiting, working: !isWaiting && (session.running || !tasks.isEmpty), unread: unread && !isWaiting)
     }
 
     /// "waiting for you", "working", "finished, unread": the state as VoiceOver says it, never colour alone.
     var tileState: String {
-        let marks = tileMarks
-        if marks.waiting { return "waiting for you" }
+        if isWaiting { return "waiting for you" }
         if session.running { return "working" }
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
         if unread { return "finished, unread" + running }
@@ -35,7 +33,7 @@ extension AgentRow {
 
     /// What VoiceOver reads after the title: "waiting for you, lcu, 4 minutes".
     func tileValue(now: Date = Date()) -> String {
-        "\(tileState), \(projectName), \(Self.spoken(now.timeIntervalSince(session.lastActivity)))"
+        "\(tileState), \(projectName), \(Self.spokenAge(now.timeIntervalSince(session.lastActivity)))"
     }
 
     /// The question it is stopped on, else what it said last: the hint under the value.
@@ -43,23 +41,15 @@ extension AgentRow {
         let said = (waitsForYou ? activity?.text : nil) ?? session.summary?.detail
         return said.flatMap { $0.isEmpty ? nil : $0 } ?? "Opens it in Claude"
     }
-
-    private static func spoken(_ seconds: TimeInterval) -> String {
-        let s = max(0, Int(seconds))
-        if s < 60 { return "just now" }
-        if s < 3600 { return plural(s / 60, "minute") }
-        if s < 86400 { return plural(s / 3600, "hour") }
-        return plural(s / 86400, "day")
-    }
 }
 
 /// A 26pt tile: letters, an emoji or a symbol, and the marks of `TileMarks`. Plain content, no button: the bar
 /// puts it in a `BarCell`, the session rows beside the bar use it as their avatar.
 struct StatusTile: View {
+        let size = Theme.Metrics.tile
     var label = ""
     var symbol: String? = nil
     var marks = TileMarks()
-    var size: CGFloat = Theme.Metrics.tile
     /// The pointer is over it: neutral tiles take a step more fill.
     var hovering = false
     /// The surface the unread dot's halo cuts into: the rail beside the screen edge, else the strip's `bg`.
@@ -67,6 +57,7 @@ struct StatusTile: View {
     @Environment(\.resolved) private var resolved
 
     var body: some View {
+        let size = Theme.Metrics.tile
         let shape = Tile.shape(size)
         face
             .foregroundStyle(marks.waiting ? Theme.onTint : Theme.text)
@@ -84,7 +75,7 @@ struct StatusTile: View {
     @ViewBuilder private var face: some View {
         if let symbol {
             Image(systemName: symbol).font(Theme.Typography.glyph(12)).symbolRenderingMode(.monochrome)
-        } else if label.unicodeScalars.first.map({ $0.properties.isEmoji && $0.value > 0xFF }) == true {
+        } else if AgentLabel.isEmoji(label) {
             Text(label).font(.system(size: 14)).lineLimit(1)
         } else {
             Text(label).font(Theme.Typography.tile).lineLimit(1)
@@ -115,15 +106,12 @@ private struct UnreadDot: View {
 /// A session's tile where the rows show it (the avatar beside its title): the status tile, named for VoiceOver.
 struct AgentTile: View {
     let row: AgentRow
-    var size: CGFloat = 26
-    var selected = false
 
     var body: some View {
-        StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size)
+        StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
             .accessibilityValue(row.tileState)
-            .focusRing(size * Tile.ratio, isFocused: selected)
     }
 }
 
@@ -164,14 +152,12 @@ struct BarCell<Face: View>: View {
     @State private var hovering = false
     @FocusState private var focused: Bool
 
-    static var depth: CGFloat { Theme.Metrics.bar }
-
     var body: some View {
         Button(action: action) {
             face(hovering)
                 .focusRing(Theme.Radius.tile, isFocused: focused || picked)
-                .frame(width: axis == .vertical ? Self.depth : Theme.Metrics.pitch,
-                       height: axis == .vertical ? Theme.Metrics.pitch : Self.depth)
+                .frame(width: axis == .vertical ? Theme.Metrics.bar : Theme.Metrics.pitch,
+                       height: axis == .vertical ? Theme.Metrics.pitch : Theme.Metrics.bar)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -220,7 +206,6 @@ private struct BarCellHelp: ViewModifier {
 /// a tile doesn't rebuild the whole hub. No tooltip: hovering opens the sessions' panel, a row beside each tile.
 struct BarTile: View {
     let row: AgentRow
-    var size: CGFloat = Theme.Metrics.tile
     let axis: Axis
     var onRail = false
     let store: Store
@@ -244,7 +229,7 @@ struct BarTile: View {
     private func cell(now: Date) -> some View {
         BarCell(axis: axis, name: row.session.title, value: row.tileValue(now: now), hint: row.tileHint,
                 picked: hub.selected("a:" + row.id), show: show, press: show, action: { store.openAgent(row.id) }) { hovering in
-            StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size, hovering: hovering, onRail: onRail)
+            StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, hovering: hovering, onRail: onRail)
         }
         .sessionMenu(row, store, hub)
         .onHover { inside in
