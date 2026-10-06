@@ -370,15 +370,15 @@ struct SessionGroupHeader: View {
             }
         }
         .contentShape(Rectangle())
-        .modifier(ReorderableProject(folder: folder.flatMap { $0.isEmpty ? nil : $0 }, store: store, dropTarget: $dropTarget))
+        .modifier(ReorderableProject(folder: folder.flatMap { $0.isEmpty ? nil : $0 }, store: store, hub: hub, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
-        .contextMenu { if let folder { ProjectMenu(folder: folder, store: store) } }
+        .contextMenu { if let folder { ProjectMenu(folder: folder, store: store, hub: hub) } }
         .accessibilityElement(children: .contain)
         .accessibilityActions {
             if let folder {
                 Button("Mute \(title)") { store.muteFolder(folder) }
-                if store.canMoveProject(folder, by: -1) { Button("Move project up") { LookoutHub.animate { store.moveProject(folder, by: -1) } } }
-                if store.canMoveProject(folder, by: 1) { Button("Move project down") { LookoutHub.animate { store.moveProject(folder, by: 1) } } }
+                if hub.canMoveProject(folder, by: -1, store: store) { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, by: -1, store: store) } } }
+                if hub.canMoveProject(folder, by: 1, store: store) { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, by: 1, store: store) } } }
             }
         }
     }
@@ -519,7 +519,7 @@ struct SessionRow: View {
             if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset)) }
         }
         .motion(Theme.Motion.hover, value: showsAction)
-        .modifier(Reorderable(enabled: placement == .project, row: row, store: store, dropTarget: $dropTarget))
+        .modifier(Reorderable(enabled: placement == .project, row: row, store: store, hub: hub, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
         .onHover { inside in
             if inside {
@@ -532,7 +532,7 @@ struct SessionRow: View {
         }
         .help(help)
         .tip(row.session.title, tipDetail, focused: picked, hover: false)
-        .sessionMenu(row, store)
+        .sessionMenu(row, store, hub)
         .rowMenuTarget(id, hub: hub)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
@@ -547,8 +547,8 @@ struct SessionRow: View {
             Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
             if row.pending { Button("Keep") { store.keepAgent(row.id) } }
             Button("Hide") { store.dismissAgent(row.id) }
-            if moves.up { Button("Move up") { store.moveAgent(row.id, by: -1) } }
-            if moves.down { Button("Move down") { store.moveAgent(row.id, by: 1) } }
+            if moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, store: store) } }
+            if moves.down { Button("Move down") { hub.moveSession(row.id, by: 1, store: store) } }
         }
     }
 
@@ -638,11 +638,53 @@ struct SessionRow: View {
     private var help: String { plainHeadline.isEmpty ? row.session.title : row.session.title + "\n" + plainHeadline }
 }
 
+/// What Move up, Move down and a drop do to the order, as the list shows it: the neighbour is the row beside it in the list, and
+/// the order the pointer holds the list in moves with it, so a move shows at once instead of when the pointer leaves.
+extension HubState {
+    func canMoveSession(_ id: String, by step: Int, store: Store) -> Bool {
+        store.canMoveAgent(id, by: step, frozen: frozenSessions)
+    }
+
+    /// One place up (-1) or down (+1) within its project.
+    func moveSession(_ id: String, by step: Int, store: Store) {
+        if let target = store.neighbour(of: id, step, frozen: frozenSessions) { moveSession(id, onto: target, store: store) }
+    }
+
+    func moveSession(_ id: String, onto target: String, store: Store) {
+        guard store.moveAgent(id, onto: target), var slots = frozenSessions,
+              let from = slots.firstIndex(where: { $0.id == id }), let to = slots.firstIndex(where: { $0.id == target }),
+              slots[from].group == slots[to].group else { return }
+        slots.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        frozenSessions = slots
+    }
+
+    func canMoveProject(_ folder: String, by step: Int, store: Store) -> Bool {
+        store.canMoveProject(folder, by: step, frozen: frozenSessions)
+    }
+
+    func moveProject(_ folder: String, by step: Int, store: Store) {
+        let order = store.listedProjects(frozen: frozenSessions)
+        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
+        moveProject(folder, onto: order[i + step], store: store)
+    }
+
+    /// The project's sessions go with it: its group's run of the held order trades places with the target's.
+    func moveProject(_ folder: String, onto target: String, store: Store) {
+        guard store.moveProject(folder, onto: target), let slots = frozenSessions else { return }
+        var groups: [String] = []
+        for slot in slots where !groups.contains(slot.group) { groups.append(slot.group) }
+        guard let from = groups.firstIndex(of: "project:" + folder), let to = groups.firstIndex(of: "project:" + target) else { return }
+        groups.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        frozenSessions = groups.flatMap { group in slots.filter { $0.group == group } }
+    }
+}
+
 /// Your sessions in a project can be dragged onto one another to reorder them; everything else stays put.
 struct Reorderable: ViewModifier {
     let enabled: Bool
     let row: AgentRow
     let store: Store
+    let hub: HubState
     @Binding var dropTarget: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -661,7 +703,7 @@ struct Reorderable: ViewModifier {
                 }
                 .dropDestination(for: String.self) { ids, _ in
                     guard let id = ids.first, id.hasPrefix("agent:") else { return false }
-                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.moveAgent(String(id.dropFirst(6)), onto: row.id) }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.moveSession(String(id.dropFirst(6)), onto: row.id, store: store) }
                     return true
                 } isTargeted: { dropTarget = $0 }
         }
@@ -673,6 +715,7 @@ struct Reorderable: ViewModifier {
 struct ReorderableProject: ViewModifier {
     let folder: String?
     let store: Store
+    let hub: HubState
     @Binding var dropTarget: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -689,7 +732,7 @@ struct ReorderableProject: ViewModifier {
                 }
                 .dropDestination(for: String.self) { ids, _ in
                     guard let id = ids.first, id.hasPrefix("project:") else { return false }
-                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.moveProject(String(id.dropFirst(8)), onto: folder) }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.moveProject(String(id.dropFirst(8)), onto: folder, store: store) }
                     return true
                 } isTargeted: { dropTarget = $0 }
         } else {
@@ -1017,6 +1060,7 @@ extension LookoutHub {
 struct SessionMenu: View {
     let row: AgentRow
     let store: Store
+    let hub: HubState
     /// Opens the label editor (`LabelEditor`) wherever the caller hosts it.
     var editLabel: () -> Void = {}
 
@@ -1026,10 +1070,10 @@ struct SessionMenu: View {
         Divider()
         if row.pending { Button("Keep") { store.keepAgent(row.id) } }
         Button("Hide") { store.dismissAgent(row.id) }
-        if store.canMoveAgent(row.id, by: -1) { Button("Move up") { store.moveAgent(row.id, by: -1) } }
-        if store.canMoveAgent(row.id, by: 1) { Button("Move down") { store.moveAgent(row.id, by: 1) } }
+        if hub.canMoveSession(row.id, by: -1, store: store) { Button("Move up") { hub.moveSession(row.id, by: -1, store: store) } }
+        if hub.canMoveSession(row.id, by: 1, store: store) { Button("Move down") { hub.moveSession(row.id, by: 1, store: store) } }
         Divider()
-        ProjectMenu(folder: row.session.folderKey, store: store)
+        ProjectMenu(folder: row.session.folderKey, store: store, hub: hub)
         Divider()
         Button("Change label…") { editLabel() }
     }
@@ -1039,6 +1083,7 @@ struct SessionMenu: View {
 struct ProjectMenu: View {
     let folder: String
     let store: Store
+    let hub: HubState
 
     var body: some View {
         if !folder.isEmpty {
@@ -1052,8 +1097,8 @@ struct ProjectMenu: View {
                 .pickerStyle(.inline)
             }
         }
-        if store.canMoveProject(folder, by: -1) { Button("Move project up") { LookoutHub.animate { store.moveProject(folder, by: -1) } } }
-        if store.canMoveProject(folder, by: 1) { Button("Move project down") { LookoutHub.animate { store.moveProject(folder, by: 1) } } }
+        if hub.canMoveProject(folder, by: -1, store: store) { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, by: -1, store: store) } } }
+        if hub.canMoveProject(folder, by: 1, store: store) { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, by: 1, store: store) } } }
         Button("Mute \u{201C}\(store.folderName(folder))\u{201D}") { store.muteFolder(folder) }
     }
 }
@@ -1061,18 +1106,19 @@ struct ProjectMenu: View {
 private struct SessionContextMenu: ViewModifier {
     let row: AgentRow
     let store: Store
+    let hub: HubState
     @State private var editing = false
 
     func body(content: Content) -> some View {
         content
-            .contextMenu { SessionMenu(row: row, store: store, editLabel: { editing = true }) }
+            .contextMenu { SessionMenu(row: row, store: store, hub: hub, editLabel: { editing = true }) }
             .popover(isPresented: $editing, arrowEdge: .bottom) { LabelEditor(row: row, store: store) }
     }
 }
 
 extension View {
     /// A session's context menu, and the popover its label editor opens in.
-    func sessionMenu(_ row: AgentRow, _ store: Store) -> some View { modifier(SessionContextMenu(row: row, store: store)) }
+    func sessionMenu(_ row: AgentRow, _ store: Store, _ hub: HubState) -> some View { modifier(SessionContextMenu(row: row, store: store, hub: hub)) }
 }
 
 /// A session's label: letters (two, or the title's own), an emoji, or the icon picked for it.

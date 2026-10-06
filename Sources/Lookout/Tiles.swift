@@ -244,7 +244,7 @@ struct BarTile: View {
                 picked: hub.selected("a:" + row.id), show: show, action: { store.openAgent(row.id) }) { hovering in
             StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size, hovering: hovering, onRail: onRail)
         }
-        .sessionMenu(row, store)
+        .sessionMenu(row, store, hub)
         .onHover { inside in
             if inside {
                 hub.selection = "a:" + row.id

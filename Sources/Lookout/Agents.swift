@@ -768,35 +768,41 @@ extension Store {
 
     /// Reordering stays within a project: dropping on another project's session does nothing. The project's sessions
     /// trade places among the slots they already hold, so the projects keep their own order.
-    func moveAgent(_ id: String, onto target: String) {
-        guard id != target, let folder = claudeSessions[id]?.folderKey, claudeSessions[target]?.folderKey == folder else { return }
+    @discardableResult
+    func moveAgent(_ id: String, onto target: String) -> Bool {
+        guard id != target, let folder = claudeSessions[id]?.folderKey, claudeSessions[target]?.folderKey == folder else { return false }
         let slots = agents.entries.indices.filter { agents.entries[$0].kept && claudeSessions[agents.entries[$0].id]?.folderKey == folder }
         var order = slots.map { agents.entries[$0] }
-        guard let from = order.firstIndex(where: { $0.id == id }), let to = order.firstIndex(where: { $0.id == target }) else { return }
+        guard let from = order.firstIndex(where: { $0.id == id }), let to = order.firstIndex(where: { $0.id == target }) else { return false }
         order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         for (slot, entry) in zip(slots, order) { agents.entries[slot] = entry }
+        return true
     }
 
-    /// The session above (-1) or below (+1) this one in its project's group, if it has one: what Move up and Move down
-    /// swap with.
-    private func neighbour(of id: String, _ step: Int) -> String? {
-        guard let group = cache.groups.first(where: { g in
-            if case .project = g.kind { return g.rows.contains { $0.id == id } }
-            return false
-        }), let i = group.rows.firstIndex(where: { $0.id == id }), group.rows.indices.contains(i + step) else { return nil }
-        return group.rows[i + step].id
+    /// The session above (-1) or below (+1) this one in the project it is listed in, which is what Move up and Move down swap
+    /// with. `frozen`: the order and groups the pointer holds the list in, so the neighbour is the row the list shows beside it,
+    /// not the one the live order has there (a session that began to wait is still listed in its project under the freeze).
+    func neighbour(of id: String, _ step: Int, frozen: [BarSessions.Slot]? = nil) -> String? {
+        let slots = BarSessions.inOrder(barSlots, frozen: frozen)
+        guard let at = slots.first(where: { $0.id == id }), let folder = claudeSessions[id]?.folderKey,
+              at.group == "project:" + folder else { return nil }
+        let own = slots.filter { $0.group == at.group && claudeSessions[$0.id]?.folderKey == folder }
+        guard let i = own.firstIndex(where: { $0.id == id }), own.indices.contains(i + step) else { return nil }
+        return own[i + step].id
     }
 
-    func canMoveAgent(_ id: String, by step: Int) -> Bool { neighbour(of: id, step) != nil }
+    func canMoveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
+        neighbour(of: id, step, frozen: frozen) != nil
+    }
 
     /// One place up (-1) or down (+1) within its project.
-    func moveAgent(_ id: String, by step: Int) {
-        if let target = neighbour(of: id, step) { moveAgent(id, onto: target) }
+    func moveAgent(_ id: String, by step: Int, frozen: [BarSessions.Slot]? = nil) {
+        if let target = neighbour(of: id, step, frozen: frozen) { moveAgent(id, onto: target) }
     }
 
     // MARK: Project order
 
-    /// The projects with a kept session, in the order the list shows them (Scratch is always the last group, so it has no
+    /// The projects with a kept session, in the order their sessions are kept in (Scratch is always the last group, so it has no
     /// place to move to).
     var projectOrder: [String] {
         var order: [String] = []
@@ -804,28 +810,42 @@ extension Store {
         return order
     }
 
-    func canMoveProject(_ folder: String, by step: Int) -> Bool {
-        guard let i = projectOrder.firstIndex(of: folder) else { return false }
-        return projectOrder.indices.contains(i + step)
+    /// The projects the list shows a group for, in its order: what Move project up and down trade places within. `frozen`:
+    /// the order the pointer holds the list in.
+    func listedProjects(frozen: [BarSessions.Slot]? = nil) -> [String] {
+        var order: [String] = []
+        for slot in BarSessions.inOrder(barSlots, frozen: frozen) where slot.group.hasPrefix("project:") && slot.group != "project:" {
+            let folder = String(slot.group.dropFirst("project:".count))
+            if !order.contains(folder) { order.append(folder) }
+        }
+        return order
+    }
+
+    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) -> Bool {
+        let order = listedProjects(frozen: frozen)
+        guard let i = order.firstIndex(of: folder) else { return false }
+        return order.indices.contains(i + step)
     }
 
     /// One place up (-1) or down (+1) among the projects.
-    func moveProject(_ folder: String, by step: Int) {
-        let order = projectOrder
+    func moveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil) {
+        let order = listedProjects(frozen: frozen)
         guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
         moveProject(folder, onto: order[i + step])
     }
 
     /// Puts a project where `target` is, its sessions together and in their own order: the projects' order is the order
     /// their first kept session is listed in, so it is the sessions' slots that trade places.
-    func moveProject(_ folder: String, onto target: String) {
+    @discardableResult
+    func moveProject(_ folder: String, onto target: String) -> Bool {
         var order = projectOrder
-        guard folder != target, let from = order.firstIndex(of: folder), let to = order.firstIndex(of: target) else { return }
+        guard folder != target, let from = order.firstIndex(of: folder), let to = order.firstIndex(of: target) else { return false }
         order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         func rank(_ entry: AgentEntry) -> Int? { claudeSessions[entry.id].flatMap { order.firstIndex(of: $0.folderKey) } }
         let slots = agents.entries.indices.filter { agents.entries[$0].kept && rank(agents.entries[$0]) != nil }
         let sorted = slots.map { (slot: $0, entry: agents.entries[$0]) }.sorted { (rank($0.entry)!, $0.slot) < (rank($1.entry)!, $1.slot) }
         for (slot, moved) in zip(slots, sorted) { agents.entries[slot] = moved.entry }
+        return true
     }
 
     // MARK: Icons (Jev)

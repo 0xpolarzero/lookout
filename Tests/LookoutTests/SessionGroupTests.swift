@@ -195,6 +195,30 @@ import Testing
         #expect(ids(s)["project:/code/x"] == ["x2", "x1"])
     }
 
+    @Test func moveActionsActOnTheRowsTheFrozenListShows() {
+        let s = store([session("x1", folder: "/code/x"), session("x2", folder: "/code/x"), session("x3", folder: "/code/x"),
+                       session("y1", folder: "/code/y")], kept: ["x1", "x2", "x3", "y1"])
+        let hub = HubState()
+        hub.frozenSessions = s.barSlots
+        // x2 starts waiting: the list still shows it between x1 and x3, in its project, with moves of its own.
+        s.claudeActivity = ["x2": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["x2"]?.running = true
+        let held = s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }
+        #expect(held?.rows.map(\.id) == ["x1", "x2", "x3"])
+        #expect(hub.canMoveSession("x2", by: 1, store: s) && !s.canMoveAgent("x2", by: 1))
+        // Move down on x1 trades with x2, as it is shown, and the list shows it at once.
+        hub.moveSession("x1", by: 1, store: s)
+        #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["x2", "x1", "x3"])
+        #expect(s.agents.entries.map(\.id) == ["x2", "x1", "x3", "y1"])
+        // A drop does the same, and a project moved is a block of the held order.
+        hub.moveSession("x3", onto: "x2", store: s)
+        #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["x3", "x2", "x1"])
+        hub.moveProject("/code/y", by: -1, store: s)
+        #expect(s.listedGroups(hub).groups.map(\.id) == ["project:/code/y", "project:/code/x"])
+        hub.frozenSessions = nil
+        #expect(s.listedGroups(hub).groups.map(\.id) == ["waiting", "project:/code/y", "project:/code/x"])
+    }
+
     @Test func dropsOnAnotherProjectAreIgnored() {
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y")], kept: ["x1", "y1"])
         s.moveAgent("y1", onto: "x1")

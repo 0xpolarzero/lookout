@@ -180,8 +180,8 @@ final class HubKeys {
             else if shortcut == store.shortcut(.moveSessionUp) || shortcut == store.shortcut(.moveSessionDown) {
                 let step = shortcut == store.shortcut(.moveSessionUp) ? -1 : 1
                 // The row keeps the pick wherever it lands, and the list follows it.
-                if store.canMoveAgent(id, by: step) {
-                    LookoutHub.animate { store.moveAgent(id, by: step) }
+                if hub.canMoveSession(id, by: step, store: store) {
+                    LookoutHub.animate { hub.moveSession(id, by: step, store: store) }
                     select(selection)
                 }
             } else { return false }
