@@ -16,10 +16,12 @@ enum SessionPlacement {
 
 /// A line of the sessions list and the bar's tile column beside it: a bar-wide slot for the tile (the rail itself on a
 /// side edge, so tile and text read as one row) and the text next to it. The fill spans both. Rows lay out the same
-/// in a peek and kept open, on every edge: only the side the tile is on changes.
+/// in a peek and kept open, on every edge: only the side the tile is on changes. The row's height is its own, so the
+/// fill, the pick bar and the focus ring span all of it.
 struct RailRow<Tile: View, Content: View>: View {
     /// The screen's side on the left and right edges, the leading edge along the top and bottom.
     let rail: HorizontalEdge
+    let height: CGFloat
     var fill = Color.clear
     var picked = false
     @ViewBuilder let tile: Tile
@@ -42,6 +44,7 @@ struct RailRow<Tile: View, Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             if rail == .trailing { slot }
         }
+        .frame(height: height)
         .background {
             Theme.Radius.shape(Theme.Radius.row).fill(resolved.fill(fill))
                 .padding(rail == .leading ? .leading : .trailing, Self.fillInset)
@@ -186,7 +189,7 @@ struct SessionGroupHeader: View {
 
     var body: some View {
         let folder = project
-        RailRow(rail: rail, tile: { Color.clear }) {
+        RailRow(rail: rail, height: SessionGroup.headerHeight, tile: { Color.clear }) {
             HStack(spacing: Theme.Space.sm) {
                 if let folder { dot(folder) }
                 Text(group.title)
@@ -198,7 +201,6 @@ struct SessionGroupHeader: View {
                 if group.kind == .newActivity { keepAll }
             }
         }
-        .frame(height: SessionGroup.headerHeight)
         .contentShape(Rectangle())
         .contextMenu { if let folder { ProjectMenu(folder: folder, name: group.title, store: store) } }
         .accessibilityElement(children: .contain)
@@ -241,11 +243,10 @@ struct MoreSessionsRow: View {
     var body: some View {
         let picked = hub.selection == "s:more"
         Button(action: action) {
-            RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
-                    tile: { Color.clear }) {
+            RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
+                    picked: picked, tile: { Color.clear }) {
                 Text("+\(hidden) more").font(Theme.Typography.body).foregroundStyle(Theme.secondary)
             }
-            .frame(height: Theme.Metrics.pitch)
         }
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
@@ -281,9 +282,8 @@ struct SessionRow: View {
         let hot = ui.drawerSelection == row.id
         let showsAction = hot || picked || voiceOverFocused
         Button { store.openAgent(row.id) } label: {
-            RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hot ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
-                    tile: { AgentTile(row: row) }, content: { lines })
-                .frame(height: row.tasks.isEmpty ? Theme.Metrics.twoLineRow : Theme.Metrics.taskRow)
+            RailRow(rail: rail, height: SessionGroup.height(of: row), fill: picked ? Theme.Fill.selected : hot ? Theme.Fill.hover : Theme.Fill.rest,
+                    picked: picked, tile: { AgentTile(row: row) }, content: { lines })
         }
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
@@ -442,8 +442,8 @@ struct NewSessionRow: View {
         let picked = hub.selection == "s:new"
         let lit = hovering || picked
         Button { store.startScratchSession() } label: {
-            RailRow(rail: rail, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest, picked: picked,
-                    tile: {
+            RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
+                    picked: picked, tile: {
                         Image(systemName: "plus")
                             .font(Theme.Typography.glyph(12, .bold))
                             .foregroundStyle(lit ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
@@ -451,7 +451,6 @@ struct NewSessionRow: View {
                     }) {
                 Text("New session").font(Theme.Typography.body).foregroundStyle(lit ? AnyShapeStyle(Theme.text) : AnyShapeStyle(Theme.secondary))
             }
-            .frame(height: Theme.Metrics.pitch)
         }
         .buttonStyle(.plain)
         .focusRing(Theme.Radius.row, inset: true)
