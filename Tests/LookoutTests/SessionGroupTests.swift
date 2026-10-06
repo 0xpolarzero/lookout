@@ -284,6 +284,29 @@ import Testing
         #expect(hub.focus == .agents)
     }
 
+    @Test func openingMoreMovesThePickToTheFirstSessionItRevealed() {
+        let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
+        let (keys, hub) = hubKeys(s)
+        #expect(s.sessionExtraTargets(hub) == ["s:more", "s:new"])
+        hub.selection = "s:more"
+        #expect(keys.key(key(kVK_Return)))
+        // The pick is on the ninth session, which is scrolled to; the arrows go on from there through the rest.
+        #expect(hub.sessionsExpanded && hub.selection == "a:n8" && hub.keyboardSelection?.id == "a:n8")
+        #expect(s.sessionExtraTargets(hub) == ["s:new"])
+        #expect(keys.key(key(kVK_DownArrow)))
+        #expect(hub.selection == "a:n9")
+        #expect(keys.key(key(kVK_Return)))
+        #expect(hub.selection == "a:n9")
+        for expected in ["a:n10", "a:n11", "s:new"] {
+            #expect(keys.key(key(kVK_DownArrow)))
+            #expect(hub.selection == expected)
+        }
+        // A click on "+N more" opens the rest and scrolls to it without picking anything.
+        let clicked = HubState()
+        clicked.expandSessions(in: s, ui: UIState())
+        #expect(clicked.selection == nil && clicked.keyboardSelection?.id == "a:n8")
+    }
+
     @Test func aPickedIconStaysWhenNoneCanBePickedToReplaceIt() {
         let s = store([session("a")])
         s.agents.entries[0].icon = "hammer"

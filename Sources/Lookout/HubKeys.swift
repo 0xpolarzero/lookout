@@ -96,7 +96,7 @@ final class HubKeys {
                 return true
             }
             guard shortcut == store.shortcut(.openItem) else { return false }
-            hub.activateSessionTarget(selection, store: store)
+            hub.activateSessionTarget(selection, store: store, ui: ui)
             return true
         }
         if selection.hasPrefix("a:") {

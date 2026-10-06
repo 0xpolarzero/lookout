@@ -99,7 +99,7 @@ struct SessionsList: View {
     /// Kept open, "+N more" shows the rest of New activity; a peek has no room for them, so it keeps the hub open on
     /// Sessions, which gets all the room.
     private func moreAction() {
-        if peekCap == nil { hub.expandSessions() } else { LookoutHub.animate(LookoutHub.refocus) { hub.pinned = true; hub.focus = .agents } }
+        if peekCap == nil { hub.expandSessions(in: store, ui: ui) } else { LookoutHub.animate(LookoutHub.refocus) { hub.pinned = true; hub.focus = .agents } }
     }
 
     private func row(_ row: AgentRow, _ placement: SessionPlacement) -> some View {
@@ -575,14 +575,25 @@ extension HubState {
         ui.drawerSelection = id
     }
 
-    /// "+N more" opens the rest of New activity.
-    func expandSessions() {
-        LookoutHub.animate { sessionsExpanded = true }
+    /// "+N more" opens the rest of New activity and scrolls to its first row. A keyboard pick moves there with it (the
+    /// "+N more" row is gone), so the arrows go on from the rows just revealed.
+    func expandSessions(in store: Store, ui: UIState) {
+        let revealed = store.firstHiddenSession
+        let picked = selection == "s:more"
+        LookoutHub.animate {
+            sessionsExpanded = true
+            guard let revealed else { return }
+            if picked {
+                selection = "a:" + revealed
+                ui.drawerSelection = revealed
+            }
+            requestScroll("a:" + revealed)
+        }
     }
 
     /// Return on a row of the list that isn't a session: "+N more", New session.
-    func activateSessionTarget(_ target: String, store: Store) {
-        if target == "s:more" { expandSessions() } else { store.startScratchSession() }
+    func activateSessionTarget(_ target: String, store: Store, ui: UIState) {
+        if target == "s:more" { expandSessions(in: store, ui: ui) } else { store.startScratchSession() }
     }
 }
 
@@ -599,6 +610,11 @@ extension Store {
             return result
         }
         return listedGroups(expanded: hub.sessionsExpanded).groups.flatMap(\.rows)
+    }
+
+    /// The first New activity session "+N more" is hiding.
+    var firstHiddenSession: String? {
+        sessionGroups.first { $0.kind == .newActivity }?.rows.dropFirst(SessionGroup.newActivityCap).first?.id
     }
 
     /// What the keys can pick after the session rows: "+N more" while New activity is cut, then New session.
@@ -757,6 +773,7 @@ struct LabelEditor: View {
         }
     }
 
+    /// An icon already picked stays available while picking is off: it just can't be replaced.
     private var modes: [Tabs<Mode>.Tab] {
         [.init(id: .letters, title: "Letters"), .init(id: .emoji, title: "Emoji")]
             + (store.canPickIcons || row.entry.icon != nil ? [.init(id: .icon, title: "Icon")] : [])
@@ -779,7 +796,6 @@ struct LabelEditor: View {
             }
             Text(help).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
         }
-    /// An icon already picked stays available while picking is off: it just can't be replaced.
     }
 
     /// Empty goes back to letters from the title, or to the icon that was picked.
