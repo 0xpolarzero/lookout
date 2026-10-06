@@ -53,6 +53,10 @@ struct InboxRow: View {
     /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
     private var selected: Bool { hub.selection == key }
     private var key: String { "i:" + item.id }
+    /// What the row is filled with: the pointer's, or the keyboard's pick.
+    private var rowFill: Color { selected && !hover ? Theme.Fill.selected : hover ? Theme.Fill.hover : Theme.Fill.rest }
+    /// The content's height: the row is `twoLineRow` whatever line 2 holds (the highlight pads 6 above and below).
+    private static let contentHeight = Theme.Metrics.twoLineRow - 12
     private var unread: Bool { item.state == .unread }
     private var isOpen: Bool { item.state.isOpen }
     private var low: Bool { store.isLowPriority(item) }
@@ -67,6 +71,9 @@ struct InboxRow: View {
                 .help(tooltip)
             if showsAction {
                 action
+                    // Over the end of line 2, which gives it no room of its own: the row's own fill behind it keeps
+                    // the text from showing through.
+                    .background(Circle().fill(Theme.bg).overlay(Circle().fill(resolved.fill(rowFill))))
                     .padding(.trailing, Theme.Metrics.rowPadding)
                     .padding(.bottom, 1)
                     .transition(.opacity)
@@ -105,6 +112,7 @@ struct InboxRow: View {
             .padding(.leading, Theme.Space.md)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: Self.contentHeight, alignment: .top)
         .rowHighlight(hover: hover, picked: selected && !hover)
     }
 
@@ -133,28 +141,47 @@ struct InboxRow: View {
         }
     }
 
-    /// The meta line, then (for Addressed and Resolved) what became of it. The trailing slot is always there, so the
-    /// text doesn't change when the action shows.
-    private var secondLine: some View {
+    /// The kind's glyph and the meta line; then, for Addressed and Resolved, what became of it. The author matters
+    /// more than the rest: the state gives up its word, then goes, then the kind's word (its glyph stays) before the
+    /// author is cut.
+    @ViewBuilder private var secondLine: some View {
         HStack(spacing: Theme.Space.xs) {
-            Image(systemName: item.kind.rowSymbol)
-                .font(Theme.Typography.glyph(10, .regular))
-                .frame(width: 12)
-            Text("\(item.repo.split(separator: "/").last ?? "")#\(item.number) · \(item.kind.label) · @\(item.author)")
-                .font(Theme.Typography.meta)
-                .lineLimit(1)
+            glyph(item.kind.rowSymbol)
             if let state = inlineState {
-                Text("·")
-                Label(state.doneLabel, systemImage: state.doneSymbol)
-                    .labelStyle(.titleAndIcon)
-                    .font(Theme.Typography.meta)
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize()
+                ViewThatFits(in: .horizontal) {
+                    meta(state: state, word: true)
+                    meta(state: state, word: false)
+                    meta(state: nil, word: false)
+                    meta(state: nil, word: false, kind: false)
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    meta(state: nil, word: false)
+                    meta(state: nil, word: false, kind: false)
+                }
             }
-            Spacer(minLength: 0)
-            Color.clear.frame(width: Theme.Metrics.iconButton, height: 1)
         }
         .foregroundStyle(Theme.tertiary)
+    }
+
+    private func glyph(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(Theme.Typography.glyph(10, .regular)).frame(width: 12)
+    }
+
+    private func meta(state: ItemState?, word: Bool, kind: Bool = true) -> some View {
+        HStack(spacing: 0) {
+            Text("\(item.repo.split(separator: "/").last ?? "")#\(item.number) · \(kind ? item.kind.label + " · " : "")@\(item.author)")
+                .lineLimit(1)
+            if let state {
+                Text(" · ")
+                HStack(spacing: Theme.Space.xs) {
+                    glyph(state.doneSymbol)
+                    if word { Text(state.doneLabel).lineLimit(1) }
+                }
+                .foregroundStyle(Theme.secondary)
+            }
+        }
+        .font(Theme.Typography.meta)
     }
 
     /// Shown unless it is what the tab already says: in Done, a plain Done needs no word.
