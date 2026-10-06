@@ -52,6 +52,47 @@ import Testing
 }
 
 @MainActor
+@Suite struct InboxRowAges {
+    /// Where, in points from the row's leading edge, the rightmost thing a row at rest draws ends: its age.
+    private func ageEnd(title: String, width: CGFloat = 560) -> CGFloat {
+        let store = Store()
+        store.persists = false
+        let hub = HubState()
+        let item = InboxItem(id: "1", repo: "apple/swift-format", kind: .issueComment, number: 1042, title: title, snippet: "", author: "someone",
+                             avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/b")!,
+                             createdAt: Date().addingTimeInterval(-18 * 60), state: .unread)
+        let hosting = NSHostingView(rootView: InboxRow(item: item, store: store, ui: UIState(), hub: hub).frame(width: width))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 100), styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        for _ in 0..<6 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+            hosting.layoutSubtreeIfNeeded()
+        }
+        hosting.frame.size = hosting.fittingSize
+        let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)!
+        hosting.cacheDisplay(in: hosting.bounds, to: rep)
+        var edge = 0
+        for x in stride(from: rep.pixelsWide - 1, through: 0, by: -1) where (0..<rep.pixelsHigh).contains(where: { (rep.colorAt(x: x, y: $0)?.alphaComponent ?? 0) > 0.3 }) {
+            edge = x
+            break
+        }
+        window.contentView = nil
+        window.orderOut(nil)
+        return CGFloat(edge) * hosting.bounds.width / CGFloat(rep.pixelsWide)
+    }
+
+    @Test func aWideRowAndOneThatFellBackToTwoLinesEndTheirAgeInOneColumn() {
+        // 560 wide: a short title keeps one line, a long one goes back to the two-line stack (DESIGN 5.4).
+        let wide = ageEnd(title: "Short title")
+        let stacked = ageEnd(title: String(repeating: "A very long title that cannot share its line ", count: 3))
+        #expect(wide > 400 && stacked > 400)
+        #expect(abs(wide - stacked) < 0.75, "wide \(wide), stacked \(stacked)")
+    }
+}
+
+@MainActor
 @Suite struct InboxListWindow {
     private let pitch = InboxList.pitch
 

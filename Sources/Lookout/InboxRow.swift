@@ -209,7 +209,8 @@ struct InboxRow: View {
             .layoutPriority(1)
             Spacer(minLength: 0)
             age(now)
-            Color.clear.frame(width: Theme.Metrics.iconButton, height: 1)
+            // The same room after the age as the stacked row leaves (its spacing and 18 pt), so the ages share a column.
+            Color.clear.frame(width: Theme.Metrics.iconButton - Theme.Space.md, height: 1)
         }
         .frame(height: Self.contentHeight)
     }
