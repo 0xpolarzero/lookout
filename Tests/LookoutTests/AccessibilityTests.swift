@@ -339,6 +339,14 @@ enum AccessibilityTree {
         #expect(hub.pinned && hub.selection == first && hub.voiceOverRequest?.target == first)
     }
 
+    @Test func showOnTheInboxWithASignInProblemGoesToTheHeaderNotAnAbsentRow() {
+        // The cached items are not drawn: the banner replaces them, and the cursor goes to what is.
+        hub.selection = "a:x"
+        store.authError = "Bad credentials"
+        view.show(.inbox)
+        #expect(hub.selection == nil && hub.voiceOverRequest?.target == "h:inbox")
+    }
+
     @Test func showControlsOnTheGearOpensTheMenuAtRestWithoutPinningAndSendsVoiceOverToItsFirstRow() {
         view.show(.controls)
         #expect(hub.section == .controls && hub.menuKeys && !hub.pinned && hub.voiceOverRequest?.target == "h:controls")

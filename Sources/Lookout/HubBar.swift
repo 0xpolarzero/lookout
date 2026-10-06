@@ -107,10 +107,13 @@ extension LookoutHub {
             // The pick is a row of the inbox: another section's focus would fold it away and leave nothing to pick.
             if hub.focus != .inbox { hub.focus = nil }
         }
-        if let first = store.list(.needsYou).first {
+        // What the inbox shows, not what it holds: a sign-in problem replaces the rows, and nothing is there to pick.
+        if let first = store.hubItems(hub).first {
             hub.selection = "i:" + first.id
             hub.requestScroll("i:" + first.id)
             ui.drawerSelection = nil
+        } else {
+            hub.selection = nil
         }
     }
 
