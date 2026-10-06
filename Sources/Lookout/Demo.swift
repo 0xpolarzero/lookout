@@ -17,6 +17,8 @@ enum Demo {
         case sessionsWaiting, sessionsWorking, sessionsUnread, sessionsNewActivity, sessionsScratch, sessionsNone, sessions12
         // The update cell.
         case updateAvailable, updateDownloading, updateReady
+        // Sessions: eleven under New activity, more than its list shows.
+        case sessionsManyNew
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -176,6 +178,8 @@ enum Demo {
         case .updateReady:
             agents(store, now)
             store.updater.preview(.ready, version: "0.5.0")
+        case .sessionsManyNew:
+            sessionsManyNew(store, now)
         }
     }
 
@@ -301,6 +305,22 @@ enum Demo {
                                          detail: "Finished turn \(i)."), kept: i < 10, unread: i % 3 == 0))
         }
         sessions(store, now, listed, activity: ["t1": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-90))])
+    }
+
+    /// One waiting, two kept, and eleven with new activity: the group shows eight and "+3 more".
+    private static func sessionsManyNew(_ store: Store, _ now: Date) {
+        let projects = ["lcu", "microsandbox", "lookout", "lcu-research"]
+        var listed = [
+            Listed(session("m0", "LCU update notifications", "lcu", minutes: 2, blocked: true,
+                           detail: "Should updates install silently, or ask first each time?"), unread: true),
+            Listed(session("m1", "Transfer setup", "lookout", minutes: 200, detail: "Both remotes point at the new org.")),
+            Listed(session("m2", "Calculator display reading", "lcu", minutes: 90, detail: "The display reads 1,234.5.")),
+        ]
+        for i in 0..<11 {
+            listed.append(Listed(session("m\(i + 3)", "New activity \(i + 1)", projects[i % projects.count], minutes: Double(3 + i * 11),
+                                         detail: "Finished turn \(i + 1)."), kept: false, unread: i % 2 == 0))
+        }
+        sessions(store, now, listed)
     }
 
     private static func items(_ now: Date) -> [InboxItem] {
@@ -451,7 +471,7 @@ enum ClaudeCheck {
             store.refreshClaude()
             let rows = store.agentRows
             let lines = (rows.kept + rows.pending).map { r in
-                "\(r.label) \(r.pending ? "pending" : "kept   ") \(r.unread ? "UNREAD" : "read  ") \(r.statusText.padding(toLength: 10, withPad: " ", startingAt: 0)) \(r.session.title)"
+                "\(r.label) \(r.pending ? "pending" : "kept   ") \(r.unread ? "UNREAD" : "read  ") \(r.statusLabel().padding(toLength: 10, withPad: " ", startingAt: 0)) \(r.session.title)"
             }
             let text = lines.joined(separator: "\n")
             guard text != last else { return }

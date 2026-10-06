@@ -311,7 +311,8 @@ struct Shot {
 ///   no-ci, all-passing, many-ci (15 repositories)
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus
 ///   sessions-waiting, sessions-working, sessions-unread, sessions-new-activity, sessions-scratch, sessions-none,
-///   sessions-12 (also `focus-agents-sessions-12`)
+///   sessions-12, sessions-many-new (eleven under New activity); every edge for `peek-agents-`, `open-` and
+///   `focus-agents-`; `picked-sessions` (right and top: one picked with the keys, one under the pointer), `focus-agents-sessions-more` (tall screen, "+3 more" picked)
 /// Update: `rest-`, `open-` plus
 ///   update-available, update-downloading, update-ready
 /// Accessibility (Increase Contrast, Reduce Motion, Differentiate Without Colour, all three as a11y; Differentiate
@@ -338,6 +339,30 @@ enum PlaygroundShots {
     private static let updates: [(String, Demo.Scenario)] = [
         ("update-available", .updateAvailable), ("update-downloading", .updateDownloading), ("update-ready", .updateReady),
     ]
+
+    /// Sessions on every edge: the peek and the kept-open list on the edges left over, the focused list on all four,
+    /// New activity cut to eight, and a session picked and one under the pointer.
+    private static let sessionShots: [Shot] = {
+        var shots = sessions.flatMap { slug, scenario in
+            Shot.edges("peek-agents-\(slug)", on: [.left, .bottom]) { $0.section = .agents; $0.scenario = scenario }
+                + Shot.edges("open-\(slug)", on: [.left, .bottom]) { $0.pinned = true; $0.scenario = scenario }
+                + Shot.edges("focus-agents-\(slug)") { $0.pinned = true; $0.focus = .agents; $0.scenario = scenario }
+        }
+        shots += Shot.edges("rest-sessions-many-new") { $0.scenario = .sessionsManyNew }
+        shots += Shot.edges("open-sessions-many-new") { $0.pinned = true; $0.scenario = .sessionsManyNew }
+        shots += Shot.edges("peek-agents-sessions-many-new") { $0.section = .agents; $0.scenario = .sessionsManyNew }
+        shots += Shot.edges("focus-agents-sessions-many-new") { $0.pinned = true; $0.focus = .agents; $0.scenario = .sessionsManyNew }
+        shots += Shot.edges("picked-sessions") {
+            $0.pinned = true; $0.scenario = .sessionsWorking; $0.selection = .session("k2"); $0.hoveredSession = "k1"
+            $0.setup = { _, _, hub in hub.requestScroll("a:k2") }
+        }
+        // The whole list with its "+3 more" picked: a screen tall enough for it.
+        shots += Shot.edges("focus-agents-sessions-more", on: .rightAndTop) {
+            $0.pinned = true; $0.scenario = .sessionsManyNew; $0.focus = .agents; $0.size = CGSize(width: 1280, height: 1500)
+            $0.setup = { _, _, hub in hub.selection = "s:more" }
+        }
+        return shots
+    }()
 
     /// Every shot, in the order they are rendered. One line each.
     static let catalog: [Shot] = [
@@ -372,6 +397,7 @@ enum PlaygroundShots {
         Shot.edges("focus-ci-many-ci", on: .rightAndTop) { $0.pinned = true; $0.scenario = .manyCI; $0.focus = .ci },
         sessions.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .agents) },
         Shot.edges("focus-agents-sessions-12", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents },
+        sessionShots,
         updates.flatMap { slug, scenario in scenarioShots(slug, scenario) },
         // Accessibility variants.
         Shot.edges("rest-contrast") { $0.environment = .contrast },
