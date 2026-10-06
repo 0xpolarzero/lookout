@@ -276,9 +276,9 @@ struct LookoutHub: View {
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
         let free = max(160, maxLength - 360 - ciExtra)
         guard store.agents.enabled else { return (free, 0) }
-        // Not under the room for three sessions, their headers and "Show all" (the list itself stops on a whole row, and is no
-        // taller than it is).
-        let agents = max(SessionGroup.leastHeight, free * 0.45)
+        // Room for three sessions, their headers and "Show all" where there is any to spare (the list itself stops on a
+        // whole row, and is no taller than it is), but never all of it: the inbox keeps a row.
+        let agents = SessionGroup.share(of: free)
         return (free - agents, agents)
     }
 

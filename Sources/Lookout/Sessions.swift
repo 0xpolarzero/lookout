@@ -167,6 +167,15 @@ extension SessionGroup {
     /// row that ends a list cut short (a list with fewer sessions is only as tall as it is).
     static let leastHeight = 3 * Theme.Metrics.twoLineRow + 2 * headerHeight + gap + Theme.Metrics.pitch
 
+    /// What the inbox keeps of the room the two lists share, whatever Sessions would like: one row (and the gap under it).
+    static let inboxLeast: CGFloat = 48
+
+    /// How much of `free` Sessions gets: the room for three sessions when there is that much to spare, else
+    /// 45% of it, and never so much that the inbox is left under one row.
+    static func share(of free: CGFloat) -> CGFloat {
+        min(max(leastHeight, free * 0.45), max(free - inboxLeast, 0))
+    }
+
     /// What a peek of `cap` points lists: the groups in order, whole rows only (a header never stands alone), and
     /// how many sessions are left out. With any left out the last line is the "+N more" row, which is in the cap.
     static func peek(_ groups: [SessionGroup], cap: CGFloat) -> (groups: [SessionGroup], hidden: Int) {

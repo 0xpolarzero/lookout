@@ -332,6 +332,17 @@ import Testing
         #expect(peek.groups[0].total == 5)
     }
 
+    @Test func theInboxGetsARowBeforeSessionsGetTheirMinimum() {
+        let least = SessionGroup.leastHeight
+        // Plenty of room: the sessions' minimum, or 45% of it when that is more.
+        #expect(SessionGroup.share(of: 600) == 270 && SessionGroup.share(of: 400) == least)
+        // A 560pt hub beside the bar leaves 200: the inbox keeps one row, Sessions shrinks to the rest.
+        #expect(SessionGroup.share(of: 200) == 200 - SessionGroup.inboxLeast)
+        for free in stride(from: 160.0, through: 700, by: 10) {
+            #expect(free - SessionGroup.share(of: free) >= SessionGroup.inboxLeast)
+        }
+    }
+
     @Test func newSessionOffersTheMostRecentProjectFirst() {
         let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1),
                        session("c", folder: nil, minutesAgo: 0)])
