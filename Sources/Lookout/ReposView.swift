@@ -275,7 +275,7 @@ struct ReposView: View {
                     .padding(.bottom, Theme.Metrics.inset)
             }
         }
-        .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
+        .listMotion(value: store.undoStack.visibleID)
         .task { await store.loadSuggestions() }
         .onAppear {
             if let query = preview.addQuery {

@@ -1038,7 +1038,7 @@ extension LookoutHub {
                     .padding(.horizontal, inset).padding(.top, Theme.Space.xs)
             }
         }
-        .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
+        .listMotion(value: store.undoStack.visibleID)
     }
 
     /// What the undo line takes under the sessions, while there is one.

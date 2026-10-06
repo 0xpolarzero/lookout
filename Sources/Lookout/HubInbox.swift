@@ -415,7 +415,7 @@ struct InboxList: View {
             }
             .id(scopeID)
             .transition(.opacity)
-            .motion(Theme.Motion.fade, value: listKey)
+            .listMotion(value: listKey)
         }
         .onDisappear { hub.inbox.scrolled = false; hub.inbox.hiddenBelow = 0; hub.inbox.cueInHeader = false }
         .accessibilityRotor("Unread") {

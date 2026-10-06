@@ -165,7 +165,7 @@ struct SettingsView: View {
             }
         }
         .motion(Theme.Motion.fade, value: current.wrappedValue)
-        .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
+        .listMotion(value: store.undoStack.visibleID)
         .onAppear {
             if let pane = preview.pane { ownPane = pane }
             revealToken = preview.revealsToken
