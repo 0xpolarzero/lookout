@@ -343,7 +343,7 @@ extension LookoutHub {
                 UndoLine(message: undo.message) { store.undoLast() }.padding(.top, Theme.Space.xs)
             }
         }
-        .motion(Theme.Motion.fade, value: list.entries.map { "\($0.id) \($0.state.rawValue) \($0.muted)" })
+        .listMotion(value: list.entries.map { "\($0.id) \($0.state.rawValue) \($0.muted)" })
         .motion(Theme.Motion.fade, value: store.undoStack.visibleID)
         // A pick on a row that left the list (it passed, was muted, lost its CI) moves on instead of lingering.
         .onChange(of: hub.ciTargets(store)) { old, new in hub.rehomeCI(from: old, to: new) }

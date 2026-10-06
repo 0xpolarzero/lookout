@@ -175,6 +175,10 @@ extension Theme {
             guard reduce else { return animation }
             return animation == hover || animation == fade ? reduced : nil
         }
+
+        /// The same for a list whose rows come, go and move: where a row sits is spatial, so under Reduce Motion the change is
+        /// instant (a shortened fade would still slide the rows round it).
+        static func resolveList(_ animation: Animation, reduce: Bool) -> Animation? { reduce ? nil : animation }
     }
 }
 
@@ -198,7 +202,22 @@ private struct MotionModifier<V: Equatable>: ViewModifier {
     }
 }
 
+private struct ListMotionModifier<V: Equatable>: ViewModifier {
+    let animation: Animation
+    let value: V
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    func body(content: Content) -> some View {
+        content.animation(Theme.Motion.resolveList(animation, reduce: reduce), value: value)
+    }
+}
+
 extension View {
+    /// `.motion` for a list's rows coming, going and moving: instant under Reduce Motion (3.6).
+    func listMotion<V: Equatable>(_ animation: Animation = Theme.Motion.fade, value: V) -> some View {
+        modifier(ListMotionModifier(animation: animation, value: value))
+    }
+
     /// `.animation(_:value:)` that follows Reduce Motion live.
     func motion<V: Equatable>(_ animation: Animation = Theme.Motion.move, value: V) -> some View {
         modifier(MotionModifier(animation: animation, value: value))

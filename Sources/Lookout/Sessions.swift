@@ -106,7 +106,7 @@ struct SessionsList: View {
             }
         }
         .padding(rail == .leading ? .trailing : .leading, inset)
-        .motion(Theme.Motion.fade, value: store.agentsRevision)
+        .listMotion(value: store.agentsRevision)
     }
 
     /// Kept open, "+N more" shows the rest of the sessions; a peek has no room for them, so it keeps the hub open on
