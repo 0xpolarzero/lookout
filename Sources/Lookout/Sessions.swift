@@ -12,7 +12,6 @@ struct AgentTile: View {
     var selected = false
 
     var body: some View {
-        let shape = Tile.shape(size)
         // Busy (Claude answering, or a subagent or command still running after it): the tile fades and pulses,
         // quieter than the sessions waiting on you. The face is rendered to an image that Core Animation fades.
         let busy = (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty
@@ -28,9 +27,7 @@ struct AgentTile: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
             .accessibilityValue(row.stateName)
-            .overlay {
-                if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
-            }
+            .focusRing(size * Tile.ratio, isFocused: selected)
             // The project's colour, as an underline.
             .overlay(alignment: .bottom) {
                 if let color = row.color {
@@ -87,7 +84,7 @@ struct WorkingText: View {
 
     var body: some View {
         Ticking { now in
-            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.claude)
+            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.secondary)
         }
     }
 }
@@ -102,7 +99,7 @@ struct ProjectLabel: View {
             if let color {
                 Circle().fill(color).frame(width: 6, height: 6)
             } else {
-                Image(systemName: "text.bubble").font(.system(size: 9))
+                Image(systemName: "text.bubble").font(Theme.Typography.glyph(9, .regular))
             }
             Text(session.folderName)
         }
@@ -119,14 +116,14 @@ struct TaskLines: View {
                 ForEach(tasks) { task in
                     HStack(spacing: 6) {
                         Image(systemName: task.kind == .agent ? "asterisk" : "terminal")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.claude)
+                            .font(Theme.Typography.glyph(9))
+                            .foregroundStyle(Theme.secondary)
                             .frame(width: 12)
                         Text(task.title).foregroundStyle(Theme.secondary).lineLimit(1)
                         Spacer(minLength: 6)
                         Text(status(task, now: now))
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundStyle(Theme.claude)
+                            .font(Theme.Typography.numeral)
+                            .foregroundStyle(Theme.secondary)
                             .lineLimit(1)
                             .layoutPriority(1)
                     }
@@ -148,6 +145,7 @@ struct Reorderable: ViewModifier {
     let row: AgentRow
     let store: Store
     @Binding var dropTarget: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     func body(content: Content) -> some View {
         if row.pending {
@@ -156,15 +154,15 @@ struct Reorderable: ViewModifier {
             content
                 .draggable("agent:" + row.id) {
                     Text(row.session.title)
-                        .font(Theme.Typography.heading)
+                        .font(Theme.Typography.title)
                         .padding(.horizontal, 10)
-                        .frame(height: Theme.Metrics.chip)
+                        .frame(height: Theme.Metrics.tile)
                         .background(Capsule().fill(Theme.bg))
                         .foregroundStyle(Theme.text)
                 }
                 .dropDestination(for: String.self) { ids, _ in
                     guard let id = ids.first, id.hasPrefix("agent:") else { return false }
-                    withAnimation(.spring(duration: 0.25)) { store.moveAgent(String(id.dropFirst(6)), onto: row.id) }
+                    withAnimation(Theme.Motion.move.resolved(reduce: reduce)) { store.moveAgent(String(id.dropFirst(6)), onto: row.id) }
                     return true
                 } isTargeted: { dropTarget = $0 }
         }
@@ -175,36 +173,35 @@ struct Reorderable: ViewModifier {
 struct AgentActions: View {
     let row: AgentRow
     let store: Store
-    var size: CGFloat = 24
-    /// The row already shows Keep and Remove: only read/unread and open here.
+    /// The row already shows Keep and Hide: only read/unread and open here.
     var keepsInline = false
 
     var body: some View {
         RowActions {
             if row.pending && !keepsInline {
-                IconButton(symbol: "pin.fill", help: "Keep", detail: "Pins it to your list · \(store.shortcut(.keepSession).display)", size: size) {
+                IconButton(symbol: "bookmark", help: "Keep", detail: "Keeps it in your list · \(store.shortcut(.keepSession).display)") {
                     store.keepAgent(row.id)
                 }
-                IconButton(symbol: "xmark", help: "Remove", detail: "Until its next activity · \(store.shortcut(.removeSession).display)", size: size) {
+                IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)") {
                     store.dismissAgent(row.id)
                 }
             } else {
                 if row.unread {
-                    IconButton(symbol: "checkmark", help: "Mark as read", detail: store.shortcut(.toggleRead).display, size: size) {
+                    IconButton(symbol: "checkmark", help: "Mark as read", detail: store.shortcut(.toggleRead).display) {
                         store.toggleAgentRead(row.id)
                     }
                 } else {
-                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: store.shortcut(.toggleRead).display, size: size) {
+                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: store.shortcut(.toggleRead).display) {
                         store.toggleAgentRead(row.id)
                     }
                 }
                 if !row.pending {
-                    IconButton(symbol: "xmark", help: "Remove", detail: "Comes back as pending on new activity · \(store.shortcut(.removeSession).display)", size: size) {
+                    IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)") {
                         store.dismissAgent(row.id)
                     }
                 }
             }
-            IconButton(symbol: "arrow.up.right", help: "Open in Claude", detail: store.shortcut(.openItem).display, size: size) {
+            IconButton(symbol: "arrow.up.right", help: "Open in Claude", detail: store.shortcut(.openItem).display) {
                 store.openAgent(row.id)
             }
         }
@@ -221,9 +218,9 @@ struct LabelEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Label for \(row.session.title)").font(Theme.Typography.heading).lineLimit(1)
+            Text("Label for \(row.session.title)").font(Theme.Typography.title).lineLimit(1)
             Text("Two letters or an emoji; empty goes back to the \(row.entry.icon != nil ? "icon" : "letters")")
-                .font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
+                .font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
             HStack(spacing: 6) {
                 TextField(row.label, text: $text)
                     .focused($focused)
@@ -329,7 +326,6 @@ private struct UpdateLabel: View {
                         .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .padding(3)
-                        .animation(.linear(duration: 0.2), value: fraction)
                 }
                 if updater.phase == .installing {
                     ProgressView().controlSize(.mini)
@@ -342,12 +338,12 @@ private struct UpdateLabel: View {
             .frame(width: 28, height: 28)
             if horizontal && hover {
                 Text(UpdateButton.label(updater.phase, version: version))
-                    .font(Theme.Typography.heading)
+                    .font(Theme.Typography.title)
                     .foregroundStyle(Theme.text)
                     .padding(.trailing, 8)
             }
         }
-        .motion(Theme.Motion.spring, value: hover)
+        .motion(Theme.Motion.hover, value: hover)
     }
 
     private var symbol: String {
@@ -394,8 +390,8 @@ struct DrawerRow: View {
             if twoLines { AgentTile(row: row, size: 24) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(row.unread ? Theme.Typography.bodyStrong : Theme.Typography.body)
-                    .foregroundStyle(row.unread || row.session.running ? Theme.text : Theme.text.opacity(0.72))
+                    .font(row.unread ? Theme.Typography.title : Theme.Typography.body)
+                    .foregroundStyle(Theme.text)
                     .lineLimit(1)
                 if twoLines {
                     HStack(spacing: 4) {
@@ -406,7 +402,7 @@ struct DrawerRow: View {
                             Text("· not in your list").foregroundStyle(Theme.tertiary)
                         }
                     }
-                    .font(Theme.Typography.caption)
+                    .font(Theme.Typography.meta)
                     .lineLimit(1)
                 }
             }
@@ -414,11 +410,11 @@ struct DrawerRow: View {
             Spacer(minLength: 6)
 
             if selected && !plain {
-                AgentActions(row: row, store: store, size: 22)
+                AgentActions(row: row, store: store)
             } else if !twoLines {
                 // In a hub block the actions are laid over this spot instead: the status steps aside without the
                 // row changing size.
-                status.font(Theme.Typography.caption.monospacedDigit()).lineLimit(1).truncationMode(.middle)
+                status.font(Theme.Typography.numeral).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: busy ? 170 : 110, alignment: .trailing)
                     .fixedSize(horizontal: busy, vertical: false)
                     .layoutPriority(busy ? 2 : 0)
@@ -427,14 +423,14 @@ struct DrawerRow: View {
         }
         Group {
             if hubRow {
-                content.rowHighlight(selected && !plain)
+                content.rowHighlight(hover: selected && !plain)
             } else {
                 content
                     .padding(.leading, 10)
                     .padding(.trailing, selected ? 3 : 10)
-                    .frame(height: twoLines ? 44 : nil)
-                    .frame(maxHeight: twoLines ? 44 : .infinity)
-                    .background(Theme.Radius.shape(Theme.Radius.md).fill(selected && !plain ? Theme.Fill.hover : Theme.Fill.rest))
+                    .frame(height: twoLines ? Theme.Metrics.twoLineRow : nil)
+                    .frame(maxHeight: twoLines ? Theme.Metrics.twoLineRow : .infinity)
+                    .background(Theme.Radius.shape(Theme.Radius.row).fill(selected && !plain ? Theme.Fill.hover : Theme.Fill.rest))
             }
         }
         .contentShape(Rectangle())
@@ -469,11 +465,11 @@ struct DrawerRow: View {
             WorkingText(row: row)
         } else {
             HStack(spacing: 4) {
-                Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "pending") : row.statusText)
+                Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "new activity") : row.statusText)
                     .foregroundStyle(row.statusColor)
                 if let tasks = row.tasksText {
                     Text("·").foregroundStyle(Theme.tertiary)
-                    Text(tasks).foregroundStyle(Theme.claude)
+                    Text(tasks).foregroundStyle(Theme.secondary)
                 }
             }
         }
@@ -524,7 +520,7 @@ struct NewSessionRow: View {
                 Button(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
             }
         } label: {
-            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            Image(systemName: "chevron.down").font(Theme.Typography.glyph(9))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -602,7 +598,7 @@ private struct ProjectTile: View {
         let name = URL(fileURLWithPath: folder).lastPathComponent
         Button(action: action) { ProjectTileFace(initials: initials, color: color) }
             // The face does its own hover look (a ring), so the style adds no fill.
-            .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), hover: .clear, pressed: .clear))
+            .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.small), hover: .clear, pressed: .clear))
             .accessibilityLabel("New session in \(name)")
             .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
     }
@@ -614,9 +610,9 @@ private struct ProjectTileFace: View {
     @Environment(\.hoverFillHovering) private var hover
 
     var body: some View {
-        let shape = Theme.Radius.shape(Theme.Radius.xs + 1)
+        let shape = Theme.Radius.shape(Theme.Radius.tile)
         Text(initials)
-            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+            .font(Theme.Typography.tile)
             .foregroundStyle(color == nil ? Theme.text.opacity(0.88) : Theme.onTint)
             .frame(width: 22, height: 22)
             .background(shape.fill(color ?? Theme.Fill.tile))
@@ -643,9 +639,9 @@ struct SessionMenu: View {
         Divider()
         if row.pending {
             Button("Keep") { store.keepAgent(row.id) }
-            Button("Remove") { store.dismissAgent(row.id) }
+            Button("Hide") { store.dismissAgent(row.id) }
         } else {
-            Button("Remove") { store.dismissAgent(row.id) }
+            Button("Hide") { store.dismissAgent(row.id) }
         }
         if !row.session.folderKey.isEmpty {
             Menu("Colour for \(row.session.folderName)") {
@@ -697,7 +693,7 @@ struct ClaudeLinkStatus: View {
 
     var body: some View {
         let (color, text, detail): (Color, String, String) = switch store.claudeLink {
-        case .ok where Claude.isRunning: (Theme.green, "Synced with Claude", "Updates as the Claude app writes its session files")
+        case .ok where Claude.isRunning: (Theme.tertiary, "Synced with Claude", "Updates as the Claude app writes its session files")
         case .ok, .off: (Theme.tertiary, "Claude isn't running", "Sessions update again when the app is open")
         case .missing: (Theme.red, "Claude's sessions not found", "Open the Claude desktop app once")
         case .unreadable: (Theme.red, "Can't read Claude's sessions", "The app's session format changed")

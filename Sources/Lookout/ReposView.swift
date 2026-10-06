@@ -40,7 +40,7 @@ struct ReposView: View {
     /// Column header over the toggles of every card, in the same order and spacing as the badges.
     private var legend: some View {
         HStack(spacing: 10) {
-            Eyebrow("Watching", count: store.repos.count)
+            Text("Watching  \(store.repos.count)").font(Theme.Typography.label)
             Spacer(minLength: Theme.Space.sm)
             RepoToggleColumns.legend
             Color.clear.frame(width: 20, height: 1)
@@ -85,8 +85,8 @@ struct ReposView: View {
                     }
                 }
                 .padding(Theme.Space.xs)
-                .background(Theme.Radius.shape(Theme.Radius.lg).fill(Theme.raised))
-                .overlay(Theme.Radius.shape(Theme.Radius.lg).strokeBorder(Theme.stroke))
+                .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
+                .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(Theme.stroke))
                 .onHover { overList = $0 }
             }
         }
@@ -118,7 +118,7 @@ private struct SuggestionRow: View {
         Button(action: action) {
             SuggestionLabel(name: name)
         }
-        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.sm)))
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.tile)))
         .accessibilityLabel("Watch \(name)")
     }
 }
@@ -161,7 +161,7 @@ private enum RepoToggleColumns {
     private static func group(_ text: String, columns: Int) -> some View {
         let width = CGFloat(columns) * 24 + CGFloat(columns - 1) * spacing
         return VStack(spacing: 2) {
-            Text(text).font(Theme.Typography.glyph(9, .medium)).lineLimit(1).fixedSize()
+            Text(text).font(Theme.Typography.meta).lineLimit(1).fixedSize()
             Hairline()
         }
         .frame(width: width)
@@ -179,7 +179,7 @@ struct RepoCard: View {
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(repo.owner).font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
+                Text(repo.owner).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
                 Text(repo.name).font(Theme.Typography.title)
             }
             .lineLimit(1)
@@ -207,10 +207,10 @@ struct RepoCard: View {
         .padding(.leading, Theme.Space.lg)
         .padding(.trailing, Theme.Space.sm)
         .padding(.vertical, Theme.Space.md)
-        .background(Theme.Radius.shape(Theme.Radius.lg).fill(hover ? Theme.Fill.hover : Theme.raised))
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(hover ? Theme.Fill.hover : Theme.Fill.group))
         .motion(Theme.Motion.hover, value: hover)
         .overlay(
-            Theme.Radius.shape(Theme.Radius.lg)
+            Theme.Radius.shape(Theme.Radius.row)
                 .strokeBorder(dropTarget ? Theme.accent : Theme.stroke, lineWidth: dropTarget ? 1.5 : 1)
         )
         .onHover { hover = $0 }
@@ -220,15 +220,15 @@ struct RepoCard: View {
         })
         .draggable(repo.fullName) {
             Text(repo.fullName)
-                .font(Theme.Typography.heading)
+                .font(Theme.Typography.title)
                 .padding(.horizontal, 10)
-                .frame(height: Theme.Metrics.chip)
+                .frame(height: Theme.Metrics.tile)
                 .background(Capsule().fill(Theme.bg))
                 .foregroundStyle(Theme.text)
         }
         .dropDestination(for: String.self) { names, _ in
             guard let name = names.first else { return false }
-            withAnimation(Theme.Motion.spring.resolved(reduce: reduceMotion)) { store.moveRepo(name, onto: repo.fullName) }
+            withAnimation(Theme.Motion.move.resolved(reduce: reduceMotion)) { store.moveRepo(name, onto: repo.fullName) }
             return true
         } isTargeted: { dropTarget = $0 }
     }
@@ -239,7 +239,7 @@ struct RepoCard: View {
         let on = repo.events.contains(kind)
         let filtered = kind != .issueOpened && kind != .prOpened && !repo.allComments
         let detail = filtered ? "Only on your threads, @mentions and replies to you" : kind.tipDetail
-        return BadgeButton(symbol: kind.symbol, color: kind.color, on: on, label: kind.toggleLabel) { store.toggle(kind, on: repo) }
+        return BadgeButton(symbol: kind.symbol, color: Theme.accent, on: on, label: kind.toggleLabel) { store.toggle(kind, on: repo) }
             .tip(kind.toggleLabel, detail + (on ? "" : "\nOff · click to turn on"))
     }
 
@@ -264,7 +264,7 @@ struct RepoCard: View {
         if on, state == .failure, let failing = status?.failing, !failing.isEmpty {
             detail += "\n" + failing.prefix(4).joined(separator: "\n")
         }
-        return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on, label: "CI",
+        return BadgeButton(symbol: symbol, color: Theme.accent, on: on, label: "CI",
                            value: on ? "\(state.label), shown on the bar" : "Hidden from the bar") {
             store.toggle(.ciMain, on: repo)
         }
@@ -304,7 +304,7 @@ private struct BadgeButton: View {
     var body: some View {
         Button(action: action) { BadgeLabel(symbol: symbol, color: color, on: on) }
             .buttonStyle(HoverFillButtonStyle(
-                shape: Theme.Radius.shape(Theme.Radius.sm),
+                shape: Theme.Radius.shape(Theme.Radius.tile),
                 rest: on ? color.opacity(0.15) : Theme.Fill.rest,
                 hover: on ? color.opacity(0.24) : Theme.Fill.hover,
                 pressed: on ? color.opacity(0.32) : Theme.Fill.selected))
@@ -324,6 +324,6 @@ private struct BadgeLabel: View {
             .font(Theme.Typography.glyph(10.5))
             .foregroundStyle(on ? color : Theme.tertiary.opacity(hover ? 1 : 0.7))
             .frame(width: 24, height: 24)
-            .overlay(Theme.Radius.shape(Theme.Radius.sm).strokeBorder(on ? color.opacity(0.25) : Theme.stroke))
+            .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(on ? color.opacity(0.25) : Theme.stroke))
     }
 }

@@ -1,91 +1,95 @@
+import AppKit
 import SwiftUI
 
-// The design system's pieces. Tokens live in `Theme` (Theme.swift); shared components live here.
+// The design system's pieces (DESIGN.md is the source of truth). Colour tokens, `Theme.Resolved` and `Theme.Timing`
+// live in Theme.swift; the rest of the tokens and the shared components live here.
 //
-// TOKENS (Theme.swift)
-//   Colours   bg, raised, hover, stroke, text, secondary (white .64, ~7.97:1 on bg; was .56), tertiary (white .46, ~4.67:1; was .34), accent, amber,
-//             green, red, purple, claude; `Theme.onTint` = text on a tinted (amber/green/...) fill.
-//   Radius    Theme.Radius.xs 5 (keycaps, small chips) / sm 7 (compact tiles, menus) / md 9 (rows, fields, buttons)
-//             / lg 12 (cards, popovers) / panel 18 (the hub itself). All `.continuous`: use `Theme.Radius.shape(_)`.
-//   Fill      Theme.Fill.rest 0 / faint .045 (cards) / field .06 (fields, row highlight) / hover .07 / selected .12 /
-//             pressed .15 / tile .10 (avatars, icon tiles). Disabled buttons show no fill and fade to 40%. Never write `Color.white.opacity(x)` for these.
-//   Font      Theme.Typography.title 13 semibold (page/section titles) / body 12 medium (row text) / meta 11 (secondary
-//             info) / caption 10.5 (tooltip detail, hints) / eyebrow 10 semibold (uppercase headings, with
-//             `.tracking(Theme.Typography.eyebrowTracking)`) / count 11 semibold mono-digit / badge 10 bold mono-digit.
-//             `Theme.Typography.glyph(_ size, weight)` for icons sized off their box.
-//   Space     Theme.Space.xs 4 / sm 6 / md 8 / lg 12 / xl 16.
-//   Metrics   Theme.Metrics.line 30 (header / one-line row), row 36 (session row), bar 46 (bar depth), inset 6 (the
-//             one outer inset), field 32, chip 26.
-//   Motion    Theme.Motion.hover (easeOut .12), spring (.28, bounce .06), fade (easeOut .14).
-//             `.motion(_:value:)` replaces `.animation(_:value:)`: reads Reduce Motion LIVE from the environment and
-//             swaps springs for a short fade. In code with no view: `@Environment(\.accessibilityReduceMotion) var
-//             reduce`, then `withAnimation(Theme.Motion.spring.resolved(reduce: reduce))` or
-//             `.transition(.slide(from: .trailing, reduce: reduce))`.
+// TOKENS
+//   Colours   Theme.bg / rail / popover; text .93, secondary .70, tertiary .58 (a hint on a form is never tertiary);
+//             accent (blue: unread, interactive), accentText (links), amber (needs you), red (broken), green (update
+//             ready only), onTint (on amber/green fills), claude (Claude settings pane only); stroke, divider,
+//             fieldBorder, switchOff. In views that should follow Increase Contrast, read `@Environment(\.resolved)`.
+//   Radius    Theme.Radius.hub 16 / row 10 (hub - inset; also banners and groups) / field 8 / tile 7 / small 4. All
+//             `.continuous`, concentric: use `Theme.Radius.shape(_)`.
+//   Fill      Theme.Fill.rest 0 / hover .07 (pointer only) / field .06 / tile .10 (tiles, avatars, bordered buttons) /
+//             selected .12 (keyboard pick, selected tab) / pressed .15 / group .045 (settings groups, banners, undo
+//             line). Never write `Color.white.opacity(x)` for these.
+//   Font      Theme.Typography.title 13 semibold / body 13 / control 12 medium / meta 11 / label 11 semibold (sentence
+//             case, secondary) / numeral 11 semibold mono-digit / tile 11 bold rounded / keyhint 11. Nothing below 11.
+//             `Theme.Typography.glyph(_ size, weight)` sizes an icon off its box (symbols may be smaller).
+//   Space     Theme.Space.hair 2 / xs 4 / sm 6 / md 8 / lg 12 / xl 16.
+//   Metrics   pitch 36 (every cell, header, one-line row and footer), bar 46, inset 6, contentEdge 14, twoLineRow 44,
+//             taskRow 60, menuRow 28, formRow 36, field/button 28, tab 24, tile 26, avatar 24 ... `line` 30 is the
+//             pre-redesign pitch, kept until each surface moves to `pitch`.
+//   Motion    Theme.Motion.hover (easeOut .12), fade (.14), move (spring .28), close (spring .20): never a bounce.
+//             `.motion(_:value:)` replaces `.animation(_:value:)` and follows Reduce Motion live; with no view,
+//             `Theme.Motion.resolve(_:reduce:)` (or `.resolved(reduce:)`), the reduce flag coming from
+//             `@Environment(\.accessibilityReduceMotion)` or, in key handlers, `LookoutHub.animate`.
 //
-// COMPONENTS (this file)
-//   HoverFillButtonStyle   (respects isEnabled) `.buttonStyle(HoverFillButtonStyle(...))`: hover/active/pressed fill, hover animation. Use
-//                          for every button that fills on hover (rows, icon buttons, chips). Any shape.
-//   .rowHighlight(on)      The hub row's 8x6 padding + r9 fill; `on` = hovered or picked. Pair with `.onHover`.
-//   Hairline(axis:inset:)  A 1pt stroke-coloured divider. Never `Rectangle().fill(Theme.stroke)`.
-//   CountBadge(n, tint:)   A count in a capsule (filter chips, section counts). `tint` fills it (text uses onTint).
-//   DotCount(n, color:)    A coloured dot + number, numeric-text transition; grey when 0 (CI counts, status counts).
-//   Eyebrow(title)         Uppercase tracking section title (settings sections, "PENDING", "WATCHING").
-//   .tile(size)            Frames a view as a rounded square filled `Fill.tile`, clipped, radius size*0.3.
-//   Tile.shape(size)       The same shape, for your own backgrounds / clipping.
+// COMPONENTS
+//   HoverFillButtonStyle   Hover/active/pressed fill for any button and shape; disabled shows no fill.
+//   .rowHighlight(hover:picked:)  A hub row's padding and fill; picked (keyboard) adds the accent bar.
+//   .focusRing(radius)     The one focus ring: 1.5pt accent, offset 2 (inset for rows), from @FocusState.
+//   IconButton, KeyCap, MenuRow, BorderedButton, SwitchStyle, .fieldStyle(), Tabs, SectionHeader, StatusBanner,
+//   EmptyBlock, UndoLine (presentation only), Hairline, Avatar, FlowLayout, `.tip(_:_:)` (icon-only controls only).
+//   .tile(size) / Tile.shape(size)   A rounded square filled like a tile, radius 27% of its size.
 //   plural(n, "folder")    "1 folder", "2 folders"; third arg for irregulars: plural(2, "repository", "repositories").
 
 extension Theme {
+    /// All `.continuous` and concentric: an inner radius is its outer one minus the inset between them.
     enum Radius {
-        static let xs: CGFloat = 5
-        static let sm: CGFloat = 7
-        static let md: CGFloat = 9
-        static let lg: CGFloat = 12
-        static let panel: CGFloat = 18
+        static let hub: CGFloat = 16
+        /// Rows, banners, undo lines and settings groups: the hub's radius minus the one outer inset.
+        static let row = hub - Metrics.inset
+        static let field: CGFloat = 8
+        /// Tiles, bordered buttons and tooltips (a 26pt tile at 27%).
+        static let tile: CGFloat = 7
+        /// Keycaps and small chips.
+        static let small: CGFloat = 4
 
         static func shape(_ radius: CGFloat) -> RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
     }
 
-    /// Translucent white fills, one per state, so hover looks the same everywhere.
+    /// Translucent white fills, one per state, so hover looks the same everywhere. Under Increase Contrast they go
+    /// through `Theme.Resolved.fill`.
     enum Fill {
         static let rest = Color.clear
-        static let faint = Color.white.opacity(0.045)
-        static let field = Color.white.opacity(0.06)
         static let hover = Color.white.opacity(0.07)
+        static let field = Color.white.opacity(0.06)
+        /// A field while it has focus (with the accent border).
+        static let fieldFocused = Color.white.opacity(0.08)
         static let tile = Color.white.opacity(0.10)
         static let selected = Color.white.opacity(0.12)
         static let pressed = Color.white.opacity(0.15)
+        static let group = Color.white.opacity(0.045)
     }
 
     enum Typography {
-        /// Page and field titles (was 13 semibold).
+        /// Page, section and group titles; unread row titles.
         static let title = SwiftUI.Font.system(size: 13, weight: .semibold)
-        /// Section header titles (was 12 semibold).
-        static let heading = SwiftUI.Font.system(size: 12, weight: .semibold)
-        /// Chips, buttons and settings labels (was 12 medium).
+        /// Read row titles, form labels, menu labels.
+        static let body = SwiftUI.Font.system(size: 13)
+        /// Tabs, buttons, chips.
         static let control = SwiftUI.Font.system(size: 12, weight: .medium)
-        /// Row text (was 12.5): regular for read, `bodyStrong` for unread; `bodyMedium` in between.
-        static let body = SwiftUI.Font.system(size: 12.5)
-        static let bodyMedium = SwiftUI.Font.system(size: 12.5, weight: .medium)
-        static let bodyStrong = SwiftUI.Font.system(size: 12.5, weight: .semibold)
-        /// Secondary info (was 11, 11.5).
+        /// Second lines, summaries, hints, tooltip detail.
         static let meta = SwiftUI.Font.system(size: 11)
-        /// Tooltip detail, hints (was 10.5).
-        static let caption = SwiftUI.Font.system(size: 10.5)
-        /// Uppercase headings (was 9.5 bold in "PENDING", 10.5 semibold in settings).
-        static let eyebrow = SwiftUI.Font.system(size: 10, weight: .semibold)
-        static let eyebrowTracking: CGFloat = 0.6
-        /// Numbers beside dots (was 11 semibold).
-        static let count = SwiftUI.Font.system(size: 11, weight: .semibold).monospacedDigit()
-        /// Numbers in capsules (was 10 bold).
-        static let badge = SwiftUI.Font.system(size: 10, weight: .bold).monospacedDigit()
+        /// Group and form section headings: sentence case, in `secondary`.
+        static let label = SwiftUI.Font.system(size: 11, weight: .semibold)
+        /// Counts, ages, elapsed time, status words.
+        static let numeral = SwiftUI.Font.system(size: 11, weight: .semibold).monospacedDigit()
+        /// Tile letters: the tile is fixed, the font doesn't scale.
+        static let tile = SwiftUI.Font.system(size: 11, weight: .bold, design: .rounded)
+        /// Key equivalents as plain text, in SF Pro (never Rounded: ⌃ must render as ⌃).
+        static let keyhint = SwiftUI.Font.system(size: 11)
 
-        /// An icon or initials sized off the box that holds it.
+        /// An icon sized off the box that holds it (symbols are glyphs, not text: the 11pt floor is for text).
         static func glyph(_ size: CGFloat, _ weight: SwiftUI.Font.Weight = .semibold) -> SwiftUI.Font {
             .system(size: size, weight: weight)
         }
     }
 
     enum Space {
+        static let hair: CGFloat = 2
         static let xs: CGFloat = 4
         static let sm: CGFloat = 6
         static let md: CGFloat = 8
@@ -94,41 +98,79 @@ extension Theme {
     }
 
     enum Metrics {
-        /// A section header, or a one-line row.
+        /// One pitch on both axes: every bar cell (its tile centred), a section header, a one-line row, the footer.
+        static let pitch: CGFloat = 36
+        /// The pitch before the redesign, still the height of the headers and one-line rows that haven't moved to
+        /// `pitch` yet.
         static let line: CGFloat = 30
-        /// A session row.
-        static let row: CGFloat = 36
         /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
         static let bar: CGFloat = 46
         /// The one outer inset around the hub's pieces.
         static let inset: CGFloat = 6
-        static let field: CGFloat = 32
-        static let chip: CGFloat = 26
+        /// A row's own horizontal padding inside the inset.
+        static let rowPadding: CGFloat = 8
+        /// Where leading text starts: headers, tabs, dots, group labels, form titles.
+        static let contentEdge = inset + rowPadding
+        static let dotSlot: CGFloat = 14
+        static let avatar: CGFloat = 24
+        static let ageColumn: CGFloat = 36
+        /// Rows: two lines (inbox, CI, session) and with a task line; menu items; the rows of a settings form (minimum).
+        static let twoLineRow: CGFloat = 44
+        static let taskRow: CGFloat = 60
+        static let menuRow: CGFloat = 28
+        static let formRow: CGFloat = 36
+        /// A status tile, and the glyph cells beside it.
+        static let tile: CGFloat = 26
+        /// Fields and bordered buttons.
+        static let field: CGFloat = 28
+        static let button: CGFloat = 28
+        static let tab: CGFloat = 24
+        /// An icon button: drawn this big, hit this big.
+        static let iconButton: CGFloat = 24
+        static let iconHit: CGFloat = 28
+        static let banner: CGFloat = 30
+        static let undoLine: CGFloat = 32
+        static let emptyBlock: CGFloat = 132
     }
 
+    /// Three speeds and no bounce. Pass through `.motion` / `resolve`, which follow Reduce Motion.
     enum Motion {
+        /// Fills and tints.
         static let hover = Animation.easeOut(duration: 0.12)
-        static let spring = Animation.spring(duration: 0.28, bounce: 0.06)
+        /// Content in and out, list changes, undo line, sibling page switch.
         static let fade = Animation.easeOut(duration: 0.14)
-    }
+        /// Expanding, a page sliding in, focus.
+        static let move = Animation.spring(duration: 0.28, bounce: 0)
+        /// Collapsing.
+        static let close = Animation.spring(duration: 0.20, bounce: 0)
+        /// What a fade becomes under Reduce Motion.
+        static let reduced = Animation.easeOut(duration: 0.10)
 
-    /// Text and glyphs on a tinted (amber, green...) fill.
-    static let onTint = Color.black.opacity(0.8)
+        /// The working arc's breathing: the one repeating motion, run by Core Animation (a SwiftUI repeat is forbidden).
+        struct Heartbeat: Equatable {
+            let period: Double
+            let from: Double
+            let to: Double
+        }
+        static let heartbeat = Heartbeat(period: 1.2, from: 1.0, to: 0.55)
+
+        /// The one place Reduce Motion is decided: fills and fades shorten to a cross-fade, anything spatial is
+        /// instant (nothing translates, scales or springs).
+        static func resolve(_ animation: Animation, reduce: Bool) -> Animation? {
+            guard reduce else { return animation }
+            return animation == hover || animation == fade ? reduced : nil
+        }
+    }
 }
 
 extension Animation {
-    /// No animation at all when Reduce Motion is on (positions, scales and sizes jump); fades come from `.opacity`
-    /// transitions, which `AnyTransition.slide`/`scaleFade` fall back to. Pass to `withAnimation` / `.animation`.
-    func resolved(reduce: Bool) -> Animation? { reduce ? nil : self }
+    /// `Theme.Motion.resolve`, for `withAnimation` / `.animation`.
+    func resolved(reduce: Bool) -> Animation? { Theme.Motion.resolve(self, reduce: reduce) }
 }
 
 extension AnyTransition {
     /// Slides in from an edge; a plain fade with Reduce Motion.
     static func slide(from edge: Edge, reduce: Bool) -> AnyTransition { reduce ? .opacity : .move(edge: edge) }
-    /// Scales up from `scale` while fading; a plain fade with Reduce Motion.
-    static func scaleFade(_ scale: CGFloat = 0.96, reduce: Bool) -> AnyTransition {
-        reduce ? .opacity : .scale(scale: scale).combined(with: .opacity)
-    }
 }
 
 private struct MotionModifier<V: Equatable>: ViewModifier {
@@ -142,19 +184,15 @@ private struct MotionModifier<V: Equatable>: ViewModifier {
 }
 
 extension View {
-    /// `.animation(_:value:)` that follows Reduce Motion live: animations are dropped.
-    func motion<V: Equatable>(_ animation: Animation = Theme.Motion.spring, value: V) -> some View {
+    /// `.animation(_:value:)` that follows Reduce Motion live.
+    func motion<V: Equatable>(_ animation: Animation = Theme.Motion.move, value: V) -> some View {
         modifier(MotionModifier(animation: animation, value: value))
     }
 
-    /// The hub row's look: 8x6 padding inside an r9 fill, shown while `on` (hovered or picked).
-    func rowHighlight(_ on: Bool) -> some View {
-        self
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Theme.Radius.shape(Theme.Radius.md).fill(on ? Theme.Fill.field : Theme.Fill.rest))
-            .contentShape(Theme.Radius.shape(Theme.Radius.md))
-            .motion(Theme.Motion.hover, value: on)
+    /// The hub row's look: 8x6 padding inside a row-radius fill. `hover` is the pointer over it; `picked` the
+    /// keyboard's pick, which also gets the accent bar. Pair with `.onHover`.
+    func rowHighlight(hover: Bool, picked: Bool = false) -> some View {
+        modifier(RowHighlight(hover: hover, picked: picked))
     }
 
     /// A rounded square filled like a tile (see `Tile`).
@@ -163,17 +201,90 @@ extension View {
     }
 }
 
+private struct RowHighlight: ViewModifier {
+    let hover: Bool
+    let picked: Bool
+    @Environment(\.resolved) private var resolved
+
+    func body(content: Content) -> some View {
+        let fill = picked ? Theme.Fill.selected : hover ? Theme.Fill.hover : Theme.Fill.rest
+        content
+            .padding(.horizontal, Theme.Metrics.rowPadding)
+            .padding(.vertical, 6)
+            .background(Theme.Radius.shape(Theme.Radius.row).fill(resolved.fill(fill)))
+            .overlay(alignment: .leading) {
+                if picked { Capsule().fill(Theme.accent).frame(width: 2, height: 24).padding(.leading, 2) }
+            }
+            .contentShape(Theme.Radius.shape(Theme.Radius.row))
+            .motion(Theme.Motion.hover, value: hover)
+            .motion(Theme.Motion.hover, value: picked)
+    }
+}
+
+// MARK: - Focus
+
+private struct FocusRingDrawing: ViewModifier {
+    let radius: CGFloat
+    let inset: Bool
+    let focused: Bool
+    @Environment(\.resolved) private var resolved
+
+    func body(content: Content) -> some View {
+        // The system's own ring is replaced by ours.
+        content
+            .focusEffectDisabled()
+            .overlay { if focused { ring } }
+    }
+
+    /// 1.5pt accent, 2pt off the content; inside it, for rows that sit flush in a list.
+    @ViewBuilder private var ring: some View {
+        let width = resolved.focusWidth
+        if inset {
+            Theme.Radius.shape(radius).strokeBorder(Theme.accent, lineWidth: width)
+        } else {
+            Theme.Radius.shape(radius + 2 + width).strokeBorder(Theme.accent, lineWidth: width).padding(-(2 + width))
+        }
+    }
+}
+
+private struct FocusRing: ViewModifier {
+    let radius: CGFloat
+    let inset: Bool
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content.focused($focused).modifier(FocusRingDrawing(radius: radius, inset: inset, focused: focused))
+    }
+}
+
+extension View {
+    /// The one focus ring (tiles, icon buttons, tabs, chips, menu rows, fields, switches), drawn while the view has
+    /// keyboard focus (Tab with Full Keyboard Access): `radius` is the content's own. `inset` draws it inside the
+    /// bounds, for rows (use radius 10).
+    func focusRing(_ radius: CGFloat, inset: Bool = false) -> some View {
+        modifier(FocusRing(radius: radius, inset: inset))
+    }
+
+    /// `focusRing` for a view that keeps its own `@FocusState` (to also show a tooltip on focus, say).
+    func focusRing(_ radius: CGFloat, inset: Bool = false, isFocused: Bool) -> some View {
+        modifier(FocusRingDrawing(radius: radius, inset: inset, focused: isFocused))
+    }
+}
+
+// MARK: - Buttons
+
 /// Fills its shape on hover (and a stronger one while `active` or pressed), animated; for `.buttonStyle`.
 /// The label keeps its own colours: labels that should change on hover read `@Environment(\.hoverFillHovering)`.
+/// Disabled: no fill at all, and the label a step quieter.
 struct HoverFillButtonStyle: ButtonStyle {
-    var shape: AnyShape = AnyShape(Theme.Radius.shape(Theme.Radius.md))
+    var shape: AnyShape = AnyShape(Theme.Radius.shape(Theme.Radius.row))
     var rest: Color = Theme.Fill.rest
     var hover: Color = Theme.Fill.hover
     var active: Color = Theme.Fill.selected
     var pressed: Color = Theme.Fill.pressed
     var isActive = false
 
-    init(shape: some Shape = Theme.Radius.shape(Theme.Radius.md), rest: Color = Theme.Fill.rest, hover: Color = Theme.Fill.hover,
+    init(shape: some Shape = Theme.Radius.shape(Theme.Radius.row), rest: Color = Theme.Fill.rest, hover: Color = Theme.Fill.hover,
          active: Color = Theme.Fill.selected, pressed: Color = Theme.Fill.pressed, isActive: Bool = false) {
         self.shape = AnyShape(shape)
         self.rest = rest
@@ -192,14 +303,15 @@ struct HoverFillButtonStyle: ButtonStyle {
         let style: HoverFillButtonStyle
         @State private var hovering = false
         @Environment(\.isEnabled) private var enabled
+        @Environment(\.resolved) private var resolved
 
         var body: some View {
             let hot = enabled && hovering
             let fill = !enabled ? style.rest : configuration.isPressed ? style.pressed : style.isActive ? style.active : hot ? style.hover : style.rest
             configuration.label
                 .environment(\.hoverFillHovering, hot)
-                .background(style.shape.fill(fill))
-                .opacity(enabled ? 1 : 0.4)
+                .background(style.shape.fill(resolved.fill(fill)))
+                .opacity(enabled ? 1 : 0.6)
                 .contentShape(style.shape)
                 .onHover { hovering = $0 }
                 .motion(Theme.Motion.hover, value: hovering)
@@ -218,84 +330,399 @@ extension EnvironmentValues {
     }
 }
 
-/// A 1pt divider in the stroke colour. `inset` trims both ends.
+/// A glyph button: 24pt drawn, 28pt to hit, outline symbols at rest and `.fill` ones (the caller's choice) for on.
+/// An icon button always has a name for VoiceOver: `help` or `label`.
+struct IconButton: View {
+    let symbol: String
+    var help: String = ""
+    /// What VoiceOver says; defaults to `help`. Give one when `help` is empty: icon-only buttons need a label.
+    var label: String? = nil
+    var detail: String? = nil
+    var active = false
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let button = Button(action: action) { IconButtonLabel(symbol: symbol, active: active) }
+            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
+            .focused($focused)
+            .focusRing(Theme.Metrics.iconButton / 2, isFocused: focused)
+            .accessibilityLabel(label ?? help)
+            .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
+
+        if help.isEmpty {
+            button
+        } else {
+            button.tip(help, detail, focused: focused)
+        }
+    }
+}
+
+private struct IconButtonLabel: View {
+    let symbol: String
+    let active: Bool
+    @Environment(\.hoverFillHovering) private var hover
+    @Environment(\.resolved) private var resolved
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(Theme.Typography.glyph(14, .medium))
+            .foregroundStyle(active || hover ? Theme.text : resolved.secondary)
+            .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
+            // 28pt to hit, without taking the room.
+            .contentShape(Rectangle().inset(by: -(Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
+    }
+}
+
+/// A plain button with a border: the one text button (Save, Add, Retry, Use a token…).
+struct BorderedButton: View {
+    let title: String
+    let action: () -> Void
+    @Environment(\.resolved) private var resolved
+
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Typography.control)
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 12)
+                .frame(height: Theme.Metrics.button)
+                .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(Theme.fieldBorder, lineWidth: resolved.borderWidth))
+        }
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.tile), rest: Theme.Fill.tile,
+                                          hover: Theme.Fill.selected, pressed: Theme.Fill.pressed))
+        .focusRing(Theme.Radius.tile)
+    }
+}
+
+/// A key as a quiet keycap, for the `esc` hint and the footer's key hints: no stroke, SF Pro.
+struct KeyCap: View {
+    let key: String
+
+    init(_ key: String) { self.key = key }
+
+    var body: some View {
+        Text(key)
+            .font(Theme.Typography.keyhint)
+            .foregroundStyle(Theme.secondary)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 18, minHeight: 16)
+            .background(Theme.Radius.shape(Theme.Radius.small).fill(Theme.Fill.tile))
+    }
+}
+
+/// A line of a menu-like panel, as in NSMenu: symbol column, label, the key that does the same as plain text.
+struct MenuRow: View {
+    let symbol: String
+    let title: String
+    let key: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(Theme.Typography.glyph(12))
+                    .foregroundStyle(Theme.secondary)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                Text(title).font(Theme.Typography.body).foregroundStyle(Theme.text)
+                Spacer(minLength: 8)
+                if let key { Text(key).font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
+            }
+            .padding(.horizontal, Theme.Metrics.rowPadding)
+            .frame(height: Theme.Metrics.menuRow)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.field), hover: Theme.Fill.selected))
+        .focusRing(Theme.Radius.field)
+        .accessibilityLabel(title)
+    }
+}
+
+// MARK: - Forms
+
+/// A drawn switch, 32 x 20: accent when on, whatever the window's key state (the system one greys out in a panel
+/// that isn't key). The whole label row is the target; VoiceOver gets a toggle that says On or Off.
+struct SwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        SwitchRow(configuration: configuration)
+    }
+
+    private struct SwitchRow: View {
+        let configuration: ToggleStyleConfiguration
+        @State private var hovering = false
+        @Environment(\.isEnabled) private var enabled
+        @Environment(\.resolved) private var resolved
+        @Environment(\.accessibilityReduceMotion) private var reduce
+
+        var body: some View {
+            let on = configuration.isOn
+            Button { configuration.isOn.toggle() } label: {
+                HStack(spacing: Theme.Space.md) {
+                    configuration.label
+                    Spacer(minLength: Theme.Space.md)
+                    track(on: on)
+                }
+                .frame(minHeight: Theme.Metrics.formRow)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusRing(10)
+            .opacity(enabled ? 1 : 0.6)
+            .onHover { hovering = $0 }
+            .accessibilityAddTraits(.isToggle)
+            .accessibilityValue(on ? "On" : "Off")
+        }
+
+        private func track(on: Bool) -> some View {
+            Capsule()
+                .fill(on ? Theme.accent : resolved.fill(Theme.switchOff))
+                .overlay(Capsule().strokeBorder(on ? .clear : Theme.fieldBorder, lineWidth: resolved.borderWidth))
+                .overlay(alignment: on ? .trailing : .leading) {
+                    Circle().fill(.white).frame(width: 16, height: 16).padding(2)
+                }
+                .brightness(hovering && enabled ? 0.06 : 0)
+                .frame(width: 32, height: 20)
+                .animation(reduce ? nil : Theme.Motion.hover, value: on)
+                .motion(Theme.Motion.hover, value: hovering)
+        }
+    }
+}
+
+private struct FieldStyle: ViewModifier {
+    let focused: Bool
+    @Environment(\.resolved) private var resolved
+
+    func body(content: Content) -> some View {
+        let shape = Theme.Radius.shape(Theme.Radius.field)
+        content
+            .textFieldStyle(.plain)
+            .font(Theme.Typography.body)
+            .padding(.horizontal, 10)
+            .frame(height: Theme.Metrics.field)
+            .background(shape.fill(resolved.fill(focused ? Theme.Fill.fieldFocused : Theme.Fill.field)))
+            .overlay(shape.strokeBorder(focused ? Theme.accent : Theme.fieldBorder, lineWidth: focused ? resolved.focusWidth : resolved.borderWidth))
+    }
+}
+
+extension View {
+    /// A text field's look: 28pt, radius 8, a visible border, and the accent border while `focused` (pass the field's
+    /// own `@FocusState`).
+    func fieldStyle(focused: Bool = false) -> some View { modifier(FieldStyle(focused: focused)) }
+}
+
+// MARK: - Tabs
+
+/// A row of pill tabs, drawn by hand: a non-key panel draws `Picker(.segmented)` grey. Selected is `text` on a tile
+/// fill, the rest `secondary`; a count after the label is a numeral in the colour that says how urgent it is (never
+/// the selection's). ←/→ switching is the keys' business.
+struct Tabs<ID: Hashable>: View {
+    struct Tab: Identifiable {
+        let id: ID
+        var title: String
+        var count: Int? = nil
+        var countTint: Color = Theme.tertiary
+        /// Shown as the system tooltip.
+        var help: String? = nil
+    }
+
+    /// What VoiceOver calls the group: "Inbox filter".
+    let label: String
+    let tabs: [Tab]
+    let selection: ID
+    let select: (ID) -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Space.hair) {
+            ForEach(tabs) { tab in TabButton(tab: tab, selected: tab.id == selection) { select(tab.id) } }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(.isTabBar)
+    }
+
+    private struct TabButton: View {
+        let tab: Tab
+        let selected: Bool
+        let action: () -> Void
+        @Environment(\.resolved) private var resolved
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 5) {
+                    Text(tab.title)
+                    if let count = tab.count, count > 0 {
+                        Text("\(count)").font(Theme.Typography.numeral).foregroundStyle(tab.countTint)
+                    }
+                }
+                .font(Theme.Typography.control)
+                .foregroundStyle(selected ? Theme.text : resolved.secondary)
+                .padding(.horizontal, 10)
+                .frame(height: Theme.Metrics.tab)
+                .fixedSize()
+            }
+            .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover, active: Theme.Fill.tile, isActive: selected))
+            .focusRing(Theme.Metrics.tab / 2)
+            .help(tab.help ?? "")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        }
+    }
+}
+
+// MARK: - Sections
+
+/// A section's header, 36pt: its title, one status phrase, then its actions. The whole header is the control that
+/// gives the section the room (click, or the key; the chevron only shows on hover or focus, as a hint). Reserve the
+/// trailing slots per section, so nothing in the header jumps.
+struct SectionHeader<Trailing: View>: View {
+    let title: String
+    var status: (text: String, color: Color)? = nil
+    /// This section is the focused one: `esc` shows beside the title, the chevron points back.
+    var focused = false
+    /// What the chevron's tooltip says: "Expand Inbox", or "Back to all sections".
+    var expandHelp = ""
+    /// Click anywhere on the header; nil for a header that isn't a control.
+    var onFocus: (() -> Void)? = nil
+    @ViewBuilder var trailing: Trailing
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.md) {
+            Text(title).font(Theme.Typography.title).foregroundStyle(Theme.text).lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            if let status {
+                Text(status.text).font(Theme.Typography.numeral).foregroundStyle(status.color).lineLimit(1)
+                    .transition(.opacity)
+            }
+            if focused { Text("esc").font(Theme.Typography.keyhint).foregroundStyle(Theme.secondary) }
+            Spacer(minLength: 0)
+            trailing
+            if onFocus != nil {
+                Image(systemName: focused ? "chevron.up" : "chevron.down")
+                    .font(Theme.Typography.glyph(11, .semibold))
+                    .foregroundStyle(Theme.tertiary)
+                    .frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
+                    .opacity(hovering || focused ? 1 : 0)
+                    .tip(expandHelp)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.leading, Theme.Metrics.contentEdge - Theme.Metrics.inset)
+        .padding(.trailing, Theme.Space.hair)
+        .frame(minHeight: Theme.Metrics.pitch)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { onFocus?() }
+        .motion(Theme.Motion.hover, value: hovering)
+        .motion(Theme.Motion.fade, value: status?.text)
+        .accessibilityAction(named: "Focus") { onFocus?() }
+    }
+}
+
+/// One thing the user should know, above a list or under a header: an icon, a sentence and up to two buttons.
+struct StatusBanner<Actions: View>: View {
+    let symbol: String
+    var tint: Color = Theme.secondary
+    let message: String
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        HStack(spacing: Theme.Space.md) {
+            Image(systemName: symbol).font(Theme.Typography.glyph(12)).foregroundStyle(tint).accessibilityHidden(true)
+            Text(message).font(Theme.Typography.control).foregroundStyle(Theme.text).lineLimit(2)
+            Spacer(minLength: Theme.Space.md)
+            actions
+        }
+        .padding(.horizontal, Theme.Space.lg)
+        .frame(minHeight: Theme.Metrics.banner)
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension StatusBanner where Actions == EmptyView {
+    init(symbol: String, tint: Color = Theme.secondary, message: String) {
+        self.init(symbol: symbol, tint: tint, message: message) { EmptyView() }
+    }
+}
+
+/// A list with nothing in it, and why: two centred lines and at most one action.
+struct EmptyBlock<Action: View>: View {
+    let title: String
+    var detail: String? = nil
+    @ViewBuilder var action: Action
+
+    var body: some View {
+        VStack(spacing: Theme.Space.xs) {
+            Text(title).font(Theme.Typography.body.weight(.medium)).foregroundStyle(Theme.secondary)
+            if let detail { Text(detail).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary) }
+            action.padding(.top, Theme.Space.sm)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, minHeight: Theme.Metrics.emptyBlock)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension EmptyBlock where Action == EmptyView {
+    init(_ title: String, detail: String? = nil) {
+        self.init(title: title, detail: detail) { EmptyView() }
+    }
+}
+
+/// "Moved to Done · Undo": the strip under a list after something was cleared. Presentation only: whoever shows it
+/// owns the timer, ⌘Z and the announcement.
+struct UndoLine: View {
+    let message: String
+    let undo: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Text(message).font(Theme.Typography.control).foregroundStyle(Theme.text).lineLimit(1)
+            Text("·").foregroundStyle(Theme.tertiary).accessibilityHidden(true)
+            Button(action: undo) {
+                Text("Undo").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
+                    .frame(minHeight: Theme.Metrics.iconButton)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusRing(Theme.Radius.small)
+            .accessibilityLabel("Undo")
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Space.lg)
+        .frame(height: Theme.Metrics.undoLine)
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
+        .transition(.opacity.animation(Theme.Motion.fade))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+// MARK: - Shapes
+
+/// A 1pt divider in the divider colour. `inset` trims both ends.
 struct Hairline: View {
     var axis: Axis = .horizontal
     var inset: CGFloat = 0
+    @Environment(\.resolved) private var resolved
 
     var body: some View {
         Rectangle()
-            .fill(Theme.stroke)
+            .fill(resolved.divider)
             .frame(width: axis == .vertical ? 1 : nil, height: axis == .horizontal ? 1 : nil)
             .padding(axis == .horizontal ? .horizontal : .vertical, inset)
     }
 }
 
-/// A count in a capsule. `tint` fills it (text goes dark); without, a quiet white fill.
-struct CountBadge: View {
-    let count: Int
-    var tint: Color? = nil
-    @Environment(\.accessibilityReduceMotion) private var reduce
-
-    init(_ count: Int, tint: Color? = nil) {
-        self.count = count
-        self.tint = tint
-    }
-
-    var body: some View {
-        Text("\(count)")
-            .font(Theme.Typography.badge)
-            .foregroundStyle(tint == nil ? Theme.secondary : Theme.onTint)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 15, minHeight: 15)
-            .background(Capsule().fill(tint ?? Theme.Fill.tile))
-            .contentTransition(reduce ? .opacity : .numericText(value: Double(count)))
-    }
-}
-
-/// A dot and a number; both grey out at zero.
-struct DotCount: View {
-    let count: Int
-    var color: Color
-    @Environment(\.accessibilityReduceMotion) private var reduce
-
-    init(_ count: Int, color: Color) {
-        self.count = count
-        self.color = color
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle().fill(count == 0 ? Theme.tertiary : color).frame(width: 7, height: 7)
-            Text("\(count)")
-                .font(Theme.Typography.count)
-                .foregroundStyle(count == 0 ? Theme.tertiary : Theme.text)
-                .contentTransition(reduce ? .opacity : .numericText(value: Double(count)))
-        }
-    }
-}
-
-/// An uppercase section title, optionally with a count after it.
-struct Eyebrow: View {
-    let title: String
-    var count: Int? = nil
-
-    init(_ title: String, count: Int? = nil) {
-        self.title = title
-        self.count = count
-    }
-
-    var body: some View {
-        Text(count.map { "\(title.uppercased())  \($0)" } ?? title.uppercased())
-            .font(Theme.Typography.eyebrow)
-            .tracking(Theme.Typography.eyebrowTracking)
-            .foregroundStyle(Theme.tertiary)
-    }
-}
-
-/// The rounded square behind avatars, icons and the "+" tile: radius is a fixed share of the size.
+/// The rounded square behind avatars, icons and the "+" tile: radius is a fixed share of the size (7 at 26).
 enum Tile {
-    static let ratio: CGFloat = 0.3
+    static let ratio: CGFloat = 0.27
     static func shape(_ size: CGFloat) -> RoundedRectangle {
         RoundedRectangle(cornerRadius: size * ratio, style: .continuous)
     }

@@ -4,7 +4,19 @@ import SwiftUI
 // itself never moves, so what you're pointing at stays under the pointer. The whole view (every section at once)
 // is the pinned one.
 
-enum HubSection: Hashable { case inbox, ci, agents, controls }
+enum HubSection: Hashable {
+    case inbox, ci, agents, controls
+
+    /// What the section is called in tooltips and for VoiceOver.
+    var name: String {
+        switch self {
+        case .inbox: "Inbox"
+        case .ci: "CI"
+        case .agents: "Sessions"
+        case .controls: "Controls"
+        }
+    }
+}
 
 struct PeekMeasure: Equatable {
     let section: HubSection
@@ -172,7 +184,7 @@ extension LookoutHub {
 
     /// The bar's outline: a corner goes square where a panel is flush with (or runs past) that end of the bar.
     var barOutline: UnevenRoundedRectangle {
-        let r: CGFloat = expanded ? 22 : 20
+        let r = Theme.Radius.hub
         let place = currentPlacement
         let start: CGFloat = place?.atStart == true ? 0 : r
         let end: CGFloat = place?.atEnd == true ? 0 : r
@@ -187,7 +199,7 @@ extension LookoutHub {
     /// A panel against the bar: square where it meets the bar, rounded elsewhere, and rounded on the bar's side too
     /// where it runs on past the bar's end.
     func panelShape(_ place: Placement?) -> UnevenRoundedRectangle {
-        let r: CGFloat = Theme.Radius.lg + 2
+        let r = Theme.Radius.hub
         let past: CGFloat = place?.pastEnd == true ? r : 0
         return switch edge {
         case .right: UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: past, style: .continuous)
@@ -237,7 +249,7 @@ extension LookoutHub {
                 // By project and draggable, like the full view's.
                 let starts = projectStarts(rows.kept)
                 ForEach(rows.kept) { r in
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.row)
+                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
                         .sessionMenu(r, store)
                         .modifier(GroupRule(on: starts.contains(r.id)))
                         .modifier(AgentReorder(row: r, store: store))
@@ -245,11 +257,11 @@ extension LookoutHub {
                 if !rows.pending.isEmpty {
                     pendingLabel(twoLines: false).frame(height: 14)
                     ForEach(rows.pending) { r in
-                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.row)
+                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.pitch)
                             .sessionMenu(r, store)
                     }
                 }
-                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.row)
+                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
             default:
                 // (The controls have their own panel.)
                 EmptyView()
@@ -340,7 +352,7 @@ extension LookoutHub {
         let hub = hub
         hub.cancelDwell()
         peekLeave = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
+            try? await Task.sleep(for: Theme.Timing.leaveGrace)
             if !Task.isCancelled {
                 hub.section = nil
                 hub.quiet = false
@@ -370,34 +382,6 @@ private struct ControlsGearLabel: View {
         Image(systemName: "gearshape.fill")
             .font(Theme.Typography.glyph(13))
             .foregroundStyle(hover || active ? Theme.text : Theme.tertiary)
-            .frame(width: IconButton.Size.bar, height: IconButton.Size.bar)
-    }
-}
-
-/// A line of the controls' panel: icon, title, and the key that does the same, like a menu item.
-struct MenuRow: View {
-    let symbol: String
-    let title: String
-    let key: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 9) {
-                Image(systemName: symbol)
-                    .font(Theme.Typography.glyph(12))
-                    .foregroundStyle(Theme.secondary)
-                    .frame(width: 18)
-                    .accessibilityHidden(true)
-                Text(title).font(Theme.Typography.body).foregroundStyle(Theme.text)
-                Spacer(minLength: 8)
-                if let key { KeyCap(key) }
-            }
-            .padding(.horizontal, Theme.Space.md)
-            .frame(height: Theme.Metrics.line)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.sm + 1)))
-        .accessibilityLabel(title)
+            .frame(width: Theme.Metrics.iconHit, height: Theme.Metrics.iconHit)
     }
 }

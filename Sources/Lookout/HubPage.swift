@@ -28,7 +28,7 @@ extension LookoutHub {
     /// The one way back, and the switch between the two pages (which doubles as their title).
     var pageHeader: some View {
         HStack(spacing: Theme.Space.sm) {
-            IconButton(symbol: "chevron.left", help: "Back", detail: "Esc", size: IconButton.Size.header) { hub.back() }
+            IconButton(symbol: "chevron.left", help: "Back", detail: "Esc") { hub.back() }
             // The switch is the title: it says which page is open.
             pageSwitch
             Spacer(minLength: 0)
@@ -40,12 +40,9 @@ extension LookoutHub {
 
     /// "Settings | Repositories", the open one picked.
     var pageSwitch: some View {
-        HStack(spacing: 2) {
-            ForEach([HubPage.settings, .repos], id: \.self) { p in
-                Chip(label: p == .settings ? "Settings" : "Repositories", selected: hub.page == p) { hub.go(p) }
-            }
-        }
-        .padding(2)
-        .background(Capsule().fill(Theme.Fill.faint))
+        Tabs(label: "Page", tabs: [HubPage.settings, .repos].map { Tabs.Tab(id: $0, title: $0 == .settings ? "Settings" : "Repositories") },
+             selection: hub.page) { hub.go($0) }
+            .padding(2)
+            .background(Capsule().fill(Theme.Fill.group))
     }
 }

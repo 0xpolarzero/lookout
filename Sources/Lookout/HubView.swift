@@ -67,7 +67,7 @@ final class HubState {
             return
         }
         dwell = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(for: Theme.Timing.dwell)
             if !Task.isCancelled, self?.dragging == false { self?.section = next }
         }
     }
@@ -159,7 +159,7 @@ final class HubKeys {
             if editing { event.window?.makeFirstResponder(nil) }
             else if !hub.query.isEmpty { setQuery("") }
             else if hub.page != .main { hub.back() }
-            else if hub.focus != nil { withAnimation(LookoutHub.refocus.resolved(reduce: LookoutHub.reduceNow)) { hub.focus = nil } }
+            else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
             else { close() }
             return true
         }
@@ -189,7 +189,7 @@ final class HubKeys {
             return true
         }
         if shortcut == store.shortcut(.markAllRead) {
-            withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.markAllRead(hub.filter) }
+            LookoutHub.animate { store.markAllRead(hub.filter) }
             return true
         }
         guard let selection = hub.selection else { return false }
@@ -200,15 +200,15 @@ final class HubKeys {
             else if shortcut == store.shortcut(.discard) {
                 let i = targets.firstIndex(of: selection) ?? 0
                 if targets.indices.contains(i + 1) { select(targets[i + 1]) }
-                withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { item.state.isOpen ? store.discard(item) : store.restore(item) }
+                LookoutHub.animate { item.state.isOpen ? store.discard(item) : store.restore(item) }
             } else { return false }
             return true
         }
         if selection.hasPrefix("a:") {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
-            else if shortcut == store.shortcut(.keepSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.keepAgent(id) } }
-            else if shortcut == store.shortcut(.removeSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.dismissAgent(id) } }
+            else if shortcut == store.shortcut(.keepSession) { LookoutHub.animate { store.keepAgent(id) } }
+            else if shortcut == store.shortcut(.removeSession) { LookoutHub.animate { store.dismissAgent(id) } }
             else { return false }
             return true
         }
@@ -222,7 +222,7 @@ final class HubKeys {
 
     /// A new search picks its first result, so ↩ opens it straight away.
     private func setQuery(_ query: String) {
-        withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) {
+        LookoutHub.animate {
             hub.query = query
             // Searching looks everywhere, and what you type shows in the inbox's header: nothing stays shrunk.
             if !query.isEmpty { hub.focus = nil }
@@ -278,12 +278,17 @@ struct LookoutHub: View {
     /// The hub's one coordinate space name (the hosting root's).
     static let rootSpace = "hub-root"
     /// Animations: pass through `.motion` / `.resolved(reduce:)`, which follow Reduce Motion live.
-    static let opening = Theme.Motion.spring
-    static let closing = Animation.spring(duration: 0.2, bounce: 0)
-    static let pageSpring = Theme.Motion.spring
-    static let refocus = Animation.spring(duration: 0.34, bounce: 0.06)
-    /// The system's current setting, for code with no view (key handlers).
-    static var reduceNow: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    static let opening = Theme.Motion.move
+    static let closing = Theme.Motion.close
+    static let pageSpring = Theme.Motion.move
+    static let refocus = Theme.Motion.move
+    /// The system's current setting, for code with no view (key handlers): read only through `animate`.
+    private static var reduceNow: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    /// `withAnimation` for code with no view (key handlers), following Reduce Motion.
+    static func animate(_ animation: Animation = Theme.Motion.fade, _ body: () -> Void) {
+        withAnimation(animation.resolved(reduce: reduceNow), body)
+    }
 
     var edge: DockEdge { ui.edge }
     var expanded: Bool { hub.expanded }
@@ -332,6 +337,7 @@ struct LookoutHub: View {
             Button("Quit Lookout") { NSApp.terminate(nil) }
         }
         .environment(\.colorScheme, .dark)
+        .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
     }
 
@@ -461,7 +467,7 @@ struct LookoutHub: View {
         // CI: its header, then one line per state, its count in the bar beside the repos in it.
         VStack(alignment: side, spacing: 0) {
             if store.ciRepos.isEmpty {
-                row(cell: { ciCell }, detail: { linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) } })
+                row(cell: { ciCell }, detail: { linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) } })
             } else {
                 row(cell: { ciCell }, detail: { ciHeader })
                 if !shrunk(.ci) {
@@ -486,7 +492,7 @@ struct LookoutHub: View {
         if store.updater.showsInPill {
             row(cell: { UpdateButton(updater: store.updater, horizontal: false).padding(.vertical, 4) },
                 detail: { Text(updateText).font(Theme.Typography.control).foregroundStyle(Theme.secondary).padding(.horizontal, 8) })
-                .transition(.scaleFade(0.8, reduce: reduce))
+                .transition(.opacity)
         }
     }
 
@@ -544,9 +550,9 @@ struct LookoutHub: View {
         return starts
     }
 
-    /// "PENDING", aligned with the text of the rows under it (two-line rows pad 10, one-line 8).
+    /// "New activity", aligned with the text of the rows under it (two-line rows pad 10, one-line 8).
     func pendingLabel(twoLines: Bool) -> some View {
-        Eyebrow("Pending")
+        Text("New activity").font(Theme.Typography.label).foregroundStyle(Theme.secondary)
             .padding(.leading, twoLines ? 10 : 8)
     }
 
@@ -768,7 +774,7 @@ struct LookoutHub: View {
     var ciColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             if store.ciRepos.isEmpty {
-                linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) }
+                linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) }
             } else {
                 // The state's name starts each line, coloured; its count is in the strip above.
                 ForEach(Self.ciLineOrder, id: \.self) { state in
@@ -877,9 +883,8 @@ struct LookoutHub: View {
     func focusButton(_ section: HubSection) -> some View {
         let focused = hub.focus == section
         return IconButton(symbol: focused ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                          help: focused ? "Back to all sections" : "Make room for this",
-                          detail: focused ? "Esc" : "The other sections shrink to their counts",
-                          size: IconButton.Size.header) {
+                          help: focused ? "Back to all sections" : "Expand \(section.name)",
+                          detail: focused ? "Esc" : "The other sections shrink to their counts") {
             withAnimation(Self.refocus.resolved(reduce: reduce)) { hub.focus = focused ? nil : section }
         }
     }
@@ -964,7 +969,7 @@ struct AgentReorder: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(Reorderable(row: row, store: store, dropTarget: $target))
-            .overlay(Theme.Radius.shape(Theme.Radius.md).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
+            .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
     }
 }
 

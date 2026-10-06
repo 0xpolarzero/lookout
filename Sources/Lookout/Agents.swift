@@ -148,16 +148,16 @@ struct AgentRow: Identifiable, Hashable {
         }
     }
 
-    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / done / pending.
+    /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / done / new activity.
     var stateName: String {
-        // A pending session keeps what it left running: "pending, 2 running".
+        // A session with new activity keeps what it left running: "new activity, 2 running".
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
-        if pending && !unread && status != .running && status != .blocked { return "pending" + running }
+        if pending && !unread && status != .running && status != .blocked { return "new activity" + running }
         switch status {
         case .blocked: return "waiting"
         case .running: return "working"
         case .finished: return (unread ? "done, unread" : "done") + running
-        case .idle: return (pending ? "pending" : "idle") + running
+        case .idle: return (pending ? "new activity" : "idle") + running
         }
     }
 
@@ -166,7 +166,7 @@ struct AgentRow: Identifiable, Hashable {
 
     var statusColor: Color {
         switch status {
-        case .running: Theme.claude
+        case .running: Theme.secondary
         case .blocked: entry.unread || waitsForYou ? Theme.amber : Theme.secondary
         case .finished: Theme.accent
         case .idle: Theme.tertiary

@@ -44,7 +44,7 @@ extension LookoutHub {
                 .accessibilityHidden(true)
             HStack(spacing: 1) {
                 Text(hub.query).font(Theme.Typography.title.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1)
-                Caret()
+                Capsule().fill(Theme.accent).frame(width: 1.5, height: 14)
             }
             Spacer(minLength: 0)
             Text(searchCount).font(Theme.Typography.meta.monospacedDigit()).foregroundStyle(Theme.tertiary).lineLimit(1)
@@ -53,7 +53,7 @@ extension LookoutHub {
         .padding(.leading, 10)
         .padding(.trailing, 7)
         .frame(height: Theme.Metrics.line)
-        .background(Theme.Radius.shape(Theme.Radius.md).fill(Theme.Fill.field))
+        .background(Theme.Radius.shape(Theme.Radius.field).fill(Theme.Fill.field))
     }
 
     /// What the search found, by kind: "3 items · 2 sessions".
@@ -68,12 +68,11 @@ extension LookoutHub {
     var filters: some View {
         HStack(spacing: 4) {
             // The tabs never give up their words: the actions after them are what yields when the column is narrow.
-            ForEach(InboxFilter.allCases, id: \.self) { f in filterChip(f).fixedSize().layoutPriority(2) }
+            tabs.fixedSize().layoutPriority(2)
             Spacer(minLength: 0)
             if hub.filter != .done && store.unreadCount(hub.filter) > 0 {
                 IconButton(symbol: "checkmark.circle", help: "Mark all as read",
-                           detail: "Everything in \(hub.filter.label) · \(store.shortcut(.markAllRead).display)",
-                           size: IconButton.Size.header) {
+                           detail: "Everything in \(hub.filter.label) · \(store.shortcut(.markAllRead).display)") {
                     withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.markAllRead(hub.filter) }
                 }
                 .transition(.opacity)
@@ -84,26 +83,29 @@ extension LookoutHub {
         .motion(Theme.Motion.fade, value: store.unreadCount(hub.filter) > 0)
     }
 
-    func filterChip(_ f: InboxFilter) -> some View {
-        // Unread, like the count in the bar beside it; none once everything's been seen.
+    var tabs: some View {
+        Tabs(label: "Inbox filter", tabs: InboxFilter.allCases.map(tab), selection: hub.filter) { f in
+            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = f }
+        }
+    }
+
+    func tab(_ f: InboxFilter) -> Tabs<InboxFilter>.Tab {
+        // Unread, like the count in the bar beside it; none once everything's been seen. Amber for what needs you.
         let unread = store.unreadCount(f)
-        let count: Int? = f == .done || unread == 0 ? nil : unread
-        let detail = switch f {
+        let help = switch f {
         case .needsYou: "Reviews, mentions and replies from people"
         case .bots: "Comments from bots, kept quiet"
         case .done: "What you marked Done · Back to inbox from here"
         }
-        return Chip(label: f.label, count: count, selected: hub.filter == f) {
-            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.filter = f }
-        }
-        .tip(f.label, detail)
+        return Tabs.Tab(id: f, title: f.label, count: f == .done || unread == 0 ? nil : unread,
+                        countTint: f == .needsYou ? Theme.amber : Theme.tertiary, help: help)
     }
 
     var emptyInbox: some View {
         HStack(spacing: 8) {
-            Image(systemName: searching ? "magnifyingglass" : hub.filter == .needsYou ? "checkmark.circle.fill" : "tray")
+            Image(systemName: searching ? "magnifyingglass" : hub.filter == .needsYou ? "checkmark.circle" : "tray")
                 .font(Theme.Typography.glyph(12))
-                .foregroundStyle(hub.filter == .needsYou && !searching ? Theme.green : Theme.tertiary)
+                .foregroundStyle(Theme.tertiary)
                 .accessibilityHidden(true)
             Text(searching ? "No inbox item matches" : hub.filter == .needsYou ? "All caught up"
                  : hub.filter == .bots ? "Bots are quiet" : "Nothing here yet")
@@ -118,7 +120,7 @@ extension LookoutHub {
         CompactItemRow(item: item, store: store, ui: ui, hub: hub).capEdge()
     }
 
-    /// A line of text with a link after it, padded like a row ("No CI shown  Choose repositories").
+    /// A line of text with a link after it, padded like a row ("No CI configured  Choose repositories").
     func linkRow(_ text: String, action: String, _ perform: @escaping () -> Void) -> some View {
         HStack(spacing: 6) {
             Text(text).foregroundStyle(Theme.tertiary)
@@ -136,10 +138,10 @@ extension LookoutHub {
     func sectionHeader<Trailing: View>(_ title: String, status: [(String, Color)] = [],
                                        @ViewBuilder trailing: () -> Trailing = { EmptyView() }) -> some View {
         HStack(spacing: 8) {
-            Text(title).font(Theme.Typography.heading).foregroundStyle(Theme.secondary).lineLimit(1)
+            Text(title).font(Theme.Typography.title).foregroundStyle(Theme.secondary).lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             ForEach(Array(status.enumerated()), id: \.offset) { _, part in
-                Text(part.0).font(Theme.Typography.meta.monospacedDigit()).foregroundStyle(part.1).lineLimit(1)
+                Text(part.0).font(Theme.Typography.numeral).foregroundStyle(part.1).lineLimit(1)
                     .transition(.opacity)
             }
             Spacer(minLength: 0)
@@ -179,7 +181,7 @@ extension LookoutHub {
         }
         return Image(systemName: worst == .failure ? "xmark.seal.fill" : "checkmark.seal.fill")
             .font(Theme.Typography.glyph(15))
-            .foregroundStyle(worst == CIState.none ? Theme.tertiary : worst.color)
+            .foregroundStyle(worst.color)
             .contentTransition(.symbolEffect(.replace))
             .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
             .contentShape(Rectangle())
@@ -206,7 +208,7 @@ extension LookoutHub {
         let running = ciRepos(listedIn: .pending).count
         let passing = ciRepos(listedIn: .success).count
         if failing > 0 { return ("\(failing) failing", Theme.red) }
-        if running > 0 { return ("\(running) running", Theme.amber) }
+        if running > 0 { return ("\(running) running", Theme.secondary) }
         // "All" only when every repo shown has passed; some without a run yet make it a count.
         if passing > 0 { return (ciRepos(listedIn: CIState.none).isEmpty ? "all passing" : "\(passing) passing", Theme.tertiary) }
         return store.ciRepos.isEmpty ? nil : ("no runs", Theme.tertiary)
@@ -215,7 +217,10 @@ extension LookoutHub {
     /// The number of repos in a CI state, beside its line; hovering lists them.
     func ciCount(_ state: CIState) -> some View {
         let n = ciRepos(listedIn: state).count
-        return DotCount(n, color: state.color)
+        return Text("\(n)")
+            .font(Theme.Typography.numeral)
+            .foregroundStyle(n == 0 ? Theme.tertiary : state.color)
+            .contentTransition(.numericText(value: Double(n)))
             .frame(width: 32, height: Theme.Metrics.line)
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
@@ -229,7 +234,7 @@ extension LookoutHub {
         // Repos without a run only get a line when there are some.
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(state == CIState.none ? "No runs" : state.title)
-                .font(Theme.Typography.count)
+                .font(Theme.Typography.numeral)
                 .foregroundStyle(repos.isEmpty ? Theme.tertiary : state.color)
                 .frame(width: 52, alignment: .leading)
             if repos.isEmpty {
@@ -260,7 +265,7 @@ extension LookoutHub {
     var claudeMark: some View {
         Image(systemName: "asterisk")
             .font(Theme.Typography.glyph(14, .bold))
-            .foregroundStyle(Theme.claude)
+            .foregroundStyle(Theme.tertiary)
             .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
             .contentShape(Rectangle())
             .accessibilityLabel("Sessions")
@@ -287,8 +292,8 @@ extension LookoutHub {
 
     /// The "+" in the bar, a tile like the sessions' above it: a scratch session.
     var newSessionCell: some View {
-        NewSessionTile(size: Theme.Metrics.chip) { store.startScratchSession() }
-            .frame(height: Theme.Metrics.row)
+        NewSessionTile(size: Theme.Metrics.tile) { store.startScratchSession() }
+            .frame(height: Theme.Metrics.pitch)
     }
 
     /// Beside the "+": the label and the projects to start a session in.
@@ -297,21 +302,20 @@ extension LookoutHub {
     // MARK: Bar actions
 
     var pinButton: some View {
-        IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Unpin" : "Keep open",
-                   detail: store.shortcut(.togglePanel).display,
-                   size: IconButton.Size.bar, tint: hub.pinned ? Theme.amber : Theme.secondary, active: hub.pinned) {
+        IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Stop keeping open" : "Keep open",
+                   detail: store.shortcut(.togglePanel).display, active: hub.pinned) {
             hub.pinned.toggle()
         }
     }
 
     var reposButton: some View {
         IconButton(symbol: "square.stack.3d.up.fill", help: "Repositories", detail: "Watched repos and what they notify",
-                   size: IconButton.Size.bar, active: hub.page == .repos) { hub.go(.repos) }
+                   active: hub.page == .repos) { hub.go(.repos) }
     }
 
     /// Lit on Settings; on Repositories too beside the bar, where the repositories button hides with the rows.
     var settingsCell: some View {
-        IconButton(symbol: "gearshape.fill", help: "Settings", detail: "⌘,", size: IconButton.Size.bar,
+        IconButton(symbol: "gearshape.fill", help: "Settings", detail: "⌘,",
                    active: hub.page == .settings || (hub.page == .repos && !edge.isHorizontal)) { hub.go(.settings) }
     }
 
@@ -356,11 +360,11 @@ extension LookoutHub {
                     }
                 }
                 .frame(width: 10, height: 10)
-                Text(s.text).font(Theme.Typography.meta).foregroundStyle(s.color == Theme.green ? Theme.tertiary : s.color)
+                Text(s.text).font(Theme.Typography.meta).foregroundStyle(s.color)
                     .lineLimit(1)
             }
             .padding(.horizontal, 8)
-            .frame(height: Theme.Metrics.chip)
+            .frame(height: Theme.Metrics.tile)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -405,12 +409,12 @@ extension LookoutHub {
                              detail: "\(checked) · check your connection or token\n" + refresh)
         }
         if store.isSnoozed, let until = store.settings.snoozeUntil {
-            return SyncState(color: Theme.purple, text: "Snoozed until \(until.formatted(date: .omitted, time: .shortened))",
+            return SyncState(color: Theme.secondary, text: "Snoozed until \(until.formatted(date: .omitted, time: .shortened))",
                              title: "Notifications snoozed", detail: "No banners; the inbox keeps filling · resume in Settings",
                              symbol: "moon.fill")
         }
         let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))
-        return SyncState(color: Theme.green, text: "Up to date", title: checked,
+        return SyncState(color: Theme.tertiary, text: "Up to date", title: checked,
                          detail: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n\(refresh)")
     }
 }

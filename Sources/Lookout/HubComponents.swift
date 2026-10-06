@@ -151,7 +151,7 @@ extension CappedScroll {
 }
 
 /// An inbox item on two short lines; its actions show on hover or when picked with the keys. Done, Addressed and
-/// Resolved items carry a small state tag and read in the quieter text tokens (never a dimmed row: contrast stays).
+/// Resolved items carry a small state tag (never a dimmed row: contrast stays).
 struct CompactItemRow: View {
     let item: InboxItem
     let store: Store
@@ -168,16 +168,16 @@ struct CompactItemRow: View {
     var body: some View {
         Button { store.open(item) } label: {
             HStack(alignment: .top, spacing: 9) {
-                Circle().fill(unread ? (low ? Theme.secondary : Theme.amber) : .clear)
+                Circle().fill(unread ? (low ? Theme.tertiary : Theme.amber) : .clear)
                     .frame(width: 6, height: 6)
                     .padding(.top, 8)
                 ZStack(alignment: .bottomTrailing) {
-                    Avatar(url: item.avatar, size: 22, name: item.author)
+                    Avatar(url: item.avatar, name: item.author)
                     Image(systemName: item.kind.symbol)
                         .font(Theme.Typography.glyph(6, .bold))
                         .foregroundStyle(Theme.onTint)
                         .frame(width: 11, height: 11)
-                        .background(Circle().fill(item.kind.color))
+                        .background(Circle().fill(Theme.secondary))
                         .overlay(Circle().strokeBorder(Theme.bg, lineWidth: 1.5))
                         .offset(x: 3, y: 3)
                 }
@@ -185,12 +185,12 @@ struct CompactItemRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(item.title)
-                            .font(unread ? Theme.Typography.bodyStrong : Theme.Typography.body)
-                            .foregroundStyle(unread || open ? Theme.text : Theme.secondary)
+                            .font(unread ? Theme.Typography.title : Theme.Typography.body)
+                            .foregroundStyle(Theme.text)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         // The actions take the timestamp's place; the title stops short of them.
-                        Text(shortAgo(item.createdAt)).font(Theme.Typography.caption.monospacedDigit()).foregroundStyle(Theme.tertiary)
+                        Text(shortAgo(item.createdAt)).font(Theme.Typography.numeral).foregroundStyle(Theme.secondary)
                             .opacity(open ? 0 : 1)
                             .frame(width: open ? actionsWidth - 6 : nil, alignment: .trailing)
                     }
@@ -204,7 +204,7 @@ struct CompactItemRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .rowHighlight(open)
+            .rowHighlight(hover: hover, picked: selected && !hover)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(item.title), \(item.repo) #\(item.number)")
@@ -226,21 +226,18 @@ struct CompactItemRow: View {
     }
 
     /// Room the action capsule takes over the title line: its buttons, its 2pt insets, and its 4pt from the edge.
-    private var actionsWidth: CGFloat { CGFloat(item.state.isOpen ? 3 : 2) * IconButton.Size.row + 4 + 4 }
+    private var actionsWidth: CGFloat { CGFloat(item.state.isOpen ? 3 : 2) * Theme.Metrics.iconButton + 4 + 4 }
 
     private var actions: some View {
-        let size = IconButton.Size.row
-        return RowActions {
+        RowActions {
             if item.state.isOpen {
                 IconButton(symbol: unread ? "checkmark" : "circle.fill", help: unread ? "Mark as read" : "Mark as unread",
-                           detail: store.shortcut(.toggleRead).display, size: size) { unread ? store.markRead(item) : store.markUnread(item) }
-                IconButton(symbol: "xmark", help: "Done", detail: "Moves it to Done · \(store.shortcut(.discard).display)",
-                           size: size) { store.discard(item) }
+                           detail: store.shortcut(.toggleRead).display) { unread ? store.markRead(item) : store.markUnread(item) }
+                IconButton(symbol: "xmark", help: "Done", detail: "Moves it to Done · \(store.shortcut(.discard).display)") { store.discard(item) }
             } else {
-                IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", detail: store.shortcut(.discard).display,
-                           size: size) { store.restore(item) }
+                IconButton(symbol: "arrow.uturn.backward", help: "Back to inbox", detail: store.shortcut(.discard).display) { store.restore(item) }
             }
-            IconButton(symbol: "arrow.up.right", help: "Open on GitHub", detail: store.shortcut(.openItem).display, size: size) {
+            IconButton(symbol: "arrow.up.right", help: "Open on GitHub", detail: store.shortcut(.openItem).display) {
                 store.open(item)
             }
         }
@@ -260,18 +257,15 @@ struct StateTag: View {
     }
 
     var body: some View {
-        let (symbol, color): (String, Color) = switch state {
-        case .addressed: ("arrowshape.turn.up.left.fill", Theme.green)
-        case .resolved: ("checkmark.circle.fill", Theme.purple)
-        default: ("checkmark", Theme.secondary)
+        let symbol = switch state {
+        case .addressed: "arrowshape.turn.up.left"
+        case .resolved: "checkmark.circle"
+        default: "checkmark"
         }
         Label(Self.label(state), systemImage: symbol)
-            .font(Theme.Typography.caption.weight(.semibold))
-            .foregroundStyle(color)
+            .font(Theme.Typography.meta.weight(.semibold))
+            .foregroundStyle(Theme.secondary)
             .labelStyle(.titleAndIcon)
-            .padding(.horizontal, 6)
-            .frame(height: 16)
-            .background(Capsule().fill(color.opacity(0.14)))
             .fixedSize()
     }
 }
@@ -284,7 +278,7 @@ struct RowActions<Content: View>: View {
     var body: some View {
         HStack(spacing: 0) { content }
             .padding(2)
-            .background(Capsule().fill(Theme.raised))
+            .background(Capsule().fill(Theme.Fill.group))
             .overlay(Capsule().strokeBorder(Theme.stroke))
     }
 }
@@ -294,13 +288,6 @@ extension AnyTransition {
     static var hubReveal: AnyTransition {
         .asymmetric(insertion: .opacity.animation(Theme.Motion.fade.delay(0.08)),
                     removal: .opacity.animation(.easeIn(duration: 0.08)))
-    }
-}
-
-/// A blinking text cursor for the typed search.
-struct Caret: View {
-    var body: some View {
-        PulseBlock(color: Theme.accent, size: CGSize(width: 1.5, height: 14), cornerRadius: 1, from: 1, to: 0, duration: 0.55)
     }
 }
 
@@ -403,7 +390,6 @@ struct InboxCell: View {
     /// Off while the filter chips beside it already show the counts.
     var showsCount = true
     let action: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         Button(action: action) { InboxCellLabel(needsYou: needsYou, bots: bots, vertical: vertical, showsCount: showsCount) }
@@ -412,9 +398,9 @@ struct InboxCell: View {
             .accessibilityValue([needsYou > 0 ? "\(needsYou) need you" : nil, bots > 0 ? plural(bots, "bot item") : nil]
                 .compactMap { $0 }.joined(separator: ", "))
             .accessibilityHint("Shows what needs you")
-            .motion(.snappy, value: needsYou)
-            .motion(.snappy, value: bots)
-            .motion(Theme.Motion.spring, value: showsCount)
+            .motion(Theme.Motion.fade, value: needsYou)
+            .motion(Theme.Motion.fade, value: bots)
+            .motion(Theme.Motion.move, value: showsCount)
     }
 }
 
@@ -445,7 +431,7 @@ private struct InboxCellLabel: View {
         }
         .padding(.vertical, vertical ? 7 : 5)
         .padding(.horizontal, vertical ? 4 : 7)
-        .frame(minWidth: vertical ? Theme.Metrics.row : nil)
+        .frame(minWidth: vertical ? Theme.Metrics.pitch : nil)
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .motion(Theme.Motion.hover, value: hover)
@@ -461,7 +447,7 @@ private struct InboxCellLabel: View {
             // Hover brightens the tile (or the tray), no box around it.
             .background(Tile.shape(28).fill(lit ? Theme.amber : hover ? Theme.Fill.hover : Theme.Fill.rest))
             .brightness(lit && hover ? 0.06 : 0)
-            .motion(.snappy, value: lit)
+            .motion(Theme.Motion.fade, value: lit)
     }
 
     private var badge: AnyView? {
@@ -474,15 +460,14 @@ private struct InboxCellLabel: View {
 
     private func count(_ n: Int, fill: Color, text: Color) -> some View {
         Text(n > 99 ? "99+" : "\(n)")
-            .font(Theme.Typography.glyph(10.5, .bold).monospacedDigit())
+            .font(Theme.Typography.glyph(11, .bold).monospacedDigit())
             .contentTransition(.numericText(value: Double(n)))
             .foregroundStyle(text)
             .padding(.horizontal, 5)
             .frame(minWidth: 18, minHeight: 15)
             .background(Capsule().fill(fill))
-            .transition(.scaleFade(0.6, reduce: reduce))
+            .transition(.opacity)
     }
-    @Environment(\.accessibilityReduceMotion) private var reduce
 }
 
 /// A repo in CI's lines: its name (and how many checks fail), opening its latest run.
@@ -497,7 +482,7 @@ struct RepoChip: View {
             HStack(spacing: 4) {
                 Text(repo.name).font(Theme.Typography.control).foregroundStyle(Theme.text)
                 if state == .failure, let n = status?.failing.count, n > 0 {
-                    Text(plural(n, "check")).font(Theme.Typography.caption).foregroundStyle(Theme.red)
+                    Text(plural(n, "check")).font(Theme.Typography.meta).foregroundStyle(Theme.red)
                 }
             }
             .padding(.horizontal, 8)
@@ -522,12 +507,12 @@ struct RepoChip: View {
 
 /// The "+" tile: shaped and filled like a session's tile, so it reads as the next one in the column.
 struct NewSessionTile: View {
-    var size: CGFloat = Theme.Metrics.chip
+    var size: CGFloat = Theme.Metrics.tile
     let action: () -> Void
 
     var body: some View {
         Button(action: action) { NewSessionTileLabel(size: size) }
-            .buttonStyle(HoverFillButtonStyle(shape: Tile.shape(size), rest: Theme.Fill.field, hover: Theme.Fill.tile))
+            .buttonStyle(HoverFillButtonStyle(shape: Tile.shape(size), rest: Theme.Fill.tile, hover: Theme.Fill.selected))
             .accessibilityLabel("New session")
             .accessibilityHint("Scratch chat, or pick a project")
             .tip("New session", "Scratch chat, or pick a project")
@@ -553,7 +538,7 @@ struct RunningLine: View {
     var body: some View {
         tasks.enumerated().reduce(Text("")) { line, item in
             let (i, task) = item
-            let icon = Text(Image(systemName: task.kind == .agent ? "asterisk" : "terminal")).foregroundStyle(Theme.claude)
+            let icon = Text(Image(systemName: task.kind == .agent ? "asterisk" : "terminal")).foregroundStyle(Theme.secondary)
             return line + (i == 0 ? Text("") : Text("   ")) + icon + Text(" " + task.title).foregroundStyle(Theme.secondary)
         }
         .font(Theme.Typography.meta)
@@ -569,7 +554,7 @@ struct SummaryText: View {
     let row: AgentRow
 
     var body: some View {
-        Text(row.summaryText).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1)
+        Text(row.summaryText).font(Theme.Typography.meta).foregroundStyle(Theme.secondary).lineLimit(1)
     }
 }
 
@@ -587,7 +572,7 @@ struct BarTile: View {
             AgentTile(row: row, size: size, selected: hub.selection == "a:" + row.id)
         }
         .buttonStyle(.plain)
-        .frame(height: Theme.Metrics.row)
+        .frame(height: Theme.Metrics.pitch)
         .accessibilityLabel(row.session.title)
         .accessibilityValue(row.stateName)
         .accessibilityHint("Opens it in Claude")
@@ -625,11 +610,11 @@ struct SessionBlock: View {
                 .padding(.top, twoLines ? -8 : -3)
                 .padding(.bottom, twoLines ? 4 : 7)
         }
-        .background(Theme.Radius.shape(Theme.Radius.md).fill(selected ? Theme.Fill.field : Theme.Fill.rest))
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(selected ? Theme.Fill.hover : Theme.Fill.rest))
         // The same actions as an inbox item's, over the title line's right end, centred on it.
         .overlay(alignment: .topTrailing) {
             if selected {
-                AgentActions(row: row, store: store, size: IconButton.Size.row)
+                AgentActions(row: row, store: store)
                     .padding(.top, twoLines ? 9 : 0)
                     .padding(.trailing, 4)
                     .transition(.opacity)

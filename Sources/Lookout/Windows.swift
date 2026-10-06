@@ -48,6 +48,8 @@ class FloatingPanel: NSPanel {
         hidesOnDeactivate = false
         isMovable = false
         isReleasedWhenClosed = false
+        // Dark only: AppKit's own pieces (context menus, pop-ups, the field editor, selection) follow.
+        appearance = NSAppearance(named: .darkAqua)
         // Lookout is an accessory app, inactive most of the time: without this, `.help` tooltips never show.
         allowsToolTipsWhenApplicationIsInactive = true
     }

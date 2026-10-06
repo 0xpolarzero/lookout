@@ -135,8 +135,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .markAllRead: "Mark all as read"
         case .refresh: "Refresh now"
         case .sessionSwitcher: "Switch Claude session"
-        case .keepSession: "Keep a pending session"
-        case .removeSession: "Remove a session"
+        case .keepSession: "Keep a session with new activity"
+        case .removeSession: "Hide a session"
         }
     }
 
@@ -191,15 +191,15 @@ struct ShortcutRecorder: View {
                         .foregroundStyle(recording ? Theme.accent : Theme.text)
                         .padding(.horizontal, Theme.Space.md)
                         .frame(minWidth: 70, minHeight: 22)
-                        .overlay(Theme.Radius.shape(Theme.Radius.xs).strokeBorder(recording ? Theme.accent : .clear))
+                        .overlay(Theme.Radius.shape(Theme.Radius.small).strokeBorder(recording ? Theme.accent : .clear))
                 }
-                .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), rest: Theme.Fill.hover,
+                .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.small), rest: Theme.Fill.hover,
                                                   hover: Theme.Fill.selected, isActive: recording))
                 .accessibilityLabel("Change shortcut for \(action.title)")
                 .accessibilityValue(recording ? "Recording, press the new keys" : current.display)
             }
             if let error {
-                Text(error).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
+                Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.amber)
             }
         }
         .onDisappear(perform: stop)

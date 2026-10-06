@@ -2,35 +2,113 @@ import AppKit
 import SwiftUI
 
 enum Theme {
+    // MARK: Colour
+    // Dark only and opaque, on purpose (DESIGN.md 3.1). Contrast figures are on `bg`; ContrastTests holds the full table.
+
     static let bg = Color(red: 0.078, green: 0.078, blue: 0.086)
-    /// Tooltip bubbles, a step above `bg`.
-    static let popover = Color(white: 0.17)
-    static let raised = Color.white.opacity(0.045)
-    static let hover = Color.white.opacity(0.07)
-    static let stroke = Color.white.opacity(0.085)
+    /// The side-edge bar column: a step above `bg`, drawn over it.
+    static let rail = Color.white.opacity(0.025)
+    /// Tooltip bubbles and menus, a step above `bg` (#2B2B2D).
+    static let popover = Color(red: 0.169, green: 0.169, blue: 0.176)
+    /// The hub's outline: decorative, exempt from 3:1.
+    static let stroke = Color.white.opacity(0.12)
+    static let divider = Color.white.opacity(0.08)
+    /// Field and bordered-button outlines (3.11:1).
+    static let fieldBorder = Color.white.opacity(0.34)
+    /// A switch's track when off (with a `fieldBorder` outline).
+    static let switchOff = Color.white.opacity(0.16)
+
+    /// Titles, rows (read or not) and values: 15.95:1.
     static let text = Color.white.opacity(0.93)
-    /// ~7.97:1 on `bg`.
-    static let secondary = Color.white.opacity(0.64)
-    /// ~4.67:1 on `bg` (was .34, 3.1:1). Still clearly below `secondary`.
-    static let tertiary = Color.white.opacity(0.46)
+    /// Summaries, ages, status words, hints, form details: 9.34:1.
+    static let secondary = Color.white.opacity(0.70)
+    /// The meta line, placeholders, quiet glyphs: 6.73:1. Never a hint on a form.
+    static let tertiary = Color.white.opacity(0.58)
+
+    /// Three hues, one meaning each: amber needs you, red is broken, blue is unread or interactive.
     static let accent = Color(red: 0.40, green: 0.58, blue: 1.0)
+    /// The accent as text (links).
+    static let accentText = Color(red: 0.52, green: 0.68, blue: 1.0)
     static let amber = Color(red: 0.99, green: 0.74, blue: 0.27)
+    static let red = Color(red: 1.0, green: 0.45, blue: 0.43)
+    /// The update-ready tile, and nothing else.
     static let green = Color(red: 0.32, green: 0.82, blue: 0.50)
-    static let red = Color(red: 0.97, green: 0.38, blue: 0.38)
-    static let purple = Color(red: 0.68, green: 0.55, blue: 1.0)
-    /// Claude's clay, for anything about Claude sessions.
+    /// Text and glyphs on an amber or green fill.
+    static let onTint = Color.black.opacity(0.85)
+    /// The Claude mark in the Claude settings pane, and nothing else.
     static let claude = Color(red: 0.85, green: 0.47, blue: 0.34)
-    /// Project colours for Claude sessions: as far apart as possible, and nowhere near the status colours (amber
-    /// needs you, blue unread, clay working) or CI's red. In assignment order, so the first projects differ most.
+
+    /// Project colours for the dots in group headers and menus (6pt): in assignment order, so the first projects
+    /// differ most, and apart from the status hues.
     static let projectColors: [Color] = [
-        Color(red: 0.30, green: 0.82, blue: 0.47),  // green
         Color(red: 0.67, green: 0.52, blue: 1.00),  // violet
         Color(red: 0.96, green: 0.42, blue: 0.75),  // pink
         Color(red: 0.24, green: 0.82, blue: 0.93),  // cyan
-        Color(red: 0.78, green: 0.90, blue: 0.24),  // lime
         Color(red: 0.86, green: 0.86, blue: 0.90),  // silver
     ]
-    static let projectColorNames = ["Green", "Violet", "Pink", "Cyan", "Lime", "Silver"]
+    static let projectColorNames = ["Violet", "Pink", "Cyan", "Silver"]
+
+    // MARK: Resolved
+
+    /// Increase Contrast and Differentiate Without Colour, read from the system once at the hub's root (see
+    /// `themeResolved()`) and handed down as `\.resolved`: views read this, never the two settings themselves. Plain
+    /// values, so the tokens' Increase Contrast set can be tested.
+    struct Resolved: Equatable {
+        var contrast = false
+        var differentiate = false
+
+        var stroke: Color { contrast ? Color.white.opacity(0.28) : Theme.stroke }
+        var divider: Color { contrast ? Color.white.opacity(0.20) : Theme.divider }
+        var secondary: Color { contrast ? Color.white.opacity(0.86) : Theme.secondary }
+        var tertiary: Color { contrast ? Color.white.opacity(0.80) : Theme.tertiary }
+        /// Outlines of fields, switches and bordered buttons.
+        var borderWidth: CGFloat { contrast ? 1.5 : 1 }
+        var focusWidth: CGFloat { contrast ? 2 : 1.5 }
+        var arcWidth: CGFloat { contrast ? 2.5 : 2 }
+
+        /// A white fill token, ×1.6 under Increase Contrast.
+        func fill(_ fill: Color) -> Color {
+            guard contrast else { return fill }
+            let c = NSColor(fill)
+            return Color(nsColor: c.withAlphaComponent(min(1, c.alphaComponent * 1.6)))
+        }
+    }
+
+    // MARK: Timing
+
+    /// Every delay in the hover choreography, in one place (DESIGN.md 3.6, 6.1).
+    enum Timing {
+        /// The pointer must settle this long before the first panel opens (later ones switch at once).
+        static let dwell: Duration = .milliseconds(100)
+        /// Leaving a section or panel closes it only after this, so travelling between bar and panel never does.
+        static let leaveGrace: Duration = .milliseconds(120)
+        /// A tooltip shows after this; instantly when another closed less than `tipChain` ago.
+        static let tooltip: Duration = .milliseconds(400)
+        static let tipChain: TimeInterval = 0.6
+        /// A tooltip on keyboard focus.
+        static let tooltipFocus: Duration = .seconds(1)
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var resolved = Theme.Resolved()
+    /// Previews and shots: Differentiate Without Colour on, whatever the system says (it can't be set directly).
+    @Entry var previewDifferentiate = false
+}
+
+private struct ThemeResolver: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
+    @Environment(\.previewDifferentiate) private var preview
+
+    func body(content: Content) -> some View {
+        content.environment(\.resolved, Theme.Resolved(contrast: contrast == .increased, differentiate: differentiate || preview))
+    }
+}
+
+extension View {
+    /// Resolves Increase Contrast and Differentiate Without Colour into `\.resolved`: once, at the root.
+    func themeResolved() -> some View { modifier(ThemeResolver()) }
 }
 
 func shortAgo(_ date: Date, now: Date = Date()) -> String {
@@ -49,83 +127,14 @@ func agoPhrase(_ date: Date, now: Date = Date()) -> String {
     return now.timeIntervalSince(date) < 7 * 86400 ? "\(short) ago" : "on \(short)"
 }
 
-struct IconButton: View {
-    let symbol: String
-    var help: String = ""
-    /// What VoiceOver says; defaults to `help`. Give one when `help` is empty: icon-only buttons need a label.
-    var label: String? = nil
-    var detail: String? = nil
-    var size: CGFloat = 26
-    var tint: Color = Theme.secondary
-    var active = false
-    let action: () -> Void
-
-    var body: some View {
-        let button = Button(action: action) { IconButtonLabel(symbol: symbol, size: size, tint: tint, active: active) }
-            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
-            .accessibilityLabel(label ?? help)
-            .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
-
-        // The pill's window is too small to host our tooltip bubble: `.tip` falls back to the system one there.
-        if help.isEmpty {
-            button
-        } else {
-            button.tip(help, detail)
-        }
-    }
-}
-
-private struct IconButtonLabel: View {
-    let symbol: String
-    let size: CGFloat
-    let tint: Color
-    let active: Bool
-    @Environment(\.hoverFillHovering) private var hover
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.46, weight: .semibold))
-            .foregroundStyle(active || hover ? Theme.text : tint)
-            .frame(width: size, height: size)
-    }
-}
-
-extension IconButton {
-    /// The hub's three button sizes: one per kind of place, so the same action looks the same everywhere.
-    enum Size {
-        /// The bar and its trailing group (pin, repositories, settings).
-        static let bar: CGFloat = 28
-        /// A section header's actions (mark all read, back).
-        static let header: CGFloat = 24
-        /// A row's hover actions, in their capsule.
-        static let row: CGFloat = 22
-    }
-}
-
-/// A key as printed on a keycap, e.g. "Esc" or "⌘K": one look everywhere a key is shown.
-struct KeyCap: View {
-    let key: String
-
-    init(_ key: String) { self.key = key }
-
-    var body: some View {
-        Text(key)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .foregroundStyle(Theme.secondary)
-            .padding(.horizontal, 5)
-            .frame(minWidth: 18, minHeight: 16)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).fill(Theme.Fill.tile))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xs, style: .continuous).strokeBorder(Theme.stroke))
-    }
-}
-
 struct Avatar: View {
     let url: URL?
-    var size: CGFloat = 26
+    var size: CGFloat = Theme.Metrics.avatar
     /// Shown as initials until (or unless) the picture is there.
     var name: String?
 
     @State private var loaded: (url: URL, image: NSImage)?
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         let sized = Self.sizedURL(url, size: size)
@@ -146,17 +155,17 @@ struct Avatar: View {
             loaded = nil
             let img = await ImageCache.shared.load(sized)
             guard !Task.isCancelled, let img else { return }
-            withAnimation(.easeOut(duration: 0.15)) { loaded = (sized, img) }
+            withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { loaded = (sized, img) }
         }
     }
 
-    /// Initials of the name, or a person glyph without one.
+    /// The name's first letter, or a person glyph without one.
     @ViewBuilder private var placeholder: some View {
-        let initials = name.map { $0.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).prefix(2).compactMap(\.first).map(String.init).joined().uppercased() } ?? ""
-        if initials.isEmpty {
-            Image(systemName: "person.fill").font(.system(size: size * 0.5)).foregroundStyle(Theme.tertiary)
+        let letter = name?.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? ""
+        if letter.isEmpty {
+            Image(systemName: "person.fill").font(Theme.Typography.glyph(size * 0.5, .regular)).foregroundStyle(Theme.tertiary)
         } else {
-            Text(initials).font(.system(size: size * 0.4, weight: .semibold, design: .rounded)).foregroundStyle(Theme.secondary)
+            Text(letter).font(Theme.Typography.label).foregroundStyle(Theme.secondary)
         }
     }
 
@@ -165,67 +174,6 @@ struct Avatar: View {
         guard let url, var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
         comps.queryItems = (comps.queryItems ?? []).filter { $0.name != "s" } + [URLQueryItem(name: "s", value: "\(Int(size * 2))")]
         return comps.url
-    }
-}
-
-struct CIDot: View {
-    let state: CIState
-    var size: CGFloat = 8
-
-    var body: some View {
-        if state == .pending {
-            // Breathing: a render-server animation, with no glow (a shadow can't animate cheaply).
-            PulseBlock(color: state.color, diameter: size, from: 1, to: 0.35, duration: 0.9)
-        } else {
-            Circle()
-                .fill(state.color)
-                .frame(width: size, height: size)
-                .shadow(color: state == .none ? .clear : state.color.opacity(0.6), radius: 3)
-        }
-    }
-}
-
-struct Chip: View {
-    let label: String
-    var count: Int? = nil
-    var selected = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Text(label)
-                if let count, count > 0 { CountBadge(count, tint: selected ? Theme.amber : nil) }
-            }
-            .font(Theme.Typography.control)
-            .foregroundStyle(selected ? Theme.text : Theme.secondary)
-            .padding(.horizontal, 10)
-            .frame(height: Theme.Metrics.chip)
-        }
-        .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.field, active: Theme.Fill.selected, isActive: selected))
-    }
-}
-
-struct FieldStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .textFieldStyle(.plain)
-            .font(.system(size: 13))
-            .padding(.horizontal, 10)
-            .frame(height: Theme.Metrics.field)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous).fill(Theme.Fill.field))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous).strokeBorder(Theme.stroke))
-    }
-}
-
-extension View {
-    func fieldStyle() -> some View { modifier(FieldStyle()) }
-
-    func card() -> some View {
-        self
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.lg + 2, style: .continuous).fill(Theme.raised))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.lg + 2, style: .continuous).strokeBorder(Theme.stroke))
     }
 }
 
@@ -270,9 +218,10 @@ struct FlowLayout: Layout {
 
 // MARK: - Tooltip
 
-/// A quick, styled tooltip (the system one waits ~1s and looks out of place on the dark panel).
-/// Badges only *request* a tooltip; the nearest `.tipSpace()` draws it in one top layer, so nothing
-/// (headers, neighbouring rows, scroll views) can cover or clip it.
+/// A quick, styled tooltip for icon-only controls: the label and, after it on the same line, its key ("Settings  ⌘,").
+/// Anything with visible text uses the system's `.help`; a tip never carries primary information. Controls only
+/// *request* a tooltip; the nearest `.tipSpace()` draws it in one top layer, so nothing (headers, neighbouring
+/// rows, scroll views) can cover or clip it.
 @Observable
 final class TipCenter {
     struct Request: Equatable {
@@ -283,11 +232,23 @@ final class TipCenter {
     }
 
     var current: Request?
+    /// When a tip last closed: the next one shows at once within `Timing.tipChain` of it.
+    @ObservationIgnored private var closedAt = Date.distantPast
+
+    /// Whether the next tip should skip its delay: another is showing, or one just closed.
+    var chaining: Bool { current != nil || Date().timeIntervalSince(closedAt) < Theme.Timing.tipChain }
+
+    func close(_ id: UUID) {
+        guard current?.id == id else { return }
+        current = nil
+        closedAt = Date()
+    }
 }
 
 private struct Tip: ViewModifier {
     let title: String
     let detail: String?
+    let focused: Bool
     @State private var id = UUID()
     @State private var anchor = CGRect.zero
     @State private var pending: Task<Void, Never>?
@@ -316,18 +277,28 @@ private struct Tip: ViewModifier {
                 }
             }
             .onHover { inside in
-                pending?.cancel()
-                if inside {
-                    pending = Task {
-                        try? await Task.sleep(for: .milliseconds(300))
-                        guard !Task.isCancelled else { return }
-                        show()
-                    }
-                } else if center?.current?.id == id {
-                    center?.current = nil
-                }
+                inside ? schedule(after: Theme.Timing.tooltip) : hide()
             }
-            .onDisappear { if center?.current?.id == id { center?.current = nil } }
+            .onChange(of: focused) { _, focused in
+                focused ? schedule(after: Theme.Timing.tooltipFocus) : hide()
+            }
+            .onDisappear { hide() }
+    }
+
+    private func schedule(after delay: Duration) {
+        pending?.cancel()
+        // Right after another tip, none of the wait: sweeping along a row of buttons reads them all.
+        let wait = center?.chaining == true ? .zero : delay
+        pending = Task {
+            if wait > .zero { try? await Task.sleep(for: wait) }
+            guard !Task.isCancelled else { return }
+            show()
+        }
+    }
+
+    private func hide() {
+        pending?.cancel()
+        center?.close(id)
     }
 
     private func show() {
@@ -340,21 +311,36 @@ private struct TipBubble: View {
     let bounds: CGSize
     @State private var size = CGSize.zero
 
+    /// A key equivalent ("⌘,", "⌫", "Esc") rather than a sentence: it goes after the label, on one line.
+    private var key: String? {
+        guard let detail = request.detail, !detail.isEmpty, detail.count <= 8, !detail.contains(" "), !detail.contains("\n") else { return nil }
+        return detail
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(request.title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.text)
-            if let detail = request.detail, !detail.isEmpty {
-                Text(detail)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.secondary)
-                    .frame(width: Self.width(of: detail), alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if let key {
+                HStack(spacing: Theme.Space.md) {
+                    Text(request.title).foregroundStyle(Theme.text)
+                    Text(key).foregroundStyle(Theme.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Space.hair) {
+                    Text(request.title).foregroundStyle(Theme.text)
+                    if let detail = request.detail, !detail.isEmpty {
+                        Text(detail)
+                            .foregroundStyle(Theme.secondary)
+                            .frame(width: Self.width(of: detail), alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(Theme.Radius.shape(Theme.Radius.sm).fill(Theme.popover))
-        .overlay(Theme.Radius.shape(Theme.Radius.sm).strokeBorder(Theme.Fill.tile))
+        .font(.system(size: 12))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Theme.Radius.shape(Theme.Radius.tile).fill(Theme.popover))
+        .overlay(Theme.Radius.shape(Theme.Radius.tile).strokeBorder(Theme.stroke))
         .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
         .fixedSize()
         .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
@@ -374,9 +360,9 @@ private struct TipBubble: View {
 
     /// Natural width of the widest line, capped so long details wrap instead of stretching the bubble.
     private static func width(of text: String) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 10.5)
+        let font = NSFont.systemFont(ofSize: 12)
         let widest = text.split(separator: "\n").map { (String($0) as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
-        return min(ceil(widest) + 2, 210)
+        return min(ceil(widest) + 2, 220)
     }
 }
 
@@ -401,7 +387,7 @@ private struct TipSpaceModifier: ViewModifier {
             .overlay(alignment: .topLeading) {
                 if let request = center.current {
                     TipBubble(request: request, bounds: size)
-                        .transition(.opacity.animation(.easeOut(duration: 0.12)))
+                        .transition(.opacity.animation(Theme.Motion.hover))
                 }
             }
     }
@@ -411,7 +397,9 @@ extension View {
     /// Hosts tooltips for everything inside (use once, at the root of the panel).
     func tipSpace() -> some View { modifier(TipSpaceModifier()) }
 
-    func tip(_ title: String, _ detail: String? = nil) -> some View {
-        modifier(Tip(title: title, detail: detail))
+    /// A tooltip for an icon-only control: `detail` is its key, or a short sentence. `focused` (the control's own
+    /// focus) shows it after a second for keyboard users.
+    func tip(_ title: String, _ detail: String? = nil, focused: Bool = false) -> some View {
+        modifier(Tip(title: title, detail: detail, focused: focused))
     }
 }

@@ -56,18 +56,6 @@ enum EventKind: String, Codable, CaseIterable, Identifiable {
         case .reviewRequested: "eye.fill"
         }
     }
-
-    var color: Color {
-        switch self {
-        case .issueOpened: Theme.green
-        case .issueComment: Theme.accent
-        case .prOpened: Theme.purple
-        case .prComment: Theme.purple
-        case .reviewComment: Theme.amber
-        case .ciMain: Theme.green
-        case .reviewRequested: Theme.amber
-        }
-    }
 }
 
 enum ItemState: String, Codable {
@@ -131,9 +119,9 @@ enum CIState: String, Codable {
 
     var color: Color {
         switch self {
-        case .success: Theme.green
+        case .success: Theme.tertiary
         case .failure: Theme.red
-        case .pending: Theme.amber
+        case .pending: Theme.secondary
         case .none: Theme.tertiary
         }
     }
@@ -152,7 +140,7 @@ enum CIState: String, Codable {
         case .success: "Passing"
         case .failure: "Failing"
         case .pending: "Running"
-        case .none: "No checks"
+        case .none: "No runs"
         }
     }
 
@@ -161,7 +149,7 @@ enum CIState: String, Codable {
         case .success: "passing"
         case .failure: "failing"
         case .pending: "running"
-        case .none: "no checks"
+        case .none: "no runs"
         }
     }
 }

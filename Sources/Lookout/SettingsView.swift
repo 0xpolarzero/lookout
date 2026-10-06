@@ -35,18 +35,18 @@ struct SettingsView: View {
                     Text(store.me.map { "@\($0.login)" } ?? "Not connected").font(Theme.Typography.title)
                     Text(store.tokenSource.map { "Token from \($0.rawValue)" } ?? (store.authError ?? ""))
                         .font(Theme.Typography.meta)
-                        .foregroundStyle(store.authError == nil ? Theme.tertiary : Theme.red)
+                        .foregroundStyle(store.authError == nil ? Theme.secondary : Theme.red)
                         .lineLimit(2)
                 }
                 Spacer()
                 if store.tokenSource == .keychain {
-                    ActionButton("Use gh CLI") { store.setToken(nil) }
+                    BorderedButton("Use gh CLI") { store.setToken(nil) }
                 }
             }
             HStack(spacing: 6) {
                 SecureField("Paste a personal access token (optional)", text: $token).fieldStyle()
                     .onSubmit(saveToken)
-                ActionButton("Save", height: Theme.Metrics.field, action: saveToken)
+                BorderedButton("Save", action: saveToken)
                     .disabled(token.isEmpty)
             }
             hint("Uses `gh auth token` by default. A pasted token is kept in the Keychain and needs `repo` scope for private repos.")
@@ -74,8 +74,8 @@ struct SettingsView: View {
                 Spacer()
                 if store.isSnoozed, let until = store.settings.snoozeUntil {
                     Text("Until \(until.formatted(date: .omitted, time: .shortened))")
-                        .font(Theme.Typography.control).foregroundStyle(Theme.purple)
-                    ActionButton("Resume") { store.snooze(for: nil) }
+                        .font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                    BorderedButton("Resume") { store.snooze(for: nil) }
                 } else {
                     Menu("Off") {
                         Button("30 minutes") { store.snooze(for: 1800) }
@@ -100,7 +100,7 @@ struct SettingsView: View {
                 TextField("Add a handle, e.g. vercel", text: $botInput)
                     .fieldStyle()
                     .onSubmit(addBot)
-                ActionButton("Add", height: Theme.Metrics.field, action: addBot).disabled(botInput.isEmpty)
+                BorderedButton("Add", action: addBot).disabled(botInput.isEmpty)
             }
             if !store.settings.botHandles.isEmpty {
                 FlowLayout(spacing: 6) {
@@ -120,10 +120,10 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(action.title).font(Theme.Typography.body)
                         if action.isGlobal {
-                            Text("Works from any app").font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
+                            Text("Works from any app").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                             if (store.shortcut(action).isModifierTap || store.shortcut(action).mouseButton != nil) && !AXIsProcessTrusted() {
                                 Text("Needs Accessibility access (System Settings › Privacy & Security)")
-                                    .font(Theme.Typography.caption).foregroundStyle(Theme.amber)
+                                    .font(Theme.Typography.meta).foregroundStyle(Theme.amber)
                             }
                         }
                     }
@@ -145,8 +145,8 @@ struct SettingsView: View {
                         Text("Claude sessions").font(Theme.Typography.body)
                     }
                     Text("Extension for the Claude desktop app")
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.tertiary)
+                        .font(Theme.Typography.meta)
+                        .foregroundStyle(Theme.secondary)
                 }
                 Spacer()
                 Toggle("Claude sessions", isOn: Binding(get: { store.agents.enabled }, set: { store.setAgentsEnabled($0) }))
@@ -163,7 +163,7 @@ struct SettingsView: View {
                 sessionIcons
                 Hairline()
                 hint("Your Claude Code sessions on the bar: what is working, done or waiting. "
-                     + "Sessions with new activity arrive as pending; keep the ones you use. Read-only: Lookout never writes to the app.")
+                     + "Sessions with new activity arrive on their own; keep the ones you use. Read-only: Lookout never writes to the app.")
             } else {
                 hint("Your Claude Code sessions on the bar, to see which are working, done or waiting, and jump between them.")
             }
@@ -180,13 +180,13 @@ struct SettingsView: View {
                         .font(Theme.Typography.meta)
                         .foregroundStyle(Theme.secondary)
                     Spacer()
-                    ActionButton("Remove") { store.setTypesafeKey(nil) }
+                    BorderedButton("Remove") { store.setTypesafeKey(nil) }
                 }
             } else {
                 HStack(spacing: 6) {
                     SecureField("Paste a TypeSafe API key", text: $typesafeKey).fieldStyle()
                         .onSubmit(saveTypesafeKey)
-                    ActionButton("Save", height: Theme.Metrics.field, action: saveTypesafeKey)
+                    BorderedButton("Save", action: saveTypesafeKey)
                         .disabled(typesafeKey.isEmpty)
                 }
             }
@@ -259,13 +259,13 @@ struct SettingsView: View {
         let updater = store.updater
         switch updater.phase {
         case .available, .failed:
-            ActionButton(updater.phase == .available ? "Download & install" : "Try again") { updater.advance() }
+            BorderedButton(updater.phase == .available ? "Download & install" : "Try again") { updater.advance() }
         case .ready:
-            ActionButton("Restart to update") { updater.install() }
+            BorderedButton("Restart to update") { updater.install() }
         case .downloading, .installing:
             EmptyView()
         case .idle:
-            ActionButton(updater.checking ? "Checking…" : "Check now") {
+            BorderedButton(updater.checking ? "Checking…" : "Check now") {
                 store.settings.skippedVersion = nil
                 Task { await updater.check(manual: true) }
             }
@@ -293,8 +293,8 @@ struct SettingsView: View {
     private var updateStatusColor: Color {
         switch store.updater.phase {
         case .failed: Theme.red
-        case .available, .ready: Theme.green
-        default: store.updater.checkError == nil ? Theme.tertiary : Theme.red
+        case .available, .ready: Theme.accentText
+        default: store.updater.checkError == nil ? Theme.secondary : Theme.red
         }
     }
 
@@ -328,7 +328,7 @@ struct SettingsView: View {
                      ? "Drag the bar to any screen edge; it stays at the middle."
                      : "Drag the bar to any screen edge.")
                 Spacer()
-                ActionButton("Quit Lookout") { NSApp.terminate(nil) }
+                BorderedButton("Quit Lookout") { NSApp.terminate(nil) }
             }
         }
     }
@@ -342,12 +342,13 @@ struct SettingsView: View {
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.lg) {
-            Eyebrow(title)
+            Text(title).font(Theme.Typography.label).foregroundStyle(Theme.secondary)
                 .accessibilityAddTraits(.isHeader)
             content()
         }
+        .padding(Theme.Space.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .card()
+        .background(Theme.Radius.shape(Theme.Radius.row).fill(Theme.Fill.group))
     }
 
     /// Label on the left, switch on the trailing edge: the same in every section.
@@ -355,7 +356,7 @@ struct SettingsView: View {
         HStack(alignment: detail == nil ? .center : .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label).font(Theme.Typography.body)
-                if let detail { Text(detail).font(Theme.Typography.caption).foregroundStyle(Theme.tertiary) }
+                if let detail { Text(detail).font(Theme.Typography.meta).foregroundStyle(Theme.secondary) }
             }
             Spacer(minLength: 8)
             Toggle(label, isOn: isOn)
@@ -368,7 +369,7 @@ struct SettingsView: View {
     private func hint(_ text: String) -> some View {
         Text(.init(text))
             .font(Theme.Typography.meta)
-            .foregroundStyle(Theme.tertiary)
+            .foregroundStyle(Theme.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -384,7 +385,7 @@ private struct RemovableTag: View {
         HStack(spacing: 4) {
             Text(text)
             Button(action: remove) {
-                Image(systemName: "xmark").font(Theme.Typography.glyph(8, .bold)).frame(width: 14, height: 14)
+                Image(systemName: "xmark").font(Theme.Typography.glyph(8, .bold)).frame(width: 24, height: 24)
             }
             .buttonStyle(HoverFillButtonStyle(shape: Circle()))
             .foregroundStyle(Theme.tertiary)
@@ -393,7 +394,7 @@ private struct RemovableTag: View {
         }
         .font(Theme.Typography.control)
         .padding(.leading, 9)
-        .padding(.trailing, 5)
+        .padding(.trailing, 2)
         .frame(height: 24)
         .background(Capsule().fill(Theme.Fill.hover))
         .modifier(OptionalTip(title: tip))
@@ -404,31 +405,5 @@ private struct OptionalTip: ViewModifier {
     let title: String?
     func body(content: Content) -> some View {
         if let title { content.tip(title) } else { content }
-    }
-}
-
-/// A small bordered text button: reads as a button at rest, brightens on hover, fades only when disabled.
-/// `height` matches the field it sits beside (`Theme.Metrics.field`) or a row's controls (`Theme.Metrics.chip`).
-struct ActionButton: View {
-    let title: String
-    var height: CGFloat = Theme.Metrics.chip
-    let action: () -> Void
-
-    init(_ title: String, height: CGFloat = Theme.Metrics.chip, action: @escaping () -> Void) {
-        self.title = title
-        self.height = height
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(Theme.Typography.control)
-                .foregroundStyle(Theme.text)
-                .padding(.horizontal, 12)
-                .frame(height: height)
-                .overlay(Theme.Radius.shape(Theme.Radius.md).strokeBorder(Theme.stroke))
-        }
-        .buttonStyle(HoverFillButtonStyle(rest: Theme.Fill.field, hover: Theme.Fill.selected, pressed: Theme.Fill.pressed))
     }
 }

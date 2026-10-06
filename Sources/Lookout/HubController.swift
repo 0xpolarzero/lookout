@@ -167,6 +167,7 @@ final class HubController {
         window.ignoresMouseEvents = true
         host = NSHostingView(rootView: HubRoot(store: store, ui: ui, hub: hub, layout: layout, maxLength: 600))
         host.sizingOptions = []
+        host.appearance = NSAppearance(named: .darkAqua)
         window.contentView = host
         keys.onClose = { [weak self] in self?.giveFocusBack() }
         window.onCancel = { [weak self] in
