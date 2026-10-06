@@ -84,20 +84,6 @@ enum DockEdge: String, CaseIterable {
     var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
 }
 
-extension EdgeSnap {
-    /// How far along its edge the bar may rest (a fraction of it): the drag's own limits.
-    nonisolated static func positions(_ edge: DockEdge) -> ClosedRange<Double> { edge.isHorizontal ? 0.03...0.97 : 0.05...0.95 }
-
-    /// The places Settings offers along an edge, named for the way it runs: the two ends (the drag's own limits), the middle,
-    /// and between.
-    nonisolated static func spots(_ edge: DockEdge) -> [(title: String, position: Double)] {
-        let range = positions(edge)
-        let titles = edge.isHorizontal ? ["Left", "Left of centre", "Centre", "Right of centre", "Right"]
-            : ["Top", "Upper", "Centre", "Lower", "Bottom"]
-        return zip(titles, [range.lowerBound, 0.25, 0.5, 0.75, range.upperBound]).map { ($0, $1) }
-    }
-}
-
 class FloatingPanel: NSPanel {
     var allowsKey = false
     var onCancel: (() -> Void)?
@@ -174,15 +160,26 @@ final class PillPanel: FloatingPanel {
 
 /// Where the hub docks: the closest screen edge to a dropped window, and where along it.
 enum EdgeSnap {
+    /// How far along its edge the bar may rest (a fraction of it): the drag's own limits.
+    nonisolated static func positions(_ edge: DockEdge) -> ClosedRange<Double> { edge.isHorizontal ? 0.03...0.97 : 0.05...0.95 }
+
+    /// The places Settings offers along an edge, named for the way it runs: the two ends (the drag's own limits), the middle,
+    /// and between.
+    nonisolated static func spots(_ edge: DockEdge) -> [(title: String, position: Double)] {
+        let range = positions(edge)
+        let titles = edge.isHorizontal ? ["Left", "Left of centre", "Centre", "Right of centre", "Right"]
+            : ["Top", "Upper", "Centre", "Lower", "Bottom"]
+        return zip(titles, [range.lowerBound, 0.25, 0.5, 0.75, range.upperBound]).map { ($0, $1) }
+    }
+
     /// Closest screen edge to the dropped window, and where along that edge it sits (0…1).
     nonisolated static func snap(_ f: NSRect, in vf: NSRect) -> (DockEdge, Double) {
         let distances: [(DockEdge, CGFloat)] = [
             (.left, f.midX - vf.minX), (.right, vf.maxX - f.midX), (.top, vf.maxY - f.midY), (.bottom, f.midY - vf.minY),
         ]
         let edge = distances.min { $0.1 < $1.1 }!.0
-        let position = edge.isHorizontal
-            ? min(max((f.midX - vf.minX) / vf.width, 0.03), 0.97)
-            : min(max((f.midY - vf.minY) / vf.height, 0.05), 0.95)
-        return (edge, position)
+        let along = edge.isHorizontal ? (f.midX - vf.minX) / vf.width : (f.midY - vf.minY) / vf.height
+        let limits = positions(edge)
+        return (edge, min(max(along, limits.lowerBound), limits.upperBound))
     }
 }
