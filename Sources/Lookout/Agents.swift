@@ -156,14 +156,18 @@ struct AgentRow: Identifiable, Hashable {
         return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
-    var statusText: String {
+    /// The status in words; finished and idle count their age from `now`.
+    func statusText(now: Date = Date()) -> String {
         switch status {
         case .running: "working"
         case .blocked: "waiting"
-        case .finished: shortAgo(session.lastActivity) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity))"
-        case .idle: shortAgo(session.lastActivity)
+        case .finished: shortAgo(session.lastActivity, now: now) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity, now: now))"
+        case .idle: shortAgo(session.lastActivity, now: now)
         }
     }
+
+    /// Whether `statusText` changes with time: only the ones that say how long ago.
+    var statusHasAge: Bool { status == .finished || status == .idle }
 
     /// The state in words, for VoiceOver and anywhere colour alone would carry it: waiting / working / done / new activity.
     var stateName: String {

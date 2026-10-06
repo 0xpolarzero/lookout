@@ -28,6 +28,16 @@ import Testing
 
     private func entry(_ s: Store, _ id: String) -> AgentEntry? { s.agents.entries.first { $0.id == id } }
 
+    @Test func statusAgesFollowTheClockTheyAreGiven() {
+        let s = store([session("a", minutesAgo: 5), session("b", minutesAgo: 5, blocked: true)])
+        let rows = s.agentRows.pending + s.agentRows.kept
+        let idle = rows.first { $0.id == "a" }!, waiting = rows.first { $0.id == "b" }!
+        #expect(idle.statusHasAge && !waiting.statusHasAge)
+        #expect(idle.statusText(now: now) == "5m")
+        #expect(idle.statusText(now: now.addingTimeInterval(3600)) == "1h")
+        #expect(waiting.statusText(now: now.addingTimeInterval(3600)) == "waiting")
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])
