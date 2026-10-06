@@ -543,6 +543,19 @@ private extension NSView {
         let kept = CGRect(origin: TipPlacement.origin(anchor: low, size: size, bounds: bounds, beside: .leading), size: size)
         #expect(kept.maxY <= bounds.height)
     }
+
+    @Test func aTallBubbleStaysInsideTheWindowWhenItFlipsBelow() {
+        let bounds = CGSize(width: 500, height: 720)
+        let size = CGSize(width: 220, height: 400)
+        // No room over the anchor and not enough under it: as low as the window lets it, never past it.
+        let anchor = CGRect(x: 100, y: 320, width: 200, height: 60)
+        let placed = CGRect(origin: TipPlacement.origin(anchor: anchor, size: size, bounds: bounds, beside: nil), size: size)
+        #expect(placed.minY >= 8 && placed.maxY <= bounds.height - 8)
+        // Where it fits under the anchor it goes right under it.
+        let high = CGRect(x: 100, y: 10, width: 200, height: 36)
+        let under = TipPlacement.origin(anchor: high, size: CGSize(width: 220, height: 100), bounds: bounds, beside: nil)
+        #expect(under.y == high.maxY + 6)
+    }
 }
 
 @MainActor
@@ -593,6 +606,13 @@ private extension NSView {
         // A row the keyboard picked before the list mounted: its focus never changes, it starts true.
         let region = try await region(title: "Truncated question", detail: "The whole of it", anchor: CGPoint(x: 470, y: 120), focusedAtStart: true)
         #expect(region != .zero)
+    }
+
+    @Test func aLongDetailStopsBeforeTheWindowsEdge() async throws {
+        let detail = (1...60).map { "Task \($0)" }.joined(separator: "\n")
+        let region = try await region(title: "Session", detail: detail, anchor: CGPoint(x: 250, y: 200))
+        // The window is 400 tall: the bubble and its gap to the control stay inside it.
+        #expect(region != .zero && region.minY >= -0.5 && region.maxY <= 400.5, "\(region)")
     }
 
     @Test func aShortTitleIsNotWidenedOrWrapped() async throws {

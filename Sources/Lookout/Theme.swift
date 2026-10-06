@@ -374,7 +374,7 @@ private struct Tip: ViewModifier {
 
 /// Where a tip's bubble goes (tests read it too).
 enum TipPlacement {
-    /// Centered over the anchor, clamped inside the panel; flips below when there's no room above. `beside`: level with the
+    /// Centered over the anchor, clamped inside the panel on both axes; flips below when there's no room above. `beside`: level with the
     /// anchor's centre and wholly off to one side of it, so a bar's tip never covers the cells next to the one it names.
     static func origin(anchor a: CGRect, size: CGSize, bounds: CGSize, beside: HorizontalEdge?) -> CGPoint {
         let margin: CGFloat = 8
@@ -384,7 +384,11 @@ enum TipPlacement {
             return CGPoint(x: min(max(x, margin), max(margin, bounds.width - margin - size.width)), y: y)
         }
         let x = min(max(a.midX - size.width / 2, margin), max(margin, bounds.width - margin - size.width))
-        let y = a.minY - size.height - 6 >= margin ? a.minY - size.height - 6 : a.maxY + 6
+        let above = a.minY - size.height - 6
+        let below = a.maxY + 6
+        // Over the anchor when it fits there, else under it, and in either case inside the window: a bubble too tall for both
+        // sits as low as the window lets it.
+        let y = above >= margin ? above : min(below, max(margin, bounds.height - margin - size.height))
         return CGPoint(x: x, y: y)
     }
 }
@@ -400,6 +404,16 @@ private struct TipBubble: View {
     /// How wide the text may be: what the window leaves the bubble, and a sentence's worth at most. A long title wraps.
     private var textLimit: CGFloat { min(max(bounds.width - 2 * Self.margin - 16, 80), 360) }
     private static let margin: CGFloat = 8
+    private static let lineHeight: CGFloat = 15
+    /// The most lines of detail a bubble shows, fewer in a window too short for them: what is cut is in the control's `.help`
+    /// and its VoiceOver hint, and a bubble never reaches past the window.
+    private static let detailLines = 12
+
+    private var detailLineLimit: Int {
+        // The window less its margins, the bubble's padding and room for a title of three lines.
+        let room = bounds.height - 2 * Self.margin - 8 - 3 * Self.lineHeight
+        return min(Self.detailLines, max(1, Int(room / Self.lineHeight)))
+    }
 
     /// A key equivalent ("⌘,", "⌫", "Esc") rather than a sentence: it goes after the label, on one line.
     private var key: String? {
@@ -420,6 +434,7 @@ private struct TipBubble: View {
                     if let detail = request.detail, !detail.isEmpty {
                         Text(detail)
                             .foregroundStyle(Theme.secondary)
+                            .lineLimit(detailLineLimit)
                             .frame(width: min(Self.width(of: detail), textLimit), alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }

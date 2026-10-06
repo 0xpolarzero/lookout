@@ -643,8 +643,9 @@ struct SessionRow: View {
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
-    /// The title, then what it says, for the pointer; the keyboard's pick has `tipDetail`.
-    private var help: String { plainHeadline.isEmpty ? row.session.title : row.session.title + "\n" + plainHeadline }
+    /// The title, then what it says and everything it left running, for the pointer: the keyboard's pick has `tipDetail`, which
+    /// stops where its bubble does.
+    private var help: String { ([row.session.title] + (Self.tipDetail(row).map { [$0] } ?? [])).joined(separator: "\n") }
 }
 
 /// What Move up, Move down and a drop do to the order, as the list shows it: the neighbour is the row beside it in the list, and
