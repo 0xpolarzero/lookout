@@ -88,15 +88,16 @@ enum HubGeometry {
     /// (a gap of up to `tolerance`, a row, is left rather than a row cut for the sake of a few points). A column shorter
     /// than the first one has nothing to fill the rest with: the void is at the end of its list. `rightFixed`: what the
     /// sessions' column has besides the list (New session, the notice). Heights are as the lists measured themselves
-    /// (nil until they have: taken to use all the room).
+    /// (nil until they have: taken to use all the room). `matchesAll`: a search, whose results are listed flat and all
+    /// there is to read: the sessions take the room they need, whatever the inbox's short column would leave.
     static func stripCaps(room: CGFloat, leftFixed: CGFloat, inbox: ListHeights?, rightFixed: CGFloat, sessions: ListHeights?,
-                          tolerance: CGFloat = Theme.Metrics.twoLineRow) -> (inbox: CGFloat, sessions: CGFloat) {
+                          tolerance: CGFloat = Theme.Metrics.twoLineRow, matchesAll: Bool = false) -> (inbox: CGFloat, sessions: CGFloat) {
         let floor: CGFloat = 120
         let inboxCap = max(room - leftFixed, floor)
         let leftHeight = leftFixed + min(inbox?.shown ?? inboxCap, inboxCap)
         let sessionsRoom = max(room - rightFixed, floor)
         let rightHeight = rightFixed + min(sessions?.content ?? .infinity, sessionsRoom)
-        if rightHeight <= leftHeight + tolerance { return (inboxCap, sessionsRoom) }
+        if matchesAll || rightHeight <= leftHeight + tolerance { return (inboxCap, sessionsRoom) }
         // At least two rows and the line that says there are more.
         let least = 2 * Theme.Metrics.twoLineRow + Theme.Metrics.pitch
         return (inboxCap, min(max(leftHeight - rightFixed, least), sessionsRoom))

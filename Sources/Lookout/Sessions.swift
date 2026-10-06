@@ -80,12 +80,13 @@ struct SessionsList: View {
 
     var body: some View {
         let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
-        let capped = store.listedGroups(expanded: hub.sessionsExpanded)
-        let listed = peekCap.map { SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: $0) } ?? capped
+        let capped = store.listedGroups(hub)
+        let peeked = peekCap.map { SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: $0) }
+        let listed = (groups: peeked?.groups ?? capped.groups, hidden: peeked?.hidden ?? capped.hidden)
         AdaptiveStack(count: store.hubSessions(hub).count, alignment: .leading, spacing: 0) {
             if searching {
                 ForEach(store.hubSessions(hub)) { row($0, .search) }
-            } else if listed.groups.isEmpty {
+            } else if listed.groups.isEmpty && listed.hidden == 0 {
                 EmptyBlock("No Claude sessions")
             } else {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
@@ -94,7 +95,8 @@ struct SessionsList: View {
                     ForEach(group.rows) { row($0, group.placement) }
                 }
                 if listed.hidden > 0 {
-                    MoreSessionsRow(hidden: listed.hidden, hub: hub, rail: rail, action: moreAction).capEdge().id("s:more")
+                    MoreSessionsRow(hidden: listed.hidden, waiting: peeked?.waiting ?? 0, hub: hub, rail: rail, action: moreAction)
+                        .capEdge().id("s:more")
                 }
             }
         }
@@ -130,20 +132,28 @@ struct SessionsScroll: View {
 
     var body: some View {
         // Read here, not in the hub's body: the list changing length doesn't redraw the hub.
-        let listed = store.listedGroups(expanded: hub.sessionsExpanded)
-        let focused = hub.focus == .agents
-        let cut = hub.query.trimmingCharacters(in: .whitespaces).isEmpty
-            && SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0) > cap + 0.5
+        let listed = store.listedGroups(hub)
+        let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
+        let matches = searching ? store.hubSessions(hub) : []
+        // Searching, the matches are listed flat: cut by the room alone, and scrolled like a focused list.
+        let content = searching ? matches.reduce(0) { $0 + SessionGroup.height(of: $1) }
+            : SessionGroup.height(listed.groups) + (listed.hidden > 0 ? Theme.Metrics.pitch : 0)
+        let cut = content > cap + 0.5
+        let scrolls = hub.focus == .agents || searching
+        let viewport = cap - Theme.Metrics.pitch
         VStack(spacing: 0) {
-            CappedScroll(cap: cut ? cap - Theme.Metrics.pitch : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count),
-                         onReach: focused ? { reach.bottom = $0 } : nil) {
+            CappedScroll(cap: cut ? viewport : cap, hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(store.hubSessions(hub).count),
+                         onReach: scrolls ? { reach.bottom = $0 } : nil) {
                 SessionsList(store: store, ui: ui, hub: hub, rail: rail, inset: inset)
             }
-            if cut && focused {
-                SessionsCue(groups: listed.groups, hidden: listed.hidden, viewport: cap - Theme.Metrics.pitch, reach: reach, hub: hub, rail: rail)
+            if cut && scrolls {
+                SessionsCue(below: { searching ? SessionGroup.below(matches, reach: $0) : SessionGroup.below(listed.groups, hidden: listed.hidden, reach: $0) },
+                            end: searching ? matches.last.map { "a:" + $0.id } : listed.hidden > 0 ? "s:more" : listed.groups.last?.rows.last.map { "a:" + $0.id },
+                            top: searching ? matches.first.map { "a:" + $0.id } : "s:top",
+                            viewport: viewport, reach: reach, hub: hub, rail: rail)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             } else if cut {
-                let more = SessionGroup.below(listed.groups, hidden: listed.hidden, reach: cap - Theme.Metrics.pitch)
+                let more = SessionGroup.below(listed.groups, hidden: listed.hidden, reach: viewport)
                 MoreSessionsRow(hidden: more, hub: hub, rail: rail, pickable: false, action: showAll)
                     .padding(rail == .leading ? .trailing : .leading, inset)
             }
@@ -161,26 +171,30 @@ struct SessionsScroll: View {
     var bottom: CGFloat?
 }
 
-/// The last line of a focused list that doesn't fit: how many sessions are below, a click scrolling to them; at the
-/// end, the way back up.
+/// The last line of a list that scrolls and doesn't fit (focused, or a search's matches): how many sessions are below, a
+/// click scrolling to them; at the end, the way back up.
 private struct SessionsCue: View {
-    let groups: [SessionGroup]
-    let hidden: Int
+    /// How many sessions are not whole yet in a viewport scrolled to `reach`.
+    let below: (CGFloat) -> Int
+    let end: String?
+    let top: String?
     let viewport: CGFloat
     let reach: ScrollReach
     let hub: HubState
     let rail: HorizontalEdge
 
     var body: some View {
-        let below = SessionGroup.below(groups, hidden: hidden, reach: reach.bottom ?? viewport)
+        let below = below(reach.bottom ?? viewport)
         if below > 0 {
             MoreSessionsRow(label: "+\(below) below", spoken: plural(below, "session") + " below", hint: "Scrolls to the end", hub: hub, rail: rail,
                             pickable: false) {
-                hub.requestScroll(hidden > 0 ? "s:more" : groups.last?.rows.last.map { "a:" + $0.id } ?? "s:top")
+                if let end { hub.requestScroll(end) }
             }
         } else {
             MoreSessionsRow(label: "Back to top", spoken: "Back to the top", hint: "Scrolls to the first session", hub: hub, rail: rail,
-                            pickable: false) { hub.requestScroll("s:top") }
+                            pickable: false) {
+                if let top { hub.requestScroll(top) }
+            }
         }
     }
 }
@@ -200,6 +214,10 @@ extension SessionGroup {
         }
     }
 
+    /// The least a cut list shows: its first group's header, one whole row and the "+N more" under them. With less room the
+    /// list would say there are sessions and show none (a waiting one among them).
+    static let leastShown = headerHeight + Theme.Metrics.twoLineRow + Theme.Metrics.pitch
+
     /// The least the list shows kept open: three sessions under two headers, with the gap between, and the "+N more"
     /// row that ends a list cut short (a list with fewer sessions is only as tall as it is).
     static let leastHeight = 3 * Theme.Metrics.twoLineRow + 2 * headerHeight + gap + Theme.Metrics.pitch
@@ -216,7 +234,7 @@ extension SessionGroup {
     /// What a peek of `cap` points lists of `groups` (which `hidden` sessions were already left out of, by
     /// `SessionCap`): in order, whole rows only (a header never stands alone), and how many sessions are left out. With
     /// any left out the last line is the "+N more" row, which is in the cap.
-    static func peek(_ groups: [SessionGroup], hidden: Int = 0, cap: CGFloat) -> (groups: [SessionGroup], hidden: Int) {
+    static func peek(_ groups: [SessionGroup], hidden: Int = 0, cap: CGFloat) -> (groups: [SessionGroup], hidden: Int, waiting: Int) {
         let total = groups.reduce(0) { $0 + $1.rows.count }
         var shown: [SessionGroup] = []
         outer: for group in groups {
@@ -232,14 +250,19 @@ extension SessionGroup {
             }
         }
         shown.removeAll { $0.rows.isEmpty }
+        if shown.isEmpty, var first = groups.first, let row = first.rows.first {
+            first.rows = [row]
+            shown = [first]
+        }
         var count = shown.reduce(0) { $0 + $1.rows.count }
-        // Room for "+N more": give up whole rows until it fits.
-        while count < total + hidden, height(shown) + Theme.Metrics.pitch > cap, count > 0 {
+        // Room for "+N more": give up whole rows until it fits, but never the last one (as `PeekCut`: a peek with no room
+        // for a row and its line still shows the row, never a list that says it has no sessions).
+        while count < total + hidden, height(shown) + Theme.Metrics.pitch > cap, count > 1 {
             shown[shown.count - 1].rows.removeLast()
             shown.removeAll { $0.rows.isEmpty }
             count -= 1
         }
-        return (shown, total + hidden - count)
+        return (shown, total + hidden - count, Self.waiting(groups) - Self.waiting(shown))
     }
 
     /// How many sessions a list scrolled to `reach` (the content's y at the viewport's bottom edge) has not shown whole
@@ -257,6 +280,22 @@ extension SessionGroup {
         return hidden > 0 && y + Theme.Metrics.pitch > reach + 0.5 ? count + hidden : count
     }
 
+    /// How many of `groups`' rows are waiting for you.
+    static func waiting(_ groups: [SessionGroup]) -> Int {
+        groups.first { $0.kind == .waiting }?.rows.count ?? 0
+    }
+
+    /// `below` for a search's matches, which are listed flat.
+    static func below(_ rows: [AgentRow], reach: CGFloat) -> Int {
+        var y: CGFloat = 0
+        var count = 0
+        for row in rows {
+            y += height(of: row)
+            if y > reach + 0.5 { count += 1 }
+        }
+        return count
+    }
+
     var placement: SessionPlacement {
         switch kind {
         case .waiting: .waiting
@@ -272,6 +311,7 @@ struct SessionGroupHeader: View {
     let group: SessionGroup
     let store: Store
     let rail: HorizontalEdge?
+    @State private var dropTarget = false
 
     var body: some View {
         let folder = project
@@ -289,9 +329,17 @@ struct SessionGroupHeader: View {
             }
         }
         .contentShape(Rectangle())
+        .modifier(ReorderableProject(folder: folder.flatMap { $0.isEmpty ? nil : $0 }, store: store, dropTarget: $dropTarget))
+        .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
         .contextMenu { if let folder { ProjectMenu(folder: folder, name: group.title, store: store) } }
         .accessibilityElement(children: .contain)
-        .accessibilityActions { if let folder { Button("Mute \(group.title)") { store.muteFolder(folder) } } }
+        .accessibilityActions {
+            if let folder {
+                Button("Mute \(group.title)") { store.muteFolder(folder) }
+                if store.canMoveProject(folder, by: -1) { Button("Move project up") { LookoutHub.animate { store.moveProject(folder, by: -1) } } }
+                if store.canMoveProject(folder, by: 1) { Button("Move project down") { LookoutHub.animate { store.moveProject(folder, by: 1) } } }
+            }
+        }
     }
 
     private var project: String? {
@@ -328,21 +376,26 @@ struct MoreSessionsRow: View {
     let hub: HubState
     let rail: HorizontalEdge?
     var pickable = true
+    /// How many of the sessions it stands for wait for you: said in amber, so a count never hides blocked work.
+    var waiting = 0
     let action: () -> Void
     @State private var hovering = false
+    @FocusState private var focused: Bool
 
-    init(hidden: Int, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, action: @escaping () -> Void) {
+    init(hidden: Int, waiting: Int = 0, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, action: @escaping () -> Void) {
         self.init(label: "+\(hidden) more", spoken: plural(hidden, "more session"), hint: "Shows them", hub: hub, rail: rail,
-                  pickable: pickable, action: action)
+                  pickable: pickable, waiting: waiting, action: action)
     }
 
-    init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, action: @escaping () -> Void) {
+    init(label: String, spoken: String, hint: String, hub: HubState, rail: HorizontalEdge?, pickable: Bool = true, waiting: Int = 0,
+         action: @escaping () -> Void) {
         self.label = label
         self.spoken = spoken
         self.hint = hint
         self.hub = hub
         self.rail = rail
         self.pickable = pickable
+        self.waiting = waiting
         self.action = action
     }
 
@@ -351,14 +404,33 @@ struct MoreSessionsRow: View {
         Button(action: action) {
             RailRow(rail: rail, height: Theme.Metrics.pitch, fill: picked ? Theme.Fill.selected : hovering ? Theme.Fill.hover : Theme.Fill.rest,
                     picked: picked, tile: { Color.clear }) {
-                Text(label).font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                HStack(spacing: Theme.Space.md) {
+                    Text(label).font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                    Spacer(minLength: 0)
+                    if waiting > 0 { Text("\(waiting) waiting").font(Theme.Typography.numeral).foregroundStyle(Theme.amber) }
+                }
             }
         }
         .buttonStyle(.plain)
-        .focusable(false)
+        .modifier(CueFocus(pickable: pickable, focused: $focused))
         .onHover { hovering = $0 }
-        .accessibilityLabel(spoken)
+        .accessibilityLabel(waiting > 0 ? "\(spoken), \(waiting) waiting for you" : spoken)
         .accessibilityHint(hint)
+    }
+}
+
+/// A "+N more" that is a keyboard target (↑↓ pick it) is not on the Tab ring; one that no key picks (the cue under a
+/// list that scrolls) is chrome, with the shared ring.
+private struct CueFocus: ViewModifier {
+    let pickable: Bool
+    var focused: FocusState<Bool>.Binding
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if pickable {
+            content.focusable(false)
+        } else {
+            content.focused(focused).focusRing(Theme.Radius.row, inset: true, isFocused: focused.wrappedValue).reportsControlFocus(focused.wrappedValue)
+        }
     }
 }
 
@@ -408,6 +480,7 @@ struct SessionRow: View {
             }
         }
         .help(help)
+        .tip(row.session.title, plainHeadline.isEmpty ? nil : plainHeadline, focused: picked, hover: false)
         .sessionMenu(row, store)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.session.title)
@@ -492,11 +565,11 @@ struct SessionRow: View {
 
     @ViewBuilder private var action: some View {
         if keeps {
-            IconButton(symbol: "bookmark", help: "Keep", detail: "Keeps it in your list · \(store.shortcut(.keepSession).display)") {
+            IconButton(symbol: "bookmark", help: "Keep", detail: "Keeps it in your list · \(store.shortcut(.keepSession).display)", tabStop: false) {
                 LookoutHub.animate { store.keepAgent(row.id) }
             }
         } else {
-            IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)") {
+            IconButton(symbol: "eye.slash", help: "Hide", detail: "Comes back on new activity · \(store.shortcut(.removeSession).display)", tabStop: false) {
                 LookoutHub.animate { store.dismissAgent(row.id) }
             }
         }
@@ -532,6 +605,36 @@ struct Reorderable: ViewModifier {
                     withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.moveAgent(String(id.dropFirst(6)), onto: row.id) }
                     return true
                 } isTargeted: { dropTarget = $0 }
+        }
+    }
+}
+
+/// A project's header can be dragged onto another's to put it there (its sessions go with it); the same is in its menu and
+/// VoiceOver's actions. Scratch has no place to move to.
+struct ReorderableProject: ViewModifier {
+    let folder: String?
+    let store: Store
+    @Binding var dropTarget: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if let folder {
+            content
+                .draggable("project:" + folder) {
+                    Text(URL(fileURLWithPath: folder).lastPathComponent)
+                        .font(Theme.Typography.title)
+                        .padding(.horizontal, 10)
+                        .frame(height: Theme.Metrics.tile)
+                        .background(Capsule().fill(Theme.bg))
+                        .foregroundStyle(Theme.text)
+                }
+                .dropDestination(for: String.self) { ids, _ in
+                    guard let id = ids.first, id.hasPrefix("project:") else { return false }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { store.moveProject(String(id.dropFirst(8)), onto: folder) }
+                    return true
+                } isTargeted: { dropTarget = $0 }
+        } else {
+            content
         }
     }
 }
@@ -637,15 +740,27 @@ private struct MenuAnchorView: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {}
 }
 
-/// New session's menu of projects: Scratch, then every project by name, the most recent first.
+/// New session's menu of projects: Scratch, then every project by name, the most recent first. The row's chevron and the
+/// bar's "+" show the same one (DESIGN.md 5.6): this is what they are both made from.
 enum ProjectsMenu {
+    struct Entry {
+        let folder: String
+        let name: String
+        let color: Color?
+    }
+
+    /// Every project a session has been seen in, most recent first, with its palette colour.
+    @MainActor static func entries(_ store: Store) -> [Entry] {
+        store.recentFolders.map { Entry(folder: $0, name: URL(fileURLWithPath: $0).lastPathComponent, color: store.projectColor($0)) }
+    }
+
     @MainActor static func make(_ store: Store) -> NSMenu {
         let menu = NSMenu()
         menu.addItem(ActionItem("Scratch (no folder)") { store.startScratchSession() })
         menu.addItem(.separator())
-        for folder in store.recentFolders {
-            let item = ActionItem(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
-            item.image = store.projectColor(folder).map(Swatch.image)
+        for entry in entries(store) {
+            let item = ActionItem(entry.name) { store.startAgent(in: entry.folder) }
+            item.image = entry.color.map(Swatch.image)
             menu.addItem(item)
         }
         return menu
@@ -664,6 +779,22 @@ enum ProjectsMenu {
         required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
         @objc private func run() { handler() }
+    }
+}
+
+/// `ProjectsMenu` as SwiftUI menu items, for the bar's "+".
+struct ProjectsMenuItems: View {
+    let store: Store
+
+    var body: some View {
+        let entries = ProjectsMenu.entries(store)
+        Button("Scratch (no folder)") { store.startScratchSession() }
+        if !entries.isEmpty { Divider() }
+        ForEach(entries, id: \.folder) { entry in
+            Button { store.startAgent(in: entry.folder) } label: {
+                Label { Text(entry.name) } icon: { Swatch(color: entry.color) }
+            }
+        }
     }
 }
 
@@ -717,7 +848,7 @@ extension Store {
             hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
             return result
         }
-        return listedGroups(expanded: hub.sessionsExpanded).groups.flatMap(\.rows)
+        return listedGroups(hub).groups.flatMap(\.rows)
     }
 
     /// The first session "+N more" is hiding.
@@ -728,7 +859,7 @@ extension Store {
     /// What the keys can pick after the session rows: "+N more" while the list is cut, then New session.
     func sessionExtraTargets(_ hub: HubState) -> [String] {
         guard agents.enabled, hub.query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        return (listedGroups(expanded: hub.sessionsExpanded).hidden > 0 ? ["s:more"] : []) + ["s:new"]
+        return (listedGroups(hub).hidden > 0 ? ["s:more"] : []) + ["s:new"]
     }
 }
 
@@ -827,6 +958,8 @@ struct ProjectMenu: View {
                 .pickerStyle(.inline)
             }
         }
+        if store.canMoveProject(folder, by: -1) { Button("Move project up") { LookoutHub.animate { store.moveProject(folder, by: -1) } } }
+        if store.canMoveProject(folder, by: 1) { Button("Move project down") { LookoutHub.animate { store.moveProject(folder, by: 1) } } }
         Button("Mute \u{201C}\(name)\u{201D}") { store.muteFolder(folder) }
     }
 }
@@ -868,7 +1001,7 @@ struct LabelEditor: View {
                 entry(prompt: row.label, help: "Two letters; empty goes back to the title's")
             case .emoji:
                 HStack(spacing: Theme.Space.sm) {
-                    entry(prompt: "🙂", help: "One emoji")
+                    entry(prompt: "🙂", help: "One emoji; empty removes it")
                     IconButton(symbol: "face.smiling", help: "Emoji") {
                         focused = true
                         NSApp.orderFrontCharacterPalette(nil)
@@ -894,6 +1027,8 @@ struct LabelEditor: View {
         .frame(width: 260)
         .onAppear {
             mode = row.entry.label.map { AgentLabel.isEmoji($0) ? .emoji : .letters } ?? (row.icon != nil ? .icon : .letters)
+            // What you set is what the field starts with: saving it again keeps it.
+            text = row.entry.label ?? ""
             focused = mode != .icon
         }
     }
@@ -923,10 +1058,16 @@ struct LabelEditor: View {
         }
     }
 
-    /// Empty goes back to letters from the title, or to the icon that was picked.
+    /// The label an emptied field saves: nil clears it, letters from the title replace an icon.
+    static func reset(_ mode: Mode, title: String, folder: String, hasIcon: Bool) -> String? {
+        mode == .letters && hasIcon ? AgentLabel.candidates(title, folder: folder).first : nil
+    }
+
+    /// Empty resets what the mode in front of you holds: Letters go back to the title's (and over an icon that was picked,
+    /// since the icon is what clearing the label alone would bring back), an emoji is removed.
     private func save() {
         if text.isEmpty {
-            store.setAgentLabel(row.id, row.entry.icon == nil ? nil : row.label)
+            store.setAgentLabel(row.id, Self.reset(mode, title: row.session.title, folder: row.session.folderName, hasIcon: row.entry.icon != nil))
         } else if let label = AgentLabel.sanitize(text) {
             guard AgentLabel.isEmoji(label) == (mode == .emoji) else { return }
             store.setAgentLabel(row.id, label)
@@ -941,15 +1082,20 @@ struct LabelEditor: View {
 struct ClaudeLinkStatus: View {
     let store: Store
 
-    var body: some View {
-        let (color, text, detail): (AnyShapeStyle, String, String) = switch store.claudeLink {
+    /// The line and what it leaves out (what to do, or why): the tooltip, VoiceOver's hint and the Details popover say it.
+    @MainActor static func describe(_ link: ClaudeLink) -> (color: AnyShapeStyle, text: String, detail: String) {
+        switch link {
         case .ok where Claude.isRunning: (AnyShapeStyle(Theme.tertiary), "Synced with Claude", "Updates as the Claude app writes its session files")
         case .ok, .off: (AnyShapeStyle(Theme.tertiary), "Claude isn't running", "Sessions update again when the app is open")
         case .missing: (AnyShapeStyle(Theme.red), "Claude's sessions not found", "Open the Claude desktop app once")
         case .unreadable: (AnyShapeStyle(Theme.red), "Can't read Claude's sessions", "The app's session format changed")
         }
-        Circle().fill(color).frame(width: 6, height: 6)
-        Text(text).tip(text, detail)
+    }
+
+    var body: some View {
+        let (color, text, detail) = Self.describe(store.claudeLink)
+        Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+        Text(text).tip(text, detail).accessibilityHint(detail)
     }
 }
 

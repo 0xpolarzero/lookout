@@ -115,6 +115,8 @@ extension LookoutHub {
     /// A cell's `Show` (VoiceOver, and Return on a focused cell, or the "+N"): keeps the hub open on that cell's
     /// section with the selection there, and moves VoiceOver's cursor to the picked row (CI: its header).
     func show(_ section: HubSection, session: String? = nil) {
+        // The controls are a menu, not a section: the peek at rest, the footer kept open (neither pins the hub).
+        if section == .controls { return hub.showControls() }
         withAnimation(Self.opening.resolved(reduce: reduce)) {
             hub.go(.main)
             hub.focus = nil
@@ -141,6 +143,7 @@ extension HubState {
     /// first of those). The keys walk through the same rows.
     func showSession(_ id: String?, store: Store, ui: UIState) {
         query = ""
+        inbox.endSearch()
         if let id, !store.hubSessions(self).contains(where: { $0.id == id }) { sessionsExpanded = true }
         guard let id = id ?? store.hubSessions(self).first?.id else { return }
         selection = "a:" + id

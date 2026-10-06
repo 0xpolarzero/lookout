@@ -438,4 +438,65 @@ import Testing
     @Test func labelsKnowEmoji() {
         #expect(AgentLabel.isEmoji("🐧") && !AgentLabel.isEmoji("AB") && !AgentLabel.isEmoji("7") && !AgentLabel.isEmoji(""))
     }
+
+    // MARK: Review round 1
+
+    @Test func projectsMoveAsBlocksAndScratchStaysLast() {
+        let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y"), session("x2", folder: "/code/x"),
+                       session("z1", folder: "/code/z"), session("scratch", folder: nil)], kept: ["x1", "y1", "x2", "z1", "scratch"])
+        #expect(s.projectOrder == ["/code/x", "/code/y", "/code/z"])
+        #expect(!s.canMoveProject("/code/x", by: -1) && s.canMoveProject("/code/x", by: 1) && !s.canMoveProject("", by: 1))
+        s.moveProject("/code/z", onto: "/code/x")
+        #expect(s.sessionGroups.map(\.id) == ["project:/code/z", "project:/code/x", "project:/code/y", "project:"])
+        // Each project keeps its sessions, in their own order.
+        #expect(ids(s)["project:/code/x"] == ["x1", "x2"])
+        s.moveProject("/code/z", by: 1)
+        #expect(s.projectOrder == ["/code/x", "/code/z", "/code/y"])
+        s.moveProject("/code/y", by: 1)
+        #expect(s.projectOrder == ["/code/x", "/code/z", "/code/y"])
+    }
+
+    @Test func aFocusedSessionsListShowsEverySession() {
+        let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
+        let hub = HubState()
+        #expect(s.hubSessions(hub).count == SessionCap.visible)
+        hub.focus = .agents
+        #expect(s.hubSessions(hub).count == 12 && s.sessionExtraTargets(hub) == ["s:new"])
+        hub.focus = nil
+        #expect(s.hubSessions(hub).count == SessionCap.visible)
+    }
+
+    @Test func aPeekTooSmallForTheRestStillShowsARowAndSaysHowManyAreLeft() {
+        let s = store((0..<5).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
+        let peek = SessionGroup.peek(s.sessionGroups, cap: 20)
+        #expect(peek.groups.flatMap(\.rows).count == 1 && peek.hidden == 4)
+        // Waiting sessions among the ones left out are counted apart.
+        let waiting = store([session("a", blocked: true), session("b", blocked: true), session("c")], kept: ["a", "b", "c"], unread: ["a", "b"])
+        let cut = SessionGroup.peek(waiting.sessionGroups, cap: SessionGroup.leastShown)
+        #expect(cut.hidden == 2 && cut.waiting == 1)
+    }
+
+    @Test func theListKeepsTheOrderTheBarTilesAreFrozenIn() {
+        let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y"), session("y2", folder: "/code/y")],
+                      kept: ["x1", "y1", "y2"])
+        let frozen = s.barSlots
+        // y2 starts waiting: live, it moves to Waiting for you at once; frozen, its row stays beside its tile.
+        s.claudeActivity = ["y2": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["y2"]?.running = true
+        #expect(s.listedGroups(expanded: false).groups.map(\.id) == ["waiting", "project:/code/x", "project:/code/y"])
+        let held = s.listedGroups(expanded: false, frozen: frozen).groups
+        #expect(held.map(\.id) == ["project:/code/x", "project:/code/y"])
+        #expect(held[1].rows.map(\.id) == ["y1", "y2"] && held[1].rows[1].isWaiting)
+    }
+
+    @Test func aWaitingSessionIsNeverCutWhereverTheFreezeLeavesIt() {
+        let sessions = (0..<10).map { session("n\($0)", minutesAgo: Double($0 + 1)) }
+        let s = store(sessions)
+        let frozen = s.barSlots
+        // The last of them, far past the eight, now asks: it is listed, whatever the frozen order says.
+        s.claudeActivity = ["n9": ClaudeActivity(text: "Which one?", since: now, waitsForYou: true)]
+        s.claudeSessions["n9"]?.running = true
+        let listed = s.listedGroups(expanded: false, frozen: frozen)
+        #expect(listed.groups.flatMap(\.rows).map(\.id).contains("n9"))
+    }
 }

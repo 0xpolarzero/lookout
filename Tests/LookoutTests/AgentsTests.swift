@@ -377,3 +377,14 @@ import Testing
         #expect(Claude.parseUnread([1, 0x7b]) == nil)
     }
 }
+
+@MainActor
+@Suite struct LabelReset {
+    @Test func anEmptiedFieldResetsWhatItsModeHolds() {
+        // Letters over an icon the title's own letters; otherwise nothing, so the default shows again.
+        #expect(LabelEditor.reset(.letters, title: "CI failure diagnosis", folder: "microsandbox", hasIcon: true) == "CF")
+        #expect(LabelEditor.reset(.letters, title: "CI failure diagnosis", folder: "microsandbox", hasIcon: false) == nil)
+        // An emoji is removed, never written back as the label it was.
+        #expect(LabelEditor.reset(.emoji, title: "CI failure diagnosis", folder: "microsandbox", hasIcon: true) == nil)
+    }
+}

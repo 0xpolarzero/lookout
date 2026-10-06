@@ -54,4 +54,26 @@ import Testing
         #expect(reverted)
         #expect(!keys.key(commandZ()))
     }
+
+    private func arrow(_ code: Int) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                         context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(code))!
+    }
+
+    @Test func anArrowBoundToAnActionActsInsteadOfSwitchingTabs() {
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_RightArrow)), for: .toggleRead)
+        #expect(keys.key(arrow(kVK_RightArrow)))
+        #expect(store.items[0].state == .unread)
+        #expect(hub.filter == .needsYou)
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_LeftArrow)), for: .discard)
+        #expect(keys.key(arrow(kVK_LeftArrow)))
+        #expect(!store.items[0].state.isOpen)
+    }
+
+    @Test func unboundArrowsStillSwitchTheInboxTabs() {
+        #expect(keys.key(arrow(kVK_RightArrow)))
+        #expect(hub.filter == .bots)
+        #expect(keys.key(arrow(kVK_LeftArrow)))
+        #expect(hub.filter == .needsYou)
+    }
 }

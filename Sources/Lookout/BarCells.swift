@@ -16,8 +16,9 @@ struct InboxBarCell: View {
     let action: () -> Void
 
     var body: some View {
+        // VoiceOver's press opens the hub on the inbox (a click, with the pointer on the bar, has its panel already).
         BarCell(axis: axis, name: "Inbox", value: Self.value(needsYou: needsYou, bots: bots), hint: "Shows the inbox",
-                show: show, action: action) { hovering in
+                show: show, press: show, action: action) { hovering in
             Face(needsYou: needsYou, hovering: hovering)
         }
     }
@@ -175,11 +176,7 @@ struct UpdateBarCell: View {
                         .rotationEffect(.degrees(-90))
                         .frame(width: 22, height: 22)
                 }
-                if phase == .installing {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: symbol).font(Theme.Typography.glyph(12, .bold)).foregroundStyle(ready ? Theme.onTint : tint)
-                }
+                Image(systemName: symbol).font(Theme.Typography.glyph(12, .bold)).foregroundStyle(ready ? Theme.onTint : tint)
             }
             .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
             // design-lint: ignore (the update tile, where green lives)
@@ -191,6 +188,8 @@ struct UpdateBarCell: View {
             switch phase {
             case .ready: "arrow.clockwise"
             case .failed: "exclamationmark"
+            // Static: it is a moment, and the label says it.
+            case .installing: "ellipsis"
             default: "arrow.down"
             }
         }
@@ -206,7 +205,7 @@ struct UpdateBarCell: View {
 
 /// What is wrong with syncing, worst first: the gear wears a badge for it. Healthy and snoozed are not faults.
 enum SyncFault: Equatable {
-    case signIn, partial, rateLimited, stale
+    case signIn, partial, reviewRequests, rateLimited, stale
 
     /// Red is broken; the rest need a look, not a fix.
     var tint: Color { self == .signIn ? Theme.red : Theme.amber }
@@ -215,6 +214,7 @@ enum SyncFault: Equatable {
         switch self {
         case .signIn: "Can't sign in to GitHub"
         case .partial: "Some repositories didn't sync"
+        case .reviewRequests: "Review requests didn't sync"
         case .rateLimited: "GitHub is rate limiting"
         case .stale: "Not syncing"
         }
@@ -226,6 +226,7 @@ extension Store {
     func syncFault(stale: Bool) -> SyncFault? {
         if authError != nil { return .signIn }
         if !repoErrors.isEmpty { return .partial }
+        if reviewRequestsFailing { return .reviewRequests }
         if let rateRemaining, rateRemaining <= 0 { return .rateLimited }
         return stale ? .stale : nil
     }
@@ -354,13 +355,8 @@ struct NewSessionBarCell: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        let folders = store.agentFolders
         Menu {
-            Button("Scratch (no folder)") { store.startScratchSession() }
-            if !folders.isEmpty { Divider() }
-            ForEach(folders, id: \.self) { folder in
-                Button(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
-            }
+            ProjectsMenuItems(store: store)
         } label: {
             Image(systemName: "plus")
                 .font(Theme.Typography.glyph(12, .bold))

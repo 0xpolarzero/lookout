@@ -116,11 +116,13 @@ final class HubKeys {
             return true
         }
         let targets = targets()
-        if event.keyCode == 125 || event.keyCode == 126, flags.isEmpty {
+        // A configured action comes before the arrows' own meaning: Right bound to "Mark read / unread" does that.
+        let bound = ShortcutAction.allCases.contains { !$0.isGlobal && store.shortcut($0) == shortcut }
+        if event.keyCode == 125 || event.keyCode == 126, flags.isEmpty, !bound {
             move(down: event.keyCode == 125, in: targets)
             return true
         }
-        if flags.isEmpty, let step = Self.horizontalStep(event.keyCode), horizontal(step, in: targets, event: event, shortcut: shortcut) { return true }
+        if flags.isEmpty, !bound, let step = Self.horizontalStep(event.keyCode), horizontal(step, in: targets, event: event, shortcut: shortcut) { return true }
         // Not over rows the list isn't showing (a sign-in problem replaces it, a focused section hides the inbox).
         if shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) {
             if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }

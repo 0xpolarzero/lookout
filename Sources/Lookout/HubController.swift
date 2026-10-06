@@ -149,10 +149,12 @@ final class HubController {
     private let trigger = HoverTrigger(size: NSSize(width: 10, height: 10))
     private var globalMouse: Any?
 
-    /// `demo`: on the right edge and nothing saved, so trying it never moves your real bar.
+    /// `demo`: on the right edge (or the one `--edge` names) and nothing saved, so trying it never moves your real bar.
     init(store: Store, demo: Bool = false) {
         self.store = store
-        ui = demo ? UIState(persists: false, edge: .right) : UIState()
+        let arguments = CommandLine.arguments
+        let edge = arguments.firstIndex(of: "--edge").flatMap { arguments.dropFirst($0 + 1).first }.flatMap(DockEdge.init(rawValue:))
+        ui = demo ? UIState(persists: false, edge: edge ?? .right) : UIState()
         keys = HubKeys(store: store, ui: ui, hub: hub)
         // The screen you're looking at: the one with the mouse.
         screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
@@ -361,15 +363,16 @@ final class HubController {
         keys.toggleTap()
     }
 
-    /// The session switcher shortcut: open on the sessions, the first one that needs you picked.
+    /// The session switcher shortcut: open on the sessions, which get all the room (every one listed, whatever section was
+    /// focused or search was open), the first one that needs you picked and scrolled to.
     func showSessions() {
         guard store.agents.enabled else { return }
         hub.go(.main)
         hub.pinned = true
+        LookoutHub.animate(LookoutHub.refocus) { hub.focus = .agents }
         let rows = store.agentRows
-        if let first = (rows.kept + rows.pending).first(where: { $0.unread && !$0.session.running }) ?? rows.kept.first {
-            keys.select("a:" + first.id)
-        }
+        let first = (rows.kept + rows.pending).first(where: { $0.unread && !$0.session.running }) ?? rows.kept.first
+        hub.showSession(first?.id, store: store, ui: ui)
     }
 
     private func takeFocus() {

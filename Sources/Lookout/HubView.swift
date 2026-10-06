@@ -59,6 +59,9 @@ final class HubState {
     let inbox = InboxState()
     /// New activity shows all its rows, not the first few and "+N more".
     var sessionsExpanded = false
+    /// Every session is listed: "+N more" was asked for, or Sessions is the focused section (only an unfocused list is cut
+    /// at eight, DESIGN.md 5.3).
+    var listsAllSessions: Bool { sessionsExpanded || focus == .agents }
     /// Asks New session to open its menu of projects (→ on that row); a new request every time.
     private(set) var projectsMenuRequest = 0
     func openProjectsMenu() { projectsMenuRequest += 1 }
@@ -267,6 +270,7 @@ struct LookoutHub: View {
         .contextMenu { barMenu }
         .environment(\.colorScheme, .dark)
         .environment(\.controlFocus, hub.controls)
+        .environment(\.tipBeside, edge == .right ? .leading : edge == .left ? .trailing : nil)
         .themeResolved()
         .background(SelectionSync(ui: ui, hub: hub))
         .background(HubAnnouncer(store: store, hub: hub))
@@ -399,13 +403,32 @@ struct ClaudeNotice: View {
         }
     }
 
+    @State private var details = false
+
     var body: some View {
         if Self.room(store) > 0 {
-            HStack(spacing: 6) { ClaudeLinkStatus(store: store) }
-                .font(Theme.Typography.meta)
-                .foregroundStyle(Theme.red)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .leading)
+            HStack(spacing: 6) {
+                ClaudeLinkStatus(store: store)
+                Spacer(minLength: 0)
+                // The recovery sentence is more than a tooltip: a button, so keyboard and VoiceOver users have it too.
+                Button { details = true } label: {
+                    Text("Details").font(Theme.Typography.control).foregroundStyle(Theme.accentText)
+                        .frame(minHeight: Theme.Metrics.iconButton)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .focusRing(Theme.Radius.small)
+                .popover(isPresented: $details, arrowEdge: .bottom) {
+                    Text(ClaudeLinkStatus.describe(store.claudeLink).detail)
+                        .font(Theme.Typography.meta).foregroundStyle(Theme.text)
+                        .padding(Theme.Space.lg)
+                }
+                .accessibilityHint(ClaudeLinkStatus.describe(store.claudeLink).detail)
+            }
+            .font(Theme.Typography.meta)
+            .foregroundStyle(Theme.red)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .leading)
         }
     }
 }

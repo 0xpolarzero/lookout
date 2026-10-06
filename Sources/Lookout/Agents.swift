@@ -352,7 +352,6 @@ struct AgentCache {
     var all: [AgentRow]
     var groups: [SessionGroup]
     var counts: (blocked: Int, done: Int)
-    var folders: [String]
     var entries: [String: AgentEntry]
     var labels: [String: String]
 }
@@ -399,13 +398,9 @@ extension Store {
         }
         let unread = allRows.filter { $0.unread && !$0.session.running }
         let blocked = unread.filter { $0.session.summary?.blocked == true }.count
-        var folders: [String] = []
-        for row in allRows where !row.session.folderKey.isEmpty && !folders.contains(row.session.folderKey) {
-            folders.append(row.session.folderKey)
-        }
         return AgentCache(rows: (keptRows, pendingRows), all: allRows, groups: SessionGroup.build(kept: keptRows, pending: pendingRows),
                           counts: (blocked + allRows.filter(\.waitsForYou).count, unread.count - blocked),
-                          folders: folders, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
+                          entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
 
     /// Kept sessions in your order, grouped by project (projects in the order their first session appears), then
@@ -445,19 +440,49 @@ extension Store {
     var sessionGroups: [SessionGroup] { cache.groups }
 
     /// The groups as the hub lists them: cut to `SessionCap` (from the end, so New activity goes first) unless
-    /// `expanded`, and how many that hid.
-    func listedGroups(expanded: Bool) -> (groups: [SessionGroup], hidden: Int) {
-        var groups = cache.groups
+    /// `expanded`, and how many that hid. `frozen`: the order and groups the bar's tiles are held in while the pointer is
+    /// over the hub, so a row doesn't move away from its tile; a session's own marks (waiting, working) are as they are.
+    /// A waiting session is never cut, wherever the freeze puts it.
+    func listedGroups(expanded: Bool, frozen: [BarSessions.Slot]? = nil) -> (groups: [SessionGroup], hidden: Int) {
+        var groups = frozen.map { regrouped(cache.groups, as: $0) } ?? cache.groups
         guard !expanded else { return (groups, 0) }
         let total = groups.reduce(0) { $0 + $1.rows.count }
-        let waiting = groups.first { $0.kind == .waiting }?.rows.count ?? 0
+        let waiting = groups.reduce(0) { $0 + $1.rows.filter(\.isWaiting).count }
         var room = SessionCap.shown(total: total, waiting: waiting)
         for i in groups.indices {
-            groups[i].rows = Array(groups[i].rows.prefix(room))
-            room -= groups[i].rows.count
+            groups[i].rows = groups[i].rows.filter { row in
+                defer { room -= 1 }
+                return room > 0 || row.isWaiting
+            }
         }
         groups.removeAll { $0.rows.isEmpty }
         return (groups, total - groups.reduce(0) { $0 + $1.rows.count })
+    }
+
+    /// `listedGroups` as `hub` has it: all of them when it asks for them, in the order the pointer found.
+    func listedGroups(_ hub: HubState) -> (groups: [SessionGroup], hidden: Int) {
+        listedGroups(expanded: hub.listsAllSessions, frozen: hub.frozenSessions)
+    }
+
+    /// `live`'s rows in the order and groups `frozen` has them (the sessions still there), then any new ones where they are.
+    private func regrouped(_ live: [SessionGroup], as frozen: [BarSessions.Slot]) -> [SessionGroup] {
+        var rows: [String: AgentRow] = [:]
+        var liveGroup: [String: String] = [:]
+        for group in live { for row in group.rows { rows[row.id] = row; liveGroup[row.id] = group.id } }
+        var kinds = Dictionary(live.map { ($0.id, $0.kind) }, uniquingKeysWith: { first, _ in first })
+        var out: [SessionGroup] = []
+        var index: [String: Int] = [:]
+        func place(_ row: AgentRow, in group: String) {
+            if let i = index[group] { out[i].rows.append(row); return }
+            let kind = kinds[group] ?? (group == "waiting" ? .waiting : group == "new" ? .newActivity : .project(String(group.dropFirst("project:".count))))
+            kinds[group] = kind
+            index[group] = out.count
+            out.append(SessionGroup(kind: kind, rows: [row]))
+        }
+        var placed = Set<String>()
+        for slot in frozen { if let row = rows[slot.id], placed.insert(slot.id).inserted { place(row, in: slot.group) } }
+        for group in live { for row in group.rows where placed.insert(row.id).inserted { place(row, in: group.id) } }
+        return out
     }
 
     func setProjectColor(_ folder: String, _ index: Int) {
@@ -496,9 +521,6 @@ extension Store {
 
     /// Unread sessions waiting on you (amber) and the other unread finished ones (blue).
     var agentCounts: (blocked: Int, done: Int) { cache.counts }
-
-    /// Projects with a session in your list or pending, in the order they're listed: where a new session can start.
-    var agentFolders: [String] { cache.folders }
 
     /// Every project a session has been seen in, the one with the most recent session first: where New session offers
     /// to start one.
@@ -740,6 +762,40 @@ extension Store {
     /// One place up (-1) or down (+1) within its project.
     func moveAgent(_ id: String, by step: Int) {
         if let target = neighbour(of: id, step) { moveAgent(id, onto: target) }
+    }
+
+    // MARK: Project order
+
+    /// The projects with a kept session, in the order the list shows them (Scratch is always the last group, so it has no
+    /// place to move to).
+    var projectOrder: [String] {
+        var order: [String] = []
+        for row in cache.rows.kept where !row.session.folderKey.isEmpty && !order.contains(row.session.folderKey) { order.append(row.session.folderKey) }
+        return order
+    }
+
+    func canMoveProject(_ folder: String, by step: Int) -> Bool {
+        guard let i = projectOrder.firstIndex(of: folder) else { return false }
+        return projectOrder.indices.contains(i + step)
+    }
+
+    /// One place up (-1) or down (+1) among the projects.
+    func moveProject(_ folder: String, by step: Int) {
+        let order = projectOrder
+        guard let i = order.firstIndex(of: folder), order.indices.contains(i + step) else { return }
+        moveProject(folder, onto: order[i + step])
+    }
+
+    /// Puts a project where `target` is, its sessions together and in their own order: the projects' order is the order
+    /// their first kept session is listed in, so it is the sessions' slots that trade places.
+    func moveProject(_ folder: String, onto target: String) {
+        var order = projectOrder
+        guard folder != target, let from = order.firstIndex(of: folder), let to = order.firstIndex(of: target) else { return }
+        order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        func rank(_ entry: AgentEntry) -> Int? { claudeSessions[entry.id].flatMap { order.firstIndex(of: $0.folderKey) } }
+        let slots = agents.entries.indices.filter { agents.entries[$0].kept && rank(agents.entries[$0]) != nil }
+        let sorted = slots.map { (slot: $0, entry: agents.entries[$0]) }.sorted { (rank($0.entry)!, $0.slot) < (rank($1.entry)!, $1.slot) }
+        for (slot, moved) in zip(slots, sorted) { agents.entries[slot] = moved.entry }
     }
 
     // MARK: Icons (Jev)
