@@ -312,9 +312,7 @@ final class HubController {
             self.hub.hovering = inside
             if !inside {
                 self.hub.cancelDwell()
-                self.hub.section = nil
-                self.hub.quiet = false
-                self.closedByLeaving()
+                if self.hub.closePeek() { self.closedByLeaving() }
             }
         }
     }

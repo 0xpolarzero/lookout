@@ -377,6 +377,16 @@ import Testing
         #expect(!hub.pinned)
     }
 
+    @Test func thePointerLeavingDoesNotCloseTheMenuTheKeysHave() {
+        hub.showControls()
+        #expect(!hub.closePeek())
+        #expect(hub.section == .controls && hub.menuKeys)
+        // A panel the pointer opened closes as it always did.
+        press(kVK_Escape, "\u{1b}")
+        hub.section = .inbox
+        #expect(hub.closePeek() && hub.section == nil)
+    }
+
     @Test func aMenuThatIsNotUpLeavesTheKeysAlone() {
         #expect(!press(kVK_DownArrow, "\u{F701}"))
         #expect(!press(kVK_Return, "\r"))

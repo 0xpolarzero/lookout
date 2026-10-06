@@ -336,6 +336,8 @@ enum PlaygroundShots {
         Shot.edges("settings") { $0.pinned = true; $0.page = .settings },
         Shot.edges("repos", on: .rightAndTop) { $0.pinned = true; $0.page = .repos },
         Shot.edges("search") { $0.pinned = true; $0.query = "sand" },
+        // A page over a search: the query stays, and the bar is as bright as ever.
+        Shot.edges("settings-search", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.query = "sand" },
         Shot.edges("tip", on: .rightAndTop) { $0.pinned = true; $0.tip = "Settings" },
         Shot.edges("peek-inbox") { $0.section = .inbox },
         Shot.edges("peek-ci") { $0.section = .ci },

@@ -35,6 +35,16 @@ extension HubState {
         menuKeys = true
     }
 
+    /// The pointer is gone: the panel closes. Not the controls menu the keyboard asked for, which has the keys and stays
+    /// up wherever the pointer is until Esc or a row closes it. Returns whether it closed.
+    @discardableResult
+    func closePeek() -> Bool {
+        guard !menuKeys else { return false }
+        section = nil
+        quiet = false
+        return true
+    }
+
     /// Does what a row of the controls menu says.
     func perform(_ row: ControlsRow, store: Store) {
         switch row {
@@ -383,10 +393,7 @@ extension LookoutHub {
         hub.cancelDwell()
         peekLeave = Task { @MainActor in
             try? await Task.sleep(for: Theme.Timing.leaveGrace)
-            if !Task.isCancelled {
-                hub.section = nil
-                hub.quiet = false
-            }
+            if !Task.isCancelled { hub.closePeek() }
         }
     }
 }
