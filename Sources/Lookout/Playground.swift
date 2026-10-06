@@ -356,7 +356,7 @@ enum PlaygroundShots {
         ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil),
     ]
     private static let ci: [(String, Demo.Scenario)] = [
-        ("no-ci", .noCI), ("all-passing", .allPassing), ("many-ci", .manyCI), ("ci-running", .ciRunning), ("ci-no-runs", .ciNoRuns),
+        ("all-passing", .allPassing), ("many-ci", .manyCI), ("ci-running", .ciRunning), ("ci-no-runs", .ciNoRuns),
     ]
     private static let sessions: [(String, Demo.Scenario)] = [
         ("sessions-waiting", .sessionsWaiting), ("sessions-working", .sessionsWorking), ("sessions-unread", .sessionsUnread),
@@ -433,7 +433,8 @@ enum PlaygroundShots {
         Shot.edges("open-done-empty", on: .rightAndTop) { $0.pinned = true; $0.scenario = .doneEmpty; $0.filter = .done },
         // CI, sessions and the update cell.
         ci.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .ci) },
-        // No CI has no cell on the strip to hover, so its peek is the side bar's only.
+        // No CI has no cell on the strip to hover, so its peek is the side bar's only (and it isn't in `ci`, whose peeks
+        // are on both).
         scenarioShots("no-ci", .noCI),
         Shot.edges("peek-ci-no-ci", on: [.right]) { $0.section = .ci; $0.scenario = .noCI },
         // The calm CI states, kept open where the block is short beside a taller column (the strip's other edge).
@@ -491,7 +492,6 @@ enum PlaygroundShots {
             }
         },
         sessions.flatMap { slug, scenario in scenarioShots(slug, scenario, peek: .agents) },
-        Shot.edges("focus-agents-sessions-12", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.focus = .agents },
         sessionShots,
         updates.flatMap { slug, scenario in scenarioShots(slug, scenario) },
         // Accessibility variants.
