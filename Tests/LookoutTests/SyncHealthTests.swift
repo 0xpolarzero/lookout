@@ -60,4 +60,24 @@ import Testing
         // Nothing the failed page might have held is taken for gone: a request that was there stays.
         #expect(s.items.allSatisfy { $0.state.isOpen })
     }
+
+    @Test func anIncompleteReviewSearchIsOneFaultOnEverySurface() {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.repos = [RepoConfig(fullName: "a/b")]
+        s.lastSync = Date()
+        #expect(s.syncFault(stale: false) == nil && s.inboxNotice() == nil)
+        s.reviewRequestsIncomplete = true
+        #expect(s.syncFault(stale: false) == .reviewRequestsCut)
+        #expect(s.inboxNotice() == .reviewRequestsCut && s.inboxEmpty(.needsYou) == .nothingNew)
+        #expect(SyncLine(s, now: Date()).text == SyncFault.reviewRequestsCut.phrase && SyncLine(s, now: Date()).isFault)
+        #expect(SyncFault.reviewRequestsCut.tint == Theme.amber)
+        // A search that failed outright is the louder fault; one that is switched off is none.
+        s.reviewRequestsError = "Timed out"
+        #expect(s.syncFault(stale: false) == .reviewRequests)
+        s.reviewRequestsError = nil
+        s.settings.reviewRequests = false
+        #expect(s.syncFault(stale: false) == nil)
+    }
 }

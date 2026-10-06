@@ -102,6 +102,7 @@ private struct SyncStatusRow: View {
         let reason = switch fault {
         case .partial: store.repoErrors.keys.sorted().joined(separator: ", ")
         case .reviewRequests: store.reviewRequestsError ?? ""
+        case .reviewRequestsCut: "GitHub cut the search for them short"
         case .rateLimited: store.rateResetsAt.map { "Checking again at \($0.formatted(date: .omitted, time: .shortened))." } ?? ""
         default: ""
         }

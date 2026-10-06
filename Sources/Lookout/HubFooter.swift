@@ -115,27 +115,37 @@ extension SyncLine {
                       opensSettings: true, isFault: true)
             return
         }
-        let failed = store.repoErrors.keys.sorted()
-        if !failed.isEmpty {
+        let interval = store.settings.pollInterval
+        let last = store.lastSync
+        let stale = last.map { now.timeIntervalSince($0) > interval * 3 } ?? false
+        // The faults are `Store.syncFault`'s, the one calculation the gear, the banner and Settings share; the rate limit has
+        // its own notice beside this line, so it doesn't replace it.
+        switch store.syncFault(stale: stale) {
+        case .partial:
+            let failed = store.repoErrors.keys.sorted()
             self.init(text: "\(plural(failed.count, "repository", "repositories")) didn't sync", color: AnyShapeStyle(Theme.secondary),
                       help: failed.joined(separator: "\n") + "\n" + refresh, isFault: true)
             return
-        }
-        if store.reviewRequestsFailing {
-            self.init(text: "Review requests didn't sync", color: AnyShapeStyle(Theme.secondary),
+        case .reviewRequests:
+            self.init(text: SyncFault.reviewRequests.phrase, color: AnyShapeStyle(Theme.secondary),
                       help: (store.reviewRequestsError ?? "") + "\n" + refresh, isFault: true)
             return
+        case .reviewRequestsCut:
+            self.init(text: SyncFault.reviewRequestsCut.phrase, color: AnyShapeStyle(Theme.secondary),
+                      help: "GitHub cut the search short, so some may be missing\n" + refresh, isFault: true)
+            return
+        default:
+            break
         }
         if store.isSyncing {
             self.init(text: "Checking…", color: AnyShapeStyle(Theme.tertiary), help: "Checking GitHub")
             return
         }
-        guard let last = store.lastSync else {
+        guard let last else {
             self.init(text: store.me == nil ? "Connecting…" : "Not checked yet", color: AnyShapeStyle(Theme.tertiary), help: refresh)
             return
         }
-        let interval = store.settings.pollInterval
-        if now.timeIntervalSince(last) > interval * 3 {
+        if stale {
             self.init(text: "Not syncing", color: AnyShapeStyle(Theme.secondary),
                       help: "Last checked at \(last.formatted(date: .omitted, time: .shortened)): check your connection or token\n" + refresh,
                       isFault: true)

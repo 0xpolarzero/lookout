@@ -10,7 +10,7 @@ enum Demo {
     enum Scenario: String, CaseIterable {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
         // Inbox and sync causes.
-        case signedOut, reposFailed, reviewRequestsFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        case signedOut, reposFailed, reviewRequestsFailed, reviewRequestsCut, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
         // An inbox longer than any list shows: the rest is "+N more".
         case inboxMany
         // CI.
@@ -114,6 +114,12 @@ enum Demo {
             store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
             passing(store)
             store.reviewRequestsError = "API rate limit exceeded"
+        case .reviewRequestsCut:
+            // The search worked, but GitHub gave up before it had looked at everything: nothing can say the rest is empty.
+            agents(store, now)
+            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+            passing(store)
+            store.reviewRequestsIncomplete = true
         case .rateLimited:
             agents(store, now)
             store.rateRemaining = 0

@@ -81,6 +81,7 @@ enum InboxEmpty: Equatable {
 enum InboxNotice: Equatable {
     case reposFailed(Int)
     case reviewRequestsFailed
+    case reviewRequestsCut
     case rateLimited(until: Date?)
     case snoozed(until: Date)
 
@@ -89,6 +90,7 @@ enum InboxNotice: Equatable {
         return switch self {
         case .reposFailed(let n): "\(plural(n, "repository", "repositories")) didn't sync"
         case .reviewRequestsFailed: "Review requests didn't sync"
+        case .reviewRequestsCut: SyncFault.reviewRequestsCut.phrase
         case .rateLimited(let until?): "GitHub is rate limiting. Checking again at \(time(until))."
         case .rateLimited: "GitHub is rate limiting. Checking again soon."
         case .snoozed(let until): "Snoozed until \(time(until))"
@@ -133,6 +135,7 @@ extension Store {
         if !repoErrors.isEmpty { return .reposFailed(repoErrors.count) }
         if rateLimited { return .rateLimited(until: rateResetsAt.flatMap { $0 > now ? $0 : nil }) }
         if reviewRequestsFailing { return .reviewRequestsFailed }
+        if reviewRequestsPartial { return .reviewRequestsCut }
         if isSnoozed, let until = settings.snoozeUntil { return .snoozed(until: until) }
         return nil
     }
@@ -271,7 +274,7 @@ extension LookoutHub {
             if let notice {
                 StatusBanner(symbol: notice.symbol, tint: notice.tint, message: notice.message) {
                     switch notice {
-                    case .reposFailed, .reviewRequestsFailed: InboxLink("Retry") { store.refreshNow() }
+                    case .reposFailed, .reviewRequestsFailed, .reviewRequestsCut: InboxLink("Retry") { store.refreshNow() }
                     case .snoozed: InboxLink("Resume") { store.snooze(for: nil) }
                     case .rateLimited: EmptyView()
                     }

@@ -205,7 +205,7 @@ struct UpdateBarCell: View {
 
 /// What is wrong with syncing, worst first: the gear wears a badge for it. Healthy and snoozed are not faults.
 enum SyncFault: Equatable {
-    case signIn, partial, reviewRequests, rateLimited, stale
+    case signIn, partial, reviewRequests, reviewRequestsCut, rateLimited, stale
 
     /// Red is broken; the rest need a look, not a fix.
     var tint: Color { self == .signIn ? Theme.red : Theme.amber }
@@ -215,6 +215,7 @@ enum SyncFault: Equatable {
         case .signIn: "Can't sign in to GitHub"
         case .partial: "Some repositories didn't sync"
         case .reviewRequests: "Review requests didn't sync"
+        case .reviewRequestsCut: "Some review requests weren't checked"
         case .rateLimited: "GitHub is rate limiting"
         case .stale: "Not syncing"
         }
@@ -227,6 +228,8 @@ extension Store {
         if authError != nil { return .signIn }
         if !repoErrors.isEmpty { return .partial }
         if reviewRequestsFailing { return .reviewRequests }
+        // The search worked but GitHub cut it short: what it found is real, the rest is not known (DESIGN.md 10.8).
+        if reviewRequestsPartial { return .reviewRequestsCut }
         if let rateRemaining, rateRemaining <= 0 { return .rateLimited }
         return stale ? .stale : nil
     }

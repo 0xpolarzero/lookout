@@ -301,7 +301,7 @@ struct Shot {
 ///   open-bots, open-done, search-none, search-sessions, focus-ci (also left)
 /// Causes, open on right and top; at rest on every edge (the bar's own state)
 ///   signed-out, repos-failed, rate-limited, snoozed, error, no-repos, needs-you-empty, bots-empty, done-empty,
-///   first-sync, sync-fault (`rest-` for the others than bots-empty, done-empty and no-repos)
+///   first-sync, sync-fault, review-requests-cut (`rest-` for the others than bots-empty, done-empty and no-repos)
 /// CI: `rest-`, `open-`, `peek-ci-`, `focus-ci-` plus
 ///   no-ci, all-passing, many-ci (15 repositories), ci-running, ci-no-runs; open-no-ci and open-all-passing also on the bottom edge
 /// Sessions: `rest-`, `open-`, `peek-agents-` plus
@@ -317,12 +317,12 @@ struct Shot {
 ///   open-/picked-/settings-contrast, open-reduce-motion, open-differentiate on right and top
 /// Inbox, right and top
 ///   inbox-needs-you, inbox-bots, inbox-done, inbox-peek, inbox-peek-done, inbox-focus,
-///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
+///   inbox-signed-out, inbox-no-repos, inbox-repos-failed, inbox-review-requests-failed, inbox-review-requests-cut, inbox-rate-limited, inbox-snoozed, inbox-caught-up,
 ///   inbox-bots-empty, inbox-done-empty, inbox-first-sync, inbox-search-open, inbox-search, inbox-search-none, inbox-search-sessions, inbox-search-sessions-only,
 ///   inbox-search-from-focus, inbox-many, inbox-peek-many,
 ///   inbox-focus-wide, inbox-focus-banner-undo, inbox-undo, inbox-undo-all, inbox-picked, inbox-picked-done, inbox-picked-done-long,
 ///   inbox-contrast, inbox-differentiate, inbox-done-contrast, inbox-caught-up-contrast
-/// A page open: settings-sync-fault on right and top (the gear lit, with its badge)
+/// A page open: settings-sync-fault and settings-review-requests-cut on right and top (the gear lit, with its badge)
 /// Components
 ///   components, components-contrast (each shared component in its states, no hub)
 /// Position: `rest-`, `open-` plus
@@ -351,11 +351,12 @@ enum PlaygroundShots {
     private static let causes: [(String, Demo.Scenario)] = [
         ("signed-out", .signedOut), ("repos-failed", .reposFailed), ("rate-limited", .rateLimited), ("snoozed", .snoozed),
         ("error", .error), ("needs-you-empty", .needsYouEmpty), ("first-sync", .firstSync), ("sync-fault", .syncFault),
+        ("review-requests-cut", .reviewRequestsCut),
     ]
     /// Why the inbox is empty or has a banner, as `(name, scenario, tab)`.
     private static let inboxCauses: [(String, Demo.Scenario, InboxFilter?)] = [
         ("signed-out", .signedOut, nil), ("no-repos", .empty, nil), ("repos-failed", .reposFailed, nil),
-        ("review-requests-failed", .reviewRequestsFailed, nil), ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
+        ("review-requests-failed", .reviewRequestsFailed, nil), ("review-requests-cut", .reviewRequestsCut, nil), ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
         ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil),
     ]
     private static let ci: [(String, Demo.Scenario)] = [
@@ -513,6 +514,7 @@ enum PlaygroundShots {
         Shot.edges("settings-contrast", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.environment = .contrast },
         // The bar beside a page: the same cells, undimmed, the gear lit and still badged.
         Shot.edges("settings-sync-fault", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.scenario = .syncFault },
+        Shot.edges("settings-review-requests-cut", on: .rightAndTop) { $0.pinned = true; $0.page = .settings; $0.scenario = .reviewRequestsCut },
         // The shared components, each in its states.
         [Shot(name: "components", sheet: .components), Shot(name: "components-contrast", sheet: .components, environment: .contrast)],
         // The working ring.
