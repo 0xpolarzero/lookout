@@ -850,16 +850,6 @@ extension Store {
         return order[i + step]
     }
 
-    func canMoveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) -> Bool {
-        neighbouringProject(of: folder, step, frozen: frozen, expanded: expanded) != nil
-    }
-
-    /// One place up (-1) or down (+1) among the projects.
-    func moveProject(_ folder: String, by step: Int, frozen: [BarSessions.Slot]? = nil, expanded: Bool = true) {
-        guard let target = neighbouringProject(of: folder, step, frozen: frozen, expanded: expanded) else { return }
-        moveProject(folder, onto: target)
-    }
-
     /// Puts a project where `target` is, its sessions together and in their own order: the projects' order is the order
     /// their first kept session is listed in, so it is the sessions' slots that trade places.
     @discardableResult

@@ -98,6 +98,7 @@ struct SessionsList: View {
             return plain.hidden > 0 ? SessionGroup.peek(capped.groups, hidden: capped.hidden, cap: cap, keeping: ui.drawerSelection) : plain
         }
         let listed = (groups: peeked?.groups ?? capped.groups, hidden: peeked?.hidden ?? capped.hidden)
+        let projects = SessionGroup.projects(listed.groups)
         AdaptiveStack(count: store.hubSessions(hub).count, alignment: .leading, spacing: 0) {
             if searching {
                 ForEach(store.hubSessions(hub)) { row($0, .search) }
@@ -107,9 +108,10 @@ struct SessionsList: View {
                 EmptyView()
             } else {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
-                    SessionGroupHeader(group: group, store: store, hub: hub, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
+                    SessionGroupHeader(group: group, store: store, hub: hub, rail: rail, projects: projects)
+                        .padding(.top, i == 0 ? 0 : SessionGroup.gap)
                         .id(i == 0 ? "s:top" : group.id)
-                    ForEach(group.rows) { row($0, group.placement(of: $0), moves: group.moves(of: $0)) }
+                    ForEach(group.rows) { row($0, group.placement(of: $0), moves: group.moves(of: $0, projects: projects)) }
                 }
                 if listed.hidden > 0 {
                     MoreSessionsRow(hidden: listed.hidden, waiting: peeked?.waiting ?? 0, hub: hub, rail: rail, action: moreAction)
@@ -349,16 +351,35 @@ extension SessionGroup {
 
     /// The rows a row can trade places with, above and below it in its project: kept rows the group draws (what a cut or a peek
     /// leaves out, or a new session that began to wait, is no neighbour, as for `Store.neighbour`); a row held here from another project (a frozen group's) has none.
+    /// And the project groups the list draws on either side of its own, which its project's menu trades places with.
     struct Moves: Equatable {
         var up: String?
         var down: String?
+        var projectUp: String?
+        var projectDown: String?
     }
 
-    func moves(of row: AgentRow) -> Moves {
-        guard case .project = kind else { return Moves() }
+    /// The projects the list draws a group for, in order (scratch has no place to move to, and a project cut off the list is no
+    /// neighbour): what Move project up and down trade places with.
+    static func projects(_ groups: [SessionGroup]) -> [String] {
+        groups.compactMap { if case .project(let folder) = $0.kind, !folder.isEmpty { folder } else { nil } }
+    }
+
+    /// The drawn projects on either side of `folder`.
+    static func neighbours(of folder: String, in projects: [String]) -> (up: String?, down: String?) {
+        guard let i = projects.firstIndex(of: folder) else { return (up: nil, down: nil) }
+        return (i > 0 ? projects[i - 1] : nil, i + 1 < projects.count ? projects[i + 1] : nil)
+    }
+
+    func moves(of row: AgentRow, projects: [String]) -> Moves {
+        let project = Self.neighbours(of: row.session.folderKey, in: projects)
+        var moves = Moves(projectUp: project.up, projectDown: project.down)
+        guard case .project = kind else { return moves }
         let own = rows.filter { placement(of: $0) == .project && !$0.pending }
-        guard let i = own.firstIndex(where: { $0.id == row.id }) else { return Moves() }
-        return Moves(up: i > 0 ? own[i - 1].id : nil, down: i + 1 < own.count ? own[i + 1].id : nil)
+        guard let i = own.firstIndex(where: { $0.id == row.id }) else { return moves }
+        moves.up = i > 0 ? own[i - 1].id : nil
+        moves.down = i + 1 < own.count ? own[i + 1].id : nil
+        return moves
     }
 
     /// What `row` is listed under here: a project's own rows say nothing of their project, but a row held in a frozen group
@@ -380,10 +401,13 @@ struct SessionGroupHeader: View {
     /// Read when Keep all is pressed, for the groups the list is held in.
     let hub: HubState
     let rail: HorizontalEdge?
+    /// The projects the list draws, in order: what Move project up and down trade places with.
+    let projects: [String]
     @State private var dropTarget = false
 
     var body: some View {
         let folder = project
+        let move = folder.map { SessionGroup.neighbours(of: $0, in: projects) } ?? (up: nil, down: nil)
         RailRow(rail: rail, height: SessionGroup.headerHeight, tile: { Color.clear }) {
             HStack(spacing: Theme.Space.sm) {
                 if let folder { dot(folder) }
@@ -402,14 +426,14 @@ struct SessionGroupHeader: View {
         .modifier(Reorderable(kind: "project:", id: folder.flatMap { $0.isEmpty ? nil : $0 }, name: title,
                               drop: { dragged in if let folder { hub.moveProject(dragged, onto: folder, store: store) } }, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
-        .contextMenu { if let folder { ProjectMenu(folder: folder, store: store, hub: hub) } }
+        .contextMenu { if let folder { ProjectMenu(folder: folder, store: store, hub: hub, up: move.up, down: move.down) } }
         .accessibilityElement(children: .contain)
         .accessibilityActions {
             if let folder {
                 if store.isFolderMuted(folder) { Button("Unmute \(title)") { store.setFolderMuted(folder, false) } }
                 else { Button("Mute \(title)") { store.muteFolder(folder) } }
-                if hub.canMoveProject(folder, by: -1, store: store) { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, by: -1, store: store) } } }
-                if hub.canMoveProject(folder, by: 1, store: store) { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, by: 1, store: store) } } }
+                if let up = move.up { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, onto: up, store: store) } } }
+                if let down = move.down { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, onto: down, store: store) } } }
             }
         }
     }
@@ -700,15 +724,6 @@ extension HubState {
               slots[from].group == slots[to].group else { return }
         slots.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         frozenSessions = slots
-    }
-
-    func canMoveProject(_ folder: String, by step: Int, store: Store) -> Bool {
-        store.canMoveProject(folder, by: step, frozen: frozenSessions, expanded: listsAllSessions)
-    }
-
-    func moveProject(_ folder: String, by step: Int, store: Store) {
-        guard let target = store.neighbouringProject(of: folder, step, frozen: frozenSessions, expanded: listsAllSessions) else { return }
-        moveProject(folder, onto: target, store: store)
     }
 
     /// The project's sessions go with it: its group's run of the held order trades places with the target's.
@@ -1103,12 +1118,15 @@ struct SessionMenu: View {
         Divider()
         if row.pending { Button("Keep") { store.keepAgent(row.id) } }
         if !row.hidden { Button("Hide") { store.dismissAgent(row.id) } }
+        let folder = row.session.folderKey
         let moves = moves ?? SessionGroup.Moves(up: store.neighbour(of: row.id, -1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions),
-                                                down: store.neighbour(of: row.id, 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions))
+                                                down: store.neighbour(of: row.id, 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions),
+                                                projectUp: store.neighbouringProject(of: folder, -1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions),
+                                                projectDown: store.neighbouringProject(of: folder, 1, frozen: hub.frozenSessions, expanded: hub.listsAllSessions))
         if let up = moves.up { Button("Move up") { hub.moveSession(row.id, by: -1, with: up, store: store) } }
         if let down = moves.down { Button("Move down") { hub.moveSession(row.id, by: 1, with: down, store: store) } }
         Divider()
-        ProjectMenu(folder: row.session.folderKey, store: store, hub: hub)
+        ProjectMenu(folder: folder, store: store, hub: hub, up: moves.projectUp, down: moves.projectDown)
         Divider()
         Button("Change label…") { editLabel() }
     }
@@ -1119,6 +1137,9 @@ struct ProjectMenu: View {
     let folder: String
     let store: Store
     let hub: HubState
+    /// The projects the list drew either side of it, which it trades places with.
+    let up: String?
+    let down: String?
 
     var body: some View {
         if !folder.isEmpty {
@@ -1132,8 +1153,8 @@ struct ProjectMenu: View {
                 .pickerStyle(.inline)
             }
         }
-        if hub.canMoveProject(folder, by: -1, store: store) { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, by: -1, store: store) } } }
-        if hub.canMoveProject(folder, by: 1, store: store) { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, by: 1, store: store) } } }
+        if let up { Button("Move project up") { LookoutHub.animate { hub.moveProject(folder, onto: up, store: store) } } }
+        if let down { Button("Move project down") { LookoutHub.animate { hub.moveProject(folder, onto: down, store: store) } } }
         let name = "\u{201C}\(store.folderName(folder))\u{201D}"
         if store.isFolderMuted(folder) { Button("Unmute \(name)") { store.setFolderMuted(folder, false) } }
         else { Button("Mute \(name)") { store.muteFolder(folder) } }

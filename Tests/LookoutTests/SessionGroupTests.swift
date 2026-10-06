@@ -204,7 +204,7 @@ import Testing
         // A drop does the same, and a project moved is a block of the held order.
         hub.moveSession("x3", onto: "x2", store: s)
         #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["x3", "x2", "x1"])
-        hub.moveProject("/code/y", by: -1, store: s)
+        hub.moveProject("/code/y", onto: "/code/x", store: s)
         #expect(s.listedGroups(hub).groups.map(\.id) == ["project:/code/y", "project:/code/x"])
         hub.frozenSessions = nil
         #expect(s.listedGroups(hub).groups.map(\.id) == ["waiting", "project:/code/y", "project:/code/x"])
@@ -227,7 +227,7 @@ import Testing
         #expect(hub.canMoveSession("a6", by: 1, store: s) && !hub.canMoveSession("a7", by: -1, store: s))
         // The accessibility actions come from the group's own rows: the last one shown has nothing to move down to, as in the menu.
         let shown = try #require(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" })
-        #expect(shown.moves(of: shown.rows[6]) == .init(up: "a5", down: "a11") && shown.moves(of: shown.rows[7]) == .init(up: "a6", down: nil))
+        #expect(shown.moves(of: shown.rows[6], projects: []) == .init(up: "a5", down: "a11") && shown.moves(of: shown.rows[7], projects: []) == .init(up: "a6", down: nil))
         // Move down trades a6 with a11 as the list shows them, and both stay on the screen.
         hub.moveSession("a6", by: 1, store: s)
         #expect(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" }?.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a11", "a6"])
@@ -249,7 +249,7 @@ import Testing
         let shown = try #require(s.listedGroups(hub).groups.first { $0.id == "project:/code/x" })
         #expect(shown.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "n0"])
         #expect(!hub.canMoveSession("a6", by: 1, store: s) && !hub.canMoveSession("n0", by: -1, store: s))
-        #expect(shown.moves(of: shown.rows[6]) == .init(up: "a5", down: nil) && shown.moves(of: shown.rows[7]) == .init())
+        #expect(shown.moves(of: shown.rows[6], projects: []) == .init(up: "a5", down: nil) && shown.moves(of: shown.rows[7], projects: []) == .init())
         let before = s.agents.entries.map(\.id)
         hub.moveSession("a6", by: 1, store: s)
         #expect(s.agents.entries.map(\.id) == before)
@@ -264,7 +264,7 @@ import Testing
         let peek = SessionGroup.peek(listed.groups, hidden: listed.hidden, cap: cap)
         let group = try #require(peek.groups.first)
         #expect(group.rows.map(\.id) == ["a0", "a1", "a2", "a3", "a4"] && peek.hidden == 3)
-        #expect(group.moves(of: group.rows[4]) == .init(up: "a3", down: nil))
+        #expect(group.moves(of: group.rows[4], projects: []) == .init(up: "a3", down: nil))
         #expect(s.neighbour(of: "a4", 1, frozen: hub.frozenSessions, expanded: false) == "a5")
     }
 
@@ -563,15 +563,14 @@ import Testing
         let s = store([session("x1", folder: "/code/x"), session("y1", folder: "/code/y"), session("x2", folder: "/code/x"),
                        session("z1", folder: "/code/z"), session("scratch", folder: nil)], kept: ["x1", "y1", "x2", "z1", "scratch"])
         #expect(s.projectOrder == ["/code/x", "/code/y", "/code/z"])
-        #expect(!s.canMoveProject("/code/x", by: -1) && s.canMoveProject("/code/x", by: 1) && !s.canMoveProject("", by: 1))
+        #expect(s.neighbouringProject(of: "/code/x", -1) == nil && s.neighbouringProject(of: "/code/x", 1) == "/code/y"
+                && s.neighbouringProject(of: "", 1) == nil)
         s.moveProject("/code/z", onto: "/code/x")
         #expect(s.sessionGroups.map(\.id) == ["project:/code/z", "project:/code/x", "project:/code/y", "project:"])
         // Each project keeps its sessions, in their own order.
         #expect(ids(s)["project:/code/x"] == ["x1", "x2"])
-        s.moveProject("/code/z", by: 1)
-        #expect(s.projectOrder == ["/code/x", "/code/z", "/code/y"])
-        s.moveProject("/code/y", by: 1)
-        #expect(s.projectOrder == ["/code/x", "/code/z", "/code/y"])
+        s.moveProject("/code/y", onto: "/code/z")
+        #expect(s.projectOrder == ["/code/y", "/code/z", "/code/x"] && s.neighbouringProject(of: "/code/y", -1) == nil)
     }
 
     @Test func aProjectIsNeverMovedBehindTheCutOfAListThatHidesIt() {
@@ -579,11 +578,26 @@ import Testing
         let s = store(a + b, kept: (a + b).map(\.id))
         let hub = HubState()
         // The list is cut at eight, and shows only a: b is behind its "+8", so a has nowhere to go.
-        #expect(s.listedGroups(hub).groups.map(\.id) == ["project:/code/a"])
-        #expect(!hub.canMoveProject("/code/a", by: 1, store: s) && !hub.canMoveProject("/code/b", by: -1, store: s))
+        let cut = s.listedGroups(hub).groups
+        #expect(cut.map(\.id) == ["project:/code/a"] && SessionGroup.projects(cut) == ["/code/a"])
+        #expect(SessionGroup.neighbours(of: "/code/a", in: SessionGroup.projects(cut)) == (nil, nil))
         // Whole, it shows both.
         hub.sessionsExpanded = true
-        #expect(hub.canMoveProject("/code/a", by: 1, store: s) && hub.canMoveProject("/code/b", by: -1, store: s))
+        let whole = SessionGroup.projects(s.listedGroups(hub).groups)
+        #expect(SessionGroup.neighbours(of: "/code/a", in: whole) == (nil, "/code/b") && SessionGroup.neighbours(of: "/code/b", in: whole) == ("/code/a", nil))
+    }
+
+    @Test func aProjectIsNeverMovedBehindAPeeksHeightCut() {
+        let s = store([session("a1", folder: "/code/a"), session("b1", folder: "/code/b")], kept: ["a1", "b1"])
+        let hub = HubState()
+        let all = s.listedGroups(hub)
+        #expect(SessionGroup.projects(all.groups) == ["/code/a", "/code/b"])
+        // 108 points list a, and "+1 more" for b: a's project has nowhere to go among what the peek draws.
+        let peeked = SessionGroup.peek(all.groups, hidden: all.hidden, cap: 108)
+        #expect(SessionGroup.projects(peeked.groups) == ["/code/a"] && peeked.hidden == 1)
+        let row = peeked.groups[0].rows[0]
+        let moves = peeked.groups[0].moves(of: row, projects: SessionGroup.projects(peeked.groups))
+        #expect(moves.projectUp == nil && moves.projectDown == nil)
     }
 
     @Test func aFocusedSessionsListShowsEverySession() {
