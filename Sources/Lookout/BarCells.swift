@@ -151,8 +151,8 @@ struct CIBarCell: View {
                 Image(systemName: worst.countSymbol)
                     .font(Theme.Typography.glyph(14, .regular))
                     // One colour in both layers: left to the default rendering, the two outline symbols (check,
-                    // minus) ignore the style in the bar and draw white.
-                    .symbolRenderingMode(.palette)
+                    // minus) ignore the style in the bar and draw white. (The filled octagon keeps its x cut out.)
+                    .symbolRenderingMode(worst == .failure ? .monochrome : .palette)
                     .foregroundStyle(worst.color, worst.color)
                 if worst == .failure {
                     Text(failing > 99 ? "99+" : "\(failing)").font(Theme.Typography.numeral).foregroundStyle(Theme.red)
@@ -349,19 +349,37 @@ struct GearBarCell: View {
 
 // MARK: - Sessions
 
-/// "+3": the sessions the bar has no room for. Opens the sessions' panel.
+/// "+3": the sessions the bar has no room for. Opens the sessions' panel. Solid amber, like a waiting tile, when
+/// one of them waits for you: that never hides behind a neutral number.
 struct MoreSessionsCell: View {
     let axis: Axis
     let count: Int
+    var waiting = 0
     let show: () -> Void
 
     var body: some View {
-        BarCell(axis: axis, name: plural(count, "more session"), hint: "Shows the sessions", show: show, action: show) { hovering in
+        BarCell(axis: axis, name: plural(count, "more session"), value: waiting > 0 ? "\(waiting) waiting for you" : "",
+                hint: "Shows the sessions", show: show, action: show) { hovering in
+            Face(count: count, lit: waiting > 0, hovering: hovering)
+        }
+    }
+
+    private struct Face: View {
+        let count: Int
+        let lit: Bool
+        let hovering: Bool
+        @Environment(\.resolved) private var resolved
+
+        var body: some View {
+            let shape = Tile.shape(Theme.Metrics.tile)
             Text("+\(count)")
                 .font(Theme.Typography.numeral)
-                .foregroundStyle(Theme.text)
+                .foregroundStyle(lit ? Theme.onTint : Theme.text)
                 .frame(width: Theme.Metrics.tile, height: Theme.Metrics.tile)
-                .background(Tile.shape(Theme.Metrics.tile).fill(hovering ? Theme.Fill.selected : Theme.Fill.tile))
+                .background(shape.fill(lit ? Theme.amber : resolved.fill(hovering ? Theme.Fill.selected : Theme.Fill.tile)))
+                // As on the waiting tile: a dark outline for an eye that can't tell amber from grey.
+                .overlay { if resolved.differentiate, lit { shape.inset(by: 1).strokeBorder(Theme.onTint, lineWidth: 1.5) } }
+                .brightness(lit && hovering ? 0.06 : 0)
         }
     }
 }
@@ -420,9 +438,10 @@ struct NewSessionBarCell: View {
 }
 
 /// Which sessions the bar shows and in what order (DESIGN.md 5.1): waiting first, then the projects, then new
-/// activity; eight tiles and a "+N", except that a session waiting for you never goes into the "+N". While the
-/// pointer is over the hub the order and the project boundaries stay as they were, so nothing under it moves; the
-/// sessions' side panel lays its rows out from the same slots, so each stays level with its tile.
+/// activity; eight tiles and a "+N", except that a session waiting for you never goes into the "+N" for want of a
+/// slot. Only the edge's room can put one there, and then the "+N" says so. While the pointer is over the hub the
+/// order and the project boundaries stay as they were, so nothing under it moves; the sessions' side panel lays its
+/// rows out from the same `arrange`, so each stays level with its tile.
 enum BarSessions {
     /// A session as the layout sees it.
     struct Slot: Equatable {
@@ -447,9 +466,11 @@ enum BarSessions {
     }
 
     /// `slots` in the frozen order, each in the group it had (those still there, then any new ones as they are),
-    /// cut to `visible` plus every waiting one: whether it waits is as it is now, so none is ever hidden. One session
-    /// over would be a "+1" in the place of its own tile: it shows instead.
-    static func arrange(_ slots: [Slot], frozen: [Slot]?, visible: Int = visible) -> (shown: [Slot], hidden: Int) {
+    /// cut to `visible` plus every waiting one (whether it waits is as it is now), then to `room` points along the bar,
+    /// the "+N" cell included: what goes is the last of the others, and only when they are gone, the last waiting one.
+    /// One session over would be a "+1" in the place of its own tile: it shows instead, room allowing.
+    static func arrange(_ slots: [Slot], frozen: [Slot]?, visible: Int = visible,
+                        room: CGFloat = .infinity) -> (shown: [Slot], hidden: [Slot]) {
         var ordered = slots
         if let frozen {
             let now = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -457,9 +478,19 @@ enum BarSessions {
             ordered = frozen.compactMap { old in now[old.id].map { Slot(id: old.id, group: old.group, waiting: $0.waiting) } }
                 + slots.filter { !known.contains($0.id) }
         }
-        let shown = ordered.enumerated().filter { $0.offset < visible || $0.element.waiting }.map(\.element)
-        let hidden = ordered.count - shown.count
-        return hidden == 1 ? (ordered, 0) : (shown, hidden)
+        var shown = ordered.enumerated().filter { $0.offset < visible || $0.element.waiting }.map(\.element)
+        while length(shown, more: shown.count < ordered.count) > room,
+              let cut = shown.lastIndex(where: { !$0.waiting }) ?? shown.indices.last {
+            shown.remove(at: cut)
+        }
+        if ordered.count - shown.count == 1, length(ordered, more: false) <= room { shown = ordered }
+        let ids = Set(shown.map(\.id))
+        return (shown, ordered.filter { !ids.contains($0.id) })
+    }
+
+    /// What the tiles take along the bar, with their gaps, and the "+N" cell when there is one.
+    private static func length(_ run: [Slot], more: Bool) -> CGFloat {
+        CGFloat(run.count + (more ? 1 : 0)) * Theme.Metrics.pitch + run.indices.reduce(0) { $0 + gap(run, before: $1) }
     }
 
     /// The room before the cell at `index` beyond the pitch: a project boundary.

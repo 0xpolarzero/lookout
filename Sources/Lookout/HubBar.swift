@@ -302,7 +302,9 @@ extension LookoutHub {
         }
         barDivider
         if store.agents.enabled {
-            RestSessionCells(store: store, ui: ui, hub: hub, axis: axis, onRail: axis == .vertical) { show(.agents, session: $0) }
+            RestSessionCells(store: store, ui: ui, hub: hub, axis: axis, onRail: axis == .vertical, room: sessionRoom) {
+                show(.agents, session: $0)
+            }
                 .modifier(probe(.agents))
             barDivider
         }
@@ -325,6 +327,15 @@ extension LookoutHub {
         .accessibilityHidden(true)
     }
     static let dividerSlot: CGFloat = 19
+
+    /// What the sessions' cells may take of the bar's length (the "+N" among them): the screen's room less the ends,
+    /// the other cells, both dividers and the "+". The rest of the sessions are behind the "+N".
+    var sessionRoom: CGFloat {
+        let pitch = Theme.Metrics.pitch
+        let others = 2 * Self.barEnd + 2 * Self.dividerSlot + 3 * pitch  // inbox, gear, "+"
+            + (store.ciRepos.isEmpty ? 0 : pitch) + (store.updater.showsInPill ? pitch : 0)
+        return barLength - others
+    }
 
     /// The inbox cell's click: straight to what needs you, its newest item picked so the keys act on it at once.
     func openInbox() {
@@ -371,6 +382,8 @@ struct RestSessionCells: View {
     let hub: HubState
     let axis: Axis
     let onRail: Bool
+    /// Points along the bar for the tiles and the "+N" (`LookoutHub.sessionRoom`).
+    let room: CGFloat
     /// Show the sessions' section, picking this session (or the first).
     let show: (String?) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -378,7 +391,7 @@ struct RestSessionCells: View {
     var body: some View {
         let rows = store.agentRows
         let slots = BarSessions.slots(kept: rows.kept, pending: rows.pending)
-        let (shown, hidden) = BarSessions.arrange(slots, frozen: hub.frozenSessions)
+        let (shown, hidden) = BarSessions.arrange(slots, frozen: hub.frozenSessions, room: room)
         let byID = Dictionary(uniqueKeysWithValues: (rows.kept + rows.pending).map { ($0.id, $0) })
         let layout = axis == .vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
         layout {
@@ -390,7 +403,9 @@ struct RestSessionCells: View {
                         .transition(.opacity)
                 }
             }
-            if hidden > 0 { MoreSessionsCell(axis: axis, count: hidden) { show(nil) } }
+            if !hidden.isEmpty {
+                MoreSessionsCell(axis: axis, count: hidden.count, waiting: hidden.filter(\.waiting).count) { show(nil) }
+            }
             NewSessionBarCell(axis: axis, store: store) { show(nil) }
         }
         .animation(reduce ? nil : Theme.Motion.fade, value: shown.map { $0.id + $0.group })
@@ -409,22 +424,26 @@ struct RestSessionCells: View {
 }
 
 /// The sessions' side panel under its header: one 36pt row beside each of the bar's tiles, in the bar's order,
-/// with the bar's gap (and a line in it) between groups and the new session row beside the "+", so every row
-/// stays level with its tile.
+/// with the bar's gap (and a line in it) between groups, a row beside the "+N" for the sessions the bar has no tile
+/// for, and the new session row beside the "+", so every row stays level with its tile.
 struct PeekSessionRows: View {
     let store: Store
     let ui: UIState
     let hub: HubState
+    /// The bar's room for sessions (`LookoutHub.sessionRoom`): the same cut as the bar's own.
+    let room: CGFloat
+    /// Keeps the sessions open, all of them listed.
+    let showAll: () -> Void
 
     var body: some View {
         let rows = store.agentRows
-        let shown = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending),
-                                        frozen: hub.frozenSessions, visible: .max).shown
+        let (shown, hidden) = BarSessions.arrange(BarSessions.slots(kept: rows.kept, pending: rows.pending),
+                                                  frozen: hub.frozenSessions, room: room)
         let byID = Dictionary(uniqueKeysWithValues: (rows.kept + rows.pending).map { ($0.id, $0) })
         let pending = Set(rows.pending.map(\.id))
         VStack(alignment: .leading, spacing: 0) {
             // (The bar's asterisk stands here until there is a session.)
-            if shown.isEmpty { Color.clear.frame(height: Theme.Metrics.pitch) }
+            if shown.isEmpty && hidden.isEmpty { Color.clear.frame(height: Theme.Metrics.pitch) }
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, slot in
                 if let row = byID[slot.id] {
                     let gap = BarSessions.gap(shown, before: index)
@@ -435,7 +454,34 @@ struct PeekSessionRows: View {
                         .modifier(ReorderIf(enabled: !pending.contains(row.id), row: row, store: store))
                 }
             }
+            if !hidden.isEmpty { MoreSessionsRow(hidden: hidden, show: showAll) }
             NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.pitch)
         }
+    }
+}
+
+/// Beside the bar's "+N": how many sessions have no tile (and how many of them wait for you), and a way to all of
+/// them: the row keeps the sessions open.
+struct MoreSessionsRow: View {
+    let hidden: [BarSessions.Slot]
+    let show: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let waiting = hidden.filter(\.waiting).count
+        Button(action: show) {
+            HStack(spacing: 6) {
+                Text(plural(hidden.count, "more session")).font(Theme.Typography.body).foregroundStyle(Theme.secondary)
+                Spacer(minLength: 6)
+                if waiting > 0 { Text("\(waiting) waiting").font(Theme.Typography.numeral).foregroundStyle(Theme.amber) }
+            }
+            .rowHighlight(hover: hovering)
+            .frame(height: Theme.Metrics.pitch)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(plural(hidden.count, "more session"))
+        .accessibilityValue(waiting > 0 ? "\(waiting) waiting for you" : "")
+        .accessibilityHint("Keeps the sessions open")
     }
 }

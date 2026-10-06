@@ -247,7 +247,7 @@ extension LookoutHub {
             case .agents:
                 // The one thing before the first tile: the rows under it line up with the bar's cells.
                 agentsHeader.frame(height: Self.peekLead(.agents))
-                PeekSessionRows(store: store, ui: ui, hub: hub)
+                PeekSessionRows(store: store, ui: ui, hub: hub, room: sessionRoom) { show(.agents) }
                 ClaudeNotice(store: store).padding(.horizontal, 8)
             default:
                 // (The controls have their own panel.)

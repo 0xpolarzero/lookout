@@ -159,26 +159,72 @@ import Testing
         let slots = (0..<12).map { slot("s\($0)") }
         let (shown, hidden) = BarSessions.arrange(slots, frozen: nil)
         #expect(shown.count == 8)
-        #expect(hidden == 4)
+        #expect(hidden.count == 4)
     }
 
     @Test func oneOverShowsItsTileInsteadOfPlusOne() {
         let (shown, hidden) = BarSessions.arrange((0..<9).map { slot("s\($0)") }, frozen: nil)
         #expect(shown.count == 9)
-        #expect(hidden == 0)
+        #expect(hidden.isEmpty)
     }
 
     @Test func waitingSessionsAreNeverCollapsed() {
         let slots = (0..<12).map { slot("s\($0)", "waiting", waiting: $0 < 10) }
         let (shown, hidden) = BarSessions.arrange(slots, frozen: nil)
         #expect(shown.count == 10)
-        #expect(hidden == 2)
+        #expect(hidden.count == 2)
         // Even when the frozen order has it far down the list.
         let late = (0..<12).map { slot("s\($0)", waiting: $0 == 11) }
         let frozen = (0..<12).map { slot("s\($0)") }
         let arranged = BarSessions.arrange(late, frozen: frozen)
         #expect(arranged.shown.contains { $0.id == "s11" })
         #expect(arranged.shown.count == 9)
+    }
+
+    @Test func aLateWaitingSessionIsNinthInTheBarAndTheHiddenOnesFollowIt() {
+        // Twelve of one project, held in order by the pointer; the twelfth then waits. The bar and the side panel arrange
+        // the same way, so its tile and its row are both the ninth and the "+3" row stands beside the "+3" tile.
+        let frozen = (0..<12).map { slot("s\($0)") }
+        let late = (0..<12).map { $0 == 11 ? slot("s11", "waiting", waiting: true) : slot("s\($0)") }
+        let (shown, hidden) = BarSessions.arrange(late, frozen: frozen)
+        #expect(shown.count == 9)
+        #expect(shown[8].id == "s11")
+        #expect(hidden.map(\.id) == ["s8", "s9", "s10"])
+    }
+
+    @Test func theEdgesRoomCutsTheTilesAndTheMoreCellTakesOneSlot() {
+        let pitch = Theme.Metrics.pitch
+        let slots = (0..<12).map { slot("s\($0)") }
+        // Room for five cells: four tiles and the "+8".
+        let (shown, hidden) = BarSessions.arrange(slots, frozen: nil, room: 5 * pitch)
+        #expect(shown.map(\.id) == ["s0", "s1", "s2", "s3"])
+        #expect(hidden.count == 8)
+        // Plenty of room changes nothing: the eight and a "+4".
+        #expect(BarSessions.arrange(slots, frozen: nil, room: 40 * pitch).hidden.count == 4)
+    }
+
+    @Test func waitingSessionsAreTheLastToLoseTheirTileToTheEdgesRoom() {
+        let pitch = Theme.Metrics.pitch
+        // Three waiting, then ten others: room for six cells keeps all three waiting and two others, never the reverse.
+        let slots = (0..<3).map { slot("w\($0)", "waiting", waiting: true) } + (0..<10).map { slot("s\($0)") }
+        let (shown, hidden) = BarSessions.arrange(slots, frozen: nil, room: 6 * pitch + BarSessions.groupGap)
+        #expect(shown.map(\.id) == ["w0", "w1", "w2", "s0", "s1"])
+        #expect(hidden.count == 8)
+        // Twenty waiting on a short screen: the first ten show, the rest are behind a "+10" that knows they wait.
+        let many = (0..<20).map { slot("w\($0)", "waiting", waiting: true) }
+        let cut = BarSessions.arrange(many, frozen: nil, room: 11 * pitch)
+        #expect(cut.shown.count == 10)
+        #expect(cut.hidden.count == 10)
+        #expect(cut.hidden.allSatisfy { $0.waiting })
+    }
+
+    @Test func oneOverStillShowsItsTileWhenTheRoomHasIt() {
+        let pitch = Theme.Metrics.pitch
+        let slots = (0..<9).map { slot("s\($0)") }
+        #expect(BarSessions.arrange(slots, frozen: nil, room: 9 * pitch).hidden.isEmpty)
+        // Not when the tile needs a gap the room lacks: the "+1" holds it instead.
+        let two = (0..<8).map { slot("s\($0)") } + [slot("t", "p:b")]
+        #expect(BarSessions.arrange(two, frozen: nil, room: 9 * pitch).hidden.count == 1)
     }
 
     @Test func slotsPutWaitingFirstThenProjectsThenNewActivity() {

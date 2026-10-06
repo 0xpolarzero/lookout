@@ -128,6 +128,9 @@ struct LookoutHub: View {
     var maxLength: CGFloat = 700
     /// The window's width: along the top and bottom, the sessions' column takes what the screen has left.
     var maxWidth: CGFloat = .infinity
+    /// Room for the bar at rest along its own axis, whatever is open: the screen's height on the sides, its width
+    /// along the top and bottom, less the margins. The sessions' cells give way to it (`sessionRoom`).
+    var barLength: CGFloat = .infinity
     /// Where each section's cells are in the bar, and whether the pointer is on the bar or a section's panel.
     @State var sectionFrames: [HubSection: CGRect] = [:]
     @State var overBar = false
