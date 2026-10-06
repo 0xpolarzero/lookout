@@ -19,6 +19,8 @@ final class InboxState {
     var scrolled = false
     /// The rows below the last whole row a list cut short shows (what its `+N more` line says).
     var hiddenBelow = 0
+    /// The list is cut and there is no room under it for the `+N more` line, so the header says it (`InboxHeaderCue`).
+    var cueInHeader = false
 
     func startSearch(seeded: Bool = false) {
         searchOpen = true
@@ -196,6 +198,7 @@ extension LookoutHub {
         return HStack(spacing: Theme.Space.xs) {
             // The tabs never give up their words: the actions after them are what yields when the column is narrow.
             tabs.fixedSize().layoutPriority(2)
+            InboxHeaderCue(hub: hub)
             Spacer(minLength: 0)
             if rows {
                 IconButton(symbol: "magnifyingglass", help: "Search", detail: "⌘F") { hub.beginSearch() }
@@ -447,7 +450,7 @@ struct InboxList: View {
             .transition(.opacity)
             .motion(Theme.Motion.fade, value: listKey)
         }
-        .onDisappear { hub.inbox.scrolled = false; hub.inbox.hiddenBelow = 0 }
+        .onDisappear { hub.inbox.scrolled = false; hub.inbox.hiddenBelow = 0; hub.inbox.cueInHeader = false }
         .accessibilityRotor("Unread") {
             ForEach(items.filter { $0.state == .unread }) { AccessibilityRotorEntry(Text($0.title), id: $0.id, in: rotor) }
         }
@@ -463,8 +466,11 @@ struct InboxList: View {
     }
 
     private func refreshHidden() {
-        let hidden = cut ? Self.hiddenBelow(count: items.count, offset: scroll.offset, rows: rows) : 0
+        // A list cut with no room for its line (a bar resting that low leaves the inbox one row) says it in the header.
+        let overflowing = Self.isCut(count: items.count, cap: cap)
+        let hidden = overflowing ? Self.hiddenBelow(count: items.count, offset: scroll.offset, rows: rows) : 0
         if hub.inbox.hiddenBelow != hidden { hub.inbox.hiddenBelow = hidden }
+        if hub.inbox.cueInHeader != (overflowing && !cut) { hub.inbox.cueInHeader = overflowing && !cut }
     }
 
     /// A page further down: the last row of the next screenful scrolls into view.
@@ -474,6 +480,21 @@ struct InboxList: View {
     }
 
     private final class ScrollBox { var offset: CGFloat = 0 }
+}
+
+/// "+4 more" in the inbox's header, for a list that is cut short where there is no room under it for the line that says so.
+/// Its own view: the count follows the scroll, which the hub's body doesn't read.
+private struct InboxHeaderCue: View {
+    let hub: HubState
+
+    var body: some View {
+        if hub.inbox.cueInHeader, hub.inbox.hiddenBelow > 0 {
+            Text("+\(hub.inbox.hiddenBelow) more")
+                .font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1).fixedSize()
+                .padding(.leading, Theme.Space.sm)
+                .accessibilityLabel(plural(hub.inbox.hiddenBelow, "more item"))
+        }
+    }
 }
 
 /// "+3 more", under a list that is cut short, and "Back to top" once it is at the end: `tertiary` text level with the

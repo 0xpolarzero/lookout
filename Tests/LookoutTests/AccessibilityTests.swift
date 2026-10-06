@@ -34,13 +34,13 @@ enum AccessibilityTree {
 
     /// The tree of a hub on `edge`, put in the state `configure` asks for once it is on screen.
     static func render(edge: DockEdge = .right, scenario: Demo.Scenario = .agents, size: CGSize = CGSize(width: 900, height: 800),
-                       configure: (Store, HubState) -> Void = { _, _ in }) async throws -> AXNode {
+                       openLength: CGFloat = 700, configure: (Store, HubState) -> Void = { _, _ in }) async throws -> AXNode {
         _ = enabled
         let store = Store()
         Demo.populate(store, scenario)
         store.agents.expanded = true
         let hub = HubState()
-        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: edge), hub: hub, maxLength: 700, openLength: 700,
+        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: edge), hub: hub, maxLength: 700, openLength: openLength,
                               maxWidth: size.width, barLength: 700)
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         let hosting = NSHostingView(rootView: view)
@@ -155,6 +155,22 @@ enum AccessibilityTree {
         #expect(try await order(.bottom) == top)
         #expect(try await order(.left) == (try await order(.right)))
         #expect(top.first == "AXButton Inbox" && top.last == "AXGroup Controls", "\(top)")
+    }
+
+    @Test func aListCutShortAlwaysSaysSoWhereverTheRoomIs() async throws {
+        // What the open-low shots show: the room below a low bar leaves the inbox a row and its line, or only a row. The six
+        // items are more than either holds, so the rest is said under the list (a button) or, with no room for that line,
+        // in the header (text).
+        for edge in [DockEdge.left, .right] {
+            for room in stride(from: CGFloat(160), through: 260, by: 10) {
+                let tree = try root(try await AccessibilityTree.render(edge: edge, scenario: .noCI, openLength: room) { store, hub in
+                    store.agents.enabled = false
+                    hub.pinned = true
+                })
+                let says = tree.all.contains { $0.label.hasSuffix("more items") || "\($0.value)".hasSuffix("more items") }
+                #expect(says, "\(edge) with \(room) pt: the list is cut and nothing says there are more")
+            }
+        }
     }
 
     @Test func theKeptOpenHubHasASectionAndAHeadingForEach() async throws {
