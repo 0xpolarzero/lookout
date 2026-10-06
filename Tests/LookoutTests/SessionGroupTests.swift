@@ -232,6 +232,23 @@ import Testing
         #expect(ProjectsMenu.make(s).items.map(\.title) == ["Scratch (no folder)", "", "new", "old"])
     }
 
+    @Test func oneWaitingClearsASearchThatHidesItBeforePickingIt() {
+        let s = store([session("ask", blocked: true), session("n1", minutesAgo: 1)], kept: ["ask"], unread: ["ask"])
+        let hub = HubState(), ui = UIState()
+        hub.query = "n1"
+        hub.focus = .inbox
+        #expect(s.hubSessions(hub).map(\.id) == ["n1"])
+        hub.pickFirstWaiting(in: s, ui: ui)
+        // The whole list is back, with the waiting row in it, picked and asked for.
+        #expect(hub.query.isEmpty && hub.focus == nil)
+        #expect(s.hubSessions(hub).map(\.id).first == "ask")
+        #expect(hub.selection == "a:ask" && hub.keyboardSelection?.id == "a:ask" && ui.drawerSelection == "ask")
+        // With Sessions focused already, it stays so.
+        hub.focus = .agents
+        hub.pickFirstWaiting(in: s, ui: ui)
+        #expect(hub.focus == .agents)
+    }
+
     @Test func newSessionOffersTheMostRecentProjectFirst() {
         let s = store([session("a", folder: "/code/old", minutesAgo: 50), session("b", folder: "/code/new", minutesAgo: 1),
                        session("c", folder: nil, minutesAgo: 0)])

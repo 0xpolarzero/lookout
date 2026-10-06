@@ -489,6 +489,21 @@ enum ProjectsMenu {
 }
 
 extension HubState {
+    /// Picks the first session waiting on you and scrolls to it. A search that left it out, or another section
+    /// focused, would hide the row: both go first, so there is a row to scroll to.
+    func pickFirstWaiting(in store: Store, ui: UIState) {
+        guard let id = store.sessionGroups.first(where: { $0.kind == .waiting })?.rows.first?.id else { return }
+        if !query.isEmpty || (focus != nil && focus != .agents) {
+            LookoutHub.animate(LookoutHub.refocus) {
+                query = ""
+                if focus != .agents { focus = nil }
+            }
+        }
+        selection = "a:" + id
+        requestScroll("a:" + id)
+        ui.drawerSelection = id
+    }
+
     /// "+N more" opens the rest of New activity.
     func expandSessions() {
         LookoutHub.animate { sessionsExpanded = true }
@@ -539,10 +554,7 @@ extension LookoutHub {
 
     /// The first row of Waiting for you, picked as the keys would, and scrolled to.
     func pickFirstWaiting() {
-        guard let id = store.sessionGroups.first(where: { $0.kind == .waiting })?.rows.first?.id else { return }
-        hub.selection = "a:" + id
-        hub.requestScroll("a:" + id)
-        ui.drawerSelection = id
+        hub.pickFirstWaiting(in: store, ui: ui)
     }
 
     /// The groups, scrolling once past `cap`.
