@@ -133,6 +133,9 @@ extension LookoutHub {
             // Its header stays level with its first cell, so it only moves at the ends: it grows to meet the bar's
             // bottom if it ends close to it.
             start = section == .inbox ? 0 : section == .controls ? bar - length : max(frame.minY - HubGeometry.lead, 0)
+            // A low cell leaves less room below it than a row and its "+N more" need with the header: the panel moves up
+            // by what would hang past the screen's end.
+            start = HubGeometry.peekStart(start, length: length, reach: maxLength + HubGeometry.inset - hubTop)
             let short = bar - (start + length)
             if short >= 0, short < Self.peekSnap { length = bar - start }
         }
@@ -236,11 +239,19 @@ extension LookoutHub {
         }
     }
 
-    /// What the screen leaves a panel below (or above) the bar's end it hangs from.
+    /// What the screen leaves a panel below (or above) the bar's end it hangs from: from where its header starts, which
+    /// is level with its section's first cell.
     func peekRoom(_ section: HubSection) -> CGFloat {
         guard !edge.isHorizontal else { return maxLength - Self.cell }
         let start = section == .inbox ? 0 : max((sectionFrames[section]?.minY ?? 0) - HubGeometry.lead, 0)
-        return max(maxLength + HubGeometry.inset - hubTop - start, 160)
+        return maxLength + HubGeometry.inset - hubTop - start
+    }
+
+    /// What a peek's rows may take (their "+N more" included): the room left by its padding and `fixed`, its header and
+    /// whatever else is always there. Never less than a whole row and the "+N more" under it: with less room than that
+    /// below its first cell, the panel moves up (`placement`) rather than the rows being cut through.
+    func peekCap(_ section: HubSection, fixed: CGFloat) -> CGFloat {
+        max(peekRoom(section) - 2 * HubGeometry.lead - fixed, Theme.Metrics.twoLineRow + Theme.Metrics.pitch)
     }
 
     @ViewBuilder func peekContent(_ section: HubSection) -> some View {
@@ -261,7 +272,7 @@ extension LookoutHub {
 
     /// The inbox, rows as the full view has them, as many whole ones as fit.
     @ViewBuilder var peekInbox: some View {
-        let cap = max(peekRoom(.inbox) - 2 * HubGeometry.lead - Theme.Metrics.pitch, 88)
+        let cap = peekCap(.inbox, fixed: Theme.Metrics.pitch)
         inboxHeader.frame(height: Theme.Metrics.pitch)
         if items.isEmpty {
             emptyInbox
@@ -280,7 +291,7 @@ extension LookoutHub {
         if store.ciRepos.isEmpty {
             linkRow("No CI configured", action: "Choose repositories") { hub.go(.repos) }.frame(height: Theme.Metrics.pitch)
         } else {
-            let cap = max(peekRoom(.ci) - 2 * HubGeometry.lead - Theme.Metrics.pitch, 88)
+            let cap = peekCap(.ci, fixed: Theme.Metrics.pitch)
             ciHeader.frame(height: Theme.Metrics.pitch)
             let rows = ciPeekRows
             WholeRows(total: rows.count, cap: cap, noun: rows.noun, onMore: keepOpen) {
@@ -306,7 +317,8 @@ extension LookoutHub {
     @ViewBuilder var peekAgents: some View {
         let rows = agentRows
         let all = rows.kept + rows.pending
-        let cap = max(peekRoom(.agents) - 2 * HubGeometry.lead - 2 * Theme.Metrics.pitch, 88)
+        // Its header and the New session row are always there, and the notice when Claude's files are not.
+        let cap = peekCap(.agents, fixed: 2 * Theme.Metrics.pitch + ClaudeNotice.room(store))
         let starts = projectStarts(rows.kept)
         agentsHeader.frame(height: Theme.Metrics.pitch)
         ClaudeNotice(store: store).padding(.horizontal, Theme.Metrics.rowPadding)
@@ -423,16 +435,7 @@ struct WholeRows<Content: View>: View {
                 .frame(height: limit, alignment: .top)
                 .clipped()
             if hidden > 0 {
-                Button(action: onMore) {
-                    Text("+\(hidden) more").font(Theme.Typography.control).foregroundStyle(Theme.secondary)
-                        .padding(.horizontal, Theme.Metrics.rowPadding)
-                        .frame(maxWidth: .infinity, minHeight: Theme.Metrics.pitch, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focusRing(Theme.Radius.row)
-                .accessibilityLabel("\(plural(hidden, "more " + noun))")
-                .accessibilityHint("Keeps Lookout open to show them")
+                MoreRow(text: "+\(hidden) more", label: plural(hidden, "more " + noun), hint: "Keeps Lookout open to show them", action: onMore)
             }
         }
         .onPreferenceChange(CapEdges.self) { new in

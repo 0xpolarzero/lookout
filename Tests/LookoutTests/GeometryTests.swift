@@ -56,6 +56,14 @@ import Testing
         #expect(HubGeometry.sideLength(visibleHeight: 800, position: 0.0, restLength: 400) == 800 - 2 * HubGeometry.inset)
     }
 
+    @Test func aPanelFromALowCellMovesUpByWhatHangsPastTheScreen() {
+        // A 720 screen leaves 714 to the panel: from a cell 90 above it, 130 of header and rows is 40 too many.
+        #expect(HubGeometry.peekStart(624, length: 130, reach: 714) == 584)
+        // Room enough, and it stays level with its cell; too long for any room, and it starts at the bar's start.
+        #expect(HubGeometry.peekStart(300, length: 130, reach: 714) == 300)
+        #expect(HubGeometry.peekStart(300, length: 900, reach: 714) == 0)
+    }
+
     @Test func theFullViewFitsAnyScreen() {
         // The longest it may be leaves both insets; along the top and bottom it never outgrows the screen's width.
         #expect(HubGeometry.maxLength(visibleHeight: 695) == 683)
@@ -260,6 +268,24 @@ import Testing
         if edge.isHorizontal { #expect(rest.frame.minX == open.frame.minX, "\(edge): \(rest.frame) then \(open.frame)") }
         else { #expect(rest.frame.minY == open.frame.minY, "\(edge): \(rest.frame) then \(open.frame)") }
         expectInside(open.frame, edge: edge, screen: screen, "\(edge) with a page")
+    }
+
+    /// A hover panel stays on the screen, whatever it hangs from.
+    private nonisolated static let peeks = [DockEdge.right, .left].flatMap { edge in
+        [0.7, 0.9].flatMap { position in [HubSection.inbox, .ci, .agents].map { (edge, position, $0) } }
+    }
+
+    @Test(arguments: peeks)
+    func aPeekFromALowCellStaysOnTheScreen(edge: DockEdge, position: Double, section: HubSection) {
+        let screen = CGSize(width: 1280, height: 720)
+        // Sessions off, so the CI cell is the last the bar has and the panel has the least room under it.
+        let (_, open) = render(edge: edge, position: position, screen: screen, scenario: section == .ci ? .allPassing : .agents, section: section) {
+            $0.agents.enabled = section == .agents
+        }
+        let panel = open.panel
+        #expect(panel.height > 0, "\(edge) \(position) \(section): no panel")
+        #expect(panel.minY >= HubGeometry.inset - 0.5 && panel.maxY <= screen.height - HubGeometry.inset + 0.5,
+                "\(edge) \(position) \(section): the panel is at \(panel) in \(screen)")
     }
 
     @Test(arguments: [DockEdge.top, .bottom])

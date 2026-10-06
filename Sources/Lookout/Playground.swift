@@ -311,6 +311,7 @@ struct Shot {
 /// 1280×720, every edge
 ///   open-720, settings-720, repos-720, rest-sessions-12-720, peek-inbox-720, peek-ci-720, peek-ci-many-ci-720, peek-agents-720,
 ///   peek-controls-720, focus-inbox-720, open-sessions-12-720, open-many-ci-720
+///   peek-inbox-low-720, peek-ci-low-720 (sessions off), peek-agents-low-720 (bar at 0.9, on the sides)
 @MainActor
 enum PlaygroundShots {
     /// States of the data, as `(name, scenario)`; each is shown at rest, open and as a peek where it applies.
@@ -400,6 +401,10 @@ enum PlaygroundShots {
         Shot.edges("peek-agents-720") { $0.section = .agents; $0.scenario = .sessions12; $0.size = Shot.hd },
         Shot.edges("peek-controls-720") { $0.section = .controls; $0.size = Shot.hd },
         Shot.edges("focus-inbox-720") { $0.pinned = true; $0.focus = .inbox; $0.size = Shot.hd },
+        // A bar low on the edge, with little room below its cells: each peek keeps whole rows, "+N more" and the screen.
+        Shot.edges("peek-ci-low-720", on: .sides) { $0.section = .ci; $0.scenario = .allPassing; $0.position = 0.9; $0.size = Shot.hd; $0.setup = { store, _, _ in store.agents.enabled = false } },
+        Shot.edges("peek-inbox-low-720", on: .sides) { $0.section = .inbox; $0.position = 0.9; $0.size = Shot.hd },
+        Shot.edges("peek-agents-low-720", on: .sides) { $0.section = .agents; $0.position = 0.9; $0.scenario = .sessions12; $0.size = Shot.hd },
         Shot.edges("open-sessions-12-720") { $0.pinned = true; $0.scenario = .sessions12; $0.size = Shot.hd },
         Shot.edges("open-many-ci-720") { $0.pinned = true; $0.scenario = .manyCI; $0.size = Shot.hd },
     ].flatMap { $0 }

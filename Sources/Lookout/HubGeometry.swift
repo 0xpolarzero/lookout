@@ -45,6 +45,13 @@ enum HubGeometry {
         return min(anchor, max(length - own - inset, inset))
     }
 
+    /// Where a hover panel starts along the bar's axis (from the bar's start): at `start`, level with its cell, unless
+    /// that would leave it hanging past `reach` (how far the screen lets it go); then up by the least that doesn't,
+    /// never above the bar's start.
+    static func peekStart(_ start: CGFloat, length: CGFloat, reach: CGFloat) -> CGFloat {
+        max(min(start, reach - length), 0)
+    }
+
     /// The hub's origin in a window `bounds` spanning the edge, flush with the screen on its own side.
     static func origin(edge: DockEdge, position: Double, restLength: CGFloat, size: CGSize, in bounds: CGRect) -> CGPoint {
         switch edge {
