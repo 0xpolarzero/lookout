@@ -10,7 +10,7 @@ enum Demo {
     enum Scenario: String {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
         // Inbox and sync causes.
-        case signedOut, reposFailed, reviewRequestsFailed, reviewRequestsCut, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        case signedOut, reposFailed, reviewRequestsFailed, reviewRequestsCut, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault, offline
         // An inbox longer than any list shows: the rest is "+N more".
         case inboxMany
         // CI.
@@ -146,6 +146,12 @@ enum Demo {
             // Several poll intervals old: the sync status reads "Not syncing".
             agents(store, now)
             store.lastSync = now.addingTimeInterval(-3600)
+        case .offline:
+            // No answer from GitHub at the first look: the rows it had stay, the token is not blamed.
+            agents(store, now)
+            store.me = nil
+            store.lastSync = now
+            store.unreachable = true
         case .noCI:
             agents(store, now)
             for i in store.repos.indices { store.repos[i].events.remove(.ciMain) }

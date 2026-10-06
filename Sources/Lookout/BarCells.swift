@@ -245,8 +245,8 @@ extension Store {
     /// How old an answer may be before it is not called fresh: three poll intervals.
     var staleAfter: TimeInterval { settings.pollInterval * 3 }
 
-    /// Whether the last sync is too old to be called fresh.
-    func isStale(at now: Date) -> Bool { lastSync.map { now.timeIntervalSince($0) > staleAfter } ?? false }
+    /// Whether the last sync is too old to be called fresh, or GitHub could not be reached to begin with.
+    func isStale(at now: Date) -> Bool { unreachable || (lastSync.map { now.timeIntervalSince($0) > staleAfter } ?? false) }
 
     /// Whether the oldest check the CI rows show is too old (a sync that refreshed the inbox can leave CI behind).
     func isCIStale(at now: Date) -> Bool { ciFreshness.map { now.timeIntervalSince($0) > staleAfter } ?? false }

@@ -299,13 +299,13 @@ enum PlaygroundShots {
     private static let causes: [(String, Demo.Scenario)] = [
         ("signed-out", .signedOut), ("repos-failed", .reposFailed), ("rate-limited", .rateLimited), ("snoozed", .snoozed),
         ("error", .error), ("needs-you-empty", .needsYouEmpty), ("first-sync", .firstSync), ("sync-fault", .syncFault),
-        ("review-requests-cut", .reviewRequestsCut),
+        ("review-requests-cut", .reviewRequestsCut), ("offline", .offline),
     ]
     /// Why the inbox is empty or has a banner, as `(name, scenario, tab)`.
     private static let inboxCauses: [(String, Demo.Scenario, InboxFilter?)] = [
         ("signed-out", .signedOut, nil), ("no-repos", .empty, nil), ("repos-failed", .reposFailed, nil),
         ("review-requests-failed", .reviewRequestsFailed, nil), ("review-requests-cut", .reviewRequestsCut, nil), ("rate-limited", .rateLimited, nil), ("snoozed", .snoozed, nil), ("caught-up", .needsYouEmpty, nil),
-        ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil),
+        ("bots-empty", .botsEmpty, .bots), ("done-empty", .doneEmpty, .done), ("first-sync", .firstSync, nil), ("offline", .offline, nil),
     ]
     private static let ci: [(String, Demo.Scenario)] = [
         ("all-passing", .allPassing), ("many-ci", .manyCI), ("ci-running", .ciRunning), ("ci-no-runs", .ciNoRuns),
@@ -608,6 +608,7 @@ enum PlaygroundShots {
         page("settings-claude-off", .settings) { $0.preview.pane = .claude; $0.scenario = .busy },
         // The states of Settings that the dev build and a healthy account never show.
         page("settings-signed-out", .settings) { $0.scenario = .signedOut },
+        page("settings-offline", .settings) { $0.scenario = .offline },
         page("settings-launch-error", .settings) { $0.preview.launchError = "The operation couldn't be completed. Operation not permitted" },
         page("settings-update-idle", .settings) { $0.setup = updater(.idle) },
         page("settings-update-available", .settings) { $0.setup = updater(.available) },

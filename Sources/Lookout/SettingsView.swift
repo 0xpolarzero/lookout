@@ -71,12 +71,13 @@ extension EnvironmentValues {
 enum SignInFailure {
     /// What `Store.authenticate` sets when neither `gh` nor the Keychain has a token.
     static let missingToken = "No GitHub token found"
+    static let unreachableSentence = "Couldn't reach GitHub."
 
     static func sentence(_ reason: String) -> String {
         if reason == missingToken { return "Run gh auth login in Terminal, or use a token." }
         return switch RepoFailure(reason: reason) {
         case .badToken: "GitHub rejected your token."
-        case .unreachable: "Couldn't reach GitHub."
+        case .unreachable: unreachableSentence
         default: "Couldn't sign in to GitHub."
         }
     }
@@ -252,11 +253,15 @@ struct SettingsView: View {
                     Text(store.tokenSource.map { "Token from \($0.rawValue)" } ?? "").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                 }
             } else {
-                Image(systemName: "exclamationmark.circle.fill").font(Theme.Typography.glyph(16, .regular)).foregroundStyle(Theme.red)
+                Image(systemName: "exclamationmark.circle.fill").font(Theme.Typography.glyph(16, .regular))
+                    .foregroundStyle(store.unreachable ? Theme.amber : Theme.red)
                     .frame(width: 22, height: 22).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Theme.Space.hair) {
-                    Text("Not signed in").font(Theme.Typography.body).foregroundStyle(Theme.text)
-                    if let error = store.authError {
+                    Text(store.unreachable ? "Couldn't reach GitHub" : "Not signed in").font(Theme.Typography.body).foregroundStyle(Theme.text)
+                    if store.unreachable {
+                        Text("Check your connection. Lookout tries again on its own.").font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let error = store.authError {
                         let sentence = SignInFailure.sentence(error)
                         Text(verbatim: sentence).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)

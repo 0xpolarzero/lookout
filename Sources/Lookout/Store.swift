@@ -99,6 +99,9 @@ final class Store {
     var me: GHUser?
     var tokenSource: TokenSource?
     var authError: String?
+    /// The first look at the account got no answer from GitHub (no network yet, a VPN down): nothing is known of the token, so
+    /// this is a sync problem, not a sign-in one, and the cached rows stay.
+    var unreachable = false
     var repoErrors: [String: String] = [:]
     /// What a repository's conversations and its CI each failed at, apart: one succeeding says nothing of the other.
     @ObservationIgnored var conversationErrors: [String: String] = [:]
@@ -732,10 +735,16 @@ final class Store {
         do {
             me = try await gh.get("/user", as: GHUser.self)
             authError = nil
+            unreachable = false
             awaitingSignIn = false
         } catch {
             if (error as? GitHubError)?.message == GitHubError.rejectedToken { gh.token = nil }
-            signInFailed(error.localizedDescription)
+            if error is URLError {
+                unreachable = true
+                signInAnswered(SignInFailure.unreachableSentence)
+            } else {
+                signInFailed(error.localizedDescription)
+            }
         }
     }
 
@@ -744,9 +753,14 @@ final class Store {
     func signInFailed(_ reason: String) {
         me = nil
         authError = reason
+        unreachable = false
+        signInAnswered(SignInFailure.sentence(reason))
+    }
+
+    private func signInAnswered(_ sentence: String) {
         guard awaitingSignIn else { return }
         awaitingSignIn = false
-        announceSignIn(SignInFailure.sentence(reason))
+        announceSignIn(sentence)
     }
 
     /// Keeps `token` in the Keychain, or removes it with nothing, and signs in again with what is there. False when the

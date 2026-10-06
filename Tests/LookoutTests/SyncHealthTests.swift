@@ -42,6 +42,25 @@ import Testing
         #expect(asks.withLock { $0 } == 3 && s.me != nil)
     }
 
+    @Test func aFirstLookThatCantReachGitHubIsASyncProblemAndKeepsTheRowsNotASignInOne() async {
+        let s = Store.unsaved()
+        s.resolveToken = { ("token", .environment) }
+        s.settings.reviewRequests = false
+        s.gh.transport = { _ in throw URLError(.notConnectedToInternet) }
+        await s.pollAll()
+        #expect(s.authError == nil && s.inboxReplacement == nil && s.unreachable)
+        #expect(s.syncFault(stale: s.isStale(at: Date())) == .stale)
+        // Through at the next poll: the sync is healthy again.
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"login": "me", "avatar_url": null, "type": "User"}"#) }
+        await s.pollAll()
+        #expect(s.me?.login == "me" && !s.unreachable && s.syncFault(stale: s.isStale(at: Date())) != .stale)
+        // A token GitHub refuses is still a sign-in problem.
+        s.me = nil
+        s.gh.transport = { _ in SyncHealth.reply(401, #"{"message": "Bad credentials"}"#) }
+        await s.pollAll()
+        #expect(s.authError != nil && !s.unreachable && s.inboxReplacement == .signedOut)
+    }
+
     @Test func signedOutPollsOnTheTimerDoNotLookForATokenAgainButAskedOnesDo() async {
         let s = Store.unsaved()
         let asks = OSAllocatedUnfairLock(initialState: 0)
