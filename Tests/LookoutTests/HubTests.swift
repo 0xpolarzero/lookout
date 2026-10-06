@@ -1030,6 +1030,21 @@ import Testing
         #expect(row?.activity?.text == "Editing Sessions.swift")
     }
 
+    @Test func aSessionRowDoesNotReadTheWholeSessionsCache() throws {
+        // One session's step must redraw its own row, not every row of the list: the row reads only its own snapshot.
+        let id = try #require(store.claudeSessions.values.first { $0.running }?.id)
+        let rows = store.allAgentRows
+        #expect(rows.count > 3)
+        var redrawn = 0
+        for row in rows {
+            let view = SessionRow(row: row, store: store, ui: ui, hub: hub, rail: .trailing, placement: .project)
+            withObservationTracking { _ = view.content(now: Date()) } onChange: { redrawn += 1 }
+        }
+        store.claudeActivity[id] = ClaudeActivity(text: "Running swift test", since: Date())
+        store.claudeTasks[id] = [ClaudeTask(id: "t1", kind: .command, title: "swift test", since: Date())]
+        #expect(redrawn == 0, "\(redrawn) of \(rows.count) rows read what a single session's activity changes")
+    }
+
     @Test func theTrackingSeesAChangeThatShouldRedrawIt() {
         #expect(bodyChanges(pinned: true) { store.items = [] })
     }

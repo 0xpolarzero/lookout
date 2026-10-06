@@ -97,7 +97,7 @@ struct SessionsList: View {
                 ForEach(Array(listed.groups.enumerated()), id: \.element.id) { i, group in
                     SessionGroupHeader(group: group, store: store, hub: hub, rail: rail).padding(.top, i == 0 ? 0 : SessionGroup.gap)
                         .id(i == 0 ? "s:top" : group.id)
-                    ForEach(group.rows) { row($0, group.placement(of: $0)) }
+                    ForEach(group.rows) { row($0, group.placement(of: $0), moves: group.moves(of: $0)) }
                 }
                 if listed.hidden > 0 {
                     MoreSessionsRow(hidden: listed.hidden, waiting: peeked?.waiting ?? 0, hub: hub, rail: rail, action: moreAction)
@@ -115,8 +115,8 @@ struct SessionsList: View {
         if peekCap == nil { hub.expandSessions(in: store, ui: ui) } else { LookoutHub.animate(LookoutHub.refocus) { hub.pinned = true; hub.focus = .agents } }
     }
 
-    private func row(_ row: AgentRow, _ placement: SessionPlacement) -> some View {
-        SessionRow(row: row, store: store, ui: ui, hub: hub, rail: rail, placement: placement)
+    private func row(_ row: AgentRow, _ placement: SessionPlacement, moves: SessionGroup.Moves = .init()) -> some View {
+        SessionRow(row: row, store: store, ui: ui, hub: hub, rail: rail, placement: placement, moves: moves)
             .transition(.opacity)
             .capEdge()
             .id("a:" + row.id)
@@ -319,6 +319,20 @@ extension SessionGroup {
         }
     }
 
+    /// Whether a row can trade places with the one above or below it in its project: the rows the group draws and those its
+    /// cut leaves out below them, a row held here from another project (a frozen group's) has no neighbour.
+    struct Moves: Equatable {
+        var up = false
+        var down = false
+    }
+
+    func moves(of row: AgentRow) -> Moves {
+        guard case .project = kind else { return Moves() }
+        let own = rows.filter { placement(of: $0) == .project }
+        guard let i = own.firstIndex(where: { $0.id == row.id }) else { return Moves() }
+        return Moves(up: i > 0, down: i + 1 < own.count + max(total - rows.count, 0))
+    }
+
     /// What `row` is listed under here: a project's own rows say nothing of their project, but a row held in a frozen group
     /// that is another project's now names it.
     func placement(of row: AgentRow) -> SessionPlacement {
@@ -471,6 +485,9 @@ struct SessionRow: View {
     let hub: HubState
     let rail: HorizontalEdge?
     let placement: SessionPlacement
+    /// Whether it has a neighbour to trade places with in its project, which the list knows from the group it draws: the row
+    /// asking the store would read every session's state in its own body, and redraw all of them for one session's step.
+    var moves = SessionGroup.Moves()
     @State private var dropTarget = false
     @AccessibilityFocusState private var voiceOverFocused: Bool
     @Environment(\.resolved) private var resolved
@@ -487,7 +504,7 @@ struct SessionRow: View {
         Ticking(since: row.session.running && !row.isWaiting ? row.workingSince : nil) { now in content(now: now) }
     }
 
-    @ViewBuilder private func content(now: Date) -> some View {
+    @ViewBuilder func content(now: Date) -> some View {
         let id = "a:" + row.id
         let picked = hub.selection == id && hub.keyboardSelection?.id == id
         let hot = ui.drawerSelection == row.id
@@ -529,8 +546,8 @@ struct SessionRow: View {
             Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
             if row.pending { Button("Keep") { store.keepAgent(row.id) } }
             Button("Hide") { store.dismissAgent(row.id) }
-            if store.canMoveAgent(row.id, by: -1) { Button("Move up") { store.moveAgent(row.id, by: -1) } }
-            if store.canMoveAgent(row.id, by: 1) { Button("Move down") { store.moveAgent(row.id, by: 1) } }
+            if moves.up { Button("Move up") { store.moveAgent(row.id, by: -1) } }
+            if moves.down { Button("Move down") { store.moveAgent(row.id, by: 1) } }
         }
     }
 

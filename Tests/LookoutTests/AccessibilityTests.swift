@@ -196,6 +196,10 @@ enum AccessibilityTree {
         let failing = try #require(lookout.first("AXButton", "swift-format"))
         #expect(failing.value.hasPrefix("failing, Linux build and Windows test, ") && failing.value.hasSuffix("minutes ago"))
         #expect(failing.actions.contains("Mute until it changes") && failing.actions.contains("Open checks"))
+        // A project's rows can trade places with the neighbour they have: the first only down, the middle both, the last only up.
+        let project = ["CI failure diagnosis", "Repository ownership transfer setup", "LCU JavaScript sandbox on Linux"]
+        let moves = try project.map { name in Set(try #require(lookout.first("AXButton", name)).actions).filter { $0.hasPrefix("Move") } }
+        #expect(moves == [["Move down"], ["Move up", "Move down"], ["Move up"]], "\(moves)")
         let session = try #require(lookout.first("AXButton", "Calculator display reading"))
         #expect(session.value.hasPrefix("finished, unread, lcu-research") && Set(session.actions) == ["Mark as read", "Keep", "Hide"])
     }
