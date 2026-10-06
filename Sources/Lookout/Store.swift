@@ -585,7 +585,7 @@ final class Store {
         guard let (token, source) = resolved else {
             me = nil
             tokenSource = nil
-            authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
+            authError = SignInFailure.missingToken
             return
         }
         gh.token = token

@@ -38,3 +38,16 @@ import Testing
                 == "Couldn't add apple/swift.")
     }
 }
+
+@Suite struct SignInSentences {
+    @Test func theSignedOutRowSaysWhatToDoHere() {
+        #expect(SignInFailure.sentence(SignInFailure.missingToken) == "Run gh auth login in Terminal, or use a token.")
+    }
+
+    @Test func otherReasonsAreOneSentenceWithoutTheSystemsWording() {
+        #expect(SignInFailure.sentence("GitHub rejected the token") == "GitHub rejected your token.")
+        #expect(SignInFailure.sentence("The Internet connection appears to be offline.") == "Couldn't reach GitHub.")
+        #expect(SignInFailure.sentence("GitHub error 500") == "Couldn't sign in to GitHub.")
+        #expect(SignInFailure.sentence("The operation couldn't be completed. (NSURLErrorDomain error -1005.)") == "Couldn't sign in to GitHub.")
+    }
+}

@@ -61,6 +61,23 @@ extension EnvironmentValues {
     @Entry var pagePreview = PagePreview()
 }
 
+/// Why Lookout isn't signed in to GitHub, as a sentence for the account row. `Store.authError` keeps what failed (a
+/// missing token, or the system's or GitHub's own wording); that is for a tooltip and VoiceOver's value, and this is
+/// what the row says, in the pane that has the token button next to it.
+enum SignInFailure {
+    /// What `Store.authenticate` sets when neither `gh` nor the Keychain has a token.
+    static let missingToken = "No GitHub token found"
+
+    static func sentence(_ reason: String) -> String {
+        if reason == missingToken { return "Run gh auth login in Terminal, or use a token." }
+        return switch RepoFailure(reason: reason) {
+        case .badToken: "GitHub rejected your token."
+        case .unreachable: "Couldn't reach GitHub."
+        default: "Couldn't sign in to GitHub."
+        }
+    }
+}
+
 struct SettingsView: View {
     @Bindable var store: Store
     /// The open pane, when the page header owns it.
@@ -195,8 +212,12 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.hair) {
                     Text("Not signed in").font(Theme.Typography.body).foregroundStyle(Theme.text)
                     if let error = store.authError {
-                        Text(.init(error)).font(Theme.Typography.meta).foregroundStyle(Theme.secondary).lineLimit(3)
+                        let sentence = SignInFailure.sentence(error)
+                        Text(verbatim: sentence).font(Theme.Typography.meta).foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                            // What failed, for whoever wants it: the missing token is the sentence already.
+                            .help(error == SignInFailure.missingToken ? "" : error)
+                            .accessibilityValue(error == SignInFailure.missingToken ? "" : error)
                     }
                 }
             }

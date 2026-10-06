@@ -81,7 +81,7 @@ enum Demo {
             store.tokenSource = nil
             store.lastSync = nil
             store.rateRemaining = nil
-            store.authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
+            store.authError = SignInFailure.missingToken
             store.items = []
             store.ci = [:]
         case .reposFailed:
