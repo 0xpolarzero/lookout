@@ -677,9 +677,12 @@ extension Store {
         }
     }
 
-    /// Keeps every session under New activity, in the order they are listed.
+    /// Keeps every session under New activity, in the order they are listed, the ones its list cuts to "+N more"
+    /// too. A pending session promoted to Waiting for you isn't under it, so it stays as it was. The ids are taken
+    /// first: keeping one rebuilds the groups.
     func keepAllAgents() {
-        for row in cache.rows.pending { keepAgent(row.id) }
+        let ids = cache.groups.first { $0.kind == .newActivity }?.rows.map(\.id) ?? []
+        for id in ids { keepAgent(id) }
     }
 
     /// Reordering stays within a project: dropping on another project's session does nothing. The project's sessions

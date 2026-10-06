@@ -113,6 +113,19 @@ import Testing
         #expect(s.sessionGroups.map(\.id) == ["project:/code/app"])
     }
 
+    @Test func keepAllLeavesTheWaitingGroupAlone() {
+        // Eleven in New activity (three behind "+N more"), and a pending one waiting on you: not under New activity.
+        let sessions = [session("ask", minutesAgo: 30, blocked: true)] + (0..<11).map { session("n\($0)", minutesAgo: Double($0 + 1)) }
+        let s = store(sessions, unread: ["ask"])
+        #expect(ids(s)["waiting"] == ["ask"] && ids(s)["new"]?.count == 11)
+        #expect(s.listedGroups(expanded: false).hidden == 3)
+        s.keepAllAgents()
+        #expect(s.agentRows.pending.map(\.id) == ["ask"])
+        #expect(s.agentRows.kept.count == 11)
+        #expect(ids(s)["waiting"] == ["ask"])
+        #expect(s.sessionGroups.map(\.id) == ["waiting", "project:/code/app"])
+    }
+
     @Test func hideAndMuteOfferAnUndo() {
         let s = store([session("a"), session("b", folder: "/code/other")], kept: ["a"])
         var offered: [(String, () -> Void)] = []
