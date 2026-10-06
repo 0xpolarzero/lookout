@@ -306,19 +306,27 @@ extension LookoutHub {
 
     // MARK: Controls
 
+    /// The Tab ring landed on a row of the controls menu that has the keys: the highlight is where the ring is.
+    func follow(_ row: ControlsRow) {
+        if hub.menuKeys { hub.menuPick = row }
+    }
+
     /// The controls (DESIGN.md 5.7): what the footer holds, as menu rows, then how syncing is going.
     @ViewBuilder var peekControls: some View {
         let picked = hub.menuKeys ? hub.menuPick : nil
-        MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display, picked: picked == .keepOpen) {
+        MenuRow(symbol: "pin", title: "Keep open", key: store.shortcut(.togglePanel).display, picked: picked == .keepOpen,
+                onFocus: { follow(.keepOpen) }) {
             hub.perform(.keepOpen, store: store)
         }
         .voiceOverTarget("h:controls", hub: hub)
-        MenuRow(symbol: "books.vertical", title: "Repositories…", key: nil, picked: picked == .repositories) {
+        MenuRow(symbol: "books.vertical", title: "Repositories…", key: nil, picked: picked == .repositories,
+                onFocus: { follow(.repositories) }) {
             hub.perform(.repositories, store: store)
         }
-        MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,", picked: picked == .settings) { hub.perform(.settings, store: store) }
+        MenuRow(symbol: "gearshape", title: "Settings…", key: "⌘,", picked: picked == .settings,
+                onFocus: { follow(.settings) }) { hub.perform(.settings, store: store) }
         Hairline().padding(.vertical, Theme.Space.xs)
-        ControlsSyncRow(store: store, picked: picked == .sync)
+        ControlsSyncRow(store: store, picked: picked == .sync, onFocus: { follow(.sync) })
     }
 
     /// The pointer left the bar and its panel: close the panel (a moment later, so going from one to the other,
@@ -366,6 +374,8 @@ extension HubState {
 struct ControlsSyncRow: View {
     let store: Store
     let picked: Bool
+    var onFocus: () -> Void = {}
+    @FocusState private var syncFocused: Bool
 
     var body: some View {
         SyncStatus(store: store) { line in
@@ -382,7 +392,10 @@ struct ControlsSyncRow: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .focusRing(Theme.Radius.small)
+                    .focused($syncFocused)
+                    .focusRing(Theme.Radius.small, isFocused: syncFocused)
+                    .reportsControlFocus(syncFocused)
+                    .onChange(of: syncFocused) { _, now in if now { onFocus() } }
                     .disabled(store.isSyncing)
                     .accessibilityLabel("Sync now")
                 }

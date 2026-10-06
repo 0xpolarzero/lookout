@@ -250,6 +250,8 @@ final class HubKeys {
         case kVK_DownArrow, kVK_UpArrow:
             // Round, as NSMenu's.
             let i = rows.firstIndex(of: hub.menuPick) ?? 0
+            // One highlight: the ring Tab had put on a row goes, so Space does what the highlighted row says.
+            event.window?.makeFirstResponder(nil)
             hub.menuPick = rows[(i + (Int(event.keyCode) == kVK_DownArrow ? 1 : rows.count - 1)) % rows.count]
         case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space:
             hub.perform(hub.menuPick, store: store)

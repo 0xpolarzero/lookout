@@ -329,6 +329,21 @@ import Testing
         return keys.key(event)
     }
 
+    @Test func theTabRingMovesTheHighlightAndTheArrowsTakeTheRingBack() {
+        hub.showControls()
+        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: .right), hub: hub, maxLength: 700)
+        // Tab lands on Settings: it is the highlighted row, so Space does what the highlight says.
+        view.follow(.settings)
+        #expect(hub.menuPick == .settings)
+        // The arrows walk from where the ring is, not from where the highlight was.
+        #expect(press(kVK_UpArrow, "\u{F700}"))
+        #expect(hub.menuPick == .repositories)
+        // Out of a menu with no keys, the ring moves nothing.
+        hub.menuKeys = false
+        view.follow(.keepOpen)
+        #expect(hub.menuPick == .repositories)
+    }
+
     @Test func showingControlsPicksTheFirstRow() {
         hub.showControls()
         #expect(hub.section == .controls && hub.menuKeys && hub.menuPick == .keepOpen)

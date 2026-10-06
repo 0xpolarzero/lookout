@@ -484,6 +484,8 @@ struct MenuRow: View {
     let title: String
     let key: String?
     var picked = false
+    /// Told when the Tab ring lands on the row: a menu with the keys has one highlight, which Tab moves as the arrows do.
+    var onFocus: (() -> Void)? = nil
     let action: () -> Void
     @FocusState private var focused: Bool
 
@@ -507,6 +509,7 @@ struct MenuRow: View {
         .focused($focused)
         .focusRing(Theme.Radius.field, isFocused: focused || picked)
         .reportsControlFocus(focused)
+        .onChange(of: focused) { _, now in if now { onFocus?() } }
         .accessibilityLabel(title)
     }
 }
