@@ -35,6 +35,9 @@ final class HubState {
     var keyboardSelection: ScrollRequest?
     /// CI's Passing row is open in place (it also is while CI is the focused section).
     var ciPassingOpen = false
+    /// CI is folded to its header because the screen leaves no room for its rows (`LookoutHub.foldsCI`): they aren't
+    /// targets while they aren't drawn. Set by the full view's layout.
+    var ciFolded = false
     /// The bar's CI cell asked VoiceOver to move into CI's section (`showCI`); the section's header answers it.
     var ciFocusPending = false
     /// Which controls have the Tab ring: the key monitor leaves them Return and Space (see `HubKeys.key`).

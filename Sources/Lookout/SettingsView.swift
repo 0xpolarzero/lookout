@@ -120,15 +120,6 @@ struct SettingsView: View {
             }
         }
         .motion(Theme.Motion.fade, value: current.wrappedValue)
-        // ←/→ switch the pane (a text field keeps the arrows for itself).
-        .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
-            guard press.modifiers.isEmpty else { return .ignored }
-            let all = SettingsPane.allCases
-            let next = all.firstIndex(of: current.wrappedValue)! + (press.key == .rightArrow ? 1 : -1)
-            guard all.indices.contains(next) else { return .handled }
-            current.wrappedValue = all[next]
-            return .handled
-        }
         .onAppear {
             if let pane = preview.pane { ownPane = pane }
             revealToken = preview.revealsToken

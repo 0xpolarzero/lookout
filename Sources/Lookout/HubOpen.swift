@@ -207,6 +207,9 @@ extension LookoutHub {
         .padding(.vertical, HubGeometry.lead)
         .frame(width: Self.cell + Self.detail)
         .background(alignment: edge == .right ? .trailing : .leading) { rail }
+        // The keys walk only the rows that are drawn.
+        .onChange(of: foldsCI, initial: true) { _, folded in hub.ciFolded = folded }
+        .onDisappear { hub.ciFolded = false }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Lookout")
     }

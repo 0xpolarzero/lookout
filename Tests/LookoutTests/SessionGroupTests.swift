@@ -306,10 +306,10 @@ import Testing
         #expect(hub.projectsMenuRequest == 0)
         #expect(keys.key(key(kVK_RightArrow)))
         #expect(hub.projectsMenuRequest == 1)
-        // Only on that row.
+        // Only on that row: on a session, → is the inbox's next tab.
         hub.selection = "a:x1"
-        #expect(!keys.key(key(kVK_RightArrow)))
-        #expect(hub.projectsMenuRequest == 1)
+        #expect(keys.key(key(kVK_RightArrow)))
+        #expect(hub.projectsMenuRequest == 1 && hub.filter == .bots)
     }
 
     @Test func theProjectsMenuListsScratchThenTheProjectsMostRecentFirst() {

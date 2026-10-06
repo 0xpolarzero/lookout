@@ -309,6 +309,7 @@ final class Store {
     }
 
     func refreshNow() {
+        if let interceptRefresh { interceptRefresh(); return }
         Task { await pollAll() }
     }
 
@@ -515,6 +516,8 @@ final class Store {
 
     /// Playground: report what would open instead of opening it.
     @ObservationIgnored var interceptOpen: ((String) -> Void)?
+    /// Stands in for checking GitHub (the key tests count the asks instead of syncing).
+    @ObservationIgnored var interceptRefresh: (() -> Void)?
 
     func open(_ item: InboxItem) {
         if let interceptOpen { interceptOpen("Open on GitHub · \(item.title)") } else { NSWorkspace.shared.open(item.url) }

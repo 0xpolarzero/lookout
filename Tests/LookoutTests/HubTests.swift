@@ -459,3 +459,456 @@ import Testing
         #expect(view.ciPhrase == nil)
     }
 }
+
+/// What the keys do (DESIGN.md 6.2), one by one, on the demo data: an inbox, CI with a failing and a running repository,
+/// and sessions in every state.
+@MainActor
+@Suite struct KeyMap {
+    final class Log {
+        var opened: [String] = []
+        var refreshes = 0
+        var gaveBack = 0
+    }
+
+    let store = Store()
+    let hub = HubState()
+    let keys: HubKeys
+    let log = Log()
+
+    init() {
+        Demo.populate(store, .agents)
+        store.agents.expanded = true
+        store.undoStack.announce = { _ in }
+        let log = log
+        store.interceptOpen = { log.opened.append($0) }
+        store.interceptRefresh = { log.refreshes += 1 }
+        keys = HubKeys(store: store, ui: UIState(persists: false, edge: .right), hub: hub)
+        keys.onClose = { log.gaveBack += 1 }
+        hub.pinned = true
+    }
+
+    @discardableResult
+    func press(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String = "", in window: NSWindow? = nil) -> Bool {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                     windowNumber: window?.windowNumber ?? 0, context: nil, characters: chars,
+                                     charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(code))!
+        return keys.key(event)
+    }
+
+    @discardableResult func down() -> Bool { press(kVK_DownArrow, [], "\u{F701}") }
+    @discardableResult func up() -> Bool { press(kVK_UpArrow, [], "\u{F700}") }
+    @discardableResult func left() -> Bool { press(kVK_LeftArrow, [], "\u{F702}") }
+    @discardableResult func right() -> Bool { press(kVK_RightArrow, [], "\u{F703}") }
+    @discardableResult func space(_ flags: NSEvent.ModifierFlags = [], in window: NSWindow? = nil) -> Bool { press(kVK_Space, flags, " ", in: window) }
+    @discardableResult func esc(in window: NSWindow? = nil) -> Bool { press(kVK_Escape, [], "\u{1b}", in: window) }
+
+    /// Picks `target` as the arrows would have, and says so to the lists.
+    func pick(_ target: String) { keys.select(target) }
+
+    var firstItem: String { "i:" + store.list(.needsYou)[0].id }
+    var firstSession: String { "a:" + store.hubSessions(hub)[0].id }
+
+    // MARK: Targets
+
+    @Test func theArrowsWalkTheInboxThenCIThenSessionsThenNewSession() {
+        let targets = keys.targets()
+        // Inbox rows, then CI's, then the sessions, then New session: the ranks never go back.
+        let ranks = targets.map { ["i:": 0, "c:": 1, "a:": 2, "s:": 3][String($0.prefix(2))]! }
+        #expect(ranks == ranks.sorted() && Set(ranks) == [0, 1, 2, 3])
+        #expect(targets.last == "s:new")
+        var walked: [String] = []
+        for _ in targets { down(); walked.append(hub.selection ?? "") }
+        #expect(walked == targets)
+        // The end stops: no wrap.
+        down()
+        #expect(hub.selection == "s:new")
+        for _ in targets { up() }
+        #expect(hub.selection == targets.first)
+    }
+
+    @Test func upFromNothingPicksTheLastRowAndDownTheFirst() {
+        hub.selection = nil
+        up()
+        #expect(hub.selection == "s:new")
+        hub.selection = nil
+        down()
+        #expect(hub.selection == keys.targets().first)
+    }
+
+    @Test func aSectionThatCollapsesTakesItsRowsOutOfTheWalk() {
+        hub.focus = .agents
+        #expect(keys.targets().allSatisfy { $0.hasPrefix("a:") || $0.hasPrefix("s:") })
+        hub.focus = .inbox
+        #expect(keys.targets().allSatisfy { $0.hasPrefix("i:") })
+        hub.focus = .ci
+        #expect(keys.targets().allSatisfy { $0.hasPrefix("c:") })
+        hub.focus = nil
+        // CI folded to its header by the screen's room is no longer drawn: its rows are not targets.
+        hub.ciFolded = true
+        #expect(!keys.targets().contains { $0.hasPrefix("c:") })
+        // A search leaves CI out too, and sessions have no "New session" row while they are results.
+        hub.ciFolded = false
+        hub.query = "zig"
+        #expect(!keys.targets().contains { $0.hasPrefix("c:") } && !keys.targets().contains("s:new"))
+    }
+
+    @Test func aPickInASectionThatCollapsesMovesToTheNewSectionsFirstRow() {
+        pick(firstItem)
+        press(kVK_ANSI_3, .command, "3")
+        #expect(hub.focus == .agents && hub.selection == keys.targets().first)
+        // And the pick stays put when every section is back.
+        let pick = hub.selection
+        press(kVK_ANSI_0, .command, "0")
+        #expect(hub.focus == nil && hub.selection == pick)
+    }
+
+    // MARK: Rows
+
+    @Test func returnOpensWhateverIsPicked() {
+        pick(firstItem)
+        #expect(press(kVK_Return, [], "\r"))
+        #expect(log.opened.last?.hasPrefix("Open on GitHub") == true)
+        pick("c:apple/swift-format")
+        press(kVK_Return, [], "\r")
+        #expect(log.opened.last == "Open checks · apple/swift-format")
+        pick(firstSession)
+        press(kVK_Return, [], "\r")
+        #expect(log.opened.last?.hasPrefix("Open in Claude") == true)
+        pick("s:new")
+        press(kVK_Return, [], "\r")
+        #expect(log.opened.last == "New Claude session in Scratch")
+    }
+
+    @Test func returnOnPassingOpensAndClosesItInPlace() {
+        pick("c:passing")
+        press(kVK_Return, [], "\r")
+        #expect(hub.ciPassingOpen)
+        press(kVK_Return, [], "\r")
+        #expect(!hub.ciPassingOpen)
+    }
+
+    @Test func spaceTogglesReadOnAnItemAndASession() {
+        let item = store.list(.needsYou)[0]
+        pick("i:" + item.id)
+        #expect(space())
+        #expect(store.items.first { $0.id == item.id }?.state == .read)
+        space()
+        #expect(store.items.first { $0.id == item.id }?.state == .unread)
+        let row = store.hubSessions(hub).first { $0.unread }!
+        pick("a:" + row.id)
+        space()
+        #expect(store.hubSessions(hub).first { $0.id == row.id }?.unread == false)
+    }
+
+    @Test func backspaceFinishesTheItemAndPicksTheNextAndCommandZBringsItBack() {
+        let items = store.list(.needsYou)
+        pick("i:" + items[0].id)
+        #expect(press(kVK_Delete, [], "\u{7f}"))
+        #expect(!store.list(.needsYou).contains { $0.id == items[0].id })
+        #expect(hub.selection == "i:" + items[1].id)
+        #expect(press(kVK_ANSI_Z, .command, "z"))
+        #expect(store.list(.needsYou).contains { $0.id == items[0].id })
+    }
+
+    @Test func backspaceOnDoneRestores() {
+        let item = store.list(.needsYou)[0]
+        store.done(item)
+        hub.filter = .done
+        pick("i:" + item.id)
+        press(kVK_Delete, [], "\u{7f}")
+        #expect(store.list(.needsYou).contains { $0.id == item.id })
+    }
+
+    @Test func optionSpaceMarksTheListRead() {
+        #expect(store.unreadCount(.needsYou) > 0)
+        #expect(space(.option))
+        #expect(store.unreadCount(.needsYou) == 0)
+    }
+
+    @Test func commandKKeepsAndCommandBackspaceHidesASession() {
+        let new = store.agentRows.pending[0]
+        pick("a:" + new.id)
+        #expect(press(kVK_ANSI_K, .command, "k"))
+        #expect(store.agentRows.pending.allSatisfy { $0.id != new.id } && store.agentRows.kept.contains { $0.id == new.id })
+        pick("a:" + new.id)
+        #expect(press(kVK_Delete, .command, "\u{7f}"))
+        #expect(!store.hubSessions(hub).contains { $0.id == new.id })
+        #expect(press(kVK_ANSI_Z, .command, "z"))
+        #expect(store.hubSessions(hub).contains { $0.id == new.id })
+    }
+
+    @Test func optionArrowsMoveASessionAndTheListFollowsIt() {
+        let group = store.sessionGroups.first { $0.rows.count > 2 && $0.kind != .newActivity }!
+        let second = group.rows[1].id
+        pick("a:" + second)
+        #expect(press(kVK_UpArrow, .option, "\u{F700}"))
+        #expect(store.sessionGroups.first { $0.id == group.id }!.rows[0].id == second)
+        #expect(hub.selection == "a:" + second)
+        press(kVK_DownArrow, .option, "\u{F701}")
+        #expect(store.sessionGroups.first { $0.id == group.id }!.rows[1].id == second)
+    }
+
+    // MARK: Chords
+
+    @Test func commandRChecksNowAndCommandCommaOpensSettings() {
+        #expect(press(kVK_ANSI_R, .command, "r"))
+        #expect(log.refreshes == 1)
+        #expect(press(kVK_ANSI_Comma, .command, ","))
+        #expect(hub.page == .settings)
+        // From a page too.
+        #expect(press(kVK_ANSI_R, .command, "r"))
+        #expect(log.refreshes == 2)
+    }
+
+    @Test func commandFStartsTheSearchAndTypingDoes() {
+        #expect(press(kVK_ANSI_F, .command, "f"))
+        #expect(hub.inbox.searchOpen)
+        hub.inbox.endSearch()
+        #expect(press(kVK_ANSI_Z, [], "z"))
+        #expect(hub.query == "z" && hub.inbox.searchOpen)
+        // The first result is picked, so Return opens it.
+        #expect(hub.selection != nil)
+    }
+
+    @Test func spaceIsNotTypedBeforeThereIsAQuery() {
+        pick(firstItem)
+        space()
+        #expect(hub.query.isEmpty)
+    }
+
+    @Test func theFocusKeysGoByPositionSoAnAzertyKeyboardHasThem() {
+        // On AZERTY ⌘1 sends "&" as its character: the key code is what counts.
+        press(kVK_ANSI_1, .command, "&")
+        #expect(hub.focus == .inbox)
+        press(kVK_ANSI_2, .command, "é")
+        #expect(hub.focus == .ci)
+        press(kVK_ANSI_3, .command, "\"")
+        #expect(hub.focus == .agents)
+        // The same again gives the room back, and so does ⌘0.
+        press(kVK_ANSI_3, .command, "\"")
+        #expect(hub.focus == nil)
+        press(kVK_ANSI_2, .command, "é")
+        press(kVK_ANSI_0, .command, "à")
+        #expect(hub.focus == nil)
+    }
+
+    // MARK: ← and →
+
+    @Test func theArrowsSwitchTheInboxTabsAndStopAtTheEnds() {
+        #expect(hub.filter == .needsYou)
+        #expect(right() && hub.filter == .bots)
+        #expect(right() && hub.filter == .done)
+        #expect(right() && hub.filter == .done)
+        #expect(left() && hub.filter == .bots)
+        #expect(left() && left() && hub.filter == .needsYou)
+    }
+
+    @Test func aPickInTheInboxGoesWithItsTabButOneElsewhereStays() {
+        pick(firstItem)
+        right()
+        #expect(hub.selection == nil)
+        hub.filter = .needsYou
+        pick(firstSession)
+        right()
+        #expect(hub.filter == .bots && hub.selection == firstSession)
+    }
+
+    @Test func theArrowsKeepTheirOwnMeaningOnPassingAndNewSession() {
+        pick("c:passing")
+        right()
+        #expect(hub.ciPassingOpen && hub.filter == .needsYou)
+        left()
+        #expect(!hub.ciPassingOpen && hub.selection == "c:passing")
+        pick("s:new")
+        let asked = hub.projectsMenuRequest
+        right()
+        #expect(hub.projectsMenuRequest == asked + 1 && hub.filter == .needsYou)
+    }
+
+    @Test func theArrowsLeaveTheTabsAloneWhileThereIsAQuery() {
+        hub.query = "zig"
+        #expect(!right() && hub.filter == .needsYou)
+    }
+
+    @Test func theArrowsSwitchTheSettingsPane() {
+        hub.go(.settings)
+        #expect(hub.settingsPane == .general)
+        #expect(right() && hub.settingsPane == .notifications)
+        right(); right()
+        #expect(hub.settingsPane == SettingsPane.allCases.last)
+        right()
+        #expect(hub.settingsPane == SettingsPane.allCases.last)
+        left()
+        #expect(hub.settingsPane == SettingsPane.allCases[SettingsPane.allCases.count - 2])
+    }
+
+    // MARK: Esc
+
+    @Test func escapeStepsBackOneThingAtATimeAndTheFirstMatchWins() {
+        hub.beginSearch()
+        hub.query = "lcu"
+        // ⌘3 while searching: Sessions has the room, the results stay.
+        press(kVK_ANSI_3, .command, "3")
+        #expect(hub.focus == .agents)
+        // 1. The query (and the field).
+        esc()
+        #expect(hub.query.isEmpty && !hub.inbox.searchOpen && hub.focus == .agents && hub.pinned)
+        // 2. The section focus.
+        esc()
+        #expect(hub.focus == nil && hub.pinned && log.gaveBack == 0)
+        // 3. The hub, with the keyboard handed back.
+        esc()
+        #expect(!hub.pinned && log.gaveBack == 1)
+    }
+
+    @Test func escapeLeavesAPageBeforeTheFocusAndTheFocusBeforeTheHub() {
+        hub.focus = .ci
+        hub.go(.settings)
+        esc()
+        #expect(hub.page == .main && hub.focus == .ci && hub.pinned)
+        esc()
+        #expect(hub.focus == nil && hub.pinned)
+        esc()
+        #expect(!hub.pinned)
+    }
+
+    @Test func escapeFromRepositoriesOpenedFromSettingsGoesBackToSettings() {
+        hub.go(.settings)
+        hub.go(.repos)
+        esc()
+        #expect(hub.page == .settings)
+        esc()
+        #expect(hub.page == .main)
+    }
+
+    @Test func aQueryLeftBehindAPageIsNotTheNextStep() {
+        hub.query = "zig"
+        hub.go(.settings)
+        esc()
+        #expect(hub.page == .main && hub.query == "zig")
+        esc()
+        #expect(hub.query.isEmpty)
+    }
+
+    @Test func somethingOpenInAFieldTakesEscapeBeforeAnyOfIt() {
+        hub.focus = .agents
+        var closed = 0
+        let id = UUID()
+        EscapeRoute.register(id) { closed += 1 }
+        defer { EscapeRoute.unregister(id) }
+        #expect(esc())
+        #expect(closed == 1 && hub.focus == .agents && hub.pinned)
+        EscapeRoute.unregister(id)
+        esc()
+        #expect(hub.focus == nil)
+    }
+
+    // MARK: Controls and fields
+
+    @Test func aControlTheTabRingIsOnKeepsSpaceAndReturn() {
+        pick(firstItem)
+        let item = store.list(.needsYou)[0]
+        let control = UUID()
+        hub.controls.set(control, focused: true)
+        #expect(!space() && !press(kVK_Return, [], "\r"))
+        #expect(store.items.first { $0.id == item.id }?.state == .unread && log.opened.isEmpty)
+        // The arrows and the chords are not the control's.
+        #expect(down())
+        #expect(press(kVK_ANSI_R, .command, "r"))
+        hub.controls.set(control, focused: false)
+        #expect(space())
+    }
+
+    /// A window with a text field being edited, as the search field is: its field editor is the first responder.
+    private func editingWindow(_ text: String = "") -> (window: NSWindow, field: NSTextField) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 180, height: 24))
+        field.stringValue = text
+        window.contentView?.addSubview(field)
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        window.makeFirstResponder(field)
+        return (window, field)
+    }
+
+    @Test func aTextFieldKeepsWhatItTypesAndTheHubKeepsItsChords() {
+        let (window, _) = editingWindow()
+        defer { window.close() }
+        pick(firstItem)
+        let item = store.list(.needsYou)[0]
+        #expect(window.firstResponder is NSText)
+        // Typing, Space, ⌫ and the arrows are the field's.
+        #expect(!press(kVK_ANSI_A, [], "a", in: window))
+        #expect(!space(in: window) && !press(kVK_Delete, [], "\u{7f}", in: window) && !press(kVK_LeftArrow, [], "\u{F702}", in: window))
+        #expect(store.items.first { $0.id == item.id }?.state == .unread && hub.query.isEmpty && hub.filter == .needsYou)
+        // ⌘Z is the field's undo.
+        #expect(!press(kVK_ANSI_Z, .command, "z", in: window))
+        // But Check now, Settings and the focus keys are not text.
+        #expect(press(kVK_ANSI_R, .command, "r", in: window) && log.refreshes == 1)
+        #expect(press(kVK_ANSI_1, .command, "&", in: window) && hub.focus == .inbox)
+        #expect(press(kVK_ANSI_Comma, .command, ",", in: window) && hub.page == .settings)
+    }
+
+    @Test func aCheckNowBoundToAPlainKeyIsTypedInAFieldNotRun() {
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_R)), for: .refresh)
+        let (window, _) = editingWindow()
+        defer { window.close() }
+        #expect(!press(kVK_ANSI_R, [], "r", in: window) && log.refreshes == 0)
+    }
+
+    @Test func escapeInAFieldLeavesTheFieldFirst() {
+        let (window, field) = editingWindow()
+        defer { window.close() }
+        hub.focus = .agents
+        #expect(esc(in: window))
+        #expect(window.firstResponder !== field.currentEditor() && hub.focus == .agents && hub.pinned)
+    }
+
+    @Test func aKeyDuringCompositionIsTheInputMethods() {
+        let (window, field) = editingWindow()
+        defer { window.close() }
+        let editor = field.currentEditor() as! NSTextView
+        editor.setMarkedText("é", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 0, length: 0))
+        #expect(editor.hasMarkedText())
+        hub.focus = .agents
+        pick(firstSession)
+        // Esc cancels the composition, Return commits it, the arrows pick a candidate: none is the hub's.
+        #expect(!esc(in: window) && !press(kVK_Return, [], "\r", in: window) && !press(kVK_DownArrow, [], "\u{F701}", in: window))
+        #expect(hub.focus == .agents && hub.pinned && log.opened.isEmpty)
+    }
+
+    @Test func theSearchFieldHasTheArrowsAndReturnAndKeepsSpaceForItself() {
+        let (window, _) = editingWindow("zig")
+        defer { window.close() }
+        hub.query = "zig"
+        hub.inbox.searchOpen = true
+        hub.inbox.searchFocused = true
+        let first = keys.targets().first!
+        keys.select(first)
+        // ↓ walks the results, ↩ opens the pick.
+        #expect(press(kVK_DownArrow, [], "\u{F701}", in: window))
+        #expect(hub.selection != first)
+        #expect(press(kVK_Return, [], "\r", in: window))
+        #expect(log.opened.count == 1)
+        // Space is typed, ⌫ edits.
+        #expect(!space(in: window) && !press(kVK_Delete, [], "\u{7f}", in: window))
+        // Esc clears the search and leaves the field in one step.
+        #expect(esc(in: window))
+        #expect(hub.query.isEmpty && !hub.inbox.searchOpen)
+    }
+
+    // MARK: Menus
+
+    @Test func theKeysDoNothingWhileNothingIsKept() {
+        hub.pinned = false
+        #expect(!down() && !space() && !press(kVK_Return, [], "\r"))
+    }
+
+    @Test func thePointerLeavingARowStopsTheKeysActingOnIt() {
+        // A key never acts on a row the pointer left (DESIGN.md 3.5): the row clears its own pick.
+        hub.pointer(true, over: "c:b/bad", ui: UIState(persists: false, edge: .right))
+        hub.pointer(false, over: "c:b/bad", ui: UIState(persists: false, edge: .right))
+        #expect(hub.selection == nil)
+    }
+}

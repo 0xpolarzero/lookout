@@ -519,7 +519,7 @@ extension HubState {
 
     /// CI's rows as keyboard targets, in the order they are listed ("c:<repo>"; "c:passing" is the Passing row).
     func ciTargets(_ store: Store) -> [String] {
-        guard query.isEmpty, focus == nil || focus == .ci else { return [] }
+        guard query.isEmpty, focus == nil || focus == .ci, !ciFolded else { return [] }
         let list = store.ciList
         var targets = list.attention.map { "c:" + $0.id }
         if !list.quiet.isEmpty {

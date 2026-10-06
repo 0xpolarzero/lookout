@@ -44,15 +44,18 @@ final class HubKeys {
         if hub.controls.isActive, event.modifierFlags.intersection(Shortcut.relevant).isEmpty,
            [kVK_Space, kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) { return false }
         let editing = event.window?.firstResponder is NSText
-        if editing, event.keyCode != UInt16(kVK_Escape) { return false }
         let flags = event.modifierFlags.intersection(Shortcut.relevant)
         let shortcut = Shortcut(event)
+        // A field keeps what it types, and the chords it has no use for stay the hub's: Settings, Check now, the focus keys.
+        if editing, event.keyCode != UInt16(kVK_Escape) { return chord(event, flags: flags, shortcut: shortcut, editing: true) }
         if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
-            // A field or overlay with something open to cancel (a token, suggestions) takes Esc before the page does.
+            // The Esc ladder, first match wins: what a field or overlay has open (a token, suggestions), the field
+            // itself, the controls menu, the search, the page, the focused section, then the hub.
             if EscapeRoute.run() { return true }
             if editing { event.window?.makeFirstResponder(nil) }
             else if hub.menuKeys, !hub.expanded { closeMenu() }
-            else if !hub.query.isEmpty { setQuery("") }
+            // The search is only on the main view: a query left behind a page is not the next thing to clear.
+            else if hub.page == .main, !hub.query.isEmpty || hub.inbox.searchOpen { setQuery("") }
             else if hub.page != .main { hub.back() }
             else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
             else { close() }
@@ -62,23 +65,37 @@ final class HubKeys {
         if hub.controls.isActive, flags.isEmpty, [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) {
             return false
         }
-        if flags == .command, event.charactersIgnoringModifiers == "," {
-            hub.go(.settings)
-            return true
-        }
+        if chord(event, flags: flags, shortcut: shortcut) { return true }
         // What the user bound comes first, even ⌘Z; undo is what's left of the key when no action takes it.
         if act(event, flags: flags, shortcut: shortcut) { return true }
         return flags == .command && event.charactersIgnoringModifiers == "z" && store.undoLast()
     }
 
+    /// The hub's chords, which a text field has no use for and so doesn't keep: ⌘, ⌘R (and a Check now bound to another
+    /// chord, never to a plain key, which the field would type) and ⌘1, ⌘2, ⌘3, ⌘0. False when the key is none of them.
+    private func chord(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut, editing: Bool = false) -> Bool {
+        if flags == .command, event.charactersIgnoringModifiers == "," {
+            hub.go(.settings)
+            return true
+        }
+        if shortcut == store.shortcut(.refresh), !editing || shortcut.hasCommandLikeModifier { store.refreshNow(); return true }
+        return focusChord(event, flags: flags)
+    }
+
+    /// ⌘1, ⌘2, ⌘3 give the Inbox, CI or Sessions all the room (again: back); ⌘0 gives every section its room back.
+    /// By key position, so they hold on an AZERTY keyboard, where the digits are shifted.
+    private func focusChord(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        guard flags == .command, hub.expanded, hub.page == .main, let focus = Self.focusKey(event.keyCode) else { return false }
+        if let section = focus { hub.toggleFocus(section) } else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
+        rehome()
+        return true
+    }
+
     /// The configured actions, and the typing that searches. False when the key is none of them.
     private func act(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool {
-        if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
-        // ⌘1, ⌘2, ⌘3 give the Inbox, CI or Sessions all the room (again: back); ⌘0 gives every section its room back.
-        // By key position, so they hold on an AZERTY keyboard, where the digits are shifted.
-        if flags == .command, hub.expanded, hub.page == .main, let focus = Self.focusKey(event.keyCode) {
-            if let section = focus { hub.toggleFocus(section) } else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
-            rehome()
+        // ← and → switch the Settings pane that is open.
+        if hub.page == .settings, flags.isEmpty, let step = Self.horizontalStep(event.keyCode) {
+            switchPane(by: step)
             return true
         }
         if hub.menuKeys, !hub.expanded { return menuKey(event, flags: flags) }
@@ -103,6 +120,7 @@ final class HubKeys {
             move(down: event.keyCode == 125, in: targets)
             return true
         }
+        if flags.isEmpty, let step = Self.horizontalStep(event.keyCode), horizontal(step, in: targets, event: event, shortcut: shortcut) { return true }
         // Not over rows the list isn't showing (a sign-in problem replaces it, a focused section hides the inbox).
         if shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) {
             if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }
@@ -125,11 +143,6 @@ final class HubKeys {
         if selection.hasPrefix("c:") { return ciKey(event, id: id, flags: flags, shortcut: shortcut) }
         // The list's own rows ("+N more", New session).
         if selection.hasPrefix("s:") {
-            // → on New session opens its menu of projects.
-            if selection == "s:new", shortcut == Shortcut(keyCode: UInt16(kVK_RightArrow)) {
-                hub.openProjectsMenu()
-                return true
-            }
             guard shortcut == store.shortcut(.openItem) else { return false }
             hub.activateSessionTarget(selection, store: store, ui: ui)
             return true
@@ -150,6 +163,43 @@ final class HubKeys {
             return true
         }
         return false
+    }
+
+    /// ← is -1 and → is +1; nil for any other key.
+    private static func horizontalStep(_ keyCode: UInt16) -> Int? {
+        switch Int(keyCode) {
+        case kVK_LeftArrow: -1
+        case kVK_RightArrow: 1
+        default: nil
+        }
+    }
+
+    /// ← and → on the main view: a picked row that has its own meaning for them keeps it (Passing opens and closes, New
+    /// session's → shows the projects); anything else, with no query to move through, switches the inbox's tab. A pick
+    /// outside the inbox survives the switch, which would otherwise take it with the tab's rows.
+    private func horizontal(_ step: Int, in targets: [String], event: NSEvent, shortcut: Shortcut) -> Bool {
+        if let selection = hub.selection, targets.contains(selection) {
+            if selection.hasPrefix("c:"), ciKey(event, id: String(selection.dropFirst(2)), flags: [], shortcut: shortcut) { return true }
+            if selection == "s:new", step > 0 {
+                hub.openProjectsMenu()
+                return true
+            }
+        }
+        guard hub.query.isEmpty, hub.shows(.inbox) else { return false }
+        let all = InboxFilter.allCases
+        let next = all.firstIndex(of: hub.filter)! + step
+        guard all.indices.contains(next) else { return true }
+        let kept = hub.selection.flatMap { $0.hasPrefix("i:") ? nil : ($0, hub.keyboardSelection) }
+        LookoutHub.animate { hub.filter = all[next] }
+        if let (selection, scroll) = kept { (hub.selection, hub.keyboardSelection) = (selection, scroll) }
+        return true
+    }
+
+    /// ← and → on Settings: the pane before or after the open one, none past the ends.
+    private func switchPane(by step: Int) {
+        let all = SettingsPane.allCases
+        let next = all.firstIndex(of: hub.settingsPane)! + step
+        if all.indices.contains(next) { LookoutHub.animate { hub.settingsPane = all[next] } }
     }
 
     /// The controls menu has the keyboard (DESIGN.md 4.7): ↑↓ walk its rows, Return or Space does the picked one.
