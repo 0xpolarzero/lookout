@@ -56,10 +56,10 @@ extension AgentRow {
 /// A 26pt tile: letters, an emoji or a symbol, and the marks of `TileMarks`. Plain content, no button: the bar
 /// puts it in a `BarCell`, the session rows beside the bar use it as their avatar.
 struct StatusTile: View {
+        let size = Theme.Metrics.tile
     var label = ""
     var symbol: String? = nil
     var marks = TileMarks()
-    var size: CGFloat = Theme.Metrics.tile
     /// The pointer is over it: neutral tiles take a step more fill.
     var hovering = false
     /// The surface the unread dot's halo cuts into: the rail beside the screen edge, else the strip's `bg`.
@@ -115,15 +115,12 @@ private struct UnreadDot: View {
 /// A session's tile where the rows show it (the avatar beside its title): the status tile, named for VoiceOver.
 struct AgentTile: View {
     let row: AgentRow
-    var size: CGFloat = 26
-    var selected = false
 
     var body: some View {
-        StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size)
+        StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
             .accessibilityValue(row.tileState)
-            .focusRing(size * Tile.ratio, isFocused: selected)
     }
 }
 
@@ -164,14 +161,12 @@ struct BarCell<Face: View>: View {
     @State private var hovering = false
     @FocusState private var focused: Bool
 
-    static var depth: CGFloat { Theme.Metrics.bar }
-
     var body: some View {
         Button(action: action) {
             face(hovering)
                 .focusRing(Theme.Radius.tile, isFocused: focused || picked)
-                .frame(width: axis == .vertical ? Self.depth : Theme.Metrics.pitch,
-                       height: axis == .vertical ? Theme.Metrics.pitch : Self.depth)
+                .frame(width: axis == .vertical ? Theme.Metrics.bar : Theme.Metrics.pitch,
+                       height: axis == .vertical ? Theme.Metrics.pitch : Theme.Metrics.bar)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -220,7 +215,6 @@ private struct BarCellHelp: ViewModifier {
 /// a tile doesn't rebuild the whole hub. No tooltip: hovering opens the sessions' panel, a row beside each tile.
 struct BarTile: View {
     let row: AgentRow
-    var size: CGFloat = Theme.Metrics.tile
     let axis: Axis
     var onRail = false
     let store: Store
@@ -244,7 +238,7 @@ struct BarTile: View {
     private func cell(now: Date) -> some View {
         BarCell(axis: axis, name: row.session.title, value: row.tileValue(now: now), hint: row.tileHint,
                 picked: hub.selected("a:" + row.id), show: show, press: show, action: { store.openAgent(row.id) }) { hovering in
-            StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, size: size, hovering: hovering, onRail: onRail)
+            StatusTile(label: row.label, symbol: row.icon, marks: row.tileMarks, hovering: hovering, onRail: onRail)
         }
         .sessionMenu(row, store, hub)
         .onHover { inside in

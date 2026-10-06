@@ -99,10 +99,6 @@ enum ClaudeLink: Equatable {
 
 // MARK: - Rows
 
-enum AgentStatus {
-    case running, blocked, finished, idle
-}
-
 struct AgentRow: Identifiable, Hashable {
     var session: ClaudeSession
     var entry: AgentEntry
@@ -130,36 +126,18 @@ struct AgentRow: Identifiable, Hashable {
     /// Mid-turn but stopped on you (a question, a plan): counts as waiting, not as working.
     var waitsForYou: Bool { session.running && activity?.waitsForYou == true }
 
-    var status: AgentStatus {
-        if waitsForYou { return .blocked }
-        if session.running { return .running }
-        if session.summary?.blocked == true { return .blocked }
-        return entry.unread ? .finished : .idle
-    }
-
     /// Needs you: stopped mid-turn on a question, or finished on one you haven't read yet.
     var isWaiting: Bool { waitsForYou || (!session.running && unread && session.summary?.blocked == true) }
-
-    /// What the strip shows: amber waiting, blue done and unread, grey otherwise.
-    var tint: Color? {
-        if waitsForYou { return Theme.amber }
-        guard !session.running, entry.unread else { return nil }
-        return session.summary?.blocked == true ? Theme.amber : Theme.accent
-    }
-
-    static func duration(_ t: TimeInterval) -> String {
-        let s = max(0, Int(t))
-        if s < 60 { return "\(s)s" }
-        if s < 3600 { return "\(s / 60)m" }
-        return "\(s / 3600)h \(s % 3600 / 60)m"
-    }
 
     /// When the running turn began, if known.
     var workingSince: Date? { session.lastUserMessage ?? activity?.since ?? session.lastActivity }
 
     /// How long the turn has been going.
-    func elapsed(now: Date = Date()) -> String {
-        Self.duration(now.timeIntervalSince(workingSince ?? now))
+    private func elapsed(now: Date) -> String {
+        let s = max(0, Int(now.timeIntervalSince(workingSince ?? now)))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
     /// The status column of a row: "Waiting", "Working 2m", "Finished 4m".
@@ -374,8 +352,6 @@ struct AgentCache {
 }
 
 extension Store {
-    var agentsEnabled: Bool { agents.enabled }
-
     /// Derived rows, memoized: views read these dozens of times per render. The getters still read the observed
     /// properties, so SwiftUI keeps tracking them; `agentCache` is dropped whenever one of them changes.
     private var cache: AgentCache {

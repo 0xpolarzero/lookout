@@ -48,12 +48,6 @@ private struct PulseKey: Hashable {
     let id: AnyHashable
     let contrast: Bool
     let differentiate: Bool
-
-    init(id: some Hashable, contrast: Bool, differentiate: Bool) {
-        self.id = AnyHashable(id)
-        self.contrast = contrast
-        self.differentiate = differentiate
-    }
 }
 
 /// A plain layer-backed view showing the rendered image, with a looping opacity animation.
