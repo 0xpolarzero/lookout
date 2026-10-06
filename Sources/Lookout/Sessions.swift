@@ -370,7 +370,8 @@ struct SessionGroupHeader: View {
             }
         }
         .contentShape(Rectangle())
-        .modifier(ReorderableProject(folder: folder.flatMap { $0.isEmpty ? nil : $0 }, store: store, hub: hub, dropTarget: $dropTarget))
+        .modifier(Reorderable(kind: "project:", id: folder.flatMap { $0.isEmpty ? nil : $0 }, name: title,
+                              drop: { dragged in if let folder { hub.moveProject(dragged, onto: folder, store: store) } }, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
         .contextMenu { if let folder { ProjectMenu(folder: folder, store: store, hub: hub) } }
         .accessibilityElement(children: .contain)
@@ -528,7 +529,8 @@ struct SessionRow: View {
             if showsAction { action.padding(.top, Self.actionTop - Theme.Metrics.iconButton / 2).padding(.trailing, RailRow<EmptyView, EmptyView>.textEnd(rail, inset: railInset)) }
         }
         .motion(Theme.Motion.hover, value: showsAction)
-        .modifier(Reorderable(enabled: placement == .project, row: row, store: store, hub: hub, dropTarget: $dropTarget))
+        .modifier(Reorderable(kind: "agent:", id: placement == .project && !row.pending ? row.id : nil, name: row.session.title,
+                              drop: { hub.moveSession($0, onto: row.id, store: store) }, dropTarget: $dropTarget))
         .overlay(Theme.Radius.shape(Theme.Radius.row).strokeBorder(dropTarget ? Theme.accent : .clear, lineWidth: 1.5))
         .onHover { inside in
             if inside {
@@ -691,60 +693,31 @@ extension HubState {
     }
 }
 
-/// Your sessions in a project can be dragged onto one another to reorder them; everything else stays put.
-struct Reorderable: ViewModifier {
-    let enabled: Bool
-    let row: AgentRow
-    let store: Store
-    let hub: HubState
-    @Binding var dropTarget: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduce
-
-    func body(content: Content) -> some View {
-        if !enabled || row.pending {
-            content
-        } else {
-            content
-                .draggable("agent:" + row.id) {
-                    Text(row.session.title)
-                        .font(Theme.Typography.title)
-                        .padding(.horizontal, 10)
-                        .frame(height: Theme.Metrics.tile)
-                        .background(Capsule().fill(Theme.bg))
-                        .foregroundStyle(Theme.text)
-                }
-                .dropDestination(for: String.self) { ids, _ in
-                    guard let id = ids.first, id.hasPrefix("agent:") else { return false }
-                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.moveSession(String(id.dropFirst(6)), onto: row.id, store: store) }
-                    return true
-                } isTargeted: { dropTarget = $0 }
-        }
-    }
-}
-
-/// A project's header can be dragged onto another's to put it there (its sessions go with it); the same is in its menu and
-/// VoiceOver's actions. Scratch has no place to move to.
-struct ReorderableProject: ViewModifier {
-    let folder: String?
-    let store: Store
-    let hub: HubState
+/// Your sessions in a project can be dragged onto one another to reorder them, and a project's header onto another's to put
+/// it there (its sessions go with it, as in its menu and VoiceOver's actions); everything else stays put, scratch included. A
+/// drag carries `kind` and the `id` of what is dragged; `id` nil is not draggable. `drop` gets the id of what was dropped on it.
+private struct Reorderable: ViewModifier {
+    let kind: String
+    let id: String?
+    let name: String
+    let drop: (String) -> Void
     @Binding var dropTarget: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     @ViewBuilder func body(content: Content) -> some View {
-        if let folder {
+        if let id {
             content
-                .draggable("project:" + folder) {
-                    Text(store.folderName(folder))
+                .draggable(kind + id) {
+                    Text(name)
                         .font(Theme.Typography.title)
                         .padding(.horizontal, 10)
                         .frame(height: Theme.Metrics.tile)
                         .background(Capsule().fill(Theme.bg))
                         .foregroundStyle(Theme.text)
                 }
-                .dropDestination(for: String.self) { ids, _ in
-                    guard let id = ids.first, id.hasPrefix("project:") else { return false }
-                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.moveProject(String(id.dropFirst(8)), onto: folder, store: store) }
+                .dropDestination(for: String.self) { tokens, _ in
+                    guard let token = tokens.first, token.hasPrefix(kind) else { return false }
+                    withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { drop(String(token.dropFirst(kind.count))) }
                     return true
                 } isTargeted: { dropTarget = $0 }
         } else {
