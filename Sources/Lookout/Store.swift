@@ -1067,10 +1067,16 @@ final class Store {
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
         if items.contains(where: expired) { items.removeAll(where: expired) }
-        if items.count > 1500 {
-            items = Array(items.sorted { $0.createdAt > $1.createdAt }.prefix(1500))
+        // What ⌘Z could still bring back is outside the cap, for the half minute it lasts.
+        let held = items.filter { $0.isInUndoWindow(now: now) }
+        if items.count - held.count > Self.itemCap {
+            let rest = items.filter { !$0.isInUndoWindow(now: now) }.sorted { $0.createdAt > $1.createdAt }
+            items = held + rest.prefix(Self.itemCap)
         }
     }
+
+    /// The most items kept, newest first, whatever their age.
+    static let itemCap = 1500
 
     // MARK: Notifications
 

@@ -209,6 +209,37 @@ final class Sleeper {
         #expect(s.items.isEmpty)
     }
 
+    @Test func theItemCapKeepsWhatUndoCouldStillRestore() {
+        // The oldest of a full inbox marked Done, then one new item: the cap would drop exactly the cleared row.
+        let now = Date()
+        let base = now.addingTimeInterval(-3600).timeIntervalSince1970
+        let s = store((0..<Store.itemCap).map { item("\($0)", at: base + Double($0)) })
+        s.done(s.items[0])
+        s.items.append(item("new", at: now.timeIntervalSince1970))
+        s.prune(now: now)
+        #expect(s.items.contains { $0.id == "0" })
+        #expect(s.items.contains { $0.id == "new" })
+        #expect(s.undoLast())
+        #expect(s.items.first { $0.id == "0" }?.state == .unread)
+        // Once the window has passed, the cap applies to it like any other row.
+        s.done(s.items.first { $0.id == "0" }!)
+        s.prune(now: now.addingTimeInterval(UndoStack.validFor + 1))
+        #expect(s.items.count == Store.itemCap)
+        #expect(!s.items.contains { $0.id == "0" })
+    }
+
+    @Test func aWholeInboxMarkedDoneStaysUndoableAndStillTakesNewItems() {
+        let now = Date()
+        let base = now.addingTimeInterval(-3600).timeIntervalSince1970
+        let s = store((0..<Store.itemCap).map { item("\($0)", .read, at: base + Double($0)) })
+        s.doneAllRead(.needsYou)
+        s.items.append(item("new", at: now.timeIntervalSince1970))
+        s.prune(now: now)
+        #expect(s.items.count == Store.itemCap + 1)
+        #expect(s.undoLast())
+        #expect(s.items.filter { $0.state == .read }.count == Store.itemCap)
+    }
+
     @Test func undoSkipsAnItemSomethingElseHasChanged() {
         let s = store([item("1")])
         s.done(s.items[0])
