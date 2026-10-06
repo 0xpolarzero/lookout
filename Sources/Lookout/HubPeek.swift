@@ -222,6 +222,9 @@ extension LookoutHub {
         switch section {
         case .controls: 250
         case .ci: edge.isHorizontal ? Self.ciWidth : Self.detail
+        // Its rows spend the tile column inside the panel (the bar's tile beside it is another): the text keeps the
+        // width it has kept open, where a waiting session's question fits.
+        case .agents: Self.detail + Theme.Metrics.bar
         default: Self.detail
         }
     }
@@ -246,8 +249,7 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                agentsHeader.frame(height: Self.peekLine)
-                ClaudeNotice(store: store).padding(.horizontal, 8)
+                sessionsPeekHeader
                 sessionsPeek(cap: Self.peekListCap)
                 newSessionRow(inset: 0)
             default:
@@ -255,7 +257,7 @@ extension LookoutHub {
                 EmptyView()
             }
         }
-        .frame(width: Self.detail - 2 * Self.peekPad, alignment: .leading)
+        .frame(width: panelWidth(section) - 2 * Self.peekPad, alignment: .leading)
     }
 
     /// Under (or over) a strip segment: that section's header, then its content.
@@ -268,15 +270,22 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                agentsHeader.frame(height: Self.peekLine)
-                ClaudeNotice(store: store).padding(.horizontal, 8)
+                sessionsPeekHeader
                 sessionsPeek(cap: Self.peekListCap)
                 newSessionRow(inset: 0)
             default:
                 EmptyView()
             }
         }
-        .frame(width: (section == .ci ? Self.ciWidth : Self.detail) - 2 * Self.peekPad, alignment: .leading)
+        .frame(width: panelWidth(section) - 2 * Self.peekPad, alignment: .leading)
+    }
+
+    /// The sessions' header and notice over their rows: indented by the tile column where it is leading, so the header,
+    /// the groups and the rows' text start at one x (on the right edge the tile is trailing and nothing moves).
+    @ViewBuilder var sessionsPeekHeader: some View {
+        let indent = railSide == .leading ? Theme.Metrics.bar : 0
+        agentsHeader.frame(height: Self.peekLine).padding(.leading, indent)
+        ClaudeNotice(store: store).padding(.leading, indent + 8).padding(.trailing, 8)
     }
 
     /// The bar's last cell at rest: a gear. Hovering shows the controls; a click goes to Settings.
