@@ -276,9 +276,16 @@ extension LookoutHub {
         let gearColumn = HubGeometry.lead + (stripCell - Theme.Metrics.iconButton) / 2 - Theme.Space.hair
         let footer = footerRow.padding(.leading, Self.inset).padding(.trailing, gearColumn)
         return VStack(alignment: .leading, spacing: 0) {
-            // The strip stays at the screen's edge and the hub grows away from it; the footer is the far end.
-            if edge == .bottom { footer.section("Controls"); Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); strip }
-            else { strip; Hairline().padding(.horizontal, Self.inset); body; Hairline().padding(.horizontal, Self.inset); footer.section("Controls") }
+            // The strip stays at the screen's edge and the hub grows away from it; the footer is the far end, except along
+            // the bottom, where it is the line just above the strip, still after the content. VoiceOver reads strip,
+            // content, footer on every edge: the bottom's views are declared in that order and laid out from below.
+            let rule = Hairline().padding(.horizontal, Self.inset)
+            let controls = footer.section("Controls")
+            if edge == .bottom {
+                BottomUp { VStack(spacing: 0) { rule; strip }; body; VStack(spacing: 0) { rule; controls } }
+            } else {
+                strip; rule; body; rule; controls
+            }
         }
         .padding(edge == .top ? .bottom : .top, HubGeometry.lead)
         .frame(width: width)
@@ -440,6 +447,27 @@ extension LookoutHub {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { record(.agents, ListHeights(shown: $0, content: agentsContent)) }
                     .onDisappear { record(.agents, nil) }
             }
+        }
+    }
+}
+
+/// The bottom edge's hub of three views, declared in reading order (strip, content, footer) and drawn with the strip
+/// at the screen's edge, the footer on it and the content above both.
+struct BottomUp: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) }
+        return CGSize(width: proposal.width ?? sizes.map(\.width).max() ?? 0, height: sizes.reduce(0) { $0 + $1.height })
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var bottom = bounds.maxY
+        // From the bottom: the first, the last, then the ones between.
+        let order = subviews.indices.isEmpty ? [] : [0] + subviews.indices.dropFirst().reversed()
+        for index in order {
+            let size = subviews[index].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            bottom -= size.height
+            subviews[index].place(at: CGPoint(x: bounds.minX, y: bottom), anchor: .topLeading,
+                                  proposal: ProposedViewSize(width: bounds.width, height: size.height))
         }
     }
 }

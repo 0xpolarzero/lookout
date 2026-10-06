@@ -145,6 +145,18 @@ enum AccessibilityTree {
         #expect(!says(peek) && peek.all.contains { $0.label == "New session" })
     }
 
+    @Test func theKeptOpenHubIsReadInTheSameOrderOnEveryEdge() async throws {
+        // Only the strip moves to the bottom edge (DESIGN.md 10.8): its controls come before the content they filter, and the
+        // footer's Controls after it, whichever way they are drawn.
+        func order(_ edge: DockEdge) async throws -> [String] {
+            try root(try await AccessibilityTree.render(edge: edge) { _, hub in hub.pinned = true }).children.map { "\($0.role) \($0.label)" }
+        }
+        let top = try await order(.top)
+        #expect(try await order(.bottom) == top)
+        #expect(try await order(.left) == (try await order(.right)))
+        #expect(top.first == "AXButton Inbox" && top.last == "AXGroup Controls", "\(top)")
+    }
+
     @Test func theKeptOpenHubHasASectionAndAHeadingForEach() async throws {
         let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true })
         #expect(lookout.children.map(\.label) == ["Inbox", "CI", "Sessions", "Controls"])
