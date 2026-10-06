@@ -921,9 +921,11 @@ extension Store {
             } catch {
                 self.iconError = error.localizedDescription
                 self.iconTask = nil
-                // A rejected key waits for a new one; anything else retries in a while.
-                self.iconsPausedUntil = (error as? JevClient.Failure)?.message.contains("API key") == true
-                    ? .distantFuture : Date().addingTimeInterval(600)
+                // A rejected key waits for a new one, and says so where it is: the Settings line that shows it may not be open.
+                // Anything else retries in a while.
+                let rejected = (error as? JevClient.Failure)?.message.contains("API key") == true
+                self.iconsPausedUntil = rejected ? .distantFuture : Date().addingTimeInterval(600)
+                if rejected, let said = self.iconError { Announce.say(said) }
                 self.scheduleClaudeTick()
             }
         }
