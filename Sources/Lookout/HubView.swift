@@ -81,7 +81,23 @@ final class HubState {
     /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
     var expanded: Bool { pinned }
     /// In the full view, the section given all the room it needs; the others shrink to their header (and counts).
-    var focus: HubSection?
+    var focus: HubSection? {
+        // A pick in a section that just shrank is no longer a row the keys may act on.
+        didSet { if let selection, !isVisible(selection) { self.selection = nil; keyboardSelection = nil } }
+    }
+
+    /// Whether a section's rows show: all of them do, unless another section is the focused one.
+    func shows(_ section: HubSection) -> Bool { focus == nil || focus == section }
+
+    /// Whether the row a pick names ("i:", "c:" or "a:" and its id) is on screen.
+    func isVisible(_ target: String) -> Bool {
+        switch target.prefix(2) {
+        case "i:": shows(.inbox)
+        case "c:": shows(.ci)
+        case "a:": shows(.agents)
+        default: true
+        }
+    }
 
     /// A section's header (or ⌘1/2/3) gives it all the room; the same again, or ⌘0, gives it back.
     func toggleFocus(_ section: HubSection) {

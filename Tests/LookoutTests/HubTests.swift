@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Foundation
 import SwiftUI
 import Testing
@@ -227,5 +228,89 @@ import Testing
         #expect(abs(out[1] - 120) < 1.5, "\(out)")
         // Cut at a measured row edge (not through a row), and regrown to the same height.
         #expect(out[0] >= 260 && out[0] <= 300.5 && abs(out[2] - out[0]) < 1.5, "\(out)")
+    }
+}
+
+/// What the keys act on while a section has the room (DESIGN.md 6.2): only rows that are showing.
+@MainActor
+@Suite struct SectionFocusKeys {
+    private let store = Store()
+    private let hub = HubState()
+    private let keys: HubKeys
+    private let box = Box()
+
+    final class Box { var opened: [String] = [] }
+
+    init() {
+        Demo.populate(store, .agents)
+        store.agents.expanded = true
+        let ui = UIState(persists: false, edge: .right)
+        keys = HubKeys(store: store, ui: ui, hub: hub)
+        let box = box
+        store.interceptOpen = { box.opened.append($0) }
+        hub.pinned = true
+    }
+
+    @discardableResult
+    private func press(_ code: Int, _ flags: NSEvent.ModifierFlags = [], _ chars: String = "") -> Bool {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                                     context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false,
+                                     keyCode: UInt16(code))!
+        return keys.key(event)
+    }
+
+    private func focus(_ number: Int) { press([1: kVK_ANSI_1, 2: kVK_ANSI_2, 3: kVK_ANSI_3, 0: kVK_ANSI_0][number]!, .command, "\(number)") }
+    private func down() { press(kVK_DownArrow, [], "\u{F701}") }
+    private func up() { press(kVK_UpArrow, [], "\u{F700}") }
+    private func enter() -> Bool { press(kVK_Return, [], "\r") }
+
+    @Test func downAfterFocusingTheSessionsPicksASession() {
+        focus(3)
+        down()
+        #expect(hub.selection?.hasPrefix("a:") == true, "\(hub.selection ?? "nothing")")
+        #expect(enter())
+        #expect(box.opened.last?.hasPrefix("Open in Claude") == true, "\(box.opened)")
+    }
+
+    @Test func focusingMovesAHiddenPickIntoTheSection() {
+        let item = store.list(.needsYou)[0]
+        hub.selection = "i:" + item.id
+        focus(3)
+        #expect(hub.selection?.hasPrefix("a:") == true, "\(hub.selection ?? "nothing")")
+        enter()
+        #expect(box.opened.allSatisfy { !$0.hasPrefix("Open on GitHub") }, "\(box.opened)")
+        // And back to every section: the pick stays where it is.
+        let pick = hub.selection
+        focus(0)
+        #expect(hub.selection == pick)
+    }
+
+    @Test func aHiddenPickIsNotActionable() {
+        hub.focus = .agents
+        hub.selection = "i:" + store.list(.needsYou)[0].id
+        #expect(!enter())
+        #expect(box.opened.isEmpty)
+        #expect(!press(kVK_Space, [], " "))
+    }
+
+    @Test func theArrowsStayInsideTheFocusedSection() {
+        focus(1)
+        for _ in 0..<40 { down() }
+        #expect(hub.selection?.hasPrefix("i:") == true, "\(hub.selection ?? "nothing")")
+        focus(3)
+        for _ in 0..<40 { up() }
+        #expect(hub.selection?.hasPrefix("a:") == true, "\(hub.selection ?? "nothing")")
+        // CI has no rows to pick yet: nothing is picked, and nothing is acted on.
+        focus(2)
+        down()
+        #expect(hub.selection == nil)
+        #expect(!enter())
+    }
+
+    @Test func markAllReadNeedsTheInboxToShow() {
+        let before = store.unreadCount(.needsYou)
+        focus(3)
+        press(kVK_Space, .option, " ")
+        #expect(store.unreadCount(.needsYou) == before)
     }
 }

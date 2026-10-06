@@ -401,6 +401,10 @@ struct SelectionSync: View {
             .onChange(of: ui.drawerSelection) { _, id in
                 if let id, hub.selection != "a:" + id { hub.selection = "a:" + id }
             }
+            // A pick that left the sessions (or went away) isn't a hovered session row either.
+            .onChange(of: hub.selection) { _, target in
+                if ui.drawerSelection != nil, target?.hasPrefix("a:") != true { ui.drawerSelection = nil }
+            }
     }
 }
 

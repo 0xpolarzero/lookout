@@ -56,6 +56,7 @@ final class HubKeys {
         // By key position, so they hold on an AZERTY keyboard, where the digits are shifted.
         if flags == .command, hub.expanded, hub.page == .main, let focus = Self.focusKey(event.keyCode) {
             if let section = focus { hub.toggleFocus(section) } else if hub.focus != nil { LookoutHub.animate(LookoutHub.refocus) { hub.focus = nil } }
+            rehome()
             return true
         }
         guard hub.expanded, hub.page == .main else { return false }
@@ -78,11 +79,12 @@ final class HubKeys {
             if targets.indices.contains(next) { select(targets[next]) }
             return true
         }
-        if shortcut == store.shortcut(.markAllRead) {
+        if shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) {
             LookoutHub.animate { store.markAllRead(hub.filter) }
             return true
         }
-        guard let selection = hub.selection else { return false }
+        // Row commands only act on a row that is showing: a pick in a section that shrank is not one.
+        guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
             if shortcut == store.shortcut(.openItem) { store.open(item) }
@@ -116,9 +118,18 @@ final class HubKeys {
         }
     }
 
-    /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
-    private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
+    /// Every row the arrows walk through, top to bottom: inbox items, then sessions; only those of the sections that
+    /// are showing (a focused section hides the others' rows).
+    func targets() -> [String] {
+        (hub.shows(.inbox) ? store.hubItems(hub).map { "i:" + $0.id } : [])
+            + (hub.shows(.agents) ? store.hubSessions(hub).map { "a:" + $0.id } : [])
+    }
+
+    /// After the focus moved by key: with the pick gone from view, the focused section's first row is the pick, so the
+    /// keys keep working where you are.
+    private func rehome() {
+        guard hub.selection == nil, hub.focus != nil, let first = targets().first else { return }
+        select(first)
     }
 
     /// A new search picks its first result, so ↩ opens it straight away.
