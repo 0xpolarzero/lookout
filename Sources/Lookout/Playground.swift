@@ -293,7 +293,7 @@ struct Shot {
 /// Baseline, every edge
 ///   rest, open, settings, search, peek-inbox, peek-ci, peek-agents, peek-controls
 /// Baseline, right and top
-///   repos, tip, picked (also left), focus-inbox, focus-agents (also left), peek-controls-keys (the menu VoiceOver asked for)
+///   peek-agents-hover (a row under the pointer, its tile ringed in the bar), repos, tip, picked (also left), focus-inbox, focus-agents (also left), peek-controls-keys (the menu VoiceOver asked for)
 /// Inbox, right and top
 ///   open-bots, open-done, search-none, search-sessions, focus-ci (also left)
 /// Causes, open on right and top; at rest on every edge (the bar's own state)
@@ -414,6 +414,8 @@ enum PlaygroundShots {
         Shot.edges("peek-ci") { $0.section = .ci },
         Shot.edges("peek-agents") { $0.section = .agents },
         Shot.edges("peek-controls") { $0.section = .controls },
+        // A row under the pointer in the sessions' peek lights its tile in the bar (and the other way round).
+        Shot.edges("peek-agents-hover", on: .rightAndTop) { $0.section = .agents; $0.hoveredSession = "local_demo-ci" },
         // Asked for by VoiceOver or a key: the first row is picked and the keys walk the rows.
         Shot.edges("peek-controls-keys", on: .rightAndTop) { $0.section = .controls; $0.setup = { _, _, hub in hub.menuKeys = true } },
         // An inbox item and a session picked, their actions showing, to compare them.
