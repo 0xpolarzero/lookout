@@ -511,6 +511,10 @@ final class Store {
     /// Playground: report what would open instead of opening it.
     @ObservationIgnored var interceptOpen: ((String) -> Void)?
 
+    /// Where an action that can be taken back reports itself: a message ("Hidden “CI failure diagnosis”") and the
+    /// closure that undoes it. The undo store (⌘Z, the undo line) sets this; nothing is offered while it is nil.
+    @ObservationIgnored var offerUndo: ((String, @escaping () -> Void) -> Void)?
+
     func open(_ item: InboxItem) {
         if let interceptOpen { interceptOpen("Open on GitHub · \(item.title)") } else { NSWorkspace.shared.open(item.url) }
         if item.state == .unread { markRead(item) }

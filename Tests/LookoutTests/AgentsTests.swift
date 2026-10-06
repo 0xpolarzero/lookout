@@ -151,7 +151,7 @@ import Testing
         let s = store([session("a", folder: "/code/x"), session("b", folder: "/code/y"), session("c", folder: "/code/x")])
         for id in ["a", "b", "c"] { s.keepAgent(id) }
         #expect(s.agentRows.kept.map(\.id) == ["a", "c", "b"])
-        #expect(s.groups(s.agentRows.kept).map { $0.map(\.id) } == [["a", "c"], ["b"]])
+        #expect(s.sessionGroups.map { $0.rows.map(\.id) } == [["a", "c"], ["b"]])
         // Each project got its own colour.
         #expect(s.agents.folderColors["/code/x"] != s.agents.folderColors["/code/y"])
         #expect(s.agentRows.kept.first?.color != nil)
