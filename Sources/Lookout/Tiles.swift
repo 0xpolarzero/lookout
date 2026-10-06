@@ -226,10 +226,13 @@ struct BarTile: View {
     let hub: HubState
     var show: (() -> Void)? = nil
 
+    /// Observed, so turning VoiceOver on mounts the clock and turning it off lets it go.
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+
     /// The age VoiceOver speaks follows the minute clock, which at rest only a screen reader needs: nothing ticks for
     /// a bar nobody is listening to.
     @ViewBuilder var body: some View {
-        if NSWorkspace.shared.isVoiceOverEnabled {
+        if voiceOver {
             Ticking(coarse: true) { cell(now: $0) }
         } else {
             cell(now: Date())
