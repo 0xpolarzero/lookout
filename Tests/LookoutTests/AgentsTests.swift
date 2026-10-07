@@ -99,6 +99,30 @@ import Testing
         #expect(s.allAgentRows.map(\.id) == ["a"])
     }
 
+    @Test func aSessionWithNothingToGoOnDoesNotBlockTheOthers() async {
+        final class Reads: @unchecked Sendable { var ids: [String] = [] }
+        let reads = Reads()
+        var untitled = session("u")
+        untitled.title = "Untitled session"
+        untitled.cliID = "cli-u"
+        let s = iconStore([untitled, session("b")])
+        s.iconFirstMessage = { reads.ids.append($0); return nil }
+        s.dismissAgent("u")
+        s.repickIcon("u")
+        await finishIcons(s)
+        #expect(entry(s, "b")?.icon != nil)
+        #expect(entry(s, "u")?.icon == nil)
+        #expect(s.iconTarget() == nil)
+        // Later reads don't look at its transcript again, until it has something new.
+        s.pickIcons()
+        await finishIcons(s)
+        #expect(reads.ids == ["cli-u"])
+        var renamed = untitled
+        renamed.title = "Fix the login form"
+        s.ingest([renamed, session("b")], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(s.iconTarget()?.id == "u")
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])

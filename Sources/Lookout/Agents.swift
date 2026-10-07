@@ -593,10 +593,18 @@ extension Store {
     // MARK: Icons (Jev)
 
     /// The session to pick an icon for next: one you asked for (it may be hidden, found through search), then the
-    /// listed ones that don't have one yet.
+    /// listed ones that don't have one yet. Sessions with nothing to go on are skipped until they change.
     func iconTarget() -> AgentRow? {
         iconRequests.removeAll { iconRow($0)?.needsIcon != true }
-        return iconRequests.lazy.compactMap { self.iconRow($0) }.first ?? allAgentRows.first(where: \.needsIcon)
+        iconDeferred = iconDeferred.filter { iconRow($0.key).map { iconStamp($0.session) } == $0.value }
+        func ready(_ row: AgentRow) -> Bool { iconDeferred[row.id] == nil }
+        return iconRequests.lazy.compactMap { self.iconRow($0) }.first(where: ready)
+            ?? allAgentRows.first { $0.needsIcon && ready($0) }
+    }
+
+    /// What a session looked like when it had nothing to go on: new activity, a title or a transcript changes it.
+    private func iconStamp(_ session: ClaudeSession) -> String {
+        "\(session.title)|\(session.activity)|\(session.cliID ?? "")"
     }
 
     /// A row for a session Lookout keeps an entry for, listed or hidden.
@@ -620,12 +628,17 @@ extension Store {
                 cliID.flatMap(readFirst)
             }.value
             guard let self else { return }
-            // Nothing to go on yet (a brand-new session the app hasn't named): wait for the next read.
-            let rows = self.allAgentRows
-            guard first != nil || session.title != "Untitled session",
-                  let current = self.iconRow(session.id), current.needsIcon else {
+            // Nothing to go on yet (a brand-new session the app hasn't named): skip it until it changes, and carry on.
+            if first == nil, session.title == "Untitled session" {
+                self.iconDeferred[session.id] = self.iconStamp(session)
                 self.iconTask = nil
-                if first != nil || session.title != "Untitled session" { self.pickIcons() }
+                self.pickIcons()
+                return
+            }
+            let rows = self.allAgentRows
+            guard let current = self.iconRow(session.id), current.needsIcon else {
+                self.iconTask = nil
+                self.pickIcons()
                 return
             }
             let used = Set(rows.compactMap(\.entry.icon)).union(current.entry.rejectedIcons ?? [])

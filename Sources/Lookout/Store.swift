@@ -134,6 +134,8 @@ final class Store {
     @ObservationIgnored var iconTask: Task<Void, Never>?
     /// Sessions you asked an icon for, picked before the rest (they may not be listed).
     @ObservationIgnored var iconRequests: [String] = []
+    /// Sessions with nothing to go on yet (see `iconStamp` for when they're looked at again).
+    @ObservationIgnored var iconDeferred: [String: String] = [:]
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     /// Where icons get their input and their answer (a session's first message by transcript id; Jev's choice from
     /// options, hints, state and instructions). Tests swap them for the disk and the network.
