@@ -135,6 +135,43 @@ private func threads(_ body: Data) -> Any {
         #expect(StubGitHub.paths.filter { $0 == "/graphql" }.count == 2)
     }
 
+    @Test func threadsGraphQLCouldntAnswerAreKeptNotDropped() async {
+        let (s, _) = store()
+        let now = Date().addingTimeInterval(-600)
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in (1...3).map { comment(100 + $0, on: $0, by: "them", at: now) } },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            // Thread 1 answered (mine), 2 reported as an error, 3 left out: only 1 is known.
+            "/graphql": { _ in [
+                "data": ["repository": [
+                    "n1": ["title": "One", "author": ["login": "me"], "comments": ["nodes": []], "reviews": ["nodes": []]],
+                    "n2": NSNull(),
+                ]],
+                "errors": [["type": "NOT_FOUND", "path": ["repository", "n2"], "message": "gone"]],
+            ] },
+        ])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.map(\.id).sorted() == ["a/r#c#101", "a/r#c#102", "a/r#c#103"])
+        #expect(s.items.sorted { $0.number < $1.number }.map(\.forYou) == [true, nil, nil])
+    }
+
+    @Test func anErrorWithoutAPathLeavesTheWholeBatchUnknown() async {
+        let (s, _) = store()
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in [comment(1, on: 7, by: "them", at: Date().addingTimeInterval(-600))] },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            "/graphql": { body in
+                var json = threads(body) as! [String: Any]
+                json["errors"] = [["type": "RESOURCE_LIMITS_EXCEEDED", "message": "slow down"]]
+                return json
+            },
+        ])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.map(\.forYou) == [nil])
+    }
+
     // MARK: Review requests
 
     private func request(_ id: Int, number: Int = 5) -> [String: Any] {

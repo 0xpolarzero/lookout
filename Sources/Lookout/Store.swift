@@ -828,12 +828,14 @@ final class Store {
             : try? await fetchThreads(name, Array(needInfo), participation: true, reviewThreads: reviewNumbers, me: me)
         // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
         // Always evaluated (and remembered), so switching All comments off later can prune what isn't for me.
-        // If the lookup failed, keep everything rather than silently dropping something addressed to me.
+        // If the lookup failed (or only partly answered), keep what it couldn't judge rather than silently
+        // dropping something addressed to me.
         for i in added.indices {
-            if let title = info?[added[i].number]?.title { added[i].title = title }
-            if let info, commentKinds.contains(added[i].kind) {
-                added[i].forYou = Self.isRelevant(added[i], thread: info[added[i].number],
-                                                  mentioned: mentioned.contains(added[i].id), me: me)
+            let thread = info?[added[i].number]
+            if let title = thread?.title { added[i].title = title }
+            let isMentioned = mentioned.contains(added[i].id)
+            if commentKinds.contains(added[i].kind), isMentioned || thread != nil {
+                added[i].forYou = Self.isRelevant(added[i], thread: thread, mentioned: isMentioned, me: me)
             }
         }
         if !repo.allComments {
@@ -907,6 +909,15 @@ final class Store {
             throw GitHubError(message: "Couldn't load threads for \(name)")
         }
 
+        // GraphQL can answer part of a query alongside `errors` (resource limits, a thread that's gone):
+        // a thread it reported on, or left out, is unknown rather than "not mine". An error that says nothing
+        // about where it happened makes the whole batch unknown.
+        var failed = Set<String>()
+        for case let error as [String: Any] in json["errors"] as? [Any] ?? [] {
+            guard let alias = (error["path"] as? [Any])?.dropFirst().first as? String else { return [:] }
+            failed.insert(alias)
+        }
+
         func nodes(_ obj: Any?, _ key: String) -> [[String: Any]] {
             ((obj as? [String: Any])?[key] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
         }
@@ -915,7 +926,7 @@ final class Store {
 
         var result: [Int: ThreadInfo] = [:]
         for (key, value) in repoObj {
-            guard let n = Int(key.dropFirst()), let obj = value as? [String: Any] else { continue }
+            guard let n = Int(key.dropFirst()), !failed.contains(key), let obj = value as? [String: Any] else { continue }
             var info = ThreadInfo(title: obj["title"] as? String, author: login(obj))
             info.activity = nodes(obj, "comments").filter { login($0) == me }.compactMap { date($0, "createdAt") }
                 + nodes(obj, "reviews").filter { login($0) == me }.compactMap { date($0, "submittedAt") }
