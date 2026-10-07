@@ -34,6 +34,11 @@ final class Store {
     var droppedRequests: Set<String> = [] {
         didSet { persistedRevision &+= 1 }
     }
+    /// Conversation events cleared from Done, by id, with when: GitHub can list one again (a comment on an issue updates it,
+    /// and its `since` goes by that date), so a sync leaves them out. Forgotten after the 14 days Done keeps a row (`prune`).
+    var clearedConversations: [String: Date] = [:] {
+        didSet { persistedRevision &+= 1 }
+    }
     var settings = AppSettings() {
         didSet {
             memo = Memo()
@@ -485,6 +490,7 @@ final class Store {
         agents = state.agents ?? AgentsState()
         mutedCI = state.mutedCI ?? [:]
         droppedRequests = Set(state.droppedRequests ?? [])
+        clearedConversations = state.clearedConversations ?? [:]
         savedRevision = persistedRevision
     }
 
@@ -517,7 +523,8 @@ final class Store {
         saveDirty = false
         let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents,
                                                         mutedCI: mutedCI.isEmpty ? nil : mutedCI,
-                                                        droppedRequests: droppedRequests.isEmpty ? nil : droppedRequests.sorted()))
+                                                        droppedRequests: droppedRequests.isEmpty ? nil : droppedRequests.sorted(),
+                                                        clearedConversations: clearedConversations.isEmpty ? nil : clearedConversations))
         let url = Self.fileURL
         let write: @Sendable () -> Void = {
             let enc = JSONEncoder()
@@ -1029,8 +1036,7 @@ final class Store {
             if let last = comments.map(\.updatedAt).max() { newCursors["review"] = last }
         }
 
-        let known = Set(items.map(\.id))
-        var added = fresh.filter { !known.contains($0.id) }
+        var added = unseen(fresh)
         let commentKinds: Set<EventKind> = [.issueComment, .prComment, .reviewComment]
         let needInfo = Set(added.filter { $0.title == "#\($0.number)" || commentKinds.contains($0.kind) }.map(\.number))
         let reviewNumbers = Set(added.filter { $0.kind == .reviewComment }.map(\.number))
@@ -1039,6 +1045,8 @@ final class Store {
         // The repository may have been stopped, or set to follow something else, while the answers were out: nothing of
         // them is kept, counted or told (the cursors stay, so a repository that is still watched asks again).
         guard isCurrent(repo) else { return }
+        // And Done may have been cleared (or the clearing undone) meanwhile: what is held, or was cleared, is not added again.
+        added = unseen(added)
         // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
         // Always evaluated (and remembered), so switching All comments off later can prune what isn't for me.
         // If the lookup failed, keep everything rather than silently dropping something addressed to me.
@@ -1074,6 +1082,12 @@ final class Store {
         }
 
         announce(added.filter { $0.state == .unread && $0.createdAt > repo.addedAt })
+    }
+
+    /// What of `events` the inbox has neither as a row nor as one cleared from Done.
+    private func unseen(_ events: [InboxItem]) -> [InboxItem] {
+        let known = Set(items.map(\.id))
+        return events.filter { !known.contains($0.id) && clearedConversations[$0.id] == nil }
     }
 
     /// Whether `repo`, as an answer was asked for it, is still what is watched: not stopped (nor stopped and watched again), and
@@ -1273,6 +1287,9 @@ final class Store {
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
         if items.contains(where: expired) { items.removeAll(where: expired) }
+        if clearedConversations.values.contains(where: { now.timeIntervalSince($0) > 14 * 86400 }) {
+            clearedConversations = clearedConversations.filter { now.timeIntervalSince($0.value) <= 14 * 86400 }
+        }
         // What ⌘Z could still bring back is outside the cap, for the half minute it lasts.
         let held = items.filter { $0.isInUndoWindow(now: now) }
         if items.count - held.count > Self.itemCap {

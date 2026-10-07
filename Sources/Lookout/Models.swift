@@ -188,6 +188,8 @@ struct PersistedState: Codable {
     var mutedCI: [String: String]?
     /// Review request ids cleared from Done while still pending (see `Store.droppedRequests`).
     var droppedRequests: [String]?
+    /// Conversation events cleared from Done, with when each was cleared (see `Store.clearedConversations`).
+    var clearedConversations: [String: Date]?
 }
 
 enum InboxFilter: String, CaseIterable {

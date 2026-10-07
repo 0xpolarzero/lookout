@@ -122,18 +122,21 @@ extension Store {
     var hasClearableDone: Bool { items.contains { !$0.state.isOpen } }
 
     /// Empties Done for good (with an undo line for the next 30 s). A review request nobody has answered would come
-    /// back from GitHub's search as new, so its id is remembered apart from the rows (`droppedRequests`).
+    /// back from GitHub's search as new, so its id is remembered apart from the rows (`droppedRequests`); so is every other
+    /// event's, which an update to its issue can have GitHub list again (`clearedConversations`).
     func clearDone() {
         let gone = items.filter { !$0.state.isOpen }
         guard !gone.isEmpty else { return }
         let requests = Set(gone.filter { $0.kind == .reviewRequested && $0.state == .discarded }.map(\.id))
         droppedRequests.formUnion(requests)
+        for event in gone where event.kind != .reviewRequested { clearedConversations[event.id] = Date() }
         removeItems { !$0.state.isOpen }
         registerUndo("Cleared \(gone.count) from Done", announcement: "Cleared \(plural(gone.count, "item")) from Done. Undo available") { [self] in
             // Only what the repositories and events watched now still allow: what was removed since stays removed.
             let known = Set(items.map(\.id))
             let back = gone.filter { !known.contains($0.id) && isWanted($0) }
             droppedRequests.subtract(requests)
+            for event in back { clearedConversations[event.id] = nil }
             items.append(contentsOf: back)
             save()
         }

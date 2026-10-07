@@ -142,6 +142,55 @@ final class Sleeper {
         #expect(state.droppedRequests == ["rr#1"])
     }
 
+    // MARK: Cleared events stay cleared
+
+    private nonisolated static func reply(_ body: String) -> (Data, URLResponse) {
+        (Data(body.utf8), HTTPURLResponse(url: URL(string: "https://api.github.com")!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+
+    /// A store watching a/b's new issues, whose issues list answers with issue 7 (opened now, then commented on, so listed again).
+    private func syncing(_ items: [InboxItem]) -> Store {
+        let s = store(items)
+        s.repos = [RepoConfig(fullName: "a/b", events: [.issueOpened])]
+        s.settings.reviewRequests = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        let now = ISO8601DateFormatter().string(from: Date())
+        let issue = """
+        [{"id": 7, "number": 7, "title": "Opened", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
+          "html_url": "https://github.com/a/b/issues/7", "created_at": "\(now)", "updated_at": "\(now)", "pull_request": null}]
+        """
+        s.gh.transport = { request in Undo.reply(request.url!.path == "/repos/a/b/issues" ? issue : "[]") }
+        return s
+    }
+
+    @Test func aClearedEventListedAgainByGitHubDoesNotComeBackUnread() async {
+        let s = syncing([item("a/b#issueOpened#7", .discarded, at: Date().timeIntervalSince1970, kind: .issueOpened)])
+        s.clearDone()
+        #expect(s.clearedConversations.keys.sorted() == ["a/b#issueOpened#7"])
+        await s.pollAll()
+        #expect(s.items.isEmpty)
+    }
+
+    @Test func anUndoneClearIsTheRowAgainAndNotAddedTwice() async {
+        let s = syncing([item("a/b#issueOpened#7", .discarded, at: Date().timeIntervalSince1970, kind: .issueOpened)])
+        s.clearDone()
+        #expect(s.undoLast())
+        #expect(s.clearedConversations.isEmpty)
+        await s.pollAll()
+        #expect(ids(s.items) == ["a/b#issueOpened#7"] && s.items[0].state == .discarded)
+    }
+
+    @Test func clearedEventsAreForgottenAfterFourteenDaysAndSurviveARestart() throws {
+        let s = store([item("1", .discarded), item("2", .discarded)])
+        s.clearDone()
+        s.clearedConversations["1"] = Date().addingTimeInterval(-15 * 86400)
+        s.prune()
+        #expect(s.clearedConversations.keys.sorted() == ["2"])
+        let data = try JSONEncoder().encode(PersistedState(repos: [], items: [], ci: [:], settings: AppSettings(), agents: nil,
+                                                           mutedCI: nil, clearedConversations: s.clearedConversations))
+        #expect(try JSONDecoder().decode(PersistedState.self, from: data).clearedConversations == s.clearedConversations)
+    }
+
     // MARK: Review requests beyond the first page
 
     private func request(_ id: Int) -> GHIssue {
