@@ -11,6 +11,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Tests: every post and withdrawal, whether or not the system would show it.
     var onPost: ((String) -> Void)?
     var onRemove: (([String]) -> Void)?
+    /// Tests: the banners that exist, delivered or still waiting, in place of asking the system.
+    var lookup: ((@escaping ([UNNotificationRequest]) -> Void) -> Void)?
     private var available: Bool { Bundle.main.bundleIdentifier != nil }
 
     func setup() {
@@ -52,11 +54,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         identifier.hasPrefix("https://github.com/\(repo)/commit/")
     }
 
-    /// Withdraws a repo's CI banners (the ones that can't be looked up by item).
+    /// Withdraws a repo's CI banners (the ones that can't be looked up by item), delivered or still waiting.
     func removeCI(of repo: String) {
-        guard available else { return }
-        UNUserNotificationCenter.current().getDeliveredNotifications { [self] delivered in
-            remove(delivered.map(\.request.identifier).filter { Self.isCI($0, of: repo) })
+        guard lookup != nil || available else { return }
+        (lookup ?? Self.systemLookup) { [self] requests in
+            remove(requests.map(\.identifier).filter { Self.isCI($0, of: repo) })
+        }
+    }
+
+    private static func systemLookup(_ done: @escaping ([UNNotificationRequest]) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            center.getPendingNotificationRequests { done(delivered.map(\.request) + $0) }
         }
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UserNotifications
 @testable import Lookout
 
 /// Answers GitHub requests from a table, so `sync` runs end to end without the network.
@@ -275,6 +276,18 @@ private func threads(_ body: Data) -> Any {
         s.removeRepo(s.repos[0])
         #expect(s.items.map(\.id) == ["rr#9", "b/q#c#2"])
         #expect(withdrawn == ["a/r#c#1"])
+    }
+
+    @Test func removingARepoWithdrawsCIBannersStillWaitingToShow() {
+        let (s, _) = store()
+        func request(_ id: String) -> UNNotificationRequest {
+            UNNotificationRequest(identifier: id, content: UNMutableNotificationContent(), trigger: nil)
+        }
+        s.notifier.lookup = { $0([request("https://github.com/a/r/commit/abc"), request("https://github.com/b/q/commit/def")]) }
+        var withdrawn: [String] = []
+        s.notifier.onRemove = { withdrawn += $0 }
+        s.removeRepo(s.repos[0])
+        #expect(withdrawn == ["https://github.com/a/r/commit/abc"])
     }
 
     @Test func ciBannersAreToldApartByRepo() {
