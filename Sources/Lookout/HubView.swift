@@ -485,7 +485,14 @@ struct LookoutHub: View {
         }
         if store.updater.showsInPill {
             row(cell: { UpdateButton(updater: store.updater, horizontal: false).padding(.vertical, 4) },
-                detail: { Text(updateText).font(Theme.Typography.control).foregroundStyle(Theme.secondary).padding(.horizontal, 8) })
+                detail: {
+                    HStack(spacing: 4) {
+                        Text(updateText).font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                        Spacer(minLength: 0)
+                        UpdateMenu(updater: store.updater)
+                    }
+                    .padding(.horizontal, 8)
+                })
                 .transition(.scaleFade(0.8, reduce: reduce))
         }
     }
@@ -674,7 +681,11 @@ struct LookoutHub: View {
             }
             if store.updater.showsInPill {
                 stripDivider
-                UpdateButton(updater: store.updater, horizontal: true).padding(.horizontal, 6)
+                HStack(spacing: 0) {
+                    UpdateButton(updater: store.updater, horizontal: true)
+                    UpdateMenu(updater: store.updater)
+                }
+                .padding(.horizontal, 6)
             }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in

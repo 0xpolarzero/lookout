@@ -271,7 +271,7 @@ struct LabelEditor: View {
 
 /// A new release, fetched in the background: an icon that says what it is on hover; click to restart into it
 /// (or to download it, with a ring for progress, if that didn't happen on its own). Right-click for the release
-/// notes or to skip that version.
+/// notes or to skip that version; `UpdateMenu` beside it offers the same from the keyboard.
 struct UpdateButton: View {
     let updater: Updater
     let horizontal: Bool
@@ -283,12 +283,7 @@ struct UpdateButton: View {
         .accessibilityLabel(Self.label(updater.phase, version: version))
         .accessibilityHint(tooltip(version).0)
         .tip(tooltip(version).0, tooltip(version).1)
-        .contextMenu {
-            if let page = updater.release?.page {
-                Button("What's new in \(version)") { NSWorkspace.shared.open(page) }
-            }
-            Button("Skip \(version)") { updater.skip() }
-        }
+        .contextMenu { UpdateActions(updater: updater) }
     }
 
     /// The tooltip: what it is, and what a click does.
@@ -310,6 +305,38 @@ struct UpdateButton: View {
         case .failed: "Retry update"
         default: "Update to \(version)"
         }
+    }
+}
+
+private struct UpdateActions: View {
+    let updater: Updater
+
+    var body: some View {
+        let version = updater.release?.version ?? ""
+        if let page = updater.release?.page {
+            Button("What's new in \(version)") { NSWorkspace.shared.open(page) }
+        }
+        Button("Skip \(version)") { updater.skip() }
+    }
+}
+
+/// The update button's other actions in a menu you can Tab to and open: a context menu opens from the keyboard
+/// only on macOS 15 and later.
+struct UpdateMenu: View {
+    let updater: Updater
+
+    var body: some View {
+        Menu { UpdateActions(updater: updater) } label: {
+            Image(systemName: "ellipsis")
+                .font(Theme.Typography.glyph(11, .bold))
+                .foregroundStyle(Theme.secondary)
+                .frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("More about this update")
+        .tip("More about this update", "Release notes, or skip this version")
     }
 }
 
