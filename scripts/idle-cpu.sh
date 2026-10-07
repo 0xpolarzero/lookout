@@ -88,8 +88,15 @@ ring_problem() {
 
 out=$(mktemp)
 pid=
+# stop_app: ends the app a measure launched, and waits for it, so none outlives its measure or reaches the next one's window.
+stop_app() {
+    [ -n "$pid" ] || return 0
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    pid=
+}
 cleanup() {
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null
+    stop_app
     rm -f "$out"
 }
 trap cleanup EXIT
@@ -98,8 +105,15 @@ failed=0
 scenario=agents
 last_ws=0
 
-# measure <label> <edge> [launch argument]: one launch, one verdict.
+# measure <label> <edge> [launch argument]: one launch, one verdict. However it ends, the app is stopped.
 measure() {
+    sample "$@"
+    stop_app
+    # The next launch starts from a clean slate, not beside the previous one's window.
+    sleep 1
+}
+
+sample() {
     local label=$1 edge=$2; shift 2
     : >"$out"
     "$bin" --demo "$scenario" --lifecycle --edge "$edge" "$@" >"$out" 2>&1 &
@@ -136,7 +150,6 @@ measure() {
         echo "idle-cpu: $label $edge: $problem"
         if [ "${ALLOW_HIDDEN:-0}" != "1" ]; then
             failed=1
-            kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; pid=
             return
         fi
     fi
@@ -172,11 +185,6 @@ measure() {
         printf "%-12s Lookout %.3f%% (limit %s%%)  WindowServer %s%% (all clients)  %s\n", label, app, limit, ws, verdict
         exit app < limit ? 0 : 1
     }' || failed=1
-    kill "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null
-    pid=
-    # The next launch starts from a clean slate, not beside the previous one's window.
-    sleep 1
 }
 
 ring_ws=
