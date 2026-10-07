@@ -112,6 +112,9 @@ final class GitHubClient: @unchecked Sendable {
     /// Remaining calls in the core (REST) and GraphQL buckets.
     var rateRemaining: Int? { lock.withLock { coreRemaining } }
     var graphqlRemaining: Int? { lock.withLock { gqlRemaining } }
+    /// When the core bucket refills.
+    var rateResetsAt: Date? { lock.withLock { coreResetsAt } }
+    private var coreResetsAt: Date?
     private var coreRemaining: Int?
     private var gqlRemaining: Int?
     /// What an answer GitHub gave is remembered by: its ETag, its body and, once decoded, the value (a 304 returns that
@@ -181,6 +184,10 @@ final class GitHubClient: @unchecked Sendable {
     }
 
     private func exchange(_ path: String, _ query: [String: String]) async throws -> Answer {
+        // Out of calls: GitHub asks that nothing is sent until the reset. Search has a budget of its own, which this one's end leaves.
+        if !path.hasPrefix("/search/"), let reset = lock.withLock({ coreRemaining == 0 ? coreResetsAt : nil }), reset > Date() {
+            throw GitHubError(message: "API rate limit exceeded, waiting for the reset")
+        }
         var comps = URLComponents(string: "https://api.github.com" + path)!
         if !query.isEmpty {
             comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -259,7 +266,12 @@ final class GitHubClient: @unchecked Sendable {
     private func trackRate(_ http: HTTPURLResponse) {
         guard let r = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) else { return }
         switch http.value(forHTTPHeaderField: "x-ratelimit-resource") {
-        case "core": lock.withLock { coreRemaining = r }
+        case "core":
+            let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset").flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) }
+            lock.withLock {
+                coreRemaining = r
+                coreResetsAt = reset
+            }
         case "graphql": lock.withLock { gqlRemaining = r }
         default: break
         }

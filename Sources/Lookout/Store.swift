@@ -83,6 +83,8 @@ final class Store {
     var isSyncing = false
     var lastSync: Date?
     var rateRemaining: Int?
+    /// When the GitHub rate limit resets, as of the last sync.
+    @ObservationIgnored var rateResetsAt: Date?
     var suggestions: [String] = []
 
     @ObservationIgnored let gh = GitHubClient()
@@ -328,6 +330,11 @@ final class Store {
             var wait = 3600.0
             if !systemAsleep {
                 wait = effectivePollInterval - Date().timeIntervalSince(lastSync ?? .distantPast)
+                // Out of calls: nothing is sent before the reset, so that is when to check again, whatever is left of the interval.
+                if rateRemaining == 0, let reset = rateResetsAt {
+                    if reset <= Date(), (lastSync ?? .distantPast) < reset, !isSyncing { return }
+                    if reset > Date() { wait = min(wait, reset.timeIntervalSinceNow) }
+                }
                 if wait <= 0 {
                     if !isSyncing { return }
                     wait = 1
@@ -732,6 +739,7 @@ final class Store {
             isSyncing = false
             lastSync = Date()
             if rateRemaining != gh.rateRemaining { rateRemaining = gh.rateRemaining }
+            rateResetsAt = gh.rateResetsAt
             prune()
             if persistedRevision != savedRevision { save() }
         }

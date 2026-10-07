@@ -80,4 +80,39 @@ import Testing
         let _: Counted = try await client.get("/repos/o/other/commits/\(String(repeating: "a", count: 40))/status")
         #expect(client.remembered == 3)
     }
+
+    @Test func nothingIsAskedOfTheCoreBudgetBetweenItsEndAndItsResetButSearchStillIs() async throws {
+        let client = GitHubClient()
+        let asked = OSAllocatedUnfairLock(initialState: [String]())
+        let reset = Date().addingTimeInterval(600)
+        client.session = StubbedGitHub.session { request in
+            asked.withLock { $0.append(request.url!.path) }
+            return .init(200, #"{"id": 7}"#, headers: [
+                "x-ratelimit-resource": "core", "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970)),
+            ])
+        }
+        let _: Counted = try await client.get("/repos/o/r/issues")
+        #expect(client.rateRemaining == 0)
+        #expect(client.rateResetsAt.map { abs($0.timeIntervalSince(reset)) < 1 } == true)
+        await #expect(throws: GitHubError.self) { let _: Counted = try await client.get("/repos/o/r/issues") }
+        let _: Counted = try await client.get("/search/issues")
+        #expect(asked.withLock { $0 } == ["/repos/o/r/issues", "/search/issues"])
+    }
+
+    @Test func requestsGoOutAgainOnceTheResetHasPassed() async throws {
+        let client = GitHubClient()
+        let asked = OSAllocatedUnfairLock(initialState: 0)
+        let reset = Date().addingTimeInterval(-5)
+        client.session = StubbedGitHub.session { _ in
+            asked.withLock { $0 += 1 }
+            return .init(200, #"{"id": 7}"#, headers: [
+                "x-ratelimit-resource": "core", "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970)),
+            ])
+        }
+        let _: Counted = try await client.get("/repos/o/r/issues")
+        let _: Counted = try await client.get("/repos/o/r/issues")
+        #expect(asked.withLock { $0 } == 2)
+    }
 }
