@@ -60,8 +60,6 @@ extension LookoutHub {
         return fixed
     }
 
-    private var ciBodyHeight: CGFloat { max(ciHeight, Theme.Metrics.pitch) }
-
     /// CI is only its header (its counts in it) where the room below the bar can't give each list a row after it: a
     /// bar resting that low keeps the screen's end as the hub's, and the lists matter more than CI's lines.
     var foldsCI: Bool {

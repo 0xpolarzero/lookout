@@ -424,6 +424,18 @@ extension LookoutHub {
         return max(4 * row, (maxLength - 210) * 0.45)
     }
 
+    /// How tall CI's lines are under its header in the layout as it is now, not as last measured (hidden, the block is
+    /// never measured again): the rows cut between rows at `ciCap`, under the stale line, with the undo line (which
+    /// `fixedLength` counts itself when there are no repositories).
+    var ciBodyHeight: CGFloat {
+        let pitch = Theme.Metrics.pitch
+        let list = store.ciList
+        if list.isEmpty { return pitch + (store.ciRepos.isEmpty ? 0 : ciUndoRoom) }
+        let edges = ciLines(list, open: hub.ciPassingOpen).reduce(into: [CGFloat]()) { $0.append(($0.last ?? 0) + $1.height) }
+        let rows = edges.last! > ciCap + 0.5 ? CappedScrollSpace.fit(cap: ciCap - pitch, edges: edges) + pitch : edges.last!
+        return rows + (hub.ciStale ? Self.staleHeight : 0) + ciUndoRoom
+    }
+
     /// Nothing watched has CI on: one line aligned with the glyph column, and where to turn it on.
     var noCI: some View {
         HStack(spacing: Theme.Space.sm) {

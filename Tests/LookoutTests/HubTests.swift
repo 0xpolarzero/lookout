@@ -1239,3 +1239,36 @@ private final class Redrawn: @unchecked Sendable {
         #expect(hub.frozenSessions == nil)
     }
 }
+
+/// DESIGN.md 10.5: CI folded to its header is a matter of the room the layout leaves, not of a height measured earlier: a
+/// focus round trip (⌘2, then esc) leaves the full view as it was, and never folds CI on the way.
+@MainActor
+@Suite struct CIFoldAcrossFocus {
+    @Test func aFocusRoundTripNeverFoldsCIByWhatItMeasuredOpen() async throws {
+        let store = Store.unsaved()
+        store.agents.enabled = true
+        let names = (1...12).map { "o/repo\($0)" }
+        store.repos = names.map { RepoConfig(fullName: $0) }
+        let now = Date()
+        store.ci = Dictionary(uniqueKeysWithValues: names.map { ($0, ciStatus(.success, sha: "a", failing: [], checkedAt: now, updatedAt: now)) })
+        let hub = HubState()
+        hub.pinned = true
+        // Room enough for CI's closed Passing row, not for the twelve repositories it lists once open.
+        let length: CGFloat = 700
+        let view = LookoutHub(store: store, ui: UIState(persists: false, edge: .right), hub: hub, maxLength: length, openLength: length,
+                              maxWidth: 900, barLength: length)
+            .frame(width: 900, height: 800, alignment: .topLeading)
+        let window = NSWindow.offscreen(NSHostingView(rootView: view), size: CGSize(width: 900, height: 800))
+        defer { window.close() }
+        try await Task.sleep(for: .seconds(0.3))
+        #expect(!hub.ciFolded)
+        hub.toggleFocus(.ci)
+        try await Task.sleep(for: .seconds(0.5))
+        // Not for a moment either: its rows would be drawn out and back in.
+        let folded = Flag()
+        withObservationTracking { _ = hub.ciFolded } onChange: { folded.set() }
+        hub.toggleFocus(.ci)
+        try await Task.sleep(for: .seconds(0.5))
+        #expect(!hub.ciFolded && !folded.value)
+    }
+}
