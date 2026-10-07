@@ -46,6 +46,15 @@ final class HubState {
     var toast: String?
     /// Typed while the hub has the keyboard: narrows the inbox and finds sessions, kept or not.
     var query = ""
+    /// The search field is showing: while there is a query, and after ⌫ emptied it (Esc, or leaving the hub, ends it).
+    var searchOpen = false
+    /// Mirrors the field's focus, for the key handler, which leaves a focused field alone.
+    var searchFocused = false
+    /// Bumped to ask the field for focus.
+    var focusRequest = 0
+    /// The next focus is the typing's own: a first character was put in the field, so the caret goes after it. Any
+    /// other focus (a click, Tab) keeps what the field and the pointer decide.
+    var caretAtEnd = false
     /// Which way the last page change went, so pages slide in from the side you're heading to.
     var forward = true
     /// The page you came from, so going back retraces your steps (Repositories opened from Settings goes back
@@ -60,6 +69,28 @@ final class HubState {
     /// The bar is being carried to another edge: no panels meanwhile.
     @ObservationIgnored var dragging = false
     @ObservationIgnored private var dwell: Task<Void, Never>?
+
+    /// Shows the search field and asks it for the keyboard; `seeded`: a first character is already in it.
+    func startSearch(seeded: Bool = false) {
+        searchOpen = true
+        if seeded { caretAtEnd = true }
+        focusRequest &+= 1
+    }
+
+    /// Clears the query and takes the field away.
+    func endSearch() {
+        query = ""
+        searchOpen = false
+        searchFocused = false
+        caretAtEnd = false
+    }
+
+    /// Picks a row from the keyboard (or none): the lists follow it.
+    func pick(_ target: String?, ui: UIState) {
+        selection = target
+        if let target { requestScroll(target) } else { keyboardSelection = nil }
+        ui.drawerSelection = target.flatMap { $0.hasPrefix("a:") ? String($0.dropFirst(2)) : nil }
+    }
 
     /// The pointer entered a section. The first panel waits for the pointer to settle (so sweeping along the edge
     /// opens nothing); once one is open, moving to another section switches at once, with no transition.
@@ -149,22 +180,26 @@ final class HubKeys {
     func close() {
         // Closing leaves any page: the hub opens on the main view next time.
         hub.go(.main)
-        hub.query = ""
+        hub.endSearch()
         hub.keyboardSelection = nil
         hub.pinned = false
         hub.hovering = false
         onClose()
     }
 
-    /// Returns whether the key was handled. Typing in a text field is left alone, except Esc.
+    /// Returns whether the key was handled. Typing in a text field is left alone, except Esc and, in the search field, the
+    /// keys that act on the results.
     func key(_ event: NSEvent) -> Bool {
-        let editing = event.window?.firstResponder is NSText
-        if editing, event.keyCode != UInt16(kVK_Escape) { return false }
+        // An input method is composing in a text field: Esc, the arrows and Return are the composition's.
+        if (event.window?.firstResponder as? NSTextView)?.hasMarkedText() == true { return false }
         let flags = event.modifierFlags.intersection(Shortcut.relevant)
         let shortcut = Shortcut(event)
+        if hub.searchFocused, hub.page == .main, let handled = searchKey(event, flags: flags, shortcut: shortcut) { return handled }
+        let editing = event.window?.firstResponder is NSText
+        if editing, event.keyCode != UInt16(kVK_Escape) { return false }
         if event.keyCode == UInt16(kVK_Escape), flags.isEmpty {
             if editing { event.window?.makeFirstResponder(nil) }
-            else if !hub.query.isEmpty { setQuery("") }
+            else if !hub.query.isEmpty || hub.searchOpen { setQuery("") }
             else if hub.page != .main { hub.back() }
             else if hub.focus != nil { withAnimation(LookoutHub.refocus.resolved(reduce: LookoutHub.reduceNow)) { hub.focus = nil } }
             else { close() }
@@ -181,24 +216,40 @@ final class HubKeys {
             setQuery(String(hub.query.dropLast()))
             return true
         }
-        if flags.subtracting(.shift).isEmpty, let typed = event.characters, !typed.isEmpty,
-           typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }),
-           !(typed == " " && hub.query.isEmpty) {
+        if flags.subtracting(.shift).isEmpty, let typed = Self.printable(event), !(typed == " " && hub.query.isEmpty) {
             setQuery(hub.query + typed)
             return true
         }
         let targets = targets()
         if event.keyCode == 125 || event.keyCode == 126, flags.isEmpty {
-            let down = event.keyCode == 125
-            let i = targets.firstIndex(of: hub.selection ?? "") ?? (down ? -1 : targets.count)
-            let next = min(max(i + (down ? 1 : -1), 0), targets.count - 1)
-            if targets.indices.contains(next) { select(targets[next]) }
+            move(down: event.keyCode == 125, in: targets)
             return true
         }
-        if shortcut == store.shortcut(.markAllRead) {
-            withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.markAllRead(hub.filter) }
-            return true
-        }
+        if markAllRead(shortcut) { return true }
+        return rowCommand(shortcut, targets: targets)
+    }
+
+    /// What a key types, when it is printable text (not a control character or a function key).
+    private static func printable(_ event: NSEvent) -> String? {
+        guard let typed = event.characters, !typed.isEmpty,
+              typed.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) && $0.value < 0xF700 }) else { return nil }
+        return typed
+    }
+
+    private func move(down: Bool, in targets: [String]) {
+        let i = targets.firstIndex(of: hub.selection ?? "") ?? (down ? -1 : targets.count)
+        let next = min(max(i + (down ? 1 : -1), 0), targets.count - 1)
+        if targets.indices.contains(next) { select(targets[next]) }
+    }
+
+    private func markAllRead(_ shortcut: Shortcut) -> Bool {
+        guard shortcut == store.shortcut(.markAllRead) else { return false }
+        withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.markAllRead(hub.filter) }
+        return true
+    }
+
+    /// What the bound actions do to the row that is picked. False when `shortcut` is none of them, or no row is picked.
+    private func rowCommand(_ shortcut: Shortcut, targets: [String]) -> Bool {
         guard let selection = hub.selection else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
@@ -223,9 +274,7 @@ final class HubKeys {
     }
 
     /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
-    private func targets() -> [String] {
-        store.hubItems(hub).map { "i:" + $0.id } + store.hubSessions(hub).map { "a:" + $0.id }
-    }
+    func targets() -> [String] { store.hubTargets(hub) }
 
     /// A new search picks its first result, so ↩ opens it straight away.
     private func setQuery(_ query: String) {
@@ -233,15 +282,66 @@ final class HubKeys {
             hub.query = query
             // Searching looks everywhere, and what you type shows in the inbox's header: nothing stays shrunk.
             if !query.isEmpty { hub.focus = nil }
+            if query.isEmpty { hub.endSearch() }
         }
-        if let first = targets().first { select(first) } else { hub.selection = nil; hub.keyboardSelection = nil; ui.drawerSelection = nil }
+        // The typing's first character goes in the field, which takes the keyboard (so the next ones are its own).
+        if !query.isEmpty { hub.startSearch(seeded: true) }
+        hub.pick(targets().first, ui: ui)
     }
 
     /// Picks a row from the keyboard: the lists follow it.
-    func select(_ target: String) {
-        hub.selection = target
-        hub.requestScroll(target)
-        ui.drawerSelection = target.hasPrefix("a:") ? String(target.dropFirst(2)) : nil
+    func select(_ target: String) { hub.pick(target, ui: ui) }
+}
+
+// MARK: Search field
+
+extension HubKeys {
+    /// A key while the search field has focus: Esc clears and ends the search, ↑↓ walk the results, ↩ or the configured
+    /// Open shortcut opens one, and the row actions, Mark all as read and ⌘, work as off the search. Everything else (typing,
+    /// ⌫, Space, ⌘Z) is the field's own: nil leaves the key to it.
+    fileprivate func searchKey(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool? {
+        // Open is the user's to rebind, ⌘O included, which the field would otherwise swallow. A bare letter is typed.
+        if shortcut == store.shortcut(.openItem), !typesText(event) { return openResult() }
+        // So are the chords of the row actions (Keep, Remove, Done, ...), which act on the picked result as they do off the
+        // search; the field keeps a chord only when no action is bound to it, or nothing is picked to act on.
+        if shortcut.hasCommandLikeModifier, isBound(shortcut), rowCommand(shortcut, targets: targets()) { return true }
+        // As do Mark all as read, Check now and Settings, which no text has a use for.
+        if !typesText(event), markAllRead(shortcut) { return true }
+        if shortcut == store.shortcut(.refresh), shortcut.hasCommandLikeModifier { store.refreshNow(); return true }
+        if flags == .command, event.charactersIgnoringModifiers == "," {
+            hub.go(.settings)
+            return true
+        }
+        guard flags.isEmpty else { return nil }
+        switch Int(event.keyCode) {
+        case kVK_Escape:
+            (event.window ?? NSApp.keyWindow)?.makeFirstResponder(nil)
+            setQuery("")
+        case kVK_UpArrow, kVK_DownArrow:
+            move(down: Int(event.keyCode) == kVK_DownArrow, in: targets())
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            return openResult()
+        default:
+            return nil
+        }
+        return true
+    }
+
+    /// Whether the key is bound to an action that is the hub's own (not a global one).
+    private func isBound(_ shortcut: Shortcut) -> Bool {
+        ShortcutAction.allCases.contains { !$0.isGlobal && store.shortcut($0) == shortcut }
+    }
+
+    /// Opens the pick as Open does off the search, only if the results still show it: a row the typing has since filtered
+    /// out is not opened. nil leaves the key to the field.
+    private func openResult() -> Bool? {
+        guard let selection = hub.selection, targets().contains(selection) else { return nil }
+        return rowCommand(store.shortcut(.openItem), targets: targets()) ? true : nil
+    }
+
+    /// Whether a field would put this key in its text: a printable character without ⌃⌥⌘.
+    private func typesText(_ event: NSEvent) -> Bool {
+        !Shortcut(event).hasCommandLikeModifier && Self.printable(event) != nil
     }
 }
 

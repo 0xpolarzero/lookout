@@ -19,7 +19,7 @@ extension LookoutHub {
             // Straight to what needs you, its newest item picked so the keys act on it at once.
             withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) {
                 hub.go(.main)
-                hub.query = ""
+                hub.endSearch()
                 hub.filter = .needsYou
             }
             if let first = store.list(.needsYou).first {
@@ -33,27 +33,13 @@ extension LookoutHub {
     /// The filter chips are the inbox's title and status; typing swaps them for the search.
     @ViewBuilder var inboxHeader: some View {
         Group {
-            if searching { searchField.transition(.opacity) } else { filters.transition(.opacity) }
+            if searching || hub.searchOpen { searchField.transition(.opacity) } else { filters.transition(.opacity) }
         }
         .frame(height: Theme.Metrics.line)
     }
 
     var searchField: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").font(Theme.Typography.glyph(12)).foregroundStyle(Theme.accent)
-                .accessibilityHidden(true)
-            HStack(spacing: 1) {
-                Text(hub.query).font(Theme.Typography.title.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1)
-                Caret()
-            }
-            Spacer(minLength: 0)
-            Text(searchCount).font(Theme.Typography.meta.monospacedDigit()).foregroundStyle(Theme.tertiary).lineLimit(1)
-            KeyCap("Esc")
-        }
-        .padding(.leading, 10)
-        .padding(.trailing, 7)
-        .frame(height: Theme.Metrics.line)
-        .background(Theme.Radius.shape(Theme.Radius.md).fill(Theme.Fill.field))
+        InboxSearchField(hub: hub, ui: ui, store: store, count: searchCount)
     }
 
     /// What the search found, by kind: "3 items · 2 sessions".
@@ -416,5 +402,56 @@ extension LookoutHub {
         let next = max(0, Int(last.addingTimeInterval(interval).timeIntervalSince(now)))
         return SyncState(color: Theme.green, text: "Up to date", title: checked,
                          detail: "Next check in about \(next < 60 ? "\(next)s" : "\(next / 60)m")\n\(refresh)")
+    }
+}
+
+/// The search: a real text field (paste, selection, dead keys and input methods work, and VoiceOver reads it), with what it
+/// found and the Esc that ends it. Typing elsewhere in the hub seeds it with the first character (see `HubKeys`), which
+/// leaves it alone while it has focus.
+struct InboxSearchField: View {
+    @Bindable var hub: HubState
+    let ui: UIState
+    let store: Store
+    let count: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass").font(Theme.Typography.glyph(12)).foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+            TextField("Search inbox and sessions", text: $hub.query,
+                      prompt: Text("Search inbox and sessions").foregroundStyle(Theme.tertiary))
+                .textFieldStyle(.plain)
+                .font(Theme.Typography.title.weight(.medium))
+                .foregroundStyle(Theme.text)
+                .lineLimit(1)
+                .focused($focused)
+                .focusEffectDisabled()
+            if !hub.query.isEmpty {
+                Text(count).font(Theme.Typography.meta.monospacedDigit()).foregroundStyle(Theme.tertiary).lineLimit(1)
+            }
+            KeyCap("Esc")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 7)
+        .frame(height: Theme.Metrics.line)
+        .background(Theme.Radius.shape(Theme.Radius.md).fill(Theme.Fill.field))
+        .onAppear { requestFocus() }
+        .onChange(of: hub.focusRequest) { requestFocus() }
+        .onChange(of: focused) { _, isFocused in
+            hub.searchFocused = isFocused
+            // Only a seeded first character moves the caret (carry on after it instead of replacing it): a click into the
+            // middle of the query, or Tab back into the field, keeps the selection the field made.
+            guard hub.caretAtEnd else { return }
+            hub.caretAtEnd = false
+            if isFocused { DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil) } }
+        }
+        .onDisappear { hub.searchFocused = false }
+        // What is typed, pasted or composed in the field doesn't go through the keys: the first result is picked like theirs.
+        .onChange(of: hub.query) { hub.pick(store.hubTargets(hub).first, ui: ui) }
+    }
+
+    private func requestFocus() {
+        DispatchQueue.main.async { focused = true }
     }
 }

@@ -330,7 +330,7 @@ final class HubController {
         // Unpinned on a page and left: next time it opens on the main view.
         hub.go(.main)
         hub.selection = nil
-        hub.query = ""
+        hub.endSearch()
         if window.isKeyWindow { giveFocusBack() }
     }
 

@@ -297,13 +297,6 @@ extension AnyTransition {
     }
 }
 
-/// A blinking text cursor for the typed search.
-struct Caret: View {
-    var body: some View {
-        PulseBlock(color: Theme.accent, size: CGSize(width: 1.5, height: 14), cornerRadius: 1, from: 1, to: 0, duration: 0.55)
-    }
-}
-
 /// A request to scroll the lists to a row; `seq` makes asking for the same row again a new request.
 struct ScrollRequest: Equatable {
     let id: String
@@ -347,6 +340,11 @@ extension Store {
         memo.queryRevision = itemsRevision
         hub.searchMemo = memo
         return memo.result
+    }
+
+    /// Every row the arrows walk through, top to bottom: inbox items, then sessions.
+    func hubTargets(_ hub: HubState) -> [String] {
+        hubItems(hub).map { "i:" + $0.id } + hubSessions(hub).map { "a:" + $0.id }
     }
 
     /// A repo's latest CI run on GitHub (its Actions page until a run is known); the playground reports it instead.
