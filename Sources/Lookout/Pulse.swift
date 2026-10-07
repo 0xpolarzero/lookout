@@ -111,11 +111,23 @@ final class PulseView: NSView {
     private var rendered: (key: AnyHashable, size: CGSize, scale: CGFloat)?
     private var cgImage: CGImage?
 
+    /// Whether the window is on screen and visible (a test says so for a window that cannot be).
+    var windowShowing: (NSWindow) -> Bool = { $0.isVisible && $0.occlusionState.contains(.visible) }
+
+    /// Every ring that exists, so the idle gate can ask how many are looping (`looping`).
+    private static let all = NSHashTable<PulseView>.weakObjects()
+    /// How many rings have their loop attached now: what costs the render server something, and what the idle gate needs to be
+    /// sure it measures (a covered window, a locked screen or Reduce Motion each leave it at 0).
+    static var looping: Int { all.allObjects.filter { $0.layer?.animation(forKey: "pulse") != nil }.count }
+    /// Told when a ring starts or stops looping (the idle gate's report; it costs nothing while none changes).
+    static var onLoopingChange: (() -> Void)?
+
     override var wantsUpdateLayer: Bool { source == nil }
 
     init() {
         super.init(frame: .zero)
         wantsLayer = true
+        Self.all.add(self)
         layer?.cornerCurve = .continuous
     }
 
@@ -185,10 +197,13 @@ final class PulseView: NSView {
     }
 
     /// Runs the animation only while the window is on screen and visible; removes it otherwise.
-    private func refresh() {
+    func refresh() {
         guard let layer else { return }
-        guard animated, let spec, let window, window.occlusionState.contains(.visible) else {
-            layer.removeAnimation(forKey: "pulse")
+        guard animated, let spec, let window, windowShowing(window) else {
+            if layer.animation(forKey: "pulse") != nil {
+                layer.removeAnimation(forKey: "pulse")
+                Self.onLoopingChange?()
+            }
             return
         }
         guard layer.animation(forKey: "pulse") == nil else { return }
@@ -200,6 +215,7 @@ final class PulseView: NSView {
         a.repeatCount = .infinity
         a.timingFunction = CAMediaTimingFunction(name: spec.smooth ? .easeInEaseOut : .linear)
         layer.add(a, forKey: "pulse")
+        Self.onLoopingChange?()
     }
 
     override func viewDidMoveToWindow() {

@@ -5,6 +5,12 @@
 # along the top (the full-width strip is where the window grows). The demo does not poll or watch Claude's files, so this
 # measures the bar itself: the ring, the clock, the hover trigger.
 #
+# What is measured has to have a ring that is looping. The app says so on stdout (`--lifecycle`, for this script only):
+# `lifecycle: sessions=S working=W rings=R showing=0|1 reduceMotion=0|1`, once after a few seconds and again whenever that
+# changes. The script fails when no session works, no ring loops or Reduce Motion is on, at the start or at any moment of the
+# window: a locked or covered screen and Reduce Motion each stop the bar's animation, and a number from a bar that stands
+# still proves nothing. ALLOW_HIDDEN=1 turns that failure into a warning.
+#
 # A sample that is missing or malformed, a window that is not positive or a CPU time that goes backwards is a failure,
 # never a 0%. WindowServer's share over the same window is printed apart and is not part of the verdict: it draws the
 # ring. To say what the ring costs it, the bar is measured once more on `--demo busy`, which has no working session, and
@@ -58,8 +64,34 @@ cpu_seconds() {
     }'
 }
 
+# ring_problem <first>: why the rings were not looping at some point since the <first>th report of the app (the last report
+# before a window is the state it begins in), or nothing when they were. A report that never came is a problem too.
+ring_problem() {
+    awk -v first="$1" '
+        /^lifecycle:/ {
+            n++
+            if (n < first) next
+            rings = showing = reduce = ""
+            for (i = 2; i <= NF; i++) {
+                split($i, kv, "=")
+                if (kv[1] == "rings") rings = kv[2]
+                else if (kv[1] == "showing") showing = kv[2]
+                else if (kv[1] == "reduceMotion") reduce = kv[2]
+            }
+            seen = 1
+            if (reduce == "1") { print "Reduce Motion is on: the rings are static, so the number would mean nothing (turn it off in System Settings)"; exit }
+            if (rings + 0 < 1) { print "no ring is looping (rings=" rings ", window showing=" showing "): locked or asleep screen, or a covered bar"; exit }
+        }
+        END { if (!seen) print "the app made no report of its rings" }
+    ' "$out"
+}
+
+out=$(mktemp)
 pid=
-cleanup() { [ -n "$pid" ] && kill "$pid" 2>/dev/null; }
+cleanup() {
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null
+    rm -f "$out"
+}
 trap cleanup EXIT
 
 failed=0
@@ -69,7 +101,8 @@ last_ws=0
 # measure <label> <edge> [launch argument]: one launch, one verdict.
 measure() {
     local label=$1 edge=$2; shift 2
-    "$bin" --demo "$scenario" --edge "$edge" "$@" >/dev/null 2>&1 &
+    : >"$out"
+    "$bin" --demo "$scenario" --lifecycle --edge "$edge" "$@" >"$out" 2>&1 &
     pid=$!
     sleep "$settle"
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -92,6 +125,21 @@ measure() {
     if [ "$still" -lt "$quiet_for" ]; then
         echo "idle-cpu: $label $edge: the CPU time was still moving $quiet_max s after the start-up (the window begins anyway)"
     fi
+    if [ "$scenario" = agents ] && ! grep -q 'lifecycle: sessions=[0-9]* working=[1-9]' "$out"; then
+        echo "idle-cpu: $label $edge: no working session on the bar ($(grep 'lifecycle:' "$out" | tail -1 || echo 'no report')): there is no ring to measure"
+        failed=1
+    fi
+    # The reports so far; the window starts from the last of them.
+    local reports problem
+    reports=$(grep -c '^lifecycle:' "$out")
+    if [ "$scenario" = agents ] && problem=$(ring_problem "$reports") && [ -n "$problem" ]; then
+        echo "idle-cpu: $label $edge: $problem"
+        if [ "${ALLOW_HIDDEN:-0}" != "1" ]; then
+            failed=1
+            kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; pid=
+            return
+        fi
+    fi
     local ws; ws=$(pgrep -x WindowServer | head -1)
     local app0 app1 ws0 ws1
     app0=$(cpu_seconds "$pid") || { echo "idle-cpu: $label $edge: no CPU sample of Lookout at the start"; failed=1; return; }
@@ -104,6 +152,11 @@ measure() {
     fi
     app1=$(cpu_seconds "$pid") || { echo "idle-cpu: $label $edge: no CPU sample of Lookout at the end"; failed=1; return; }
     ws1=$(cpu_seconds "${ws:-0}") || ws1=
+    # Nothing may have stopped the rings while the window ran: a stretch with none looping costs nothing and passes for free.
+    if [ "$scenario" = agents ] && problem=$(ring_problem "$reports") && [ -n "$problem" ]; then
+        echo "idle-cpu: $label $edge: $problem (during the measurement)"
+        [ "${ALLOW_HIDDEN:-0}" = "1" ] || failed=1
+    fi
     if [ -n "$ws0" ] && [ -n "$ws1" ]; then
         last_ws=$(awk -v w0="$ws0" -v w1="$ws1" -v window="$window" 'BEGIN { printf "%.2f", (w1 - w0) / window * 100 }')
     else

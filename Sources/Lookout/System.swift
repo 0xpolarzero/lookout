@@ -386,6 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--open") {
             hub?.toggleShortcut()
         }
+        if CommandLine.arguments.contains(Lifecycle.flag) { Lifecycle.start(store) }
     }
 
     /// SIGTERM would skip `applicationWillTerminate` and lose a pending save.
