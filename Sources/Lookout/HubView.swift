@@ -326,7 +326,11 @@ struct LookoutHub: View {
             Button("Settings…") { hub.go(.settings) }
             Button("Repositories…") { hub.go(.repos) }
             if store.updater.isRelease {
-                Button("Check for Updates") { Task { await store.updater.update(manual: true) } }
+                // Settings' update row says what the check finds (up to date, or why it failed); the bar has no room to.
+                Button("Check for Updates") {
+                    hub.go(.settings)
+                    Task { await store.updater.update(manual: true) }
+                }
             }
             Divider()
             Button("Quit Lookout") { NSApp.terminate(nil) }
