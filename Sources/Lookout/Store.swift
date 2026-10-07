@@ -132,6 +132,11 @@ final class Store {
     @ObservationIgnored private var ciCheckedAt: [String: Date] = [:]
     /// Review requests the last complete search listed; nil until one has (then nothing is known to be gone).
     @ObservationIgnored private var requested: Set<String>?
+    /// CI checks under way, by repo, and the newest one each repo has started (see `syncCI`).
+    @ObservationIgnored private var ciChecks: [String: Task<Void, Error>] = [:]
+    @ObservationIgnored private var ciTickets: [String: Int] = [:]
+    /// What a check asks GitHub, replaced by the tests.
+    @ObservationIgnored var ciFetch: ((RepoConfig) async throws -> CIStatus)?
     /// Counts the times Review requests was switched, so a search that outlives its switch is let go (see `syncReviewRequests`).
     @ObservationIgnored private var reviewGeneration = 0
     @ObservationIgnored var persists = true
@@ -755,6 +760,7 @@ final class Store {
         ci[repo.fullName] = nil
         // Polls never visit it again, so its fault would outlive it (the gear's badge, the banner, Settings).
         repoErrors[repo.fullName] = nil
+        endCIChecks(repo.fullName)
         save()
     }
 
@@ -763,6 +769,7 @@ final class Store {
         if repos[i].events.contains(kind) {
             repos[i].events.remove(kind)
             removeItems { $0.repo == repo.fullName && $0.kind == kind }
+            if kind == .ciMain { endCIChecks(repo.fullName) }
         } else {
             repos[i].events.insert(kind)
         }
@@ -1146,8 +1153,33 @@ final class Store {
         if changed { items = all }
     }
 
-    private func syncCI(_ name: String) async throws {
-        guard var repo = repos.first(where: { $0.fullName == name }), repo.events.contains(.ciMain) else { return }
+    /// Checks one repo's CI. A request while one is under way for the same repo waits for that one's answer instead of
+    /// asking again, so "Check now" pressed twice, or during a poll, is one round trip.
+    func syncCI(_ name: String) async throws {
+        if let running = ciChecks[name] { return try await running.value }
+        guard let repo = repos.first(where: { $0.fullName == name }), repo.events.contains(.ciMain) else { return }
+        let ticket = (ciTickets[name] ?? 0) + 1
+        ciTickets[name] = ticket
+        let check = Task { @MainActor [self] in
+            // A check `endCIChecks` already gave up on leaves what a newer one registered.
+            defer { if ciTickets[name] == ticket { ciChecks[name] = nil } }
+            publishCI(name, try await (ciFetch ?? fetchCI)(repo), ticket: ticket)
+        }
+        ciChecks[name] = check
+        try await check.value
+    }
+
+    /// Whatever is under way for a repo no longer counts: it was removed or its CI turned off, and what comes back must
+    /// not bring it back.
+    private func endCIChecks(_ name: String) {
+        ciTickets[name, default: 0] += 1
+        ciChecks[name] = nil
+    }
+
+    /// Asks GitHub for a repo's CI, and the commit's headline.
+    private func fetchCI(_ repo: RepoConfig) async throws -> CIStatus {
+        let name = repo.fullName
+        var repo = repo
         if repo.defaultBranch == nil {
             let info: GHRepo = try await gh.get("/repos/\(name)")
             updateRepo(name) { $0.defaultBranch = info.defaultBranch }
@@ -1167,15 +1199,19 @@ final class Store {
         async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
         let (checks, combined) = try await (checksReq, statusReq)
         let reading = Self.readCI(runs: actions.workflowRuns, sha: sha, checks: checks.checkRuns, combined: combined)
-        let (state, failing) = (reading.state, reading.failing)
         let commit = sha ?? combined.sha
-
-        let previous = ci[name]?.state
         // The headline comes from the Actions run; a repo with only external CI asks the commit for it (once per commit).
         let title = await ciHeadline(name, commit: commit, runTitle: actions.workflowRuns.first?.displayTitle)
-        let status = CIStatus(state: state, branch: branch, sha: commit,
-                              url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
-                              failing: failing, checkedAt: Date(), title: title, updatedAt: reading.changedAt)
+        return CIStatus(state: reading.state, branch: branch, sha: commit,
+                        url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
+                        failing: reading.failing, checkedAt: Date(), title: title, updatedAt: reading.changedAt)
+    }
+
+    /// Takes an answer in, unless a newer check or the repo's removal has overtaken it. Nothing here waits: what the
+    /// repo was before (for the notifications) is read in the same step that replaces it.
+    func publishCI(_ name: String, _ status: CIStatus, ticket: Int) {
+        guard ciTickets[name] == ticket else { return }
+        let previous = ci[name]?.state
         // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
         ciCheckedAt[name] = status.checkedAt
         if var old = ci[name] {
@@ -1186,9 +1222,10 @@ final class Store {
             save()
         }
 
+        let (state, commit, branch) = (status.state, status.sha ?? "", status.branch)
         if previous == .success || previous == .pending, state == .failure {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",
-                   subtitle: failing.prefix(3).joined(separator: ", "), body: "", quiet: false, url: status.url)
+                   subtitle: status.failing.prefix(3).joined(separator: ", "), body: "", quiet: false, url: status.url)
         } else if previous == .failure, state == .success {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI back to green",
                    subtitle: branch, body: "", quiet: true, url: status.url)

@@ -119,4 +119,103 @@ import Testing
         // Same commit as last time: what was fetched then stands (no request).
         #expect(await store.ciHeadline("a/x", commit: "c1", runTitle: nil) == "Known")
     }
+
+    // MARK: Checking
+
+    /// A GitHub the test answers by hand, in the order it likes.
+    @MainActor private final class Answers {
+        var waiting: [CheckedContinuation<CIStatus, Error>] = []
+        var asked = 0
+
+        func fetch(_ repo: RepoConfig) async throws -> CIStatus {
+            asked += 1
+            return try await withCheckedThrowingContinuation { waiting.append($0) }
+        }
+
+        func settle(_ index: Int, with status: CIStatus) {
+            guard waiting.indices.contains(index) else { Issue.record("No check \(index) is waiting"); return }
+            waiting[index].resume(returning: status)
+        }
+
+        func fail(_ index: Int, _ message: String) {
+            guard waiting.indices.contains(index) else { Issue.record("No check \(index) is waiting"); return }
+            waiting[index].resume(throwing: NSError(domain: "CI", code: 1, userInfo: [NSLocalizedDescriptionKey: message]))
+        }
+    }
+
+    private func status(_ state: CIState, sha: String) -> CIStatus {
+        CIStatus(state: state, branch: "main", sha: sha, failing: state == .failure ? ["build"] : [], checkedAt: Date(), title: nil,
+                 updatedAt: t0)
+    }
+
+    /// A store watching `names` with CI on, whose checks wait for the test to answer them.
+    private func store(_ names: [String] = ["a/x"]) -> (Store, Answers) {
+        let store = Store()
+        store.persists = false
+        store.settings.notifications = false
+        store.repos = names.map { RepoConfig(fullName: $0, events: [.ciMain]) }
+        let answers = Answers()
+        store.ciFetch = { try await answers.fetch($0) }
+        return (store, answers)
+    }
+
+    /// Lets the main actor turn until `condition` holds (counted in turns, not timed).
+    private func eventually(_ condition: () -> Bool) async throws {
+        for _ in 0..<1500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async throws {
+        let (store, answers) = store()
+        async let first: () = { try? await store.syncCI("a/x") }()
+        async let second: () = { try? await store.syncCI("a/x") }()
+        try await eventually { answers.waiting.count == 1 }
+        async let third: () = { try? await store.syncCI("a/x") }()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(answers.asked == 1)
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        _ = await (first, second, third)
+        #expect(store.ci["a/x"]?.sha == "s1")
+        // Once it has answered, the next check asks again.
+        async let next: () = { try? await store.syncCI("a/x") }()
+        try await eventually { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.success, sha: "s2"))
+        await next
+        #expect(store.ci["a/x"]?.sha == "s2")
+    }
+
+    @Test func anOlderAnswerThatArrivesLastDoesNotReplaceANewerOne() async throws {
+        let (store, answers) = store()
+        let repo = store.repos[0]
+        async let older: () = { try? await store.syncCI("a/x") }()
+        try await eventually { answers.waiting.count == 1 }
+        // CI turned off and on again while that check was out: the check it starts is the newer one.
+        store.toggle(.ciMain, on: repo)
+        store.toggle(.ciMain, on: store.repos[0])
+        try await eventually { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.failure, sha: "s2"))
+        try await eventually { store.ci["a/x"]?.sha == "s2" }
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        await older
+        #expect(store.ci["a/x"]?.sha == "s2")
+    }
+
+    @Test func anAnswerThatArrivesAfterTheRepoWasStoppedBringsNothingBack() async throws {
+        let (store, answers) = store()
+        async let check: () = { try? await store.syncCI("a/x") }()
+        try await eventually { answers.waiting.count == 1 }
+        store.removeRepo(store.repos[0])
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        await check
+        #expect(store.ci.isEmpty)
+    }
+
+    @Test func anAnswerThatArrivesAfterCIWasSwitchedOffBringsNothingBack() async throws {
+        let (store, answers) = store()
+        async let check: () = { try? await store.syncCI("a/x") }()
+        try await eventually { answers.waiting.count == 1 }
+        store.toggle(.ciMain, on: store.repos[0])
+        answers.settle(0, with: status(.failure, sha: "s1"))
+        await check
+        #expect(store.ci.isEmpty)
+    }
 }
