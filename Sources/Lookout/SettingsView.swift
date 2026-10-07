@@ -67,6 +67,7 @@ struct SettingsView: View {
             }
             HStack(spacing: 6) {
                 SecureField("Paste a personal access token (optional)", text: $token).fieldStyle()
+                    .accessibilityLabel("GitHub personal access token")
                     .onSubmit(saveToken)
                 ActionButton("Save", height: Theme.Metrics.field, action: saveToken)
                     .disabled(token.isEmpty)
@@ -146,6 +147,7 @@ struct SettingsView: View {
             HStack(spacing: 6) {
                 TextField("Add a handle, e.g. vercel", text: $botInput)
                     .fieldStyle()
+                    .accessibilityLabel("Bot handle")
                     .onSubmit(addBot)
                 ActionButton("Add", height: Theme.Metrics.field, action: addBot).disabled(botInput.isEmpty)
             }
@@ -250,6 +252,7 @@ struct SettingsView: View {
             } else {
                 HStack(spacing: 6) {
                     SecureField("Paste a TypeSafe API key", text: $typesafeKey).fieldStyle()
+                        .accessibilityLabel("TypeSafe API key")
                         .onSubmit(saveTypesafeKey)
                     ActionButton("Save", height: Theme.Metrics.field, action: saveTypesafeKey)
                         .disabled(typesafeKey.isEmpty)

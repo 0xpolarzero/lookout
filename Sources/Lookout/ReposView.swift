@@ -59,6 +59,7 @@ struct ReposView: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.tertiary).font(Theme.Typography.control)
                     TextField("owner/repo or GitHub URL", text: $input)
                         .textFieldStyle(.plain)
+                        .accessibilityLabel("Repository to add")
                         .focused($fieldFocused)
                         .onSubmit { add(input) }
                     if adding { ProgressView().controlSize(.mini) }

@@ -226,6 +226,7 @@ struct LabelEditor: View {
                 .font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
             HStack(spacing: 6) {
                 TextField(row.label, text: $text)
+                    .accessibilityLabel("Label for \(row.session.title)")
                     .focused($focused)
                     .fieldStyle()
                     .frame(width: 90)
