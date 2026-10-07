@@ -289,7 +289,7 @@ One at a time, in priority order. Lists never show spinners or skeletons. Sync h
 |---|---|---|---|
 | Can't sign in | Inbox body replaces list | `red` icon "Can't sign in to GitHub" / "Lookout uses gh or your saved token." | Open Settings |
 | Can't reach GitHub at the first look (no network yet) | List stays; footer and gear badge `amber` "Not syncing"; Settings' account row `amber` "Couldn't reach GitHub" | Not a sign-in problem: `authError` is set only for a missing or refused token | Check now |
-| No repos watched | Inbox body | "Nothing watched yet" / "Add a repository to start." | Add a repository (opens Repositories, field focused) |
+| No repos watched, review requests off | Inbox body | "Nothing watched yet" / "Add a repository to start." | Add a repository (opens Repositories, field focused) |
 | Some repos failed | Banner above list; list stays | `amber` icon "2 repositories didn't sync" | Retry |
 | Rate limited | Banner | "GitHub is rate limiting. Checking again at 14:12." | none |
 | Snoozed | Banner | "Snoozed until 14:30" | Resume |

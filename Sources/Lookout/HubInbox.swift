@@ -110,10 +110,13 @@ extension Store {
     /// Whether review requests are on and the last search found only some of them.
     var reviewRequestsPartial: Bool { settings.reviewRequests && reviewRequestsIncomplete }
 
+    /// Nothing is checked for: no repository is watched and review requests (which don't need one) are off.
+    var watchesNothing: Bool { repos.isEmpty && !settings.reviewRequests }
+
     /// The cause to show when the list under `filter` is empty.
     func inboxEmpty(_ filter: InboxFilter, now: Date = Date()) -> InboxEmpty {
         if let replacement = inboxReplacement { return replacement }
-        if repos.isEmpty { return .noRepos }
+        if watchesNothing { return .noRepos }
         if lastSync == nil { return .firstSync }
         switch filter {
         case .needsYou:
@@ -128,7 +131,7 @@ extension Store {
 
     /// The banner above the list, if any. Not with a sign-in problem or nothing watched: those replace the list.
     func inboxNotice(now: Date = Date()) -> InboxNotice? {
-        guard authError == nil, !repos.isEmpty else { return nil }
+        guard authError == nil, !watchesNothing else { return nil }
         if !repoErrors.isEmpty { return .reposFailed(repoErrors.count) }
         if rateLimited { return .rateLimited(until: rateResetsAt.flatMap { $0 > now ? $0 : nil }) }
         if reviewRequestsFailing { return .reviewRequestsFailed }

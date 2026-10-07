@@ -25,10 +25,29 @@ import Testing
     @Test func nothingWatchedThenFirstSync() {
         let s = healthy()
         s.repos = []
+        s.settings.reviewRequests = false
         #expect(s.inboxEmpty(.bots) == .noRepos)
         s.repos = [RepoConfig(fullName: "a/b")]
         s.lastSync = nil
         #expect(s.inboxEmpty(.needsYou) == .firstSync)
+    }
+
+    @Test func reviewRequestsAloneAreSomethingWatched() {
+        let s = healthy()
+        s.repos = []
+        // Review requests need no repository: the ordinary empty state, and their failures are told.
+        #expect(s.settings.reviewRequests && s.inboxEmpty(.needsYou) == .caughtUp)
+        s.reviewRequestsError = "API rate limit exceeded"
+        #expect(s.inboxEmpty(.needsYou) == .nothingNew && s.inboxNotice() == .reviewRequestsFailed)
+        s.reviewRequestsError = nil
+        s.reviewRequestsIncomplete = true
+        #expect(s.inboxNotice() == .reviewRequestsCut)
+        s.reviewRequestsIncomplete = false
+        s.lastSync = nil
+        #expect(s.inboxEmpty(.needsYou) == .firstSync)
+        // Switched off as well, nothing is checked for.
+        s.settings.reviewRequests = false
+        #expect(s.inboxEmpty(.needsYou) == .noRepos && s.inboxNotice() == nil)
     }
 
     @Test func allCaughtUpOnlyWhenSyncingIsHealthy() {
