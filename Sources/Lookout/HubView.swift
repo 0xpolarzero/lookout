@@ -205,6 +205,9 @@ final class HubKeys {
             else { close() }
             return true
         }
+        // A control the Tab ring is on (Undo, a button, a tab) takes Return and Space itself, not the picked row.
+        if flags.isEmpty, event.window?.firstResponder is NSControl,
+           [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) { return false }
         if flags == .command, event.charactersIgnoringModifiers == "," {
             hub.go(.settings)
             return true

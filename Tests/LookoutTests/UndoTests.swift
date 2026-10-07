@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import Foundation
+import SwiftUI
 import Testing
 @testable import Lookout
 
@@ -118,6 +119,47 @@ import Testing
         window.makeFirstResponder(nil)
         #expect(press(in: window) && state(s, "1") == .unread)
         #expect(!press(in: window))
+    }
+
+    @Test func theFocusedUndoButtonKeepsSpaceAndReturn() throws {
+        let s = store([item("1"), item("2")])
+        let ui = UIState(persists: false, edge: .right)
+        let hub = HubState()
+        hub.pinned = true
+        let keys = HubKeys(store: s, ui: ui, hub: hub)
+        func press(_ code: Int, _ chars: String, in window: NSWindow) -> Bool {
+            keys.key(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                      context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false,
+                                      keyCode: UInt16(code))!)
+        }
+        s.discard(s.items[0])
+        keys.select("i:2")
+        // The line as the hub shows it, its Undo button on the Tab ring.
+        let host = NSHostingView(rootView: LookoutHub(store: s, ui: ui, hub: hub).undoLine.frame(width: 400))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 60), styleMask: .titled, backing: .buffered, defer: false)
+        window.contentView = host
+        window.isReleasedWhenClosed = false
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        for _ in 0..<20 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)); host.layoutSubtreeIfNeeded() }
+        let undo = try #require(host.first(NSButton.self))
+        #expect(window.makeFirstResponder(undo))
+        // Space and Return are the button's: the picked row is not marked read, and the button still activates.
+        #expect(!press(kVK_Space, " ", in: window) && !press(kVK_Return, "\r", in: window) && !press(kVK_ANSI_KeypadEnter, "\r", in: window))
+        #expect(state(s, "2") == .unread && state(s, "1") == .discarded)
+        undo.performClick(nil)
+        #expect(state(s, "1") == .unread)
+        // Off the button they are the hub's again.
+        window.makeFirstResponder(nil)
+        #expect(press(kVK_Space, " ", in: window) && state(s, "2") == .read)
+    }
+}
+
+private extension NSView {
+    /// The first view of `type` at or below this one.
+    func first<V: NSView>(_ type: V.Type) -> V? {
+        (self as? V) ?? subviews.lazy.compactMap { $0.first(type) }.first
     }
 }
 
