@@ -389,6 +389,16 @@ import Testing
         #expect(s.searchSessions("").isEmpty)
     }
 
+    @Test func aSearchListsEverySessionThatMatchesNotTheFirstEight() {
+        let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
+        let hub = HubState()
+        hub.query = "Session"
+        #expect(s.searchSessions("Session").count == 12 && s.hubSessions(hub).count == 12)
+        #expect(s.searchSessions("Session n11").map(\.id) == ["n11"])
+        // The oldest of them is reachable by the keys, so is a count of them.
+        #expect(s.hubTargets(hub).contains("a:n11"))
+    }
+
     @Test func countsSplitBlockedFromDone() {
         let s = store([session("a", blocked: true), session("b"), session("c"), session("d", running: true)], dots: ["a", "b", "d"])
         let counts = s.agentCounts
