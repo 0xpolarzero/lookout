@@ -394,6 +394,13 @@ extension Store {
 
     var allAgentRows: [AgentRow] { cache.all }
 
+    /// What the sessions shortcut picks: the first session that needs you (stopped on a question mid-turn, or finished and
+    /// unread), else the first kept one. A question mid-turn is still `running`, so "unread and not running" alone skipped it.
+    var sessionShortcutPick: AgentRow? {
+        let rows = agentRows
+        return (rows.kept + rows.pending).first { $0.waitsForYou || ($0.unread && !$0.session.running) } ?? rows.kept.first
+    }
+
     /// Unread sessions waiting on you (amber) and the other unread finished ones (blue).
     var agentCounts: (blocked: Int, done: Int) { cache.counts }
 

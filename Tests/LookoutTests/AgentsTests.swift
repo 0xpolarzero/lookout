@@ -132,6 +132,22 @@ import Testing
         #expect(s.iconTarget()?.id == "u")
     }
 
+    @Test func theSessionsShortcutPicksTheFirstSessionThatNeedsYou() {
+        let s = store([session("done", minutesAgo: 1, running: false), session("asking", minutesAgo: 2, running: true)], dots: ["done"])
+        s.keepAgent("done")
+        s.keepAgent("asking")
+        s.claudeActivity["asking"] = ClaudeActivity(text: "Asking you a question", since: now, waitsForYou: true)
+        // Stopped on a question mid-turn counts as waiting, not as the working session it is still marked as.
+        #expect(s.agentRows.kept.first { $0.id == "asking" }?.waitsForYou == true)
+        #expect(s.sessionShortcutPick?.id == "done")
+        // Reading the finished one leaves the question to go to, ahead of the first kept session, which needs nothing.
+        s.toggleAgentRead("done")
+        #expect(s.sessionShortcutPick?.id == "asking")
+        // Nothing needs you: the first kept one.
+        s.claudeActivity["asking"] = nil
+        #expect(s.sessionShortcutPick?.id == s.agentRows.kept.first?.id)
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])

@@ -364,10 +364,7 @@ final class HubController {
         guard store.agents.enabled else { return }
         hub.go(.main)
         hub.pinned = true
-        let rows = store.agentRows
-        if let first = (rows.kept + rows.pending).first(where: { $0.unread && !$0.session.running }) ?? rows.kept.first {
-            keys.select("a:" + first.id)
-        }
+        if let first = store.sessionShortcutPick { keys.select("a:" + first.id) }
     }
 
     /// A summary banner's click: the full view on the inbox, to see what arrived.
