@@ -466,6 +466,7 @@ struct RepoRow: View {
     @Binding var customOpen: Bool
     @State private var dropTarget = false
     @FocusState private var retryFocused: Bool
+    @FocusState private var moreFocused: Bool
     @Environment(\.pagePreview) private var preview
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -548,13 +549,31 @@ struct RepoRow: View {
     }
 
     private var controls: some View {
-        HStack(spacing: Theme.Space.md) {
-            preset
-            Toggle(isOn: binding(.ciMain)) { Text("CI").font(Theme.Typography.body).foregroundStyle(Theme.text) }
-                .toggleStyle(SwitchStyle())
-                .fixedSize()
-                .accessibilityLabel("CI")
+        // The menu's glyph has room of its own around it, so it sits against the switch: the side hub has no width to spare.
+        HStack(spacing: 0) {
+            HStack(spacing: Theme.Space.md) {
+                preset
+                Toggle(isOn: binding(.ciMain)) { Text("CI").font(Theme.Typography.body).foregroundStyle(Theme.text) }
+                    .toggleStyle(SwitchStyle())
+                    .fixedSize()
+                    .accessibilityLabel("CI")
+            }
+            more
         }
+    }
+
+    /// The row's menu for the keyboard too: the context menu is the mouse's, and before macOS 15 nothing opens it from a key.
+    private var more: some View {
+        Menu { menu } label: { MoreGlyph() }
+            .menuStyle(.button)
+            .buttonStyle(HoverFillButtonStyle(shape: Circle(), hitOutset: (Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .focused($moreFocused)
+            .focusRing(Theme.Metrics.iconButton / 2, isFocused: moreFocused)
+            .reportsControlFocus(moreFocused)
+            .help("More")
+            .accessibilityLabel("More actions for \(repo.fullName)")
     }
 
     // MARK: Preset

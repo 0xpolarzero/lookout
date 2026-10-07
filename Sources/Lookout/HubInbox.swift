@@ -618,7 +618,7 @@ private struct InboxMenu: View {
                     .disabled(!rows.contains { $0.state == .read })
             }
         } label: {
-            InboxMenuGlyph()
+            MoreGlyph()
         }
         .menuStyle(.button)
         .buttonStyle(HoverFillButtonStyle(shape: Circle(), hitOutset: (Theme.Metrics.iconHit - Theme.Metrics.iconButton) / 2))
@@ -632,8 +632,8 @@ private struct InboxMenu: View {
     }
 }
 
-/// The header's menu button: the same look as an `IconButton`.
-private struct InboxMenuGlyph: View {
+/// A "More" menu button's look, the same as an `IconButton`: the inbox header's, a repository row's.
+struct MoreGlyph: View {
     @Environment(\.hoverFillHovering) private var hover
     @Environment(\.resolved) private var resolved
 
