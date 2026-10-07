@@ -36,6 +36,7 @@ final class Store {
             if oldValue.reviewRequests, !settings.reviewRequests, !loading {
                 removeItems { $0.kind == .reviewRequested }
             }
+            armSnoozeExpiry()
             save()
         }
     }
@@ -424,7 +425,33 @@ final class Store {
 
     // MARK: Derived
 
-    var isSnoozed: Bool { (settings.snoozeUntil ?? .distantPast) > Date() }
+    /// Whether notifications are snoozed. The views that read it are redrawn once, when the snooze runs out (`snoozeRevision`):
+    /// nothing changes in the settings then, and nothing ticks for it.
+    var isSnoozed: Bool {
+        _ = snoozeRevision
+        return (settings.snoozeUntil ?? .distantPast) > Date()
+    }
+
+    /// Bumped when a snooze's deadline passes.
+    private(set) var snoozeRevision = 0
+    @ObservationIgnored private var snoozeExpiry: (deadline: Date, task: Task<Void, Never>)?
+
+    /// One cancellable one-shot at the snooze's deadline, kept in step with the setting.
+    private func armSnoozeExpiry() {
+        guard let until = settings.snoozeUntil, until > Date() else {
+            snoozeExpiry?.task.cancel()
+            snoozeExpiry = nil
+            return
+        }
+        guard snoozeExpiry?.deadline != until else { return }
+        snoozeExpiry?.task.cancel()
+        snoozeExpiry = (until, Task { [weak self] in
+            try? await Task.sleep(for: .seconds(until.timeIntervalSinceNow))
+            guard !Task.isCancelled, let self else { return }
+            snoozeRevision &+= 1
+            snoozeExpiry = nil
+        })
+    }
 
     /// Derived inbox data, rebuilt lazily after `items`, `settings`, `repos` or `ci` change.
     private struct Memo {
