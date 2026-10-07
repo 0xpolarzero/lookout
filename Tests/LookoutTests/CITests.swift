@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Lookout
 
@@ -321,5 +323,42 @@ import Testing
     @Test func aLongNameIsCutShort() {
         #expect(RepoChip.failingSummary(["Linux build (release, arm64)"]) == "Linux build (re…")
         #expect(RepoChip.failingSummary(["exactly sixteen!"]) == "exactly sixteen!")
+    }
+
+    /// What the chip's width is in a flow of `width`, as each chip reports it.
+    private struct Widths: PreferenceKey {
+        static let defaultValue: [CGFloat] = []
+        static func reduce(value: inout [CGFloat], nextValue: () -> [CGFloat]) { value += nextValue() }
+    }
+
+    @MainActor private func chipWidths(_ chips: [(String, [String])], flow width: CGFloat) -> [CGFloat] {
+        var seen: [CGFloat] = []
+        let flow = FlowLayout(spacing: 5) {
+            ForEach(chips.indices, id: \.self) { i in
+                RepoChip(repo: RepoConfig(fullName: chips[i].0), status: CIStatus(state: .failure, branch: "main", failing: chips[i].1,
+                                                                                   checkedAt: Date(), title: nil, updatedAt: nil),
+                         state: .failure) {}
+                    .background(GeometryReader { Color.clear.preference(key: Widths.self, value: [$0.size.width]) })
+            }
+        }
+        .frame(width: width)
+        .onPreferenceChange(Widths.self) { seen = $0 }
+        let host = NSHostingView(rootView: flow)
+        host.frame = CGRect(x: 0, y: 0, width: width, height: 400)
+        let window = NSWindow(contentRect: host.frame, styleMask: [], backing: .buffered, defer: true)
+        window.contentView = host
+        for _ in 0..<5 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        }
+        return seen
+    }
+
+    @MainActor @Test func wideFailingNamesStayInsideTheFlowTheCIPanelGivesThem() {
+        // The horizontal panel gives its chips about 208 pt; a long repo name and wide failing names are more than that.
+        let wide = ["WWWWWWWWWWWWWWW", "MMMMMMMMMMMMMMM", "OOOOOOOOOOOOOOO"]
+        let widths = chipWidths([("a/swift-format", wide), ("a/another-long-repository-name", wide), ("a/x", ["build"])], flow: 208)
+        #expect(widths.count == 3)
+        #expect(widths.allSatisfy { $0 <= 208 })
     }
 }

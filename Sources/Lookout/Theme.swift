@@ -243,11 +243,19 @@ struct FlowLayout: Layout {
         for row in rows {
             var x = bounds.minX
             for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
-                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: .unspecified)
+                let size = measure(subviews[index], within: bounds.width)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y), proposal: ProposedViewSize(size))
                 x += size.width + spacing
             }
         }
+    }
+
+    /// An item's size, never wider than the row: one that can give (a line limit, a truncating text) does, instead of
+    /// running past the edge.
+    private func measure(_ sub: LayoutSubview, within width: CGFloat) -> CGSize {
+        var size = sub.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        size.width = min(size.width, width)
+        return size
     }
 
     private struct Row { var indices: [Int] = []; var y: CGFloat = 0; var width: CGFloat = 0; var height: CGFloat = 0 }
@@ -255,7 +263,7 @@ struct FlowLayout: Layout {
     private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
         var rows: [Row] = [Row()]
         for (i, sub) in subviews.enumerated() {
-            let size = sub.sizeThatFits(.unspecified)
+            let size = measure(sub, within: width)
             if rows[rows.count - 1].width + size.width > width, !rows[rows.count - 1].indices.isEmpty {
                 let prev = rows[rows.count - 1]
                 rows.append(Row(y: prev.y + prev.height + spacing))

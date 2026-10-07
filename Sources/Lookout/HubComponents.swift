@@ -495,10 +495,12 @@ struct RepoChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
+                // The name keeps its room; the failing checks give way to it, and both stop at the chip's width.
                 Text(repo.name).font(Theme.Typography.control).foregroundStyle(Theme.text)
+                    .lineLimit(1).layoutPriority(1)
                 if state == .failure, let failing = status?.failing, !failing.isEmpty {
                     Text(Self.failingSummary(failing)).font(Theme.Typography.caption).foregroundStyle(Theme.red)
-                        .lineLimit(1)
+                        .lineLimit(1).truncationMode(.tail)
                 }
             }
             .padding(.horizontal, 8)
