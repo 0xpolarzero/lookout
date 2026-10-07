@@ -872,13 +872,26 @@ final class Store {
         var reviewActivity: [Int: [Date]] = [:]
     }
 
-    /// One GraphQL call for the threads new comments landed on: titles, authors and my participation.
+    /// GraphQL calls (40 threads each) for the threads new comments landed on: titles, authors and my participation.
     func fetchThreads(_ name: String, _ numbers: [Int], participation: Bool, reviewThreads: Set<Int>,
-                              me: String) async throws -> [Int: ThreadInfo] {
+                      me: String) async throws -> [Int: ThreadInfo] {
+        // One at a time: a failed batch fails the lookup, so no thread is ever judged on partial information.
+        var result: [Int: ThreadInfo] = [:]
+        let sorted = numbers.sorted()
+        for start in stride(from: 0, to: sorted.count, by: 40) {
+            let batch = sorted[start..<min(start + 40, sorted.count)]
+            result.merge(try await fetchThreadBatch(name, batch, participation: participation,
+                                                    reviewThreads: reviewThreads, me: me)) { a, _ in a }
+        }
+        return result
+    }
+
+    private func fetchThreadBatch(_ name: String, _ numbers: ArraySlice<Int>, participation: Bool, reviewThreads: Set<Int>,
+                                  me: String) async throws -> [Int: ThreadInfo] {
         let parts = name.split(separator: "/")
         let common = participation ? "title author { login } comments(last: 100) { nodes { author { login } createdAt } }" : "title"
         var q = "query { repository(owner: \"\(parts[0])\", name: \"\(parts[1])\") {"
-        for n in numbers.sorted().suffix(40) {
+        for n in numbers {
             var pr = common
             if participation { pr += " reviews(last: 50) { nodes { author { login } submittedAt } }" }
             if reviewThreads.contains(n) {

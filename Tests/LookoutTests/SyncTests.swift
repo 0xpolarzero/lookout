@@ -118,4 +118,20 @@ private func threads(_ body: Data) -> Any {
         try? await s.syncConversations("a/r")
         #expect(posted.ids == ["a/r#c#1"])
     }
+
+    @Test func relevanceIsFetchedForEveryNumberOfASync() async {
+        let (s, _) = store()
+        let now = Date()
+        // Comments on 45 different threads, all mine: the five lowest numbers used to be left out and dropped.
+        let comments = (1...45).map { comment(100 + $0, on: $0, by: "them", at: now.addingTimeInterval(-600)) }
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in comments },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            "/graphql": threads,
+        ])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.count == 45)
+        #expect(StubGitHub.paths.filter { $0 == "/graphql" }.count == 2)
+    }
 }
