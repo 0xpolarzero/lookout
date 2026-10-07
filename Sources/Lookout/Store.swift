@@ -418,7 +418,10 @@ final class Store {
         guard open != hubOpen else { return }
         hubOpen = open
         sleeper?.cancel()
-        if open, !isSyncing, Date().timeIntervalSince(lastSync ?? .distantPast) > 60 { refreshNow() }
+        guard open, !isSyncing else { return }
+        // Signed out for want of a token, `gh auth login` may have been run since: look again, however recent the last poll.
+        if me == nil, authError == SignInFailure.missingToken { checkSignIn() }
+        else if Date().timeIntervalSince(lastSync ?? .distantPast) > 60 { refreshNow() }
     }
 
     private var effectivePollInterval: TimeInterval {
@@ -472,6 +475,10 @@ final class Store {
                 }
             },
         ]
+        // `gh auth login` is run in Terminal, which the app comes back from, whatever window is showing.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkSignIn() }
+        }
     }
 
     // MARK: Persistence

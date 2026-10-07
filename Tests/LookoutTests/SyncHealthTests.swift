@@ -101,6 +101,20 @@ import Testing
         #expect(refreshes == 1)
     }
 
+    @Test func openingTheHubSignedOutLooksForATokenWhateverTheLastSync() async {
+        let s = Store.unsaved()
+        s.resolveToken = { nil }
+        await s.pollAll(automatic: true)
+        var refreshes = 0
+        s.interceptRefresh = { refreshes += 1 }
+        // The poll just ended, and the timer's next one would not look again: opening the hub does.
+        s.setHubOpen(true)
+        #expect(refreshes == 1)
+        s.setHubOpen(false)
+        s.setHubOpen(true)
+        #expect(refreshes == 2)
+    }
+
     @Test func stoppingAFailedRepositoryClearsItsFault() {
         let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one"), RepoConfig(fullName: "a/two")]

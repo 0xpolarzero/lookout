@@ -285,8 +285,6 @@ struct SettingsView: View {
         .padding(.vertical, Theme.Space.sm)
         .frame(minHeight: Theme.Metrics.formRow)
         .accessibilityElement(children: .contain)
-        // `gh auth login` is run in Terminal, which this comes back from.
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in store.checkSignIn() }
     }
 
     private var tokenField: some View {
