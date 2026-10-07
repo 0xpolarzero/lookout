@@ -211,6 +211,36 @@ import Testing
         #expect(said.count == 1 && registrar.registered[2] == ShortcutAction.sessionSwitcher.defaultShortcut)
     }
 
+    @MainActor @Test func aKeyAnotherAppHeldAtLaunchIsStoredSaidOnceAndShownToDoNothing() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        store.persists = false
+        let held = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        store.setShortcut(held, for: .togglePanel)
+        registrar.taken = [held, ShortcutAction.sessionSwitcher.defaultShortcut]
+        store.agents.enabled = false
+        var said: [String] = []
+        let globals = GlobalShortcuts(store: store, registrar: registrar, perform: { _ in }) { said.append($0) }
+        globals.start()
+        #expect(store.isShortcutHeldByAnotherApp(.togglePanel))
+        #expect(said == ["Keep open: ⌃⌘G is used by another app, so it does nothing"])
+        // The switcher is not registered while the extension is off, so there is nothing to refuse yet.
+        #expect(!store.isShortcutHeldByAnotherApp(.sessionSwitcher))
+        store.agents.enabled = true
+        globals.register(.sessionSwitcher)
+        #expect(store.isShortcutHeldByAnotherApp(.sessionSwitcher))
+        // Another key that works clears it, as does the other app letting go.
+        registrar.taken = []
+        #expect(store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command]), for: .togglePanel) == nil)
+        #expect(!store.isShortcutHeldByAnotherApp(.togglePanel))
+        globals.register(.sessionSwitcher)
+        #expect(!store.isShortcutHeldByAnotherApp(.sessionSwitcher))
+        // A refusal of a key just chosen leaves the old one stored and working: nothing to say.
+        registrar.taken = [held]
+        #expect(store.setShortcut(held, for: .togglePanel) != nil)
+        #expect(!store.isShortcutHeldByAnotherApp(.togglePanel))
+    }
+
     @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
         let store = Store()
         let registrar = FakeRegistrar()

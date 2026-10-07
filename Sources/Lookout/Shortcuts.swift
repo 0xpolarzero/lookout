@@ -229,27 +229,35 @@ final class GlobalShortcuts {
         self.say = say ?? { Announce.say($0) }
     }
 
-    /// Registers both and follows the store from here on.
+    /// Registers both and follows the store from here on. A key another app already holds is said once, here: at launch
+    /// nothing else tells anyone it does nothing.
     func start() {
-        for action in ShortcutAction.allCases where action.isGlobal { register(action) }
+        for action in ShortcutAction.allCases where action.isGlobal && !register(action) { announceRefusal(action) }
         store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) ?? true }
         store.onAgentsEnabledChange = { [weak self] _ in
             guard let self, !self.register(.sessionSwitcher) else { return }
             // Turning the extension on is what registers it, and nothing on screen says it did not take: the recorder only
             // does in Settings.
-            say("\(ShortcutAction.sessionSwitcher.title): \(store.shortcut(.sessionSwitcher).display) is used by another app, so it does nothing")
+            self.announceRefusal(.sessionSwitcher)
         }
     }
 
-    /// `shortcut` is what the store is about to set, or its current one. `false` when the system refused it.
+    private func announceRefusal(_ action: ShortcutAction) {
+        say("\(action.title): \(store.shortcut(action).display) is used by another app, so it does nothing")
+    }
+
+    /// `shortcut` is what the store is about to set, or its current one. `false` when the system refused it, which the store
+    /// keeps (`refusedShortcuts`): a key refused at launch, or when the extension turns on, is not one the user just chose.
     @discardableResult
     func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) -> Bool {
         guard action.isGlobal else { return true }
         let shortcut = shortcut ?? store.shortcut(action)
         let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
-        return registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
+        let taken = registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
             DispatchQueue.main.async { perform(action) }
         }
+        store.refusedShortcuts[action] = taken ? nil : shortcut
+        return taken
     }
 }
 
@@ -267,6 +275,9 @@ struct ShortcutRecorder: View {
     var body: some View {
         let current = store.shortcut(action)
         let customized = current != action.defaultShortcut
+        // What was said at the last attempt, else the key another app holds: it is stored and does nothing.
+        let held = store.isShortcutHeldByAnotherApp(action) ? "\(current.display) is used by another app, so it does nothing" : nil
+        let shown = error ?? held
         VStack(alignment: .trailing, spacing: Theme.Space.xs) {
             HStack(spacing: 4) {
                 if customized && !recording {
@@ -289,10 +300,13 @@ struct ShortcutRecorder: View {
                 .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), rest: Theme.Fill.hover,
                                                   hover: Theme.Fill.selected, isActive: recording))
                 .accessibilityLabel("Change shortcut for \(action.title)")
-                .accessibilityValue(recording ? "Recording, press the new keys" : current.isUnassigned ? "Not set" : current.display)
+                .accessibilityValue(recording ? "Recording, press the new keys" : current.isUnassigned ? "Not set" : [current.display, held].compactMap { $0 }.joined(separator: ". "))
             }
-            if let error {
-                Text(error).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
+            if let shown {
+                Text(shown).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
+                    .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                    // Wider than the keycap it sits under, so a conflict reads on two lines at most.
+                    .frame(maxWidth: 220, alignment: .trailing)
             }
         }
         // A refusal belongs to the key it was about.
