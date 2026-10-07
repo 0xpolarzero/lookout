@@ -118,6 +118,21 @@ import Testing
         #expect(!store.isRecordingShortcut)
     }
 
+    @Test func aClearedShortcutMatchesNothingAndComesBackWithReset() {
+        let store = Store()
+        store.persists = false
+        store.setShortcut(.unassigned, for: .markAllRead)
+        #expect(store.shortcut(.markAllRead).isUnassigned)
+        #expect(store.shortcut(.markAllRead).display == "None")
+        #expect(!store.shortcut(.markAllRead).isModifierTap && store.shortcut(.markAllRead).mouseButton == nil)
+        // Whatever key is pressed, none is the cleared one.
+        for code in [kVK_Space, kVK_Delete, kVK_Return, kVK_ANSI_Z] {
+            #expect(Shortcut(key(code, [.option])) != store.shortcut(.markAllRead))
+        }
+        store.setShortcut(nil, for: .markAllRead)
+        #expect(store.shortcut(.markAllRead) == ShortcutAction.markAllRead.defaultShortcut)
+    }
+
     @Test func oldSettingsStillLoad() throws {
         let old = #"{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"reviewRequests":true,"didInitialReviewSync":true}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
@@ -154,6 +169,20 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
+    @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        registrar.received = []
+        store.setShortcut(.unassigned, for: .togglePanel)
+        #expect(registrar.received == [nil])
+        #expect(registrar.registered[1] == nil)
+        #expect(registrar.registered[2] == ShortcutAction.sessionSwitcher.defaultShortcut)
+        store.setShortcut(nil, for: .togglePanel)
+        #expect(registrar.registered[1] == ShortcutAction.togglePanel.defaultShortcut)
+        withExtendedLifetime(globals) {}
+    }
+
     @MainActor @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
         let store = Store()
         let registrar = FakeRegistrar()
@@ -169,10 +198,12 @@ import Testing
 /// does, with what the id held left as it was.
 private final class FakeRegistrar: HotKeyRegistrar {
     var registered: [UInt32: Shortcut] = [:]
+    var received: [Shortcut?] = []
     /// Keys that other apps hold.
     var taken: Set<Shortcut> = []
 
     func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool {
+        received.append(shortcut)
         guard let shortcut else { registered[id] = nil; return true }
         if taken.contains(shortcut) || registered.contains(where: { $0.key != id && $0.value == shortcut }) { return false }
         registered[id] = shortcut

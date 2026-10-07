@@ -42,7 +42,12 @@ struct Shortcut: Codable, Hashable {
     /// NSEvent's button number: 2 is the middle button, 3 and 4 the side ones (back, forward).
     var mouseButton: Int? { keyCode >= Self.mouseBase ? Int(keyCode - Self.mouseBase) : nil }
 
+    /// A shortcut that was cleared: no key produces this code, so it never matches and nothing is registered for it.
+    static let unassigned = Shortcut(keyCode: 0x0FFF)
+    var isUnassigned: Bool { keyCode == Self.unassigned.keyCode }
+
     var display: String {
+        if isUnassigned { return "None" }
         if let tap = Self.tapKeys[keyCode] { return tap.name }
         if let button = mouseButton {
             let mods = (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
@@ -189,7 +194,7 @@ extension ShortcutAction {
 }
 
 /// Keeps the registrar in step with the store's global shortcuts: one registration per action, and the session
-/// switcher only while the Claude extension is on.
+/// switcher only while the Claude extension is on, and none for a shortcut that was cleared.
 @MainActor
 final class GlobalShortcuts {
     private let store: Store
@@ -216,13 +221,13 @@ final class GlobalShortcuts {
         guard action.isGlobal else { return true }
         let shortcut = shortcut ?? store.shortcut(action)
         let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
-        return registrar.set(action.hotKeyID, wanted) { [perform] in
+        return registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
             DispatchQueue.main.async { perform(action) }
         }
     }
 }
 
-/// Click, then press the new combination. Esc cancels.
+/// Click, then press the new combination. Esc cancels, Delete clears.
 struct ShortcutRecorder: View {
     let action: ShortcutAction
     let store: Store
@@ -258,7 +263,7 @@ struct ShortcutRecorder: View {
                 .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), rest: Theme.Fill.hover,
                                                   hover: Theme.Fill.selected, isActive: recording))
                 .accessibilityLabel("Change shortcut for \(action.title)")
-                .accessibilityValue(recording ? "Recording, press the new keys" : current.display)
+                .accessibilityValue(recording ? "Recording, press the new keys" : current.isUnassigned ? "Not set" : current.display)
             }
             if let error {
                 Text(error).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
@@ -305,6 +310,9 @@ struct ShortcutRecorder: View {
             tap.interrupt()
             let shortcut = Shortcut(event)
             if event.keyCode == UInt16(kVK_Escape) && shortcut.flags.isEmpty {
+                stop()
+            } else if event.keyCode == UInt16(kVK_Delete) && shortcut.flags.isEmpty {
+                store.setShortcut(.unassigned, for: action)
                 stop()
             } else if action.isGlobal && !shortcut.hasCommandLikeModifier {
                 error = "Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere"

@@ -150,7 +150,7 @@ struct SettingsView: View {
                     ShortcutRecorder(action: action, store: store)
                 }
             }
-            hint("Click a shortcut, then press the new keys (Esc cancels). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
+            hint("Click a shortcut, then press the new keys (Esc cancels, Delete clears). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
         }
     }
 
