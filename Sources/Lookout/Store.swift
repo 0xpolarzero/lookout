@@ -174,6 +174,8 @@ final class Store {
     @ObservationIgnored var iconFirstMessage: (@Sendable (String) -> String?)?
     @ObservationIgnored var iconChooser: (([String], [String: String], [String: String], String) async throws -> JevClient.Choice)?
     @ObservationIgnored var typesafeKeyCache: String?
+    /// What keeps a key in the Keychain (tests answer for it).
+    @ObservationIgnored var keychainWrite: ((String, String) -> Bool)?
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?
     @ObservationIgnored private var dotsWatcher: FolderWatcher?

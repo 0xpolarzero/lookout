@@ -81,9 +81,10 @@ struct SettingsView: View {
         token = ""
     }
 
+    /// Cleared only once the Keychain has it; a refusal keeps what was typed (and the error shows below it).
     private func saveTypesafeKey() {
-        guard !typesafeKey.isEmpty else { return }
-        store.setTypesafeKey(typesafeKey)
+        let key = typesafeKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, store.setTypesafeKey(key) else { return }
         typesafeKey = ""
     }
 

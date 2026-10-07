@@ -473,3 +473,25 @@ import Testing
         #expect(Claude.parseUnread([1, 0x7b]) == nil)
     }
 }
+
+@MainActor
+@Suite struct TypesafeKeySaving {
+    @Test func aKeyTheKeychainRefusedIsNotSavedAndSaysSo() {
+        let s = Store()
+        s.persists = false
+        var written: [String] = []
+        s.keychainWrite = { key, _ in written.append(key); return false }
+        #expect(!s.setTypesafeKey("  sk-test \n"))
+        #expect(written == ["sk-test"])
+        #expect(!s.hasTypesafeKey && s.typesafeKey == nil)
+        #expect(s.iconError == "Couldn't save the key in the Keychain")
+    }
+
+    @Test func aKeyTheKeychainKeptIsSavedTrimmed() {
+        let s = Store()
+        s.persists = false
+        s.keychainWrite = { _, _ in true }
+        #expect(s.setTypesafeKey(" sk-test "))
+        #expect(s.hasTypesafeKey && s.typesafeKey == "sk-test" && s.iconError == nil)
+    }
+}

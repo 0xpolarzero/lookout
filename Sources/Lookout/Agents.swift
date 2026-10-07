@@ -689,14 +689,23 @@ extension Store {
         typesafeKeyCache
     }
 
-    func setTypesafeKey(_ key: String?) {
+    /// Keeps `key` in the Keychain, or removes it with nothing. False when the Keychain refused it: the key is then not
+    /// saved (`iconError` says so) and what was saved before stays.
+    @discardableResult
+    func setTypesafeKey(_ key: String?) -> Bool {
         let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmed.isEmpty { Keychain.delete(Keychain.typesafe) } else { Keychain.write(trimmed, Keychain.typesafe) }
+        if trimmed.isEmpty {
+            Keychain.delete(Keychain.typesafe)
+        } else if !(keychainWrite ?? Keychain.write)(trimmed, Keychain.typesafe) {
+            iconError = "Couldn't save the key in the Keychain"
+            return false
+        }
         typesafeKeyCache = trimmed
         hasTypesafeKey = !trimmed.isEmpty
         iconError = nil
         iconsPausedUntil = .distantPast
         pickIcons()
+        return true
     }
 
     func setIconsEnabled(_ on: Bool) {
