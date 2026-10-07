@@ -17,7 +17,7 @@ import Testing
             return token.map { ($0, .environment) }
         }
         // Never the real Keychain.
-        s.keepToken = { _ in }
+        s.keychainWrite = { _, _ in true }
         return s
     }
 

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var token = ""
     @State private var botInput = ""
+    @State private var tokenError: String?
     @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
@@ -72,13 +73,21 @@ struct SettingsView: View {
                 ActionButton("Save", height: Theme.Metrics.field, action: saveToken)
                     .disabled(token.isEmpty)
             }
+            // A refusal keeps the field and what was typed; it is said where it shows.
+            if let tokenError {
+                Text(tokenError).font(Theme.Typography.meta).foregroundStyle(Theme.red).fixedSize(horizontal: false, vertical: true)
+            }
             hint("Uses `gh auth token` by default. A pasted token is kept in the Keychain and needs `repo` scope for private repos.")
         }
     }
 
     private func saveToken() {
         guard !token.isEmpty else { return }
-        store.setToken(token)
+        guard store.setToken(token) else {
+            tokenError = "Couldn't save the token in the Keychain"
+            return
+        }
+        tokenError = nil
         token = ""
     }
 

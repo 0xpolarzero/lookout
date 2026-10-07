@@ -115,10 +115,6 @@ final class Store {
     @ObservationIgnored private var pollNow = false
     /// Where the token comes from; replaced in tests (the real one can spawn `gh`).
     @ObservationIgnored var resolveToken: @Sendable () -> (String, TokenSource)? = { TokenProvider.resolve() }
-    /// Keeps a token pasted in Settings in the Keychain, or removes it with nil (replaced in tests).
-    @ObservationIgnored var keepToken: (String?) -> Void = { token in
-        if let token, !token.isEmpty { Keychain.write(token) } else { Keychain.delete() }
-    }
     /// Counts the changes made in Settings; the token held was found under `foundAt`, and is looked for again once they differ.
     @ObservationIgnored private var credentialsChanged = 0
     @ObservationIgnored private var foundAt = 0
@@ -771,11 +767,19 @@ final class Store {
         authError = "GitHub rejected the token. Run `gh auth login` again, then Retry."
     }
 
-    func setToken(_ token: String?) {
-        keepToken(token)
+    /// Keeps `token` in the Keychain, or removes it with nothing, and signs in again with what is there. False when the
+    /// Keychain refused it: nothing changes then, and the token that was saved before still signs in.
+    @discardableResult
+    func setToken(_ token: String?) -> Bool {
+        if let token, !token.isEmpty {
+            guard (keychainWrite ?? Keychain.write)(token, Keychain.github) else { return false }
+        } else {
+            Keychain.delete()
+        }
         me = nil
         credentialsChanged += 1
         refreshNow()
+        return true
     }
 
     // MARK: Repos
