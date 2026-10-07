@@ -437,6 +437,7 @@ struct InboxSearchField: View {
                 .font(Theme.Typography.title.weight(.medium))
                 .foregroundStyle(Theme.text)
                 .lineLimit(1)
+                .accessibilityLabel("Search inbox and sessions")
                 .focused($focused)
                 .focusEffectDisabled()
             if !hub.query.isEmpty {
