@@ -689,7 +689,9 @@ extension Store {
     }
 
     func setAgentLabel(_ id: String, _ label: String?) {
-        mutateAgent(id) { $0.label = label.flatMap(AgentLabel.sanitize) }
+        let label = label.flatMap(AgentLabel.sanitize)
+        if label != nil { ensureEntry(id) }
+        mutateAgent(id) { $0.label = label }
     }
 
     func setFolderMuted(_ folder: String, _ muted: Bool) {

@@ -36,6 +36,13 @@ import Testing
         #expect(s.searchSessions("session").first { $0.id == "a" }?.label == "🔥")
     }
 
+    @Test func aLabelOnAnOldSessionFoundThroughSearchIsKept() {
+        let s = store([session("a"), session("old", minutesAgo: 3 * 24 * 60)])
+        s.setAgentLabel("old", "🔥")
+        #expect(s.searchSessions("session old").first?.label == "🔥")
+        #expect(s.allAgentRows.map(\.id) == ["a"])
+    }
+
     @Test func askingForAnIconOfAHiddenSessionPicksIt() {
         let s = store([session("a"), session("b")])
         s.dismissAgent("a")
