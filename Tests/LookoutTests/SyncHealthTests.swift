@@ -60,4 +60,27 @@ import Testing
         await s.pollAll()
         #expect(s.authError != nil && !s.unreachable)
     }
+
+    @Test func aTokenSavedWhileAnotherIsBeingSignedInWithWinsAndTheOldAnswerIsDropped() async {
+        let s = store()
+        s.gh.token = nil
+        let tokens = OSAllocatedUnfairLock(initialState: ["A", "B"])
+        s.resolveToken = { (tokens.withLock { $0.removeFirst() }, .keychain) }
+        let gate = StubbedGitHub.Gate()
+        // Token A's answer is held until the user has saved B in Settings.
+        answer(s) { request in
+            let isA = request.value(forHTTPHeaderField: "Authorization") == "Bearer A"
+            let body = #"{"login": "\#(isA ? "a" : "b")", "avatar_url": null, "type": "User"}"#
+            return .init(200, body, gate: isA ? gate : nil)
+        }
+        let poll = Task { await s.pollAll() }
+        while gate.held == 0 { await Task.yield() }
+        s.setToken("B")
+        // The refresh asked for meanwhile waits for this poll, and runs once it is over.
+        gate.open()
+        await poll.value
+        #expect(s.me == nil || s.me?.login == "b")
+        for _ in 0..<500 where s.me?.login != "b" || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(s.me?.login == "b" && s.gh.token == "B" && s.authError == nil)
+    }
 }

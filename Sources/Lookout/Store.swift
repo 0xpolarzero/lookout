@@ -111,6 +111,7 @@ final class Store {
     @ObservationIgnored private var foundAt = 0
     @ObservationIgnored private var lastAuthAttempt: Date?
     @ObservationIgnored private var authRetry = false
+    @ObservationIgnored private var refreshQueued = false
     /// Signed out, polls look for a new token this rarely: each look can spawn `gh auth token`.
     private static let authBackoff: TimeInterval = 300
     @ObservationIgnored private var sleeper: Task<Void, Never>?
@@ -314,7 +315,8 @@ final class Store {
 
     func refreshNow() {
         authRetry = true
-        Task { await pollAll() }
+        // Asked for during a poll: that one may be on its way out with what it knew before, so one more follows it.
+        if isSyncing { refreshQueued = true } else { Task { await pollAll() } }
     }
 
     /// The hub being open means someone is looking: sync now if stale, and poll faster meanwhile.
@@ -654,10 +656,13 @@ final class Store {
     /// reads the Keychain and may run `gh`, which a poll that fails (offline, a VPN down, GitHub's own trouble) would do every
     /// minute. Only no token, one GitHub refused (`dropRejectedToken`), or a change in Settings (`setToken`) looks again.
     func authenticate() async {
+        // What Settings changes while this waits (on the token found, or on /user) is about another token: nothing of it is kept.
+        let asked = credentialsChanged
         if gh.token == nil || foundAt != credentialsChanged {
             lastAuthAttempt = Date()
             let find = resolveToken
             let resolved = await Task.detached(operation: find).value
+            guard asked == credentialsChanged else { return }
             guard let (token, source) = resolved else {
                 gh.token = nil
                 me = nil
@@ -668,13 +673,16 @@ final class Store {
             }
             gh.token = token
             tokenSource = source
-            foundAt = credentialsChanged
+            foundAt = asked
         }
         do {
-            me = try await gh.get("/user", as: GHUser.self)
+            let user = try await gh.get("/user", as: GHUser.self)
+            guard asked == credentialsChanged else { return }
+            me = user
             authError = nil
             unreachable = false
         } catch {
+            guard asked == credentialsChanged else { return }
             if error is URLError {
                 // Only a missing or refused token is a sign-in problem.
                 unreachable = true
@@ -794,6 +802,10 @@ final class Store {
             rateResetsAt = gh.rateResetsAt
             prune()
             if persistedRevision != savedRevision { save() }
+            if refreshQueued {
+                refreshQueued = false
+                Task { await pollAll() }
+            }
         }
         // Signed out: look for a token when asked (Retry, a refresh) or once the backoff has passed. One already held is
         // asked about at every poll: that is a request, not a look in the Keychain and `gh`.
