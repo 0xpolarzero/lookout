@@ -684,7 +684,12 @@ struct SessionMenu: View {
                 }
             }
         }
-        Button("Mute \(row.projectName)") { store.setFolderMuted(row.session.folderKey, true) }
+        // A session found through search can be of a project muted already: muting it again would do nothing.
+        if store.isFolderMuted(row.session.folderKey) {
+            Button("Unmute \(row.projectName)") { store.setFolderMuted(row.session.folderKey, false) }
+        } else {
+            Button("Mute \(row.projectName)") { store.setFolderMuted(row.session.folderKey, true) }
+        }
     }
 }
 

@@ -148,6 +148,15 @@ import Testing
         #expect(s.sessionShortcutPick?.id == s.agentRows.kept.first?.id)
     }
 
+    @Test func aMutedFolderSaysSoAndMutingItAgainChangesNothing() {
+        let s = store([session("a")])
+        #expect(!s.isFolderMuted("/code/app"))
+        s.setFolderMuted("/code/app", true)
+        #expect(s.isFolderMuted("/code/app") && !s.isFolderMuted("/code/other"))
+        s.setFolderMuted("/code/app", false)
+        #expect(!s.isFolderMuted("/code/app"))
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])

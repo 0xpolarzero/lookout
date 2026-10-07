@@ -767,6 +767,8 @@ extension Store {
         mutateAgent(id) { $0.label = label }
     }
 
+    func isFolderMuted(_ folder: String) -> Bool { agents.mutedFolders.contains(folder) }
+
     func setFolderMuted(_ folder: String, _ muted: Bool) {
         agents.mutedFolders.removeAll { $0 == folder }
         if muted { agents.mutedFolders.append(folder) }
