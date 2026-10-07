@@ -418,7 +418,7 @@ extension LookoutHub {
 }
 
 /// The search: a real text field (paste, selection, dead keys and input methods work, and VoiceOver reads it), with what it
-/// found and the Esc that ends it. Typing elsewhere in the hub seeds it with the first character (see `HubKeys`), which
+/// found and the Esc that ends it. Typing elsewhere in the hub opens it and hands it the key (see `HubKeys`), which
 /// leaves it alone while it has focus.
 struct InboxSearchField: View {
     @Bindable var hub: HubState
@@ -452,18 +452,24 @@ struct InboxSearchField: View {
         .onChange(of: hub.focusRequest) { requestFocus() }
         .onChange(of: focused) { _, isFocused in
             hub.searchFocused = isFocused
-            // Only a seeded first character moves the caret (carry on after it instead of replacing it): a click into the
-            // middle of the query, or Tab back into the field, keeps the selection the field made.
-            guard hub.caretAtEnd else { return }
-            hub.caretAtEnd = false
-            if isFocused { DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil) } }
+            if isFocused { DispatchQueue.main.async(execute: hub.typePendingKeys) }
         }
         .onDisappear { hub.searchFocused = false }
-        // What is typed, pasted or composed in the field doesn't go through the keys: the first result is picked like theirs.
-        .onChange(of: hub.query) { hub.pick(store.hubTargets(hub).first, ui: ui) }
+        // What is typed, pasted or composed in the field doesn't go through the keys: the first result is picked like theirs,
+        // and nothing stays shrunk behind the results.
+        .onChange(of: hub.query) {
+            if !hub.query.isEmpty, hub.focus != nil {
+                withAnimation(LookoutHub.refocus.resolved(reduce: LookoutHub.reduceNow)) { hub.focus = nil }
+            }
+            hub.pick(store.hubTargets(hub).first, ui: ui)
+        }
     }
 
     private func requestFocus() {
-        DispatchQueue.main.async { focused = true }
+        DispatchQueue.main.async {
+            focused = true
+            // Already focused (a key arrived while it was): nothing changes for `onChange` to answer.
+            DispatchQueue.main.async(execute: hub.typePendingKeys)
+        }
     }
 }

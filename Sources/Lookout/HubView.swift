@@ -52,8 +52,8 @@ final class HubState {
     var searchFocused = false
     /// Bumped to ask the field for focus.
     var focusRequest = 0
-    /// The next focus is the typing's own: a first character was put in the field, so the caret goes after it. Any
-    /// other focus (a click, Tab) keeps what the field and the pointer decide.
+    /// The next focus is the typing's own: the caret goes after what the field holds, and the key is typed. Any other
+    /// focus (a click, Tab) keeps what the field and the pointer decide.
     var caretAtEnd = false
     /// Which way the last page change went, so pages slide in from the side you're heading to.
     var forward = true
@@ -70,11 +70,30 @@ final class HubState {
     @ObservationIgnored var dragging = false
     @ObservationIgnored private var dwell: Task<Void, Never>?
 
-    /// Shows the search field and asks it for the keyboard; `seeded`: a first character is already in it.
-    func startSearch(seeded: Bool = false) {
+    /// The keys that started the search, for the field to take once it has the keyboard: it types them itself (a dead key,
+    /// an input method's first key, a plain letter), as it would have had it been focused.
+    @ObservationIgnored var pendingKeys: [NSEvent] = []
+
+    /// Shows the search field and asks it for the keyboard; `replaying`: the key that started it, which the field gets
+    /// as if typed in it (after anything already in it).
+    func startSearch(replaying event: NSEvent? = nil) {
         searchOpen = true
-        if seeded { caretAtEnd = true }
+        caretAtEnd = true
+        if let event { pendingKeys.append(event) }
         focusRequest &+= 1
+    }
+
+    /// With the field editor up: the caret goes after what the field holds, then the keys that started the search are typed
+    /// into it, in order. (A click into the query, or Tab back into it, keeps the selection the field made.)
+    func typePendingKeys() {
+        // The window the keys were typed in is the one whose field editor gets them.
+        guard let editor = (pendingKeys.first?.window ?? NSApp.keyWindow)?.firstResponder as? NSTextView,
+              editor.isFieldEditor else { return }
+        if caretAtEnd { editor.moveToEndOfDocument(nil) }
+        caretAtEnd = false
+        let keys = pendingKeys
+        pendingKeys = []
+        keys.forEach(editor.keyDown(with:))
     }
 
     /// Clears the query and takes the field away.
@@ -83,6 +102,7 @@ final class HubState {
         searchOpen = false
         searchFocused = false
         caretAtEnd = false
+        pendingKeys = []
     }
 
     /// Picks a row from the keyboard (or none): the lists follow it.
@@ -214,13 +234,14 @@ final class HubKeys {
         }
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
         guard hub.expanded, hub.page == .main else { return false }
-        // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started.
+        // Typing searches: letters and digits start it, Space and ⌫ edit it once it has started. The key is handed to the
+        // field to type (not read here), so a dead key or an input method's first key works as it does in any field.
         if event.keyCode == UInt16(kVK_Delete), flags.isEmpty, !hub.query.isEmpty {
             setQuery(String(hub.query.dropLast()))
             return true
         }
-        if flags.subtracting(.shift).isEmpty, let typed = Self.printable(event), !(typed == " " && hub.query.isEmpty) {
-            setQuery(hub.query + typed)
+        if startsSearch(event, flags: flags) {
+            hub.startSearch(replaying: event)
             return true
         }
         let targets = targets()
@@ -232,6 +253,32 @@ final class HubKeys {
         if rowCommand(shortcut, targets: targets) { return true }
         // What no action is bound to: ⌘Z takes back the last Done.
         return flags == .command && event.charactersIgnoringModifiers == "z" && store.undoLast()
+    }
+
+    /// Whether the key types something into a field: a printable character (not Space before the first one), or a dead key
+    /// (the accent a layout waits to put on the next letter), whose event carries no characters at all.
+    private func startsSearch(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        if flags.subtracting(.shift).isEmpty, let typed = Self.printable(event) { return !(typed == " " && hub.query.isEmpty) }
+        return flags.isDisjoint(with: [.command, .control]) && isDeadKey(event)
+    }
+
+    /// Whether the key is a dead key of the current layout (⌥E on US, ^ on French). Replaceable, as it depends on the keyboard.
+    var isDeadKey: (NSEvent) -> Bool = HubKeys.layoutHasDeadKey
+
+    private static func layoutHasDeadKey(_ event: NSEvent) -> Bool {
+        guard event.characters?.isEmpty ?? true,
+              let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let data = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return false }
+        let layout = Unmanaged<CFData>.fromOpaque(data).takeUnretainedValue()
+        var state: UInt32 = 0
+        var length = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        let modifiers = (Shortcut(event).carbonModifiers >> 8) & 0xFF
+        let status = CFDataGetBytePtr(layout).withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) {
+            UCKeyTranslate($0, event.keyCode, UInt16(kUCKeyActionDown), modifiers, UInt32(LMGetKbdType()),
+                           0, &state, chars.count, &length, &chars)
+        }
+        return status == noErr && state != 0
     }
 
     /// What a key types, when it is printable text (not a control character or a function key).
@@ -289,8 +336,8 @@ final class HubKeys {
             if !query.isEmpty { hub.focus = nil }
             if query.isEmpty { hub.endSearch() }
         }
-        // The typing's first character goes in the field, which takes the keyboard (so the next ones are its own).
-        if !query.isEmpty { hub.startSearch(seeded: true) }
+        // The field takes the keyboard (so the next keys are its own), the caret after what is in it.
+        if !query.isEmpty { hub.startSearch() }
         hub.pick(targets().first, ui: ui)
     }
 
