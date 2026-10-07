@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
+    @State private var accessibilityTrusted = AXIsProcessTrusted()
 
     static let updatesID = "updates"
 
@@ -140,7 +141,7 @@ struct SettingsView: View {
                         Text(action.title).font(Theme.Typography.body)
                         if action.isGlobal {
                             Text("Works from any app").font(Theme.Typography.caption).foregroundStyle(Theme.tertiary)
-                            if (store.shortcut(action).isModifierTap || store.shortcut(action).mouseButton != nil) && !AXIsProcessTrusted() {
+                            if (store.shortcut(action).isModifierTap || store.shortcut(action).mouseButton != nil) && !accessibilityTrusted {
                                 Text("Needs Accessibility access (System Settings › Privacy & Security)")
                                     .font(Theme.Typography.caption).foregroundStyle(Theme.amber)
                             }
@@ -151,6 +152,10 @@ struct SettingsView: View {
                 }
             }
             hint("Click a shortcut, then press the new keys (Esc cancels, Delete clears). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
+        }
+        // Granted in System Settings, which Lookout comes back from.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            accessibilityTrusted = AXIsProcessTrusted()
         }
     }
 

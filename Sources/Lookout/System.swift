@@ -121,6 +121,8 @@ final class HotKeys {
     private var swallowedUps: Set<Int> = []
     private var tap = ModifierTap()
     private var monitors: [Any] = []
+    /// Waits for Lookout to come back to the front while taps or mouse buttons are set and Accessibility is not granted.
+    private var activation: NSObjectProtocol?
     /// When the held modifier went down (event timestamps, i.e. system uptime), to ask whether anything else happened since.
     private var heldSince: TimeInterval?
     /// Taps are ignored while this is true (e.g. while a shortcut is being recorded).
@@ -141,7 +143,7 @@ final class HotKeys {
     /// registered until a replacement is.
     @discardableResult
     func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) -> Bool {
-        defer { updateMonitors(); updateButtonTap() }
+        defer { updateMonitors(); updateButtonTap(); updateActivation() }
         if let shortcut, shortcut.mouseButton == nil, !shortcut.isModifierTap {
             if combos[id]?.shortcut == shortcut, refs[id] != nil || isSuspended {
                 combos[id] = (shortcut, handler)
@@ -193,6 +195,28 @@ final class HotKeys {
         guard !isSuspended, let (shortcut, handler) = combos[id], let ref = claim(shortcut, id) else { return }
         refs[id] = ref
         HotKeys.handlers[id] = handler
+    }
+
+    /// Access is granted in System Settings, with Lookout behind it, and the tap that failed before it, or the monitors that heard
+    /// nothing, are not tried again by themselves: coming back to the front is when to look. Nothing listens otherwise.
+    private func updateActivation() {
+        let waiting = (!taps.isEmpty || !buttons.isEmpty) && !AXIsProcessTrusted()
+        if waiting, activation == nil {
+            activation = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                                                queue: .main) { [weak self] _ in self?.accessMayBeGranted() }
+        } else if !waiting, let observer = activation {
+            NotificationCenter.default.removeObserver(observer)
+            activation = nil
+        }
+    }
+
+    private func accessMayBeGranted() {
+        guard AXIsProcessTrusted() else { return }
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+        updateMonitors()
+        updateButtonTap()
+        updateActivation()
     }
 
     private func updateMonitors() {
