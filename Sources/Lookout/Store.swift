@@ -819,8 +819,6 @@ final class Store {
             let info: GHRepo = try await gh.get("/repos/\(name)")
             var config = RepoConfig(fullName: info.fullName)
             config.defaultBranch = info.defaultBranch
-            // Your own repos: everything, as the README promises.
-            config.allComments = config.owner.lowercased() == me?.login.lowercased()
             repos.append(config)
             save()
             suggestions.removeAll { $0 == info.fullName }
