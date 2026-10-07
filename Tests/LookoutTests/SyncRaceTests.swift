@@ -86,4 +86,43 @@ import Testing
         await poll.value
         #expect(s.repoErrors.isEmpty)
     }
+
+    /// Stops watching `repo` and watches it anew (a new `addedAt`), as one does while a request for it is out.
+    private func watchAgain(_ s: Store, _ repo: RepoConfig) {
+        s.removeRepo(repo)
+        var again = repo
+        again.addedAt = repo.addedAt.addingTimeInterval(1)
+        s.repos = [again]
+    }
+
+    @Test func aLateFailureOfAStoppedAndWatchedAgainRepoIsNotItsFault() async {
+        var repo = RepoConfig(fullName: "a/one")
+        // Conversations only: a CI check the new watching starts is its own, and may fault on its own.
+        repo.events = [.issueOpened]
+        let s = store(repo)
+        let gate = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { _ in .init(500, #"{"message": "Server error"}"#, gate: gate) }
+        let poll = Task { await s.pollAll() }
+        while gate.held == 0 { await Task.yield() }
+        watchAgain(s, repo)
+        gate.open()
+        await poll.value
+        #expect(s.repoErrors.isEmpty)
+    }
+
+    @Test func aLateAnswerOfAStoppedAndWatchedAgainRepoDoesNotClearItsFault() async {
+        var repo = RepoConfig(fullName: "a/one")
+        // Conversations only: a CI check the new watching starts is its own, and may fault on its own.
+        repo.events = [.issueOpened]
+        let s = store(repo)
+        let gate = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { _ in .init(200, "[]", gate: gate) }
+        let poll = Task { await s.pollAll() }
+        while gate.held == 0 { await Task.yield() }
+        watchAgain(s, repo)
+        s.repoErrors["a/one"] = "Forbidden"
+        gate.open()
+        await poll.value
+        #expect(s.repoErrors["a/one"] == "Forbidden")
+    }
 }

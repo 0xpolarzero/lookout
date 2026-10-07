@@ -242,6 +242,73 @@ import Testing
         await poll
         #expect(store.repoErrors["a/x"] == "Server error")
     }
+
+    @Test func aLateFailureOfAStoppedAndWatchedAgainRepoIsNotItsFault() async throws {
+        let (store, answers) = store()
+        store.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        store.settings.reviewRequests = false
+        async let poll: () = store.pollAll()
+        try await eventually { answers.waiting.count == 1 }
+        // The repo is stopped and watched anew while its check is out, and the check then fails.
+        let repo = store.repos[0]
+        store.removeRepo(repo)
+        var again = repo
+        again.addedAt = repo.addedAt.addingTimeInterval(1)
+        store.repos = [again]
+        answers.fail(0, "Server error")
+        await poll
+        #expect(store.repoErrors.isEmpty)
+    }
+
+    @Test func aLateAnswerOfAStoppedAndWatchedAgainRepoDoesNotClearItsFault() async throws {
+        let (store, answers) = store()
+        store.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        store.settings.reviewRequests = false
+        async let poll: () = store.pollAll()
+        try await eventually { answers.waiting.count == 1 }
+        let repo = store.repos[0]
+        store.removeRepo(repo)
+        var again = repo
+        again.addedAt = repo.addedAt.addingTimeInterval(1)
+        store.repos = [again]
+        store.repoErrors["a/x"] = "Forbidden"
+        answers.settle(0, with: status(.success, sha: "s1"))
+        await poll
+        #expect(store.repoErrors["a/x"] == "Forbidden")
+    }
+
+    @Test func conversationsFailingDoNotKeepCIFromBeingChecked() async throws {
+        let (store, answers) = store()
+        store.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        store.settings.reviewRequests = false
+        store.repos[0].events = [.issueOpened, .ciMain]
+        store.gh.session = StubbedGitHub.session { _ in .init(500, #"{"message": "Not here"}"#) }
+        async let poll: () = store.pollAll()
+        try await eventually { answers.waiting.count == 1 }
+        answers.settle(0, with: status(.success, sha: "s1"))
+        await poll
+        #expect(store.ci["a/x"]?.sha == "s1")
+        // The conversations' fault stays, though CI answered.
+        #expect(store.repoErrors["a/x"] == "Not here")
+    }
+
+    @Test func eachSourceKeepsItsFaultWhenTheOtherAnswers() async throws {
+        let (store, answers) = store()
+        store.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        store.settings.reviewRequests = false
+        // CI fails; the conversations (none asked for) are fine.
+        async let first: () = store.pollAll()
+        try await eventually { answers.waiting.count == 1 }
+        answers.fail(0, "CI down")
+        await first
+        #expect(store.repoErrors["a/x"] == "CI down")
+        // CI answers: its fault goes.
+        async let second: () = store.pollAll()
+        try await eventually { answers.waiting.count == 2 }
+        answers.settle(1, with: status(.success, sha: "s1"))
+        await second
+        #expect(store.repoErrors.isEmpty)
+    }
 }
 
 @Suite struct FailingChecks {

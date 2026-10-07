@@ -135,6 +135,9 @@ final class Store {
     /// CI checks under way, by repo, and the newest one each repo has started (see `syncCI`).
     @ObservationIgnored private var ciChecks: [String: Task<Void, Error>] = [:]
     @ObservationIgnored private var ciTickets: [String: Int] = [:]
+    /// What each source of a repo last failed at; `repoErrors` shows the conversations' first, then CI's (see `publishHealth`).
+    @ObservationIgnored private var conversationErrors: [String: String] = [:]
+    @ObservationIgnored private var ciErrors: [String: String] = [:]
     /// What a check asks GitHub, replaced by the tests.
     @ObservationIgnored var ciFetch: ((RepoConfig) async throws -> CIStatus)?
     /// Counts the times Review requests was switched, so a search that outlives its switch is let go (see `syncReviewRequests`).
@@ -759,6 +762,8 @@ final class Store {
         notifier.removeBanners(of: repo.fullName)
         ci[repo.fullName] = nil
         // Polls never visit it again, so its fault would outlive it (the gear's badge, the banner, Settings).
+        conversationErrors[repo.fullName] = nil
+        ciErrors[repo.fullName] = nil
         repoErrors[repo.fullName] = nil
         endCIChecks(repo.fullName)
         save()
@@ -769,7 +774,12 @@ final class Store {
         if repos[i].events.contains(kind) {
             repos[i].events.remove(kind)
             removeItems { $0.repo == repo.fullName && $0.kind == kind }
-            if kind == .ciMain { endCIChecks(repo.fullName) }
+            if kind == .ciMain {
+                endCIChecks(repo.fullName)
+                // CI is not watched any more: what it failed at is no fault of the repo's.
+                ciErrors[repo.fullName] = nil
+                publishHealth(repo.fullName)
+            }
         } else {
             repos[i].events.insert(kind)
         }
@@ -857,17 +867,38 @@ final class Store {
     }
 
     func sync(_ name: String) async {
+        let watchedSince = repos.first(where: { $0.fullName == name })?.addedAt
+        var failure: Error?
         do {
             try await syncConversations(name)
             try await syncThreads(name)
-            try await syncCI(name)
-            if repoErrors[name] != nil { repoErrors[name] = nil }
         } catch {
-            // A request that outlived the repo's removal has nobody to tell.
-            guard repos.contains(where: { $0.fullName == name }) else { return }
-            let message = error.localizedDescription
-            if repoErrors[name] != message { repoErrors[name] = message }
+            failure = error
         }
+        // A request that outlived the repo's removal (or its removal and return, which is a new repo) has nobody to tell.
+        if repos.contains(where: { $0.fullName == name && $0.addedAt == watchedSince }) {
+            conversationErrors[name] = failure?.localizedDescription
+            // Published here, not left to the CI check: with CI off there is none, and the fault would never come or go.
+            publishHealth(name)
+        }
+        // CI has endpoints of its own: conversations failing doesn't keep it from being checked. Its own fault is published
+        // by the check (`syncCI`), under its ticket.
+        try? await syncCI(name)
+    }
+
+    /// `repoErrors` is what the sources of a repo (its conversations, its CI) failed at, the conversations' first.
+    private func publishHealth(_ name: String) {
+        guard repos.contains(where: { $0.fullName == name }) else { return }
+        let message = conversationErrors[name] ?? ciErrors[name]
+        if repoErrors[name] != message { repoErrors[name] = message }
+    }
+
+    /// What a check of a repo's CI came to, for its sync health: nothing if the check was overtaken (CI switched off, and
+    /// perhaps on again, whose own check is the newer one; or the repo removed).
+    private func publishCIHealth(_ name: String, failure: String?, ticket: Int) {
+        guard ciTickets[name] == ticket, repos.contains(where: { $0.fullName == name && $0.events.contains(.ciMain) }) else { return }
+        ciErrors[name] = failure
+        publishHealth(name)
     }
 
     /// Whether `repo`, as an answer was asked for it, is still what is watched: not stopped (nor stopped and watched again),
@@ -1165,10 +1196,12 @@ final class Store {
             defer { if ciTickets[name] == ticket { ciChecks[name] = nil } }
             do {
                 publishCI(name, try await (ciFetch ?? fetchCI)(repo), ticket: ticket)
+                publishCIHealth(name, failure: nil, ticket: ticket)
             } catch {
-                // Overtaken (CI switched off, the repo removed, a newer check begun): the fault is no news of the source as it is
-                // now, so it must not be blamed on it.
-                if ciTickets[name] == ticket { throw error }
+                // An overtaken check (CI switched off, the repo removed, a newer check begun) publishes nothing: its fault is
+                // no news of the source as it is now.
+                publishCIHealth(name, failure: error.localizedDescription, ticket: ticket)
+                throw error
             }
         }
         ciChecks[name] = check
