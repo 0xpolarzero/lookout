@@ -452,6 +452,23 @@ import Testing
         #expect(hub.focus == .agents)
     }
 
+    @Test func aPickMarkedReadBehindTheCapMovesToTheRowThatTookItsPlace() {
+        // Ten kept sessions, the last of them finished and unread: first under Waiting for you.
+        let sessions = (1...9).map { session("k\($0)", folder: "/code/x", minutesAgo: Double($0)) } + [session("done", folder: "/code/x", minutesAgo: 10, blocked: true)]
+        let s = store(sessions, kept: sessions.map(\.id), unread: ["done"])
+        let (keys, hub) = hubKeys(s)
+        let before = s.hubSessionIDs(hub).map { "a:" + $0 }
+        #expect(before.first == "a:done" && before.count == SessionCap.visible)
+        keys.select("a:done")
+        s.toggleAgentRead("done")
+        // Back at the end of its project, behind the cap: no longer a row the keys can act on.
+        let after = s.hubSessionIDs(hub).map { "a:" + $0 }
+        #expect(!after.contains("a:done"))
+        hub.rehome("a:", from: before, to: after)
+        #expect(hub.selection == after.first && hub.keyboardSelection?.id == after.first)
+        #expect(keys.targets().contains(hub.selection ?? ""))
+    }
+
     @Test func openingMoreMovesThePickToTheFirstSessionItRevealed() {
         let s = store((0..<12).map { session("n\($0)", minutesAgo: Double($0 + 1)) })
         let (keys, hub) = hubKeys(s)

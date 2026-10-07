@@ -34,25 +34,25 @@ import Testing
 
     @Test func aKeyboardPickMovesToTheRowThatTookItsPlaceWhenItLeavesTheList() {
         let (hub, _) = state(selecting: "c:b", keyboard: true)
-        hub.rehomeCI(from: ["c:a", "c:b", "c:c", "c:passing"], to: ["c:a", "c:c", "c:passing"])
+        hub.rehome("c:", from: ["c:a", "c:b", "c:c", "c:passing"], to: ["c:a", "c:c", "c:passing"])
         #expect(hub.selection == "c:c")
-        hub.rehomeCI(from: ["c:a", "c:c", "c:passing"], to: ["c:a", "c:passing"])
+        hub.rehome("c:", from: ["c:a", "c:c", "c:passing"], to: ["c:a", "c:passing"])
         #expect(hub.selection == "c:passing")
-        hub.rehomeCI(from: ["c:a", "c:passing"], to: ["c:a"])
+        hub.rehome("c:", from: ["c:a", "c:passing"], to: ["c:a"])
         #expect(hub.selection == "c:a")
     }
 
     @Test func aPointersPickAndAPickWithNothingLeftAreCleared() {
         let (hub, _) = state(selecting: "c:b", keyboard: false)
-        hub.rehomeCI(from: ["c:a", "c:b"], to: ["c:a"])
+        hub.rehome("c:", from: ["c:a", "c:b"], to: ["c:a"])
         #expect(hub.selection == nil)
         let (keyed, _) = state(selecting: "c:b", keyboard: true)
-        keyed.rehomeCI(from: ["c:b"], to: [])
+        keyed.rehome("c:", from: ["c:b"], to: [])
         #expect(keyed.selection == nil)
         #expect(keyed.keyboardSelection == nil)
         // An inbox pick isn't CI's to move.
         let (inbox, _) = state(selecting: "i:1", keyboard: true)
-        inbox.rehomeCI(from: ["c:a"], to: [])
+        inbox.rehome("c:", from: ["c:a"], to: [])
         #expect(inbox.selection == "i:1")
     }
 

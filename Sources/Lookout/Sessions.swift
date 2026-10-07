@@ -179,6 +179,11 @@ struct SessionsScroll: View {
                     .awayFromRail(rail, inset)
             }
         }
+        // A pick on a session the list no longer shows (marked read, it left Waiting for you behind the cap) moves on. A search's
+        // results are `reconcileSelection`'s.
+        .onChange(of: store.hubSessionIDs(hub)) { old, new in
+            if hub.query.isEmpty { hub.rehome("a:", from: old.map { "a:" + $0 }, to: new.map { "a:" + $0 }) }
+        }
     }
 
     private func showAll() {

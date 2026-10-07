@@ -355,7 +355,7 @@ extension LookoutHub {
         .listMotion(value: list.entries.map { "\($0.id) \($0.state.rawValue) \($0.muted)" })
         .listMotion(value: store.undoStack.visibleID)
         // A pick on a row that left the list (it passed, was muted, lost its CI) moves on instead of lingering.
-        .onChange(of: hub.ciTargets(store)) { old, new in hub.rehomeCI(from: old, to: new) }
+        .onChange(of: hub.ciTargets(store)) { old, new in hub.rehome("c:", from: old, to: new) }
     }
 
     /// A line of the list: a failing or running repo, the Passing row, or (Passing open) a quiet repo.
@@ -547,10 +547,10 @@ extension HubState {
         return targets
     }
 
-    /// The pick was a CI row that is no longer a target: a pick made with the keyboard moves to the row now in its
-    /// place (the one before it, at the end), a pointer's goes with the pointer.
-    func rehomeCI(from old: [String], to new: [String]) {
-        guard let gone = selection, gone.hasPrefix("c:"), !new.contains(gone) else { return }
+    /// The pick was a row of one list ("c:" CI, "a:" sessions) that is no longer a target: a pick made with the keyboard moves
+    /// to the row now in its place (the one before it, at the end), a pointer's goes with the pointer.
+    func rehome(_ prefix: String, from old: [String], to new: [String]) {
+        guard let gone = selection, gone.hasPrefix(prefix), !new.contains(gone) else { return }
         guard keyboardSelection?.id == gone, !new.isEmpty else {
             selection = nil
             if keyboardSelection?.id == gone { keyboardSelection = nil }
