@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
+    @State private var restoreError: String?
     @State private var accessibilityTrusted = AXIsProcessTrusted()
     @State private var notificationsBlocked = false
 
@@ -176,6 +177,20 @@ struct SettingsView: View {
                     ShortcutRecorder(action: action, store: store)
                 }
             }
+            HStack(spacing: Theme.Space.md) {
+                Spacer()
+                if let restoreError {
+                    Text(restoreError).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
+                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                }
+                ActionButton("Restore defaults") {
+                    // Beside the button, and said at each attempt, a repeated one too.
+                    restoreError = store.restoreDefaultShortcuts()?.message
+                    if let restoreError { Announce.say(restoreError) }
+                }
+                .disabled(!store.hasCustomShortcuts)
+            }
+            .onChange(of: store.hasCustomShortcuts) { restoreError = nil }
             hint("Click a shortcut, then press the new keys (Esc cancels, Delete clears). App-wide ones also accept a single modifier tapped alone, like right ⌘. In the inbox, ↑↓ or hovering picks the row they act on.")
         }
         // Granted in System Settings, which Lookout comes back from.

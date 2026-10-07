@@ -181,6 +181,28 @@ extension Store {
         if let other = shortcutConflict(action.defaultShortcut, for: action) { return .usedBy(other) }
         return setShortcut(nil, for: action)
     }
+
+    var hasCustomShortcuts: Bool { !(settings.shortcuts ?? [:]).isEmpty }
+
+    /// Every shortcut back to its default. The global ones are unregistered first and registered again after: with
+    /// the two swapped, registering one default while the other still holds its key would be refused, and Settings
+    /// would show a default that does nothing. If another app holds one of the defaults nothing changes: what was
+    /// registered is registered again, every setting stays as it was, and the refusal is returned.
+    @discardableResult
+    func restoreDefaultShortcuts() -> ShortcutRefusal? {
+        let globals = ShortcutAction.allCases.filter(\.isGlobal)
+        let before = settings.shortcuts
+        let held = globals.map { ($0, shortcut($0)) }
+        for action in globals { _ = onGlobalShortcutChange?(action, .unassigned) }
+        settings.shortcuts = nil
+        var refused: Shortcut?
+        for action in globals where onGlobalShortcutChange?(action, shortcut(action)) == false { refused = refused ?? action.defaultShortcut }
+        guard let refused else { return nil }
+        for action in globals { _ = onGlobalShortcutChange?(action, .unassigned) }
+        settings.shortcuts = before
+        for (action, shortcut) in held { _ = onGlobalShortcutChange?(action, shortcut) }
+        return .defaultUnavailable(refused)
+    }
 }
 
 /// Why a shortcut wasn't taken: the sentence under its recorder.
@@ -188,11 +210,14 @@ enum ShortcutRefusal: Equatable {
     case usedBy(ShortcutAction)
     /// Another app holds a system-wide key: Lookout keeps the one it had.
     case unavailable(Shortcut)
+    /// Restore defaults found one of the defaults held by another app: nothing was restored.
+    case defaultUnavailable(Shortcut)
 
     var message: String {
         switch self {
         case .usedBy(let other): "Already used for \(other.title)"
         case .unavailable(let shortcut): "\(shortcut.display) is used by another app. Lookout keeps the old shortcut"
+        case .defaultUnavailable(let shortcut): "\(shortcut.display) is used by another app. Lookout keeps your shortcuts"
         }
     }
 }

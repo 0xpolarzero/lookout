@@ -193,6 +193,66 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
+    @MainActor @Test func restoreDefaultsResetsEveryShortcutAndRegistersTheGlobalOnesAgain() {
+        let store = Store()
+        store.persists = false
+        var registered: [ShortcutAction] = []
+        store.onGlobalShortcutChange = { action, _ in registered.append(action); return true }
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
+        store.setShortcut(.unassigned, for: .discard)
+        #expect(store.hasCustomShortcuts)
+        registered = []
+        #expect(store.restoreDefaultShortcuts() == nil)
+        #expect(!store.hasCustomShortcuts)
+        for action in ShortcutAction.allCases { #expect(store.shortcut(action) == action.defaultShortcut) }
+        #expect(Set(registered) == [.togglePanel, .sessionSwitcher])
+    }
+
+    @MainActor @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keep = ShortcutAction.togglePanel.defaultShortcut, sessions = ShortcutAction.sessionSwitcher.defaultShortcut
+        // Swapped the way the recorder allows it: through a key neither holds.
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command]), for: .togglePanel)
+        store.setShortcut(keep, for: .sessionSwitcher)
+        store.setShortcut(sessions, for: .togglePanel)
+        #expect(registrar.registered == [1: sessions, 2: keep])
+        // Each reset alone is refused, the other action holding its default.
+        #expect(store.resetShortcut(for: .togglePanel) == .usedBy(.sessionSwitcher))
+        #expect(store.resetShortcut(for: .sessionSwitcher) == .usedBy(.togglePanel))
+        #expect(store.restoreDefaultShortcuts() == nil)
+        #expect(registrar.registered == [1: keep, 2: sessions])
+        #expect(store.shortcut(.togglePanel) == keep && store.shortcut(.sessionSwitcher) == sessions)
+        #expect(store.refusedShortcuts.isEmpty)
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func restoreDefaultsRefusedByAnotherAppChangesNothing() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keep = ShortcutAction.togglePanel.defaultShortcut
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])
+        store.setShortcut(moved, for: .togglePanel)
+        store.setShortcut(.unassigned, for: .discard)
+        let before = store.settings.shortcuts
+        // Another app took Keep open's default after it was let go of.
+        registrar.taken = [keep]
+        let refusal = store.restoreDefaultShortcuts()
+        #expect(refusal == .defaultUnavailable(keep))
+        #expect(refusal?.message == "\(keep.display) is used by another app. Lookout keeps your shortcuts")
+        // What worked still does, and so does what was cleared: stored, registered, shown.
+        #expect(store.settings.shortcuts == before && store.shortcut(.togglePanel) == moved && store.shortcut(.discard).isUnassigned)
+        #expect(registrar.registered == [1: moved, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        #expect(store.refusedShortcuts.isEmpty)
+        // Once the other app lets go, the restore goes through.
+        registrar.taken = []
+        #expect(store.restoreDefaultShortcuts() == nil && !store.hasCustomShortcuts)
+        #expect(registrar.registered == [1: keep, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
+        withExtendedLifetime(globals) {}
+    }
+
     @MainActor @Test func turningTheExtensionOnSaysWhenAnotherAppHoldsTheSessionKey() {
         let store = Store()
         let registrar = FakeRegistrar()
