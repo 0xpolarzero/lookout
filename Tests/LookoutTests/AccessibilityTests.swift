@@ -196,7 +196,7 @@ enum AccessibilityTree {
 
     @Test func aRowIsOneElementWithItsLabelValueHintAndActions() async throws {
         let lookout = try root(try await AccessibilityTree.render { _, hub in hub.pinned = true })
-        let item = try #require(lookout.all.first { $0.label.hasPrefix("Review comment from andrewrk on zig #21877: std.Io: add vectored reads to File") })
+        let item = try #require(lookout.all.first { $0.label.hasPrefix("Review comment from andrewrk on ziglang/zig #21877: std.Io: add vectored reads to File") })
         #expect(item.role == "AXButton" && item.label.hasSuffix("minutes ago") && item.value == "Unread")
         #expect(item.help == "Opens on GitHub. More actions available.")
         #expect(Set(item.actions) == ["Open on GitHub", "Mark as read", "Done", "Copy link"])
@@ -211,6 +211,20 @@ enum AccessibilityTree {
         #expect(moves == [["Move down"], ["Move up", "Move down"], ["Move up"]], "\(moves)")
         let session = try #require(lookout.first("AXButton", "Calculator display reading"))
         #expect(session.value.hasPrefix("finished, unread, lcu-research") && Set(session.actions) == ["Mark as read", "Keep", "Hide"])
+    }
+
+    @Test func aRowNamesItsOwnerSoAForkAndItsUpstreamAreTold() async throws {
+        let lookout = try root(try await AccessibilityTree.render { store, hub in
+            hub.pinned = true
+            for owner in ["upstream", "fork"] {
+                store.items.append(InboxItem(id: owner, repo: "\(owner)/lookout", kind: .issueComment, number: 42, title: "Same title", snippet: "",
+                                             author: "someone", avatar: nil, authorIsApp: false,
+                                             url: URL(string: "https://github.com/\(owner)/lookout/issues/42")!, createdAt: Date(), state: .unread))
+            }
+        })
+        let labels = lookout.all.map(\.label).filter { $0.contains("lookout #42") }
+        #expect(labels.contains { $0.hasPrefix("Issue comment from someone on upstream/lookout #42: Same title") }, "\(labels)")
+        #expect(labels.contains { $0.hasPrefix("Issue comment from someone on fork/lookout #42: Same title") }, "\(labels)")
     }
 
     @Test func aMutedProjectsHeaderOffersUnmuteAndSaysItIsMuted() async throws {

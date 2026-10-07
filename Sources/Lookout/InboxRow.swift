@@ -291,10 +291,10 @@ struct InboxRow: View {
     /// The title and the first lines of the comment.
     private var tooltip: String { ([item.title] + (tipDetail.map { [$0] } ?? [])).joined(separator: "\n") }
 
-    /// "Review comment from andrewrk on zig #21877: std.Io: add vectored reads to File, 3 minutes ago".
+    /// "Review comment from andrewrk on ziglang/zig #21877: std.Io: add vectored reads to File, 3 minutes ago". The owner is
+    /// said: a fork and its upstream are two repositories with one name.
     private func spokenLabel(_ now: Date) -> String {
-        let name = item.repo.split(separator: "/").last.map(String.init) ?? item.repo
-        return "\(item.kind.label) from \(item.author) on \(name) #\(item.number): \(item.title), \(spokenAgo(ageDate, now: now))"
+        "\(item.kind.label) from \(item.author) on \(item.repo) #\(item.number): \(item.title), \(spokenAgo(ageDate, now: now))"
     }
 }
 
