@@ -84,8 +84,6 @@ final class Store {
     var lastSync: Date?
     var rateRemaining: Int?
     var suggestions: [String] = []
-    /// Bumped whenever an important item arrives, so the pill can flash.
-    var pulse = 0
 
     @ObservationIgnored let gh = GitHubClient()
     @ObservationIgnored let notifier = Notifier()
@@ -997,7 +995,6 @@ final class Store {
         if previous == .success || previous == .pending, state == .failure {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",
                    subtitle: failing.prefix(3).joined(separator: ", "), body: "", quiet: false)
-            pulse += 1
         } else if previous == .failure, state == .success {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI back to green",
                    subtitle: branch, body: "", quiet: true)
@@ -1049,7 +1046,6 @@ final class Store {
     private func announce(_ new: [InboxItem]) {
         guard !new.isEmpty else { return }
         let important = new.filter { !isLowPriority($0) }
-        if !important.isEmpty { pulse += 1 }
         if new.count > 4 {
             let repos = Set(new.map(\.repo)).sorted().joined(separator: ", ")
             notify(id: "", title: "\(new.count) new items", subtitle: repos, body: "", quiet: important.isEmpty)
