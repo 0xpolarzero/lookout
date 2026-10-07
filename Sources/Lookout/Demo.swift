@@ -502,7 +502,7 @@ enum ClaudeCheck {
             store.refreshClaude()
             let rows = store.agentRows
             let lines = (rows.kept + rows.pending).map { r in
-                "\(r.label) \(r.pending ? "pending" : "kept   ") \(r.unread ? "UNREAD" : "read  ") \(r.statusText.padding(toLength: 10, withPad: " ", startingAt: 0)) \(r.session.title)"
+                "\(r.label) \(r.pending ? "pending" : "kept   ") \(r.unread ? "UNREAD" : "read  ") \(r.statusText().padding(toLength: 10, withPad: " ", startingAt: 0)) \(r.session.title)"
             }
             let text = lines.joined(separator: "\n")
             guard text != last else { return }

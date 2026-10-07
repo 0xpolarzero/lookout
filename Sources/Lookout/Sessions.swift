@@ -27,7 +27,7 @@ struct AgentTile: View {
         }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
-            .accessibilityValue(row.spokenValue)
+            .spokenValue(of: row)
             .overlay {
                 if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
             }
@@ -90,6 +90,24 @@ struct WorkingText: View {
             Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.claude)
         }
     }
+}
+
+/// A session's value for VoiceOver, its age included, which moves on with the clock while a screen reader is on (nothing ticks
+/// at rest for a bar nobody is listening to).
+struct SpokenValue: ViewModifier {
+    let row: AgentRow
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if NSWorkspace.shared.isVoiceOverEnabled {
+            Ticking(coarse: true) { now in content.accessibilityValue(row.spokenValue(now: now)) }
+        } else {
+            content.accessibilityValue(row.spokenValue())
+        }
+    }
+}
+
+extension View {
+    func spokenValue(of row: AgentRow) -> some View { modifier(SpokenValue(row: row)) }
 }
 
 /// A project's colour dot and name.
@@ -471,7 +489,7 @@ struct DrawerRow: View {
         .onHover { if $0 { ui.drawerSelection = row.id } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.spokenValue)
+        .spokenValue(of: row)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { store.openAgent(row.id) }
     }
@@ -498,8 +516,12 @@ struct DrawerRow: View {
             WorkingText(row: row)
         } else {
             HStack(spacing: 4) {
-                Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? row.statusText : "pending") : row.statusText)
-                    .foregroundStyle(row.statusColor)
+                // Its age moves with the same clock as the one VoiceOver is told.
+                Ticking(coarse: true) { now in
+                    let text = row.statusText(now: now)
+                    Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? text : "pending") : text)
+                        .foregroundStyle(row.statusColor)
+                }
                 if let tasks = row.tasksText {
                     Text("·").foregroundStyle(Theme.tertiary)
                     Text(tasks).foregroundStyle(Theme.claude)

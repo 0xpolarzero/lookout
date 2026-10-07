@@ -133,9 +133,12 @@ struct AgentRow: Identifiable, Hashable {
         return session.summary?.blocked == true ? Theme.amber : Theme.accent
     }
 
+    /// When the running turn began, if known.
+    var workingSince: Date? { session.lastUserMessage ?? activity?.since }
+
     /// "Running swift test · 3m" while working: the current step, and how long the turn has run.
     func workingText(now: Date = Date()) -> String {
-        let elapsed = Self.duration(now.timeIntervalSince(session.lastUserMessage ?? activity?.since ?? now))
+        let elapsed = Self.duration(now.timeIntervalSince(workingSince ?? now))
         return "\(activity?.text ?? "Working") · \(elapsed)"
     }
 
@@ -146,12 +149,12 @@ struct AgentRow: Identifiable, Hashable {
         return "\(s / 3600)h \(s % 3600 / 60)m"
     }
 
-    var statusText: String {
+    func statusText(now: Date = Date()) -> String {
         switch status {
         case .running: "working"
         case .blocked: "waiting"
-        case .finished: shortAgo(session.lastActivity) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity))"
-        case .idle: shortAgo(session.lastActivity)
+        case .finished: shortAgo(session.lastActivity, now: now) == "now" ? "done just now" : "done \(shortAgo(session.lastActivity, now: now))"
+        case .idle: shortAgo(session.lastActivity, now: now)
         }
     }
 
@@ -169,8 +172,20 @@ struct AgentRow: Identifiable, Hashable {
     }
 
     /// What VoiceOver reads after the title, on every surface that shows a session: its state and its project, so two sessions
-    /// with the same title in `customer-a/app` and `customer-b/app` don't sound alike.
-    var spokenValue: String { "\(stateName), \(projectName)" }
+    /// with the same title in `customer-a/app` and `customer-b/app` don't sound alike, and the age the row shows: how long the
+    /// turn has run while it works, else since it last did anything.
+    func spokenValue(now: Date = Date()) -> String {
+        let since = session.running ? workingSince ?? now : session.lastActivity
+        return "\(stateName), \(projectName), \(Self.spokenAge(now.timeIntervalSince(since)))"
+    }
+
+    /// `shortAgo` and `duration` in words, counted the same way.
+    static func spokenAge(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t))
+        if s < 60 { return "just now" }
+        let (n, unit) = s < 3600 ? (s / 60, "minute") : s < 86400 ? (s / 3600, "hour") : (s / 86400, "day")
+        return plural(n, unit)
+    }
 
     /// "3 running": what's left in the background, after the status.
     var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
