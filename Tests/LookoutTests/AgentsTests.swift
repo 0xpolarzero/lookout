@@ -43,11 +43,18 @@ import Testing
         #expect(s.allAgentRows.map(\.id) == ["a"])
     }
 
+    /// Icons on and a key saved, so an icon can be asked for; the store has not read the key, so none is.
+    private func keySaved(_ s: Store) {
+        s.agents.iconsEnabled = true
+        s.hasTypesafeKey = true
+    }
+
     @Test func askingForAnIconOfAHiddenSessionPicksIt() {
         let s = store([session("a"), session("b")])
         s.dismissAgent("a")
         #expect(s.allAgentRows.map(\.id) == ["b"])
-        s.repickIcon("a")  // no key here, so nothing is asked for yet
+        keySaved(s)
+        s.repickIcon("a")  // the key is not read yet, so nothing is asked for yet
         #expect(s.iconTarget()?.id == "a")
         s.agents.entries[s.agents.entries.firstIndex { $0.id == "a" }!].icon = "star"
         #expect(s.iconTarget()?.id == "b")
@@ -57,7 +64,8 @@ import Testing
         let s = store([session("a"), session("old", minutesAgo: 3 * 24 * 60)])
         #expect(entry(s, "old") == nil)
         #expect(s.searchSessions("session old").map(\.id) == ["old"])
-        s.repickIcon("old")  // no key here, so nothing is asked for yet
+        keySaved(s)
+        s.repickIcon("old")  // the key is not read yet, so nothing is asked for yet
         #expect(s.iconTarget()?.id == "old")
         #expect(s.allAgentRows.map(\.id) == ["a"])  // still unlisted
         #expect(entry(s, "old")?.hiddenAt != nil)
@@ -68,6 +76,7 @@ import Testing
         let s = store(sessions)
         s.agents.iconsEnabled = true
         s.typesafeKeyCache = "test"
+        s.hasTypesafeKey = true
         s.iconFirstMessage = { _ in firstMessage }
         s.iconChooser = { options, _, _, _ in .init(choice: options[0], confidence: 1, probabilities: [options[0]: 1]) }
         return s
