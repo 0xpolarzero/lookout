@@ -31,6 +31,20 @@ import Testing
         #expect(updater.stagedPath == nil)
     }
 
+    @MainActor @Test(arguments: [true, false]) func aChecksumFailureShowsOnEveryCheck(manual: Bool) async throws {
+        let updater = Updater(current: "0.0.1", forceRelease: true)
+        let page = URL(string: "https://example.com")!
+        updater.latest = { Updater.Release(version: "9.9.9", zip: page, checksum: nil, page: page) }
+        await updater.update(manual: manual)
+        for _ in 0..<100 { if case .downloading = updater.phase { try await Task.sleep(for: .milliseconds(20)) } else { break } }
+        guard case .failed(let message) = updater.phase else { Issue.record("phase \(updater.phase)"); return }
+        #expect(message.contains("no checksum"))
+        // The next check tries again rather than leaving the failure for good.
+        await updater.update(manual: manual)
+        for _ in 0..<100 { if case .downloading = updater.phase { try await Task.sleep(for: .milliseconds(20)) } else { break } }
+        guard case .failed = updater.phase else { Issue.record("phase \(updater.phase)"); return }
+    }
+
     @Test func checksumMustMatchTheZip() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lookout-checksum-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

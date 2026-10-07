@@ -41,13 +41,16 @@ final class Updater {
     @ObservationIgnored var automatic: () -> Bool = { true }
     @ObservationIgnored var skipped: () -> String? = { nil }
     @ObservationIgnored var onSkip: (String) -> Void = { _ in }
+    /// Looks up the newest release; tests swap it for a canned one.
+    @ObservationIgnored var latest: () async throws -> Release = Updater.latest
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var work: Task<Void, Never>?
     @ObservationIgnored private var staged: URL?
     var stagedPath: String? { staged?.path }
     @ObservationIgnored private var progress: NSKeyValueObservation?
     @ObservationIgnored private var wake: NSObjectProtocol?
-    /// Downloads started by a check rather than a click fail quietly and are tried again at the next check.
+    /// Downloads started by an automatic check fail quietly and are tried again at the next check,
+    /// unless the failure says the release can't be trusted (see `UpdateError.untrusted`).
     @ObservationIgnored private var quiet = false
 
     let current: String
@@ -97,8 +100,10 @@ final class Updater {
     /// Checks, then fetches and verifies anything new in the background.
     func update(manual: Bool) async {
         await check(manual: manual)
+        // A download that failed without a staged app is tried again, as a quiet one was before it was shown.
+        if case .failed = phase, staged == nil, release != nil { phase = .available }
         guard phase == .available else { return }
-        quiet = true
+        quiet = !manual
         download()
     }
 
@@ -109,7 +114,7 @@ final class Updater {
         checking = true
         defer { checking = false }
         do {
-            let found = try await Self.latest()
+            let found = try await latest()
             lastCheck = Date()
             checkError = nil
             guard let new = Version(found.version), let old = Version(current), new > old else {
@@ -160,7 +165,7 @@ final class Updater {
             defer { work = nil; progress = nil }
             do {
                 // Without a checksum there's nothing to trust the download against: don't even fetch it.
-                guard let checksum = release.checksum else { throw UpdateError("The release has no checksum to verify the download") }
+                guard let checksum = release.checksum else { throw UpdateError("The release has no checksum to verify the download", untrusted: true) }
                 let zip = try await fetch(release.zip)
                 defer { try? FileManager.default.removeItem(at: zip) }
                 try await Self.verifyChecksum(of: zip, against: checksum)
@@ -169,7 +174,7 @@ final class Updater {
             } catch is CancellationError {
                 phase = .available
             } catch {
-                phase = quiet ? .available : .failed(error.localizedDescription)
+                phase = quiet && (error as? UpdateError)?.untrusted != true ? .available : .failed(error.localizedDescription)
             }
             quiet = false
         }
@@ -182,12 +187,12 @@ final class Updater {
         do {
             (data, response) = try await URLSession.shared.data(from: checksum)
         } catch {
-            throw UpdateError("Couldn't read the release checksum")
+            throw UpdateError("Couldn't read the release checksum", untrusted: true)
         }
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw UpdateError("Couldn't read the release checksum") }
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw UpdateError("Couldn't read the release checksum", untrusted: true) }
         let expected = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isWhitespace).first.map { $0.lowercased() }
         let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-        guard expected == actual else { throw UpdateError("The download is corrupted (checksum mismatch)") }
+        guard expected == actual else { throw UpdateError("The download is corrupted (checksum mismatch)", untrusted: true) }
     }
 
     private func fetch(_ url: URL) async throws -> URL {
@@ -358,7 +363,12 @@ enum UpdateCheck {
 
 struct UpdateError: LocalizedError {
     let message: String
-    init(_ message: String) { self.message = message }
+    /// The release failed its checksum: shown even when a check started the download, not retried in silence.
+    let untrusted: Bool
+    init(_ message: String, untrusted: Bool = false) {
+        self.message = message
+        self.untrusted = untrusted
+    }
     var errorDescription: String? { message }
 }
 
