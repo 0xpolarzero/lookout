@@ -2,7 +2,7 @@
 # Gate 5 of DESIGN.md section 9 (the rules are section 8): idle is 0%. Launches the release build on the demo data with
 # its real lifecycle (`--demo agents --lifecycle`: the demo's working sessions stay on the bar, so the rings are breathing
 # and their rows tick; polling, with every request failing at once; the Claude watchers and their reads on an empty
-# temporary folder, whose answer is not applied: it would take the demo's sessions away), lets it settle, then reads the
+# temporary folder, whose answer is not applied: it would take the demo's sessions away), lets it settle (until its CPU time has stopped moving), then reads the
 # process's cumulative CPU time at the start and end of a window and asserts the average stays under the limit, at rest
 # and kept open (`--open`), on the right edge and along the top (the full-width strip is where the window grew).
 #
@@ -38,7 +38,9 @@ set -u
 cd "$(dirname "$0")/.."
 
 limit=${LIMIT:-0.1}     # percent of one core
-settle=${SETTLE:-5}     # seconds between launch and the first sample
+settle=${SETTLE:-5}     # seconds between launch and the wait for the CPU time to stop moving
+quiet_for=${QUIET_FOR:-3}   # whole seconds the CPU time must not move before the window begins (ps reports hundredths)
+quiet_max=${QUIET_MAX:-40}  # whole seconds that wait takes at most
 window=${WINDOW:-30}    # seconds between the two samples
 edges=${EDGES:-"right top"}
 bin=.build/release/Lookout
@@ -46,6 +48,9 @@ bin=.build/release/Lookout
 number() { [[ "$1" =~ ^[0-9]+(\.[0-9]+)?$ ]]; }
 for value in "$limit" "$settle" "$window"; do
     number "$value" || { echo "idle-cpu: LIMIT, SETTLE and WINDOW are numbers ('$value' is not)"; exit 2; }
+done
+for value in "$quiet_for" "$quiet_max"; do
+    [[ "$value" =~ ^[0-9]+$ ]] || { echo "idle-cpu: QUIET_FOR and QUIET_MAX are whole numbers ('$value' is not)"; exit 2; }
 done
 awk -v limit="$limit" -v window="$window" 'BEGIN { exit !(limit > 0 && window > 0) }' || { echo "idle-cpu: LIMIT and WINDOW must be above 0"; exit 2; }
 
@@ -120,6 +125,21 @@ measure() {
         echo "idle-cpu: $label $edge: Lookout exited during the first $settle seconds"
         failed=1
         return
+    fi
+    # Launching costs a second of CPU or more, longer on a busy machine and longer still when the bar opens at once (--open:
+    # the whole hub is built and its avatars asked for): the window starts once the CPU time has not moved for a few seconds,
+    # so it never holds a start-up that was still going. At most `quiet_max` seconds are waited.
+    local still=0 last now_cpu waited=0
+    last=$(cpu_seconds "$pid") || last=
+    while [ "$still" -lt "$quiet_for" ] && [ "$waited" -lt "$quiet_max" ]; do
+        sleep 1
+        waited=$((waited + 1))
+        now_cpu=$(cpu_seconds "$pid") || now_cpu=
+        if [ -n "$now_cpu" ] && [ "$now_cpu" = "$last" ]; then still=$((still + 1)); else still=0; fi
+        last=$now_cpu
+    done
+    if [ "$still" -lt "$quiet_for" ]; then
+        echo "idle-cpu: $label $edge: the CPU time was still moving $quiet_max s after the start-up (the window begins anyway)"
     fi
     if [ "$scenario" = agents ] && ! grep -q 'lifecycle: sessions=[0-9]* working=[1-9]' "$out"; then
         echo "idle-cpu: $label $edge: no working session on the bar ($(grep 'lifecycle:' "$out" | tail -1 || echo 'no report')): there is no ring to measure"
