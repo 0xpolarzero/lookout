@@ -695,11 +695,15 @@ struct Tabs<ID: Hashable>: View {
     let tabs: [Tab]
     let selection: ID
     let select: (ID) -> Void
+    @FocusState private var focus: ID?
 
     var body: some View {
         HStack(spacing: Theme.Space.hair) {
-            ForEach(tabs) { tab in TabButton(tab: tab, selected: tab.id == selection) { select(tab.id) } }
+            ForEach(tabs) { tab in TabButton(tab: tab, selected: tab.id == selection, focus: $focus) { select(tab.id) } }
         }
+        // The arrows switch the tab from outside (← and → in the hub): a ring that was on one follows to the one now
+        // shown, so Space and Return act on what the ring is on.
+        .onChange(of: selection) { if focus != nil { focus = selection } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(label)
         .accessibilityAddTraits(.isTabBar)
@@ -708,6 +712,7 @@ struct Tabs<ID: Hashable>: View {
     private struct TabButton: View {
         let tab: Tab
         let selected: Bool
+        let focus: FocusState<ID?>.Binding
         let action: () -> Void
         @Environment(\.resolved) private var resolved
 
@@ -729,7 +734,9 @@ struct Tabs<ID: Hashable>: View {
             // The fill alone is 1.3:1 on the page: the selected tab is told apart by its outline too (WCAG 1.4.11). A circular
             // capsule: the continuous one's outline grew a flat stub at each end.
             .overlay { if selected { Capsule(style: .circular).strokeBorder(TabStyle.selectedOutline, lineWidth: resolved.borderWidth).allowsHitTesting(false) } }
-            .focusRing(Theme.Metrics.tab / 2)
+            .focused(focus, equals: tab.id)
+            .focusRing(Theme.Metrics.tab / 2, isFocused: focus.wrappedValue == tab.id)
+            .reportsControlFocus(focus.wrappedValue == tab.id)
             .help(tab.help ?? "")
             .accessibilityAddTraits(selected ? .isSelected : [])
         }
