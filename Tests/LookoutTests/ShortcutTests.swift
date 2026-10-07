@@ -301,6 +301,28 @@ import Testing
         #expect(!store.isShortcutHeldByAnotherApp(.togglePanel))
     }
 
+    @MainActor @Test func aRefusedReplacementKeepsTheWarningOfTheKeyStillStored() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        store.persists = false
+        let a = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        let b = Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])
+        store.setShortcut(a, for: .togglePanel)
+        registrar.taken = [a, b, ShortcutAction.sessionSwitcher.defaultShortcut]
+        let globals = GlobalShortcuts(store: store, registrar: registrar, perform: { _ in }) { _ in }
+        globals.start()
+        #expect(store.isShortcutHeldByAnotherApp(.togglePanel))
+        // B is refused as well: A is still the stored binding and still does nothing.
+        #expect(store.setShortcut(b, for: .togglePanel) == .unavailable(b))
+        #expect(store.shortcut(.togglePanel) == a && store.isShortcutHeldByAnotherApp(.togglePanel))
+        // A replacement that registers clears it.
+        registrar.taken = [a]
+        let c = Shortcut(keyCode: UInt16(kVK_ANSI_H), modifiers: [.control, .command])
+        #expect(store.setShortcut(c, for: .togglePanel) == nil)
+        #expect(!store.isShortcutHeldByAnotherApp(.togglePanel) && store.refusedShortcuts[.togglePanel] == nil)
+        withExtendedLifetime(globals) {}
+    }
+
     @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
         let store = Store()
         let registrar = FakeRegistrar()

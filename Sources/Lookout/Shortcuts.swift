@@ -272,7 +272,8 @@ final class GlobalShortcuts {
     }
 
     /// `shortcut` is what the store is about to set, or its current one. `false` when the system refused it, which the store
-    /// keeps (`refusedShortcuts`): a key refused at launch, or when the extension turns on, is not one the user just chose.
+    /// keeps (`refusedShortcuts`) when it is the current one: a key refused at launch, or when the extension turns on, is not
+    /// one the user just chose, and a replacement refused leaves the current key's refusal as it was.
     @discardableResult
     func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) -> Bool {
         guard action.isGlobal else { return true }
@@ -281,7 +282,12 @@ final class GlobalShortcuts {
         let taken = registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
             DispatchQueue.main.async { perform(action) }
         }
-        store.refusedShortcuts[action] = taken ? nil : shortcut
+        if taken {
+            store.refusedShortcuts[action] = nil
+        } else if shortcut == store.shortcut(action) {
+            store.refusedShortcuts[action] = shortcut
+        }
+        // Else it is a key the user is trying: the store keeps the current one, so what was said of that one still holds.
         return taken
     }
 }
