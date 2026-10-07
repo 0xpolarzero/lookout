@@ -859,6 +859,13 @@ final class Store {
         }
     }
 
+    /// Whether `repo`, as an answer was asked for it, is still what is watched: not stopped (nor stopped and watched again),
+    /// and following the same events.
+    private func isCurrent(_ repo: RepoConfig) -> Bool {
+        guard let now = repos.first(where: { $0.fullName == repo.fullName }) else { return false }
+        return now.addedAt == repo.addedAt && now.events == repo.events && now.allComments == repo.allComments
+    }
+
     private func updateRepo(_ name: String, _ f: (inout RepoConfig) -> Void) {
         guard let i = repos.firstIndex(where: { $0.fullName == name }) else { return }
         var repo = repos[i]
@@ -944,6 +951,9 @@ final class Store {
         let reviewNumbers = Set(added.filter { $0.kind == .reviewComment }.map(\.number))
         let info: [Int: ThreadInfo]? = needInfo.isEmpty ? [:]
             : try? await fetchThreads(name, Array(needInfo), participation: true, reviewThreads: reviewNumbers, me: me)
+        // The repo may have been stopped, or set to follow something else, while the answers were out: nothing of them is
+        // kept, counted or told (the cursors stay, so a repo that is still watched asks again).
+        guard isCurrent(repo) else { return }
         // Comments only count when they're on my thread, mention me, or come after I joined the conversation.
         // Always evaluated (and remembered), so switching All comments off later can prune what isn't for me.
         // If the lookup failed (or only partly answered), keep what it couldn't judge rather than silently

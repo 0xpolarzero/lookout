@@ -1,0 +1,67 @@
+import Foundation
+import Testing
+@testable import Lookout
+
+/// Answers that arrive after what they were asked for has changed.
+@MainActor
+@Suite struct SyncRace {
+    private func store(_ repo: RepoConfig) -> Store {
+        let s = Store()
+        s.persists = false
+        s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        s.settings.reviewRequests = false
+        s.repos = [repo]
+        return s
+    }
+
+    @Test func anAnswerThatArrivesAfterTheRepoWasStoppedLeavesNothingInTheInbox() async {
+        var repo = RepoConfig(fullName: "a/one")
+        repo.events = [.issueOpened]
+        let s = store(repo)
+        let fresh = ISO8601DateFormatter().string(from: Date())
+        let issue = """
+            [{"id": 7, "number": 7, "title": "Late", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
+              "html_url": "https://github.com/a/one/issues/7", "created_at": "\(fresh)", "updated_at": "\(fresh)", "pull_request": null}]
+            """
+        // Stop watching while the issues request is out; it then answers with a new issue.
+        let gate = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { request in
+            if request.url?.path.hasSuffix("/issues") == true { return .init(200, issue, gate: gate) }
+            if request.url?.path.hasSuffix("/comments") == true { return .init(200, "[]") }
+            return .init(500, #"{"message": "Not here"}"#)
+        }
+        let poll = Task { await s.pollAll() }
+        while gate.held == 0 { await Task.yield() }
+        s.removeRepo(repo)
+        gate.open()
+        await poll.value
+        #expect(s.repos.isEmpty && s.items.isEmpty)
+    }
+
+    @Test func anAnswerForARepoWatchedAgainIsAskedForAnew() async {
+        var repo = RepoConfig(fullName: "a/one")
+        repo.events = [.issueOpened]
+        let s = store(repo)
+        let fresh = ISO8601DateFormatter().string(from: Date())
+        let issue = """
+            [{"id": 7, "number": 7, "title": "Late", "body": null, "user": {"login": "x", "avatar_url": null, "type": "User"},
+              "html_url": "https://github.com/a/one/issues/7", "created_at": "\(fresh)", "updated_at": "\(fresh)", "pull_request": null}]
+            """
+        // Only the issue's own request answers, and the repo is watched anew (a new `addedAt`) while it is out.
+        let gate = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { request in
+            if request.url?.path.hasSuffix("/issues") == true { return .init(200, issue, gate: gate) }
+            if request.url?.path.hasSuffix("/comments") == true { return .init(200, "[]") }
+            return .init(500, #"{"message": "Not here"}"#)
+        }
+        let poll = Task { await s.pollAll() }
+        while gate.held == 0 { await Task.yield() }
+        s.removeRepo(repo)
+        var again = repo
+        again.addedAt = Date().addingTimeInterval(1)
+        s.repos = [again]
+        gate.open()
+        await poll.value
+        #expect(s.items.isEmpty)
+    }
+}
