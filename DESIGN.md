@@ -325,11 +325,11 @@ The hollow `checkmark.circle` (22 pt, `tertiary`) is used only for "All caught u
 | Return | Open the pick (GitHub, checks, Claude, start session) | |
 | Space | Toggle read/unread | types a space while the search field has focus |
 | ⌫ | Done / Restore | edits text while the search field has focus |
-| ⌥Space | Mark all as read | |
+| ⌥Space | Mark all as read | also while the search field has focus |
 | ⌘K / ⌘⌫ | Keep / Hide a session | |
 | ⌘Z | Undo last Done/Hide/Mute/Stop watching | while undo line visible, and 30 s after |
 | ⌘F | Search | typing any printable character also starts it, unless an action is bound to it and a row is picked to act on |
-| Menu key, ⇧F10, ⌃Return | The picked row's context menu | the same menu the right button opens (the row answers with the right-click it would have had, at its centre), with the system's own arrow keys; not Passing, "+N more" or New session, and not while the Tab ring is on a control |
+| Menu key, ⇧F10, ⌃Return | The picked row's context menu | the same menu the right button opens (the row answers with the right-click it would have had, at its centre), with the system's own arrow keys, also while the search field has focus; not Passing, "+N more" or New session, and not while the Tab ring is on a control |
 | ⌘R | Check now | |
 | ⌘, | Settings | |
 | ⌘1 / ⌘2 / ⌘3 | Focus Inbox / CI / Sessions | click on the header does the same |

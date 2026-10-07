@@ -992,6 +992,26 @@ import Testing
         #expect(!press(kVK_ANSI_P, .command, "p", in: window))
     }
 
+    @Test func markAllReadAndTheRowMenuKeysWorkWithTheSearchFieldFocused() {
+        let (window, _) = editingWindow("zig")
+        defer { window.close() }
+        hub.query = "zig"
+        hub.inbox.searchOpen = true
+        hub.inbox.searchFocused = true
+        pick(keys.targets().first!)
+        #expect(window.firstResponder is NSText)
+        // ⌥Space marks the tab read, and the Menu key, ⇧F10 and ⌃Return ask the pick for its menu.
+        #expect(store.list(.needsYou).contains { $0.state == .unread })
+        #expect(press(kVK_Space, .option, " ", in: window))
+        #expect(!store.list(.needsYou).contains { $0.state == .unread })
+        #expect(press(kVK_ContextualMenu, [], "", in: window) && hub.rowMenuRequest?.seq == 1)
+        #expect(press(kVK_F10, .shift, "", in: window) && press(kVK_Return, .control, "\r", in: window) && hub.rowMenuRequest?.seq == 3)
+        // Plain typing stays the field's, and so does a menu chord with nothing picked.
+        #expect(!space(in: window))
+        hub.selection = nil
+        #expect(!press(kVK_ContextualMenu, [], "", in: window) && hub.rowMenuRequest?.seq == 3)
+    }
+
     // MARK: Menus
 
     @Test func theKeysDoNothingWhileNothingIsKept() {

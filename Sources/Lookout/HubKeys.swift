@@ -123,10 +123,7 @@ final class HubKeys {
         // Check now needs no row, so a plain letter bound to it is its own and not the search's.
         if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
         // Not over rows the list isn't showing (a sign-in problem replaces it, a focused section hides the inbox).
-        if shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) {
-            if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }
-            return true
-        }
+        if markAllRead(shortcut) { return true }
         if rowCommand(shortcut, targets: targets, event: event, flags: flags) { return true }
         // The menu key's chords are the last of the keys' own meanings: one bound to an action is that action's.
         if Self.opensRowMenu(event, flags: flags) { return openRowMenu() }
@@ -151,6 +148,14 @@ final class HubKeys {
     private func searchChord(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
         guard flags == .command, event.charactersIgnoringModifiers == "f" else { return false }
         hub.beginSearch()
+        return true
+    }
+
+    /// Mark all as read: not over a list the inbox isn't showing (a sign-in problem replaces it, a focused section hides
+    /// it). False when `shortcut` is not the action's, or the inbox is not on screen.
+    private func markAllRead(_ shortcut: Shortcut) -> Bool {
+        guard shortcut == store.shortcut(.markAllRead), hub.shows(.inbox) else { return false }
+        if store.inboxReplacement == nil { LookoutHub.animate { store.markAllRead(hub.filter) } }
         return true
     }
 
@@ -335,17 +340,21 @@ final class HubKeys {
 
 extension HubKeys {
     /// A key while the search field has focus: Esc clears and ends the search, ↑↓ walk the results and ↩ or the
-    /// configured Open shortcut opens one; everything else (typing, ⌫, Space, ⌘Z) is the field's own. nil leaves the
+    /// configured Open shortcut opens one, and the row actions, Mark all as read and the row menu's keys work as off the
+    /// search; everything else (typing, ⌫, Space, ⌘Z) is the field's own. nil leaves the
     /// key to the field.
     fileprivate func searchKey(_ event: NSEvent) -> Bool? {
         // Open is the user's to rebind, ⌘O included, which the field would otherwise swallow with the other
         // modifier combinations. A bare letter is still typed.
-        if Shortcut(event) == store.shortcut(.openItem), !typesText(event) { return openResult() }
+        let shortcut = Shortcut(event)
+        if shortcut == store.shortcut(.openItem), !typesText(event) { return openResult() }
         // So are the chords of the row actions (Keep, Hide, Done, ...), which act on the picked result as they do off the
         // search; the field keeps a chord only when no action is bound to it, or nothing is picked to act on.
-        let shortcut = Shortcut(event)
         if shortcut.hasCommandLikeModifier, isBound(shortcut),
            rowCommand(shortcut, targets: targets(), event: event, flags: event.modifierFlags.intersection(Shortcut.relevant)) { return true }
+        // As do Mark all as read and the row menu's keys (the Menu key, ⇧F10, ⌃Return), which no text has a use for.
+        if !typesText(event), markAllRead(shortcut) { return true }
+        if Self.opensRowMenu(event, flags: event.modifierFlags.intersection(Shortcut.relevant)), openRowMenu() { return true }
         guard event.modifierFlags.intersection(Shortcut.relevant).isEmpty else { return nil }
         switch Int(event.keyCode) {
         case kVK_Escape:
