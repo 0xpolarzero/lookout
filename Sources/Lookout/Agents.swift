@@ -105,6 +105,9 @@ struct AgentRow: Identifiable, Hashable {
     /// The picked icon, unless you chose letters or an emoji yourself.
     var icon: String? { entry.label == nil ? entry.icon : nil }
 
+    /// No icon yet, and no label of your own to show instead.
+    var needsIcon: Bool { entry.icon == nil && entry.label == nil }
+
     var id: String { session.id }
     var unread: Bool { entry.unread }
     var pending: Bool { !entry.kept }
@@ -584,12 +587,23 @@ extension Store {
 
     // MARK: Icons (Jev)
 
-    /// Picks icons for listed sessions that don't have one yet, one request at a time.
+    /// The session to pick an icon for next: one you asked for (it may be hidden, found through search), then the
+    /// listed ones that don't have one yet.
+    func iconTarget() -> AgentRow? {
+        iconRequests.removeAll { iconRow($0)?.needsIcon != true }
+        return iconRequests.lazy.compactMap { self.iconRow($0) }.first ?? allAgentRows.first(where: \.needsIcon)
+    }
+
+    /// A row for a session Lookout keeps an entry for, listed or hidden.
+    private func iconRow(_ id: String) -> AgentRow? {
+        guard let session = claudeSessions[id], let entry = cache.entries[id] else { return nil }
+        return row(session, entry)
+    }
+
+    /// Picks icons for the sessions that want one (see `iconTarget`), one request at a time.
     func pickIcons() {
         guard agents.enabled, agents.iconsEnabled, iconTask == nil, Date() >= iconsPausedUntil,
-              let key = typesafeKey, !key.isEmpty else { return }
-        let rows = allAgentRows
-        guard let next = rows.first(where: { $0.entry.icon == nil && $0.entry.label == nil }) else { return }
+              let key = typesafeKey, !key.isEmpty, let next = iconTarget() else { return }
         let session = next.session
         let cliID = session.cliID
         let reader = activityReader
@@ -603,7 +617,7 @@ extension Store {
             // Nothing to go on yet (a brand-new session the app hasn't named): wait for the next read.
             let rows = self.allAgentRows
             guard first != nil || session.title != "Untitled session",
-                  let current = rows.first(where: { $0.id == session.id }), current.entry.icon == nil, current.entry.label == nil else {
+                  let current = self.iconRow(session.id), current.needsIcon else {
                 self.iconTask = nil
                 if first != nil || session.title != "Untitled session" { self.pickIcons() }
                 return
@@ -643,6 +657,7 @@ extension Store {
             if let icon = $0.icon { $0.rejectedIcons = ($0.rejectedIcons ?? []) + [icon] }
             $0.icon = nil
         }
+        iconRequests.append(id)
         pickIcons()
     }
 

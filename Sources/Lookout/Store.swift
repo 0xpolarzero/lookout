@@ -132,6 +132,8 @@ final class Store {
     @ObservationIgnored var claudeStamp = ClaudeStamp()
     @ObservationIgnored var ingesting = false
     @ObservationIgnored var iconTask: Task<Void, Never>?
+    /// Sessions you asked an icon for, picked before the rest (they may not be listed).
+    @ObservationIgnored var iconRequests: [String] = []
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
     @ObservationIgnored var typesafeKeyCache: String?
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?

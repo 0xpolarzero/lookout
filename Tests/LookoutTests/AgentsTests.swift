@@ -36,6 +36,16 @@ import Testing
         #expect(s.searchSessions("session").first { $0.id == "a" }?.label == "🔥")
     }
 
+    @Test func askingForAnIconOfAHiddenSessionPicksIt() {
+        let s = store([session("a"), session("b")])
+        s.dismissAgent("a")
+        #expect(s.allAgentRows.map(\.id) == ["b"])
+        s.repickIcon("a")  // no key here, so nothing is asked for yet
+        #expect(s.iconTarget()?.id == "a")
+        s.agents.entries[s.agents.entries.firstIndex { $0.id == "a" }!].icon = "star"
+        #expect(s.iconTarget()?.id == "b")
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])
