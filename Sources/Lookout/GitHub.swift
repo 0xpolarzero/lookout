@@ -94,11 +94,14 @@ struct GitHubError: LocalizedError {
 /// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
 final class GitHubClient: @unchecked Sendable {
     var token: String? {
-        didSet { lock.withLock { rejected = false } }
+        didSet { lock.withLock { generation += 1; rejected = false } }
     }
     /// GitHub answered 401 since the token was last set: it was revoked or has expired.
     var tokenRejected: Bool { lock.withLock { rejected } }
     private var rejected = false
+    /// Counts token changes. A 401 only counts against the token its request was sent with,
+    /// so one that lands after a newer token took over can't discard it.
+    private var generation = 0
     /// Swapped for a stub in tests.
     var session = URLSession.shared
     /// Remaining calls in the core (REST) and GraphQL buckets.
@@ -134,7 +137,7 @@ final class GitHubClient: @unchecked Sendable {
             comps.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
         let url = comps.url!
-        var req = request(url)
+        var (req, sent) = request(url)
         // Without the moving `since` cursor: each poll replaces the entry instead of adding one (a changed query
         // that returns the same body still gets its 304).
         var keyed = comps
@@ -153,7 +156,7 @@ final class GitHubClient: @unchecked Sendable {
         let http = resp as! HTTPURLResponse
         trackRate(http)
         if http.statusCode == 304, let cached { return cached.data }
-        try check(http, data)
+        try check(http, data, sent: sent)
         if let etag = http.value(forHTTPHeaderField: "ETag") {
             lock.withLock {
                 etagClock += 1
@@ -167,26 +170,28 @@ final class GitHubClient: @unchecked Sendable {
     }
 
     func graphql(_ query: String) async throws -> [String: Any] {
-        var req = request(URL(string: "https://api.github.com/graphql")!)
+        var (req, sent) = request(URL(string: "https://api.github.com/graphql")!)
         req.httpMethod = "POST"
         req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
         let (data, resp) = try await session.data(for: req)
         let http = resp as! HTTPURLResponse
         trackRate(http)
-        try check(http, data)
+        try check(http, data, sent: sent)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw GitHubError(message: "Bad GraphQL response")
         }
         return json
     }
 
-    private func request(_ url: URL) -> URLRequest {
+    private func request(_ url: URL) -> (URLRequest, generation: Int) {
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         req.setValue("Lookout", forHTTPHeaderField: "User-Agent")
-        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        return req
+        // Token and generation read together, so they describe the same credential.
+        let (current, sent) = lock.withLock { (token, generation) }
+        if let current { req.setValue("Bearer \(current)", forHTTPHeaderField: "Authorization") }
+        return (req, sent)
     }
 
     private func trackRate(_ http: HTTPURLResponse) {
@@ -198,12 +203,12 @@ final class GitHubClient: @unchecked Sendable {
         }
     }
 
-    private func check(_ http: HTTPURLResponse, _ data: Data) throws {
+    private func check(_ http: HTTPURLResponse, _ data: Data, sent: Int) throws {
         guard !(200..<300).contains(http.statusCode) else { return }
         let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
         switch http.statusCode {
         case 401:
-            lock.withLock { rejected = true }
+            lock.withLock { if generation == sent { rejected = true } }
             throw GitHubError(message: "GitHub rejected the token")
         case 404: throw GitHubError(message: "Not found (or no access)")
         default: throw GitHubError(message: message ?? "GitHub error \(http.statusCode)")

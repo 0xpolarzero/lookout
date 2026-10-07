@@ -9,7 +9,25 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
+    /// Requests this answers only once `releaseHeld()` is called, to land a response late.
+    nonisolated(unsafe) static var holds: (URLRequest) -> Bool = { _ in false }
+    nonisolated(unsafe) private static var held: [StubAuthGitHub] = []
+    private static let heldLock = NSLock()
+
+    static func releaseHeld() {
+        let all = heldLock.withLock { () -> [StubAuthGitHub] in defer { held = [] }; return held }
+        all.forEach { $0.respond() }
+    }
+
     override func startLoading() {
+        if Self.holds(request) {
+            Self.heldLock.withLock { Self.held.append(self) }
+        } else {
+            respond()
+        }
+    }
+
+    private func respond() {
         let (status, body) = Self.handler(request)
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -87,6 +105,27 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
         #expect(s.gh.token == "fresh")
         #expect(s.me?.login == "me")
         #expect(s.authError == nil)
+    }
+
+    @Test func aLateRejectionOfAnOlderTokenLeavesTheNewOneAlone() async {
+        let gh = GitHubClient()
+        gh.session = StubAuthGitHub.session
+        let sent = Counter()
+        let isA = { (req: URLRequest) in req.value(forHTTPHeaderField: "Authorization") == "Bearer A" }
+        StubAuthGitHub.holds = { req in
+            if isA(req) { sent.bump() }
+            return isA(req)
+        }
+        StubAuthGitHub.handler = { req in isA(req) ? (401, #"{"message":"Bad credentials"}"#) : (200, #"{"login":"me"}"#) }
+        defer { StubAuthGitHub.holds = { _ in false } }
+        gh.token = "A"
+        let late = Task { try? await gh.get("/user", as: GHUser.self) }
+        while sent.count == 0 { await Task.yield() }
+        gh.token = "B"
+        #expect((try? await gh.get("/user", as: GHUser.self))?.login == "me")
+        StubAuthGitHub.releaseHeld()
+        _ = await late.value
+        #expect(!gh.tokenRejected)
     }
 
     @Test func signedOutPollsDoNotSpawnGhEveryTime() async {
