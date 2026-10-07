@@ -24,6 +24,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
+    /// Whether macOS refuses this app's banners: said no at the first prompt, or turned off since in System Settings.
+    static func isBlocked() async -> Bool {
+        guard Bundle.main.bundleIdentifier != nil else { return false }
+        return await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
+    }
+
     /// `repos`: the repositories a banner covers, so stopping to watch one can find it again.
     func post(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil, repos: [String] = []) {
         let content = UNMutableNotificationContent()

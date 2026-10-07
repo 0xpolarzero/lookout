@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
     @State private var accessibilityTrusted = AXIsProcessTrusted()
+    @State private var notificationsBlocked = false
 
     static let updatesID = "updates"
 
@@ -86,8 +87,23 @@ struct SettingsView: View {
     }
 
     private var notifications: some View {
-        section("Notifications") {
+        let blocked = store.settings.notifications && notificationsBlocked
+        return section("Notifications") {
             toggle("Desktop notifications", isOn: $store.settings.notifications)
+            if blocked {
+                HStack(spacing: 8) {
+                    Text("macOS is blocking Lookout's notifications. Allow them in System Settings › Notifications.")
+                        .font(Theme.Typography.caption).foregroundStyle(Theme.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    ActionButton("Open Settings") {
+                        let id = Bundle.main.bundleIdentifier.map { "?id=\($0)" } ?? ""
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension\(id)") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+            }
             toggle("Review requests from any repo", isOn: $store.settings.reviewRequests)
             HStack {
                 Text("Snooze").font(Theme.Typography.body)
@@ -110,6 +126,15 @@ struct SettingsView: View {
                 }
             }
             hint("Snoozing silences banners; the inbox keeps filling up.")
+        }
+        // What the system says is read when Settings opens and when the app comes back from System Settings, where it changes.
+        .task { notificationsBlocked = await Notifier.isBlocked() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { notificationsBlocked = await Notifier.isBlocked() }
+        }
+        // The notice that appears is said, once.
+        .onChange(of: blocked, initial: true) { _, now in
+            if now { Announce.say("Notifications are blocked in System Settings") }
         }
     }
 
