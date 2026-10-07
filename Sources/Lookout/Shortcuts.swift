@@ -398,7 +398,7 @@ struct ShortcutRecorder: View {
     /// A conflict or a refusal appears under the key and is said at each attempt, a repeated one too.
     private func refuse(_ message: String?) {
         error = message
-        if let message { Announce.say(message) }
+        if let message { Announce.say(message, again: true) }
     }
 
     private func accept(_ shortcut: Shortcut) {

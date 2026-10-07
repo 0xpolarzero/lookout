@@ -306,15 +306,27 @@ func plural(_ n: Int, _ singular: String, _ plural: String? = nil) -> String {
     "\(n) \(n == 1 ? singular : plural ?? singular + "s")"
 }
 
-/// Says something aloud to VoiceOver: what appears or fails without anyone looking at it.
+/// Says something aloud to VoiceOver: what appears or fails without anyone looking at it. The same words twice within a few
+/// seconds are said once (a failure announced where it happens, and again by the pane that shows it).
+@MainActor
 enum Announce {
+    private static var last: (text: String, at: Date)?
+    /// Where the words go instead of VoiceOver; the tests replace it (there is no app to post to).
+    static var sink: ((String) -> Void)?
+
     /// A moment after what asked for it, so a window taking the keyboard doesn't talk over it.
-    @MainActor
-    static func say(_ text: String, after delay: Duration = .milliseconds(300)) {
-        guard NSApp != nil, NSWorkspace.shared.isVoiceOverEnabled else { return }
+    /// `again`: a repeated attempt is news (a refusal at each try), so the same words are said again.
+    static func say(_ text: String, again: Bool = false, after delay: Duration = .milliseconds(300)) {
+        guard sink != nil || (NSApp != nil && NSWorkspace.shared.isVoiceOverEnabled) else { return }
+        if !again, let last, last.text == text, Date().timeIntervalSince(last.at) < 3 { return }
+        last = (text, Date())
+        if let sink { sink(text); return }
         Task { @MainActor in
             try? await Task.sleep(for: delay)
             AccessibilityNotification.Announcement(text).post()
         }
     }
+
+    /// Forgets what was last said, so the tests don't depend on each other.
+    static func reset() { last = nil; sink = nil }
 }

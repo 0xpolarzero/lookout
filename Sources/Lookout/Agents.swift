@@ -692,14 +692,20 @@ extension Store {
                 self.iconTask = nil
                 self.pickIcons()
             } catch {
-                self.iconError = error.localizedDescription
-                self.iconTask = nil
-                // A rejected key waits for a new one; anything else retries in a while.
-                self.iconsPausedUntil = (error as? JevClient.Failure)?.message.contains("API key") == true
-                    ? .distantFuture : Date().addingTimeInterval(600)
-                self.scheduleClaudeTick()
+                self.iconPickFailed(error)
             }
         }
+    }
+
+    /// A rejected key waits for a new one, and says so where it happens: the Settings line that shows it may not be open.
+    /// Anything else retries in a while.
+    func iconPickFailed(_ error: Error) {
+        iconError = error.localizedDescription
+        iconTask = nil
+        let rejected = (error as? JevClient.Failure)?.message.contains("API key") == true
+        iconsPausedUntil = rejected ? .distantFuture : Date().addingTimeInterval(600)
+        if rejected, let said = iconError { Announce.say(said) }
+        scheduleClaudeTick()
     }
 
     /// Whether icons can be picked now: on, with a key. Without that a session keeps the icon it has, but can't get another.

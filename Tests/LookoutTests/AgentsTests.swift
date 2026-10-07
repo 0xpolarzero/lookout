@@ -262,6 +262,28 @@ import Testing
         #expect(s.agents.entries[0].icon == nil && s.agents.entries[0].rejectedIcons == ["hammer"])
     }
 
+    @Test func aRejectedTypesafeKeyIsAnnouncedWhereItHappensAndOnceWhenSettingsShowsIt() {
+        let s = store([session("a")])
+        var said: [String] = []
+        Announce.reset()
+        Announce.sink = { said.append($0) }
+        defer { Announce.reset() }
+        // Settings is closed: the rejection is still said, and picking waits for a new key.
+        s.iconPickFailed(JevClient.Failure(message: "Invalid API key"))
+        #expect(said == ["Invalid API key"] && s.iconsPausedUntil == .distantFuture)
+        // Settings opened on it says the same line: not twice.
+        Announce.say(s.iconError ?? "")
+        #expect(said == ["Invalid API key"])
+        // Another failure is retried later and not announced from here (Settings says it if it is open).
+        s.iconPickFailed(JevClient.Failure(message: "TypeSafe is down"))
+        #expect(said == ["Invalid API key"] && s.iconsPausedUntil < .distantFuture)
+        // What Settings shows about a refused save is said by Settings alone, once.
+        s.keychainWrite = { _, _ in false }
+        #expect(!s.setTypesafeKey("sk-test"))
+        Announce.say(s.iconError ?? "")
+        #expect(said == ["Invalid API key", "Couldn't save the key in the Keychain"])
+    }
+
     @Test func keptOrderAndReorder() {
         let s = store([session("a"), session("b"), session("c")])
         s.keepAgent("b")

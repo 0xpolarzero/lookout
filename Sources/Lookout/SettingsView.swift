@@ -187,7 +187,7 @@ struct SettingsView: View {
                 ActionButton("Restore defaults") {
                     // Beside the button, and said at each attempt, a repeated one too.
                     restoreError = store.restoreDefaultShortcuts()?.message
-                    if let restoreError { Announce.say(restoreError) }
+                    if let restoreError { Announce.say(restoreError, again: true) }
                 }
                 .disabled(!store.hasCustomShortcuts)
             }
@@ -257,6 +257,7 @@ struct SettingsView: View {
             }
             if let error = store.iconError {
                 Text(error).font(Theme.Typography.meta).foregroundStyle(Theme.amber)
+                    .onChange(of: error, initial: true) { _, now in Announce.say(now) }
             }
             hint("Each session in your list gets an icon instead of letters. Its title, project name and first message go to "
                  + "TypeSafe (api.typesafe.ai), whose Jev model picks what kind of icon fits (code, debugging, data, people…), "
