@@ -359,7 +359,19 @@ final class Store {
         guard open != hubOpen else { return }
         hubOpen = open
         sleeper?.cancel()
-        if open, !isSyncing, Date().timeIntervalSince(lastSync ?? .distantPast) > 60 { refreshNow() }
+        guard open, !isSyncing else { return }
+        // Signed out for want of a token, `gh auth login` may have been run since: look again, however recent the last poll.
+        if awaitsToken || Date().timeIntervalSince(lastSync ?? .distantPast) > 60 { refreshNow() }
+    }
+
+    /// Signed out with no token to ask GitHub about: the only case where a look for one (it reads the Keychain and may run
+    /// `gh`) is likely to find something new, once the user has signed in elsewhere.
+    private var awaitsToken: Bool { me == nil && gh.token == nil && authError != nil }
+
+    /// `gh auth login` was run in Terminal, which the app comes back from: the look the polls hold back (see `authBackoff`)
+    /// is made now. Nothing happens for any other reason to be signed out.
+    func appBecameActive() {
+        if awaitsToken, !isSyncing { refreshNow() }
     }
 
     private var effectivePollInterval: TimeInterval {
@@ -412,6 +424,9 @@ final class Store {
                     self.pollNow = true
                     self.sleeper?.cancel()
                 }
+            },
+            NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.appBecameActive() }
             },
         ]
     }

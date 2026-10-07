@@ -160,6 +160,38 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
         s.refreshNow()  // asked for: looks again
         while looks.count < 2 { await Task.yield() }
     }
+
+    @Test func comingBackToTheAppOrOpeningTheHubLooksAgainForAMissingToken() async {
+        let s = store()
+        s.me = nil
+        s.gh.token = nil
+        let looks = Counter()
+        s.resolveToken = { looks.bump(); return nil }
+        await s.pollAll()
+        #expect(looks.count == 1 && s.authError != nil)
+        // `gh auth login` was run in Terminal: coming back is a look, though the poll is within its backoff.
+        s.appBecameActive()
+        while looks.count < 2 { await Task.yield() }
+        while s.isSyncing { await Task.yield() }
+        // So is opening the hub, though the last poll was a moment ago.
+        s.setHubOpen(true)
+        while looks.count < 3 { await Task.yield() }
+        while s.isSyncing { await Task.yield() }
+    }
+
+    @Test func aTokenHeldIsNotLookedForAgainWhenTheAppComesBack() async {
+        let s = store()
+        s.me = nil
+        s.gh.token = "held"
+        s.authError = "The Internet connection appears to be offline."
+        let looks = Counter()
+        s.resolveToken = { looks.bump(); return nil }
+        s.lastSync = Date()
+        s.appBecameActive()
+        s.setHubOpen(true)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(looks.count == 0 && !s.isSyncing)
+    }
 }
 
 private final class Counter: @unchecked Sendable {
