@@ -7,6 +7,8 @@ import UserNotifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     var onOpen: ((String) -> Void)?
+    /// Tests: every post, whether or not the system would show it.
+    var onPost: ((String) -> Void)?
     private var available: Bool { Bundle.main.bundleIdentifier != nil }
 
     func setup() {
@@ -17,6 +19,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(id: String, title: String, subtitle: String, body: String, quiet: Bool) {
+        onPost?(id)
         guard available else { return }
         let content = UNMutableNotificationContent()
         content.title = title

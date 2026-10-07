@@ -727,7 +727,7 @@ final class Store {
         }
     }
 
-    private func sync(_ name: String) async {
+    func sync(_ name: String) async {
         do {
             try await syncConversations(name)
             try await syncThreads(name)
@@ -746,7 +746,7 @@ final class Store {
         if repo != repos[i] { repos[i] = repo }
     }
 
-    private func syncConversations(_ name: String) async throws {
+    func syncConversations(_ name: String) async throws {
         guard let repo = repos.first(where: { $0.fullName == name }), let me = me?.login.lowercased() else { return }
         let ev = repo.events
         let baseline = repo.addedAt.addingTimeInterval(-24 * 3600)
@@ -858,7 +858,9 @@ final class Store {
             if changed { items = all }
         }
 
-        announce(added.filter { $0.state == .unread && $0.createdAt > repo.addedAt })
+        // From the stored copies: a reply above may have settled an item that just arrived.
+        let arrived = Set(added.map(\.id))
+        announce(items.filter { arrived.contains($0.id) && $0.state == .unread && $0.createdAt > repo.addedAt })
     }
 
     struct ThreadInfo {
@@ -1031,7 +1033,7 @@ final class Store {
         }
     }
 
-    private func syncReviewRequests() async {
+    func syncReviewRequests() async {
         guard let result: GHSearch<GHIssue> = try? await gh.get(
             "/search/issues", ["q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "50"]) else { return }
         let first = !settings.didInitialReviewSync
