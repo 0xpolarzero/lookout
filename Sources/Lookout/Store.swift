@@ -135,6 +135,10 @@ final class Store {
     /// Sessions you asked an icon for, picked before the rest (they may not be listed).
     @ObservationIgnored var iconRequests: [String] = []
     @ObservationIgnored var iconsPausedUntil = Date.distantPast
+    /// Where icons get their input and their answer (a session's first message by transcript id; Jev's choice from
+    /// options, hints, state and instructions). Tests swap them for the disk and the network.
+    @ObservationIgnored var iconFirstMessage: (@Sendable (String) -> String?)?
+    @ObservationIgnored var iconChooser: (([String], [String: String], [String: String], String) async throws -> JevClient.Choice)?
     @ObservationIgnored var typesafeKeyCache: String?
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?

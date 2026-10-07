@@ -63,6 +63,42 @@ import Testing
         #expect(entry(s, "old")?.hiddenAt != nil)
     }
 
+    /// A store that asks for icons, with the transcript and Jev stood in for: every question gets its first option.
+    private func iconStore(_ sessions: [ClaudeSession], firstMessage: String? = "Fix the login form") -> Store {
+        let s = store(sessions)
+        s.agents.iconsEnabled = true
+        s.typesafeKeyCache = "test"
+        s.iconFirstMessage = { _ in firstMessage }
+        s.iconChooser = { options, _, _, _ in .init(choice: options[0], confidence: 1, probabilities: [options[0]: 1]) }
+        return s
+    }
+
+    private func finishIcons(_ s: Store) async {
+        while let task = s.iconTask { await task.value }
+    }
+
+    @Test func theIconPickedForAHiddenSessionIsKept() async {
+        var hidden = session("a")
+        hidden.cliID = "cli-a"
+        let s = iconStore([hidden, session("b")])
+        s.dismissAgent("a")
+        s.repickIcon("a")
+        await finishIcons(s)
+        #expect(entry(s, "a")?.icon != nil)
+        #expect(s.allAgentRows.map(\.id) == ["b"])
+    }
+
+    @Test func theIconPickedForAnOldSessionFoundThroughSearchIsKept() async {
+        var old = session("old", minutesAgo: 3 * 24 * 60)
+        old.cliID = "cli-old"
+        let s = iconStore([session("a"), old])
+        s.repickIcon("old")
+        await finishIcons(s)
+        #expect(entry(s, "old")?.icon != nil)
+        #expect(s.searchSessions("session old").first?.icon != nil)
+        #expect(s.allAgentRows.map(\.id) == ["a"])
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])

@@ -612,11 +612,12 @@ extension Store {
         let session = next.session
         let cliID = session.cliID
         let reader = activityReader
+        let readFirst = iconFirstMessage ?? { id in reader.transcript(id).flatMap { Claude.firstMessage(head: Claude.head(of: $0)) } }
         iconTask = Task { [weak self] in
             // The transcript's head (256 KB, parsed) is read off the main thread, which may also be waiting on the
             // activity reader's lock.
             let first = await Task.detached(priority: .utility) {
-                cliID.flatMap { reader.transcript($0) }.flatMap { Claude.firstMessage(head: Claude.head(of: $0)) }
+                cliID.flatMap(readFirst)
             }.value
             guard let self else { return }
             // Nothing to go on yet (a brand-new session the app hasn't named): wait for the next read.
@@ -632,14 +633,16 @@ extension Store {
             guard !open.isEmpty else { self.iconTask = nil; return }
             var state = ["session title": session.title, "project": session.folderName]
             if let first { state["first message"] = first }
-            let client = JevClient(key: key)
+            let choose = self.iconChooser ?? { options, hints, state, instructions in
+                try await JevClient(key: key).choose(options, hints: hints, for: state, instructions: instructions)
+            }
             do {
                 // Two questions (Jev takes at most 255 options): what kind of icon, then which one.
-                let kinds = try await client.choose(open.map(\.category.key),
-                    hints: Dictionary(uniqueKeysWithValues: open.map { ($0.category.key, $0.category.about) }),
-                    for: state, instructions: "Which kind of icon would best show what this coding session is about?")
+                let kinds = try await choose(open.map(\.category.key),
+                    Dictionary(uniqueKeysWithValues: open.map { ($0.category.key, $0.category.about) }), state,
+                    "Which kind of icon would best show what this coding session is about?")
                 let options = SessionIcons.shortlist(open, probabilities: kinds.probabilities)
-                let pick = try await client.choose(options, hints: SessionIcons.hints, for: state, instructions:
+                let pick = try await choose(options, SessionIcons.hints, state,
                     "Pick the icon that best shows what this coding session is about, so its owner can tell it apart from their other sessions at a glance.")
                 self.mutateAgent(session.id) { $0.icon = pick.choice }
                 self.iconError = nil
