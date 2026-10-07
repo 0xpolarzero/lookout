@@ -745,6 +745,7 @@ final class Store {
         }
         guard me != nil else { return }
         defer { if gh.tokenRejected { dropRejectedToken() } }
+        gh.reserveETags(forRepositories: repos.count)
         await withTaskGroup(of: Void.self) { group in
             var names = repos.map(\.fullName).makeIterator()
             for _ in 0..<4 {
