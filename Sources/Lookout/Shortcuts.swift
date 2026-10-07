@@ -303,7 +303,7 @@ final class GlobalShortcuts {
     }
 }
 
-/// Click, then press the new combination. Esc cancels, Delete clears.
+/// Click, then press the new combination. Esc cancels.
 struct ShortcutRecorder: View {
     let action: ShortcutAction
     let store: Store
@@ -401,9 +401,6 @@ struct ShortcutRecorder: View {
             tap.interrupt()
             let shortcut = Shortcut(event)
             if event.keyCode == UInt16(kVK_Escape) && shortcut.flags.isEmpty {
-                stop()
-            } else if event.keyCode == UInt16(kVK_Delete) && shortcut.flags.isEmpty {
-                store.setShortcut(.unassigned, for: action)
                 stop()
             } else if action.isGlobal && !shortcut.hasCommandLikeModifier {
                 refuse("Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere")
