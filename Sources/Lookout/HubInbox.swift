@@ -160,7 +160,9 @@ extension LookoutHub {
     }
 
     var searchField: some View {
-        InboxSearchField(hub: hub, ui: ui, summary: searchCount, showsSummary: !searchFoundNothing, targets: store.shownHubTargets(hub))
+        // "No match" is said by the inbox's body, which a focused Sessions leaves out: the field says it then.
+        InboxSearchField(hub: hub, ui: ui, summary: searchCount, showsSummary: !searchFoundNothing || shrunk(.inbox),
+                         targets: store.shownHubTargets(hub))
     }
 
     /// What the search found, by kind, each group counted even at none: "3 items · 0 sessions".

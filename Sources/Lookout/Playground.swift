@@ -515,6 +515,8 @@ enum PlaygroundShots {
         },
         // Sessions focused while searching: the inbox is only its header, and the search field its sessions are filtered by stays.
         Shot.edges("inbox-search-focus-agents", on: .rightAndTop) { $0.pinned = true; $0.focus = .agents; $0.query = "lcu" },
+        // The same with nothing found: no Sessions, and no inbox body to say so, so the field's summary does.
+        Shot.edges("inbox-search-focus-agents-none", on: .rightAndTop) { $0.pinned = true; $0.focus = .agents; $0.query = "zzzz" },
         Shot.edges("inbox-undo", on: .rightAndTop) {
             $0.pinned = true
             $0.setup = { store, _, _ in if let first = store.list(.needsYou).first { store.done(first) } }
