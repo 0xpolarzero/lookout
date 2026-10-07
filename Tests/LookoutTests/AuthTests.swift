@@ -96,20 +96,20 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
         s.keychainWrite = { _, _ in true }
         s.resolveToken = { ("ghp_revoked", .keychain) }
         revoke()
-        var said: [String] = []
-        Announce.reset()
-        Announce.sink = { said.append($0) }
-        defer { Announce.reset() }
-        // A poll that fails to sign in with nobody having tried anything says nothing.
-        await s.pollAll()
-        #expect(s.authError == "GitHub rejected the token" && said.isEmpty)
-        // The token saved in Settings is refused: that attempt's result is said.
-        #expect(s.setToken("ghp_revoked"))
-        for _ in 0..<500 where said.isEmpty || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(said == ["GitHub rejected the token"] && s.awaitingSignIn == false)
-        // The next poll's failure is not the attempt's.
-        await s.pollAll()
-        #expect(said.count == 1)
+        await Announced.exclusively {
+            var said: [String] = []
+            Announce.sink = { said.append($0) }
+            // A poll that fails to sign in with nobody having tried anything says nothing.
+            await s.pollAll()
+            #expect(s.authError == "GitHub rejected the token" && said.isEmpty)
+            // The token saved in Settings is refused: that attempt's result is said.
+            #expect(s.setToken("ghp_revoked"))
+            for _ in 0..<500 where said.isEmpty || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
+            #expect(said == ["GitHub rejected the token"] && s.awaitingSignIn == false)
+            // The next poll's failure is not the attempt's.
+            await s.pollAll()
+            #expect(said.count == 1)
+        }
     }
 
     @Test func retryPicksUpTheTokenFromANewLogin() async {
