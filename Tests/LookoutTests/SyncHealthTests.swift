@@ -61,6 +61,18 @@ import Testing
         #expect(s.authError != nil && !s.unreachable)
     }
 
+    @Test func aTokenSuppliedWhileOfflineReplacesTheSignInProblemWithTheSyncOne() async {
+        let s = store(token: nil)
+        await s.pollAll()
+        #expect(s.authError != nil && !s.unreachable)
+        // The replacement can't be tried, which says nothing of the old problem.
+        s.resolveToken = { ("new", .keychain) }
+        answer(s) { _ in throw URLError(.notConnectedToInternet) }
+        s.setToken("new")
+        for _ in 0..<500 where !s.unreachable || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(s.authError == nil && s.unreachable && s.gh.token == "new")
+    }
+
     @Test func aTokenSavedWhileAnotherIsBeingSignedInWithWinsAndTheOldAnswerIsDropped() async {
         let s = store()
         s.gh.token = nil

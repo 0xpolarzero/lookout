@@ -766,7 +766,8 @@ final class Store {
         } catch {
             guard asked == credentialsChanged else { return }
             if error is URLError {
-                // Only a missing or refused token is a sign-in problem.
+                // Only a missing or refused token is a sign-in problem: an earlier one is not this attempt's.
+                authError = nil
                 unreachable = true
                 return
             }
