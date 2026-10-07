@@ -94,7 +94,7 @@ struct WorkingText: View {
 
 /// A project's colour dot and name.
 struct ProjectLabel: View {
-    let session: ClaudeSession
+    let name: String
     let color: Color?
 
     var body: some View {
@@ -104,7 +104,7 @@ struct ProjectLabel: View {
             } else {
                 Image(systemName: "text.bubble").font(.system(size: 9))
             }
-            Text(session.folderName)
+            Text(name)
         }
     }
 }
@@ -427,7 +427,7 @@ struct DrawerRow: View {
                     .lineLimit(1)
                 if twoLines {
                     HStack(spacing: 4) {
-                        ProjectLabel(session: row.session, color: row.color).foregroundStyle(Theme.tertiary)
+                        ProjectLabel(name: row.projectName, color: row.color).foregroundStyle(Theme.tertiary)
                         Text("·").foregroundStyle(Theme.tertiary)
                         status
                         if showsKept && !row.entry.kept {
@@ -677,13 +677,13 @@ struct SessionMenu: View {
             Button("Remove") { store.dismissAgent(row.id) }
         }
         if !row.session.folderKey.isEmpty {
-            Menu("Colour for \(row.session.folderName)") {
+            Menu("Colour for \(row.projectName)") {
                 ForEach(Theme.projectColorNames.indices, id: \.self) { i in
                     Button(Theme.projectColorNames[i]) { store.setProjectColor(row.session.folderKey, i) }
                 }
             }
         }
-        Button("Mute \(row.session.folderName)") { store.setFolderMuted(row.session.folderKey, true) }
+        Button("Mute \(row.projectName)") { store.setFolderMuted(row.session.folderKey, true) }
     }
 }
 

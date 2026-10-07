@@ -227,6 +227,21 @@ import Testing
         #expect(s.agentRows.kept.map(\.id) == ["a", "b"])
     }
 
+    @Test func sessionsOfSameNamedProjectsSayWhichProjectTheyAreIn() throws {
+        let s = store([session("a", folder: "/customer-a/app"), session("b", folder: "/customer-b/app")])
+        let rows = s.allAgentRows
+        let a = try #require(rows.first { $0.id == "a" }), b = try #require(rows.first { $0.id == "b" })
+        #expect(a.projectName == "customer-a/app" && b.projectName == "customer-b/app")
+        #expect(s.searchSessions("customer-b").map(\.id) == ["b"])
+        // The name follows the folders: with the other project gone, the folder's own name is enough again.
+        s.claudeSessions["a"] = nil
+        #expect(s.folderName("/customer-b/app") == "app")
+        #expect(try #require(s.allAgentRows.first).projectName == "app")
+        // A muted project still tells a session's project from another of its name.
+        s.setFolderMuted("/customer-a/app", true)
+        #expect(s.folderName("/customer-b/app") == "customer-b/app")
+    }
+
     @Test func keptOrderAndReorder() {
         let s = store([session("a"), session("b"), session("c")])
         s.keepAgent("b")
