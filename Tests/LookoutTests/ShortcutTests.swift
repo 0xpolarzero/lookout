@@ -61,7 +61,7 @@ import Testing
         let store = Store()
         store.persists = false
         var registered: Shortcut?
-        store.onGlobalShortcutChange = { _, shortcut in registered = shortcut }
+        store.onGlobalShortcutChange = { _, shortcut in registered = shortcut; return true }
         let custom = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
         store.setShortcut(custom, for: .togglePanel)
         #expect(store.shortcut(.togglePanel) == custom)
@@ -122,5 +122,60 @@ import Testing
         let old = #"{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"reviewRequests":true,"didInitialReviewSync":true}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))
         #expect(settings.shortcuts == nil)
+    }
+
+    @MainActor private func connected(_ store: Store, _ registrar: FakeRegistrar) -> GlobalShortcuts {
+        store.persists = false
+        store.agents.enabled = true
+        let globals = GlobalShortcuts(store: store, registrar: registrar) { _ in }
+        globals.start()
+        return globals
+    }
+
+    @MainActor @Test func aKeyAnotherAppHoldsIsRefusedAndTheWorkingOneStays() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keep = ShortcutAction.togglePanel.defaultShortcut
+        let held = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        registrar.taken = [held]
+        let refusal = store.setShortcut(held, for: .togglePanel)
+        #expect(refusal == .unavailable(held))
+        #expect(refusal?.message == "⌃⌘G is used by another app. Lookout keeps the old shortcut")
+        // Stored and registered as before: nothing shows a key that does nothing, and the old one still works.
+        #expect(store.shortcut(.togglePanel) == keep && store.settings.shortcuts == nil)
+        #expect(registrar.registered[1] == keep)
+        // A refused reset of a custom key keeps the custom one too.
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])
+        #expect(store.setShortcut(moved, for: .togglePanel) == nil)
+        registrar.taken = [keep]
+        #expect(store.setShortcut(nil, for: .togglePanel) == .unavailable(keep))
+        #expect(store.shortcut(.togglePanel) == moved && registrar.registered[1] == moved)
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func theSessionSwitcherIsRegisteredOnlyWhileTheExtensionIsOn() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        #expect(registrar.registered[2] != nil)
+        store.agents.enabled = false
+        globals.register(.sessionSwitcher)
+        #expect(registrar.registered[2] == nil)
+    }
+}
+
+/// Stands in for the system: one registration per id, and a key another id (or another app) holds is refused, as Carbon
+/// does, with what the id held left as it was.
+private final class FakeRegistrar: HotKeyRegistrar {
+    var registered: [UInt32: Shortcut] = [:]
+    /// Keys that other apps hold.
+    var taken: Set<Shortcut> = []
+
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool {
+        guard let shortcut else { registered[id] = nil; return true }
+        if taken.contains(shortcut) || registered.contains(where: { $0.key != id && $0.value == shortcut }) { return false }
+        registered[id] = shortcut
+        return true
     }
 }

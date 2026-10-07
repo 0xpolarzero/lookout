@@ -137,41 +137,62 @@ final class HotKeys {
         }, 1, &spec, nil, nil)
     }
 
-    /// `nil` unregisters.
-    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) {
+    /// `nil` unregisters. A system-wide key that another app holds is refused (`false`), and what the action had stays
+    /// registered until a replacement is.
+    @discardableResult
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) -> Bool {
+        defer { updateMonitors(); updateButtonTap() }
+        if let shortcut, shortcut.mouseButton == nil, !shortcut.isModifierTap {
+            if combos[id]?.shortcut == shortcut, refs[id] != nil || isSuspended {
+                combos[id] = (shortcut, handler)
+                if refs[id] != nil { HotKeys.handlers[id] = handler }
+                return true
+            }
+            // The replacement first: Carbon refuses a key another app holds, and the old one should keep working then.
+            guard let ref = claim(shortcut, id) else { return false }
+            release(id)
+            combos[id] = (shortcut, handler)
+            if isSuspended {
+                UnregisterEventHotKey(ref)
+            } else {
+                refs[id] = ref
+                HotKeys.handlers[id] = handler
+            }
+            return true
+        }
+        release(id)
+        guard let shortcut else { return true }
+        if let button = shortcut.mouseButton { buttons[id] = (button, shortcut.flags, handler) } else { taps[id] = (shortcut.keyCode, handler) }
+        return true
+    }
+
+    /// Lets go of whatever `id` holds, of every kind.
+    private func release(_ id: UInt32) {
+        if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
         combos[id] = nil
-        register(id)
+        HotKeys.handlers[id] = nil
         taps[id] = nil
         buttons[id] = nil
-        defer { updateMonitors(); updateButtonTap() }
-        guard let shortcut else { return }
-        if let button = shortcut.mouseButton {
-            buttons[id] = (button, shortcut.flags, handler)
-            return
-        }
-        if shortcut.isModifierTap {
-            taps[id] = (shortcut.keyCode, handler)
-            return
-        }
-        combos[id] = (shortcut, handler)
-        register(id)
+    }
+
+    /// Asks the system for a key combination, which it refuses when another app holds it.
+    private func claim(_ shortcut: Shortcut, _ id: UInt32) -> EventHotKeyRef? {
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers,
+                                         EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
+                                         GetApplicationEventTarget(), 0, &ref)
+        if status == noErr, let ref { return ref }
+        NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))")
+        return nil
     }
 
     /// (Re)registers one combination with the system, or only releases it while suspended or removed.
     private func register(_ id: UInt32) {
         if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
         HotKeys.handlers[id] = nil
-        guard !isSuspended, let (shortcut, handler) = combos[id] else { return }
-        var ref: EventHotKeyRef?
-        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers,
-                                         EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
-                                         GetApplicationEventTarget(), 0, &ref)
-        if status == noErr, let ref {
-            refs[id] = ref
-            HotKeys.handlers[id] = handler
-        } else {
-            NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))")
-        }
+        guard !isSuspended, let (shortcut, handler) = combos[id], let ref = claim(shortcut, id) else { return }
+        refs[id] = ref
+        HotKeys.handlers[id] = handler
     }
 
     private func updateMonitors() {
@@ -279,6 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store!
     private var hub: HubController?
     private lazy var hotKeys = HotKeys()
+    private var globalShortcuts: GlobalShortcuts?
     private var playground: Playground?
     private var sigtermSource: DispatchSourceSignal?
 
@@ -320,14 +342,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
         store.onRecordingShortcutChange = { [weak self] on in self?.hotKeys.isSuspended = on }
-        // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
-        registerHotKey(.togglePanel)
-        registerHotKey(.sessionSwitcher)
         store.onOpenInbox = { [weak self] in self?.hub?.showInbox() }
-        store.onGlobalShortcutChange = { [weak self] action, _ in self?.registerHotKey(action) }
-        store.onAgentsEnabledChange = { [weak self] _ in
-            self?.registerHotKey(.sessionSwitcher)
+        // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
+        let globals = GlobalShortcuts(store: store, registrar: hotKeys) { [weak self] action in
+            switch action {
+            case .togglePanel: self?.hub?.toggleShortcut()
+            case .sessionSwitcher: self?.hub?.showSessions()
+            default: break
+            }
         }
+        globals.start()
+        globalShortcuts = globals
         if CommandLine.arguments.contains("--open") {
             hub?.toggleShortcut()
         }
@@ -344,26 +369,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         store?.flushSave()
-    }
-
-    /// The session switcher only grabs its keys while the Claude extension is on.
-    private func registerHotKey(_ action: ShortcutAction) {
-        switch action {
-        case .togglePanel:
-            hotKeys.set(1, store.shortcut(action)) { [weak self] in
-                DispatchQueue.main.async {
-                    self?.hub?.toggleShortcut()
-                }
-            }
-        case .sessionSwitcher:
-            hotKeys.set(2, store.agents.enabled ? store.shortcut(action) : nil) { [weak self] in
-                DispatchQueue.main.async {
-                    self?.hub?.showSessions()
-                }
-            }
-        default:
-            break
-        }
     }
 
     /// Accessory apps have no visible menu bar, but key equivalents (⌘C/⌘V/⌘A) still route through the main menu.

@@ -162,6 +162,66 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     }
 }
 
+/// Why a shortcut wasn't taken: the sentence under its recorder.
+enum ShortcutRefusal: Equatable {
+    /// Another app holds a system-wide key: Lookout keeps the one it had.
+    case unavailable(Shortcut)
+
+    var message: String {
+        switch self {
+        case .unavailable(let shortcut): "\(shortcut.display) is used by another app. Lookout keeps the old shortcut"
+        }
+    }
+}
+
+/// Where a system-wide shortcut is registered: `HotKeys`, or a stand-in under test.
+protocol HotKeyRegistrar: AnyObject {
+    /// `nil` unregisters. A shortcut that can't be registered is refused (`false`), and what `id` held stays held.
+    @discardableResult
+    func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool
+}
+
+extension HotKeys: HotKeyRegistrar {}
+
+extension ShortcutAction {
+    /// The registration a global action holds, one per action.
+    var hotKeyID: UInt32 { self == .togglePanel ? 1 : 2 }
+}
+
+/// Keeps the registrar in step with the store's global shortcuts: one registration per action, and the session
+/// switcher only while the Claude extension is on.
+@MainActor
+final class GlobalShortcuts {
+    private let store: Store
+    private let registrar: HotKeyRegistrar
+    private let perform: (ShortcutAction) -> Void
+
+    /// `perform` runs on the main queue when a global shortcut is pressed.
+    init(store: Store, registrar: HotKeyRegistrar, perform: @escaping (ShortcutAction) -> Void) {
+        self.store = store
+        self.registrar = registrar
+        self.perform = perform
+    }
+
+    /// Registers both and follows the store from here on.
+    func start() {
+        for action in ShortcutAction.allCases where action.isGlobal { register(action) }
+        store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) ?? true }
+        store.onAgentsEnabledChange = { [weak self] _ in self?.register(.sessionSwitcher) }
+    }
+
+    /// `shortcut` is what the store is about to set, or its current one. `false` when the system refused it.
+    @discardableResult
+    func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) -> Bool {
+        guard action.isGlobal else { return true }
+        let shortcut = shortcut ?? store.shortcut(action)
+        let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
+        return registrar.set(action.hotKeyID, wanted) { [perform] in
+            DispatchQueue.main.async { perform(action) }
+        }
+    }
+}
+
 /// Click, then press the new combination. Esc cancels.
 struct ShortcutRecorder: View {
     let action: ShortcutAction
@@ -179,7 +239,7 @@ struct ShortcutRecorder: View {
         VStack(alignment: .trailing, spacing: Theme.Space.xs) {
             HStack(spacing: 4) {
                 if customized && !recording {
-                    Button { store.setShortcut(nil, for: action) } label: {
+                    Button { error = store.setShortcut(nil, for: action)?.message } label: {
                         Image(systemName: "arrow.uturn.backward").font(Theme.Typography.glyph(9, .bold)).frame(width: 20, height: 20)
                     }
                     .buttonStyle(HoverFillButtonStyle(shape: Circle()))
@@ -204,6 +264,8 @@ struct ShortcutRecorder: View {
                 Text(error).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
             }
         }
+        // A refusal belongs to the key it was about.
+        .onChange(of: current) { error = nil }
         .onDisappear(perform: stop)
         // Settings can stay pinned and mounted while another app takes over, so none of the other ways out run.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in stop() }
@@ -256,8 +318,9 @@ struct ShortcutRecorder: View {
     private func accept(_ shortcut: Shortcut) {
         if let other = ShortcutAction.allCases.first(where: { $0 != action && store.shortcut($0) == shortcut }) {
             error = "Already used for \(other.title)"
+        } else if let refusal = store.setShortcut(shortcut, for: action) {
+            error = refusal.message
         } else {
-            store.setShortcut(shortcut, for: action)
             stop()
         }
     }

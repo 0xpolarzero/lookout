@@ -150,7 +150,8 @@ final class Store {
     @ObservationIgnored var onRecordingShortcutChange: ((Bool) -> Void)?
     /// Shows the inbox: where a summary banner leads.
     @ObservationIgnored var onOpenInbox: (() -> Void)?
-    @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Void)?
+    /// Registers a global shortcut system-wide; `false` when the system refuses it.
+    @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Bool)?
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
     @ObservationIgnored let activityReader = Claude.ActivityReader()
     @ObservationIgnored lazy var claudeFeed = ClaudeFeed(activityReader: activityReader)
@@ -629,12 +630,16 @@ final class Store {
         settings.shortcuts?[action.rawValue] ?? action.defaultShortcut
     }
 
-    /// `nil` resets to the default.
-    func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) {
+    /// `nil` resets to the default. A global one the system refuses (another app holds the key) is not kept: the one that
+    /// works stays stored and registered, and the refusal is returned.
+    @discardableResult
+    func setShortcut(_ shortcut: Shortcut?, for action: ShortcutAction) -> ShortcutRefusal? {
         var all = settings.shortcuts ?? [:]
         all[action.rawValue] = shortcut == action.defaultShortcut ? nil : shortcut
+        let wanted = all[action.rawValue] ?? action.defaultShortcut
+        if action.isGlobal, onGlobalShortcutChange?(action, wanted) == false { return .unavailable(wanted) }
         settings.shortcuts = all.isEmpty ? nil : all
-        if action.isGlobal { onGlobalShortcutChange?(action, self.shortcut(action)) }
+        return nil
     }
 
     /// A recorder starts listening; one that already was is stopped, so only one ever is.
