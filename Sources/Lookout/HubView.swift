@@ -240,6 +240,9 @@ final class HubKeys {
             setQuery(String(hub.query.dropLast()))
             return true
         }
+        // What the user bound comes before the typing that starts a search: a letter bound to Mark read marks the picked row
+        // read. With nothing picked to act on, or once a search has started, it is a letter like any other.
+        if hub.query.isEmpty, isBound(shortcut), markAllRead(shortcut) || rowCommand(shortcut, targets: targets()) { return true }
         if startsSearch(event, flags: flags) {
             hub.startSearch(replaying: event)
             return true
