@@ -555,9 +555,10 @@ extension Store {
             state.entries[i] = entry
         }
 
-        // Forget long-gone pending sessions so the state file stays small.
+        // Forget long-gone pending sessions so the state file stays small, except those you gave a label or an icon.
         state.entries.removeAll { e in
-            guard !e.kept, e.hiddenAt != nil, let s = byID[e.id] else { return false }
+            guard !e.kept, e.hiddenAt != nil, e.label == nil, e.icon == nil, !iconRequests.contains(e.id),
+                  let s = byID[e.id] else { return false }
             return now.timeIntervalSince(s.lastActivity) > 30 * 86400
         }
         if let appUnread { state.appUnread = appUnread.sorted() }

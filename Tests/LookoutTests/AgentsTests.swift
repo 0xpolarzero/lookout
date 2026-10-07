@@ -43,6 +43,24 @@ import Testing
         #expect(s.allAgentRows.map(\.id) == ["a"])
     }
 
+    @Test func aLabelOnAnOldSessionSurvivesTheNextRefresh() {
+        let old = session("old", minutesAgo: 45 * 24 * 60)
+        let s = store([session("a"), old])
+        s.setAgentLabel("old", "🔥")
+        s.ingest([session("a"), old], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "old")?.label == "🔥")
+        #expect(s.searchSessions("session old").first?.label == "🔥")
+    }
+
+    @Test func anOldSessionNobodyCustomizedIsStillForgotten() {
+        let old = session("old", minutesAgo: 45 * 24 * 60)
+        let s = store([session("a"), old])
+        s.keepAgent("old")
+        s.dismissAgent("old")
+        s.ingest([session("a"), old], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "old") == nil)
+    }
+
     /// Icons on and a key saved, so an icon can be asked for; the store has not read the key, so none is.
     private func keySaved(_ s: Store) {
         s.agents.iconsEnabled = true
@@ -95,6 +113,17 @@ import Testing
         await finishIcons(s)
         #expect(entry(s, "a")?.icon != nil)
         #expect(s.allAgentRows.map(\.id) == ["b"])
+    }
+
+    @Test func theIconPickedForAnOldSessionSurvivesTheNextRefresh() async {
+        var old = session("old", minutesAgo: 45 * 24 * 60)
+        old.cliID = "cli-old"
+        let s = iconStore([session("a"), old])
+        s.repickIcon("old")
+        s.ingest([session("a"), old], appUnread: [], claudeFrontmost: false, now: now)  // before the icon is picked
+        await finishIcons(s)
+        s.ingest([session("a"), old], appUnread: [], claudeFrontmost: false, now: now)
+        #expect(entry(s, "old")?.icon != nil)
     }
 
     @Test func theIconPickedForAnOldSessionFoundThroughSearchIsKept() async {
