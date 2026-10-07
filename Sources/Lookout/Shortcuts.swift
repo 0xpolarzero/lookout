@@ -168,6 +168,8 @@ struct ShortcutRecorder: View {
     let store: Store
     @State private var recording = false
     @State private var monitor: Any?
+    /// The window being recorded in; losing key status there means the keys no longer reach the monitor.
+    @State private var window: NSWindow?
     @State private var error: String?
     @State private var tap = ModifierTap()
 
@@ -203,11 +205,20 @@ struct ShortcutRecorder: View {
             }
         }
         .onDisappear(perform: stop)
+        // Settings can stay pinned and mounted while another app takes over, so none of the other ways out run.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in stop() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { leave($0) }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { leave($0) }
+    }
+
+    private func leave(_ note: Notification) {
+        if let window, note.object as? NSWindow === window { stop() }
     }
 
     private func start() {
         error = nil
         recording = true
+        window = NSApp.keyWindow
         // Stops any other recorder first, and releases the global hotkeys: Carbon would otherwise take a
         // combination like Keep open's before it reaches the monitor below.
         store.beginRecordingShortcut(stop: stop)
@@ -256,6 +267,7 @@ struct ShortcutRecorder: View {
         guard recording else { return }
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        window = nil
         recording = false
         store.endRecordingShortcut()
     }
