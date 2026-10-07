@@ -64,4 +64,26 @@ import Testing
         await poll.value
         #expect(s.items.isEmpty)
     }
+
+    @Test func stoppingAFailedRepoClearsItsFault() {
+        let s = store(RepoConfig(fullName: "a/one"))
+        s.repos.append(RepoConfig(fullName: "a/two"))
+        s.repoErrors = ["a/one": "Forbidden"]
+        s.removeRepo(s.repos[0])
+        #expect(s.repoErrors.isEmpty)
+    }
+
+    @Test func aRequestThatOutlivesItsRepoPublishesNoFault() async {
+        let repo = RepoConfig(fullName: "a/one")
+        let s = store(repo)
+        // The repo is stopped while its first request is in flight, and that request then fails.
+        let gate = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { _ in .init(500, #"{"message": "Server error"}"#, gate: gate) }
+        let poll = Task { await s.pollAll() }
+        while gate.held == 0 { await Task.yield() }
+        s.removeRepo(repo)
+        gate.open()
+        await poll.value
+        #expect(s.repoErrors.isEmpty)
+    }
 }

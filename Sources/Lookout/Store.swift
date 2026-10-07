@@ -753,6 +753,8 @@ final class Store {
         removeItems { $0.repo == repo.fullName && $0.kind != .reviewRequested }
         notifier.removeBanners(of: repo.fullName)
         ci[repo.fullName] = nil
+        // Polls never visit it again, so its fault would outlive it (the gear's badge, the banner, Settings).
+        repoErrors[repo.fullName] = nil
         save()
     }
 
@@ -854,6 +856,8 @@ final class Store {
             try await syncCI(name)
             if repoErrors[name] != nil { repoErrors[name] = nil }
         } catch {
+            // A request that outlived the repo's removal has nobody to tell.
+            guard repos.contains(where: { $0.fullName == name }) else { return }
             let message = error.localizedDescription
             if repoErrors[name] != message { repoErrors[name] = message }
         }
