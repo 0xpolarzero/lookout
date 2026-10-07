@@ -533,9 +533,9 @@ struct NewSessionRow: View {
                 .tip("New session", "Scratch chat, no folder · or pick a project")
 
             let shown = Array(folders.prefix(Self.maxTiles))
-            let initials = Self.initials(shown.map { URL(fileURLWithPath: $0).lastPathComponent })
+            let initials = Self.initials(shown.map { store.folderName($0) })
             ForEach(Array(shown.enumerated()), id: \.element) { i, folder in
-                ProjectTile(folder: folder, initials: initials[i], color: store.projectColor(folder)) { store.startAgent(in: folder) }
+                ProjectTile(folder: folder, name: store.folderName(folder), initials: initials[i], color: store.projectColor(folder)) { store.startAgent(in: folder) }
             }
             if folders.count > Self.maxTiles { menu(folders) }
         }
@@ -549,7 +549,8 @@ struct NewSessionRow: View {
             Button("Scratch (no folder)") { store.startScratchSession() }
             Divider()
             ForEach(folders, id: \.self) { folder in
-                Button(URL(fileURLWithPath: folder).lastPathComponent) { store.startAgent(in: folder) }
+                Button(store.folderName(folder)) { store.startAgent(in: folder) }
+                    .help(folder)
             }
         } label: {
             Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
@@ -622,12 +623,12 @@ private struct NewSessionLabel: View {
 /// A listed project in the new-session row: its colour, its initials, its name on hover.
 private struct ProjectTile: View {
     let folder: String
+    let name: String
     let initials: String
     let color: Color?
     let action: () -> Void
 
     var body: some View {
-        let name = URL(fileURLWithPath: folder).lastPathComponent
         Button(action: action) { ProjectTileFace(initials: initials, color: color) }
             // The face does its own hover look (a ring), so the style adds no fill.
             .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), hover: .clear, pressed: .clear))

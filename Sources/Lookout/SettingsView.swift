@@ -268,12 +268,13 @@ struct SettingsView: View {
     @ViewBuilder private var mutedFolders: some View {
         let muted = store.agents.mutedFolders
         let unmuted = store.knownFolders.filter { !muted.contains($0) }
+        let name = { (folder: String) in folder.isEmpty ? "Scratch chats" : store.folderName(folder) }
         HStack {
             Text("Muted folders").font(Theme.Typography.body)
             Spacer()
             Menu(muted.isEmpty ? "None" : plural(muted.count, "folder")) {
                 ForEach(unmuted, id: \.self) { folder in
-                    Button(folderName(folder)) { store.setFolderMuted(folder, true) }
+                    Button(name(folder)) { store.setFolderMuted(folder, true) }
                 }
             }
             .menuStyle(.borderlessButton)
@@ -285,17 +286,13 @@ struct SettingsView: View {
         if !muted.isEmpty {
             FlowLayout(spacing: 6) {
                 ForEach(muted, id: \.self) { folder in
-                    RemovableTag(text: folderName(folder), removeLabel: "Unmute \(folderName(folder))",
+                    RemovableTag(text: name(folder), removeLabel: "Unmute \(name(folder))",
                                  tip: folder.isEmpty ? "Chats not tied to a folder" : folder) {
                         store.setFolderMuted(folder, false)
                     }
                 }
             }
         }
-    }
-
-    private func folderName(_ folder: String) -> String {
-        folder.isEmpty ? "Scratch chats" : URL(fileURLWithPath: folder).lastPathComponent
     }
 
     private var updates: some View {

@@ -50,15 +50,22 @@ final class Store {
             agentsRevision &+= 1
             persistedRevision &+= 1
             if !ingesting { claudeStamp.revision += 1 }
+            refreshFolderNames()
             save()
         }
     }
+    /// Every project's name, with as much of its path as tells it from another of the same name (`customer-a/app`): worked
+    /// out when the folders change, not by each view that names a project. Only a change in it redraws what reads it.
+    var folderNames: [String: String] = [:]
+    /// The folders `folderNames` was worked out for: the work is skipped while they are the same.
+    @ObservationIgnored var namedFoldersSeen: Set<String>?
     /// Bumped whenever the rows the hub shows can change (agents, sessions, activity, tasks): a cheap memo/animation key.
     private(set) var agentsRevision = 0
     var claudeSessions: [String: ClaudeSession] = [:] {
         didSet {
             agentCache = nil
             agentsRevision &+= 1
+            refreshFolderNames()
         }
     }
     var claudeActivity: [String: ClaudeActivity] = [:] {
