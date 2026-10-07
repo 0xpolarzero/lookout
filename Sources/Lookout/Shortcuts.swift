@@ -312,7 +312,7 @@ struct ShortcutRecorder: View {
         VStack(alignment: .trailing, spacing: Theme.Space.xs) {
             HStack(spacing: 4) {
                 if customized && !recording {
-                    Button { error = store.resetShortcut(for: action)?.message } label: {
+                    Button { refuse(store.resetShortcut(for: action)?.message) } label: {
                         Image(systemName: "arrow.uturn.backward").font(Theme.Typography.glyph(9, .bold)).frame(width: 20, height: 20)
                     }
                     .buttonStyle(HoverFillButtonStyle(shape: Circle()))
@@ -331,7 +331,8 @@ struct ShortcutRecorder: View {
                 .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), rest: Theme.Fill.hover,
                                                   hover: Theme.Fill.selected, isActive: recording))
                 .accessibilityLabel("Change shortcut for \(action.title)")
-                .accessibilityValue(recording ? "Recording, press the new keys" : current.isUnassigned ? "Not set" : [current.display, held].compactMap { $0 }.joined(separator: ". "))
+                .accessibilityValue(recording ? ["Recording, press the new keys", error].compactMap { $0 }.joined(separator: ". ")
+                                        : current.isUnassigned ? "Not set" : [current.display, shown].compactMap { $0 }.joined(separator: ". "))
             }
             if let shown {
                 Text(shown).font(Theme.Typography.caption).foregroundStyle(Theme.amber)
@@ -367,7 +368,7 @@ struct ShortcutRecorder: View {
                 if action.isGlobal {
                     accept(Shortcut.mouse(event.buttonNumber, modifiers: event.modifierFlags))
                 } else {
-                    error = "Mouse buttons work for the shortcuts that work from any app"
+                    refuse("Mouse buttons work for the shortcuts that work from any app")
                 }
                 return nil
             }
@@ -386,7 +387,7 @@ struct ShortcutRecorder: View {
                 store.setShortcut(.unassigned, for: action)
                 stop()
             } else if action.isGlobal && !shortcut.hasCommandLikeModifier {
-                error = "Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere"
+                refuse("Use ⌃, ⌥ or ⌘, or tap one of them alone, for a shortcut that works everywhere")
             } else {
                 accept(shortcut)
             }
@@ -394,11 +395,17 @@ struct ShortcutRecorder: View {
         }
     }
 
+    /// A conflict or a refusal appears under the key and is said at each attempt, a repeated one too.
+    private func refuse(_ message: String?) {
+        error = message
+        if let message { Announce.say(message) }
+    }
+
     private func accept(_ shortcut: Shortcut) {
         if let other = store.shortcutConflict(shortcut, for: action) {
-            error = ShortcutRefusal.usedBy(other).message
+            refuse(ShortcutRefusal.usedBy(other).message)
         } else if let refusal = store.setShortcut(shortcut, for: action) {
-            error = refusal.message
+            refuse(refusal.message)
         } else {
             stop()
         }
