@@ -1162,33 +1162,20 @@ final class Store {
         let actions: GHWorkflowRuns = try await gh.get("/repos/\(name)/actions/runs",
                                                        ["branch": branch, "event": "push", "per_page": "30"])
         let sha = actions.workflowRuns.first?.headSha
-        var latest: [Int: GHWorkflowRuns.Run] = [:]
-        for run in actions.workflowRuns where run.headSha == sha && latest[run.workflowId] == nil {
-            latest[run.workflowId] = run
-        }
         let target = sha ?? ref
         async let checksReq: GHCheckRuns = gh.get("/repos/\(name)/commits/\(target)/check-runs", ["per_page": "100"])
         async let statusReq: GHCombinedStatus = gh.get("/repos/\(name)/commits/\(target)/status")
         let (checks, combined) = try await (checksReq, statusReq)
-        let external = checks.checkRuns.filter { $0.app?.slug != "github-actions" }
-
-        let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
-        var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()
-        failing += external.filter { bad.contains($0.conclusion ?? "") }.map(\.name)
-        failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
-        let pending = latest.values.contains { $0.status != "completed" }
-            || external.contains { $0.status != "completed" }
-            || combined.statuses.contains { $0.state == "pending" }
-        let any = !latest.isEmpty || !external.isEmpty || combined.totalCount > 0
-        let state: CIState = !failing.isEmpty ? .failure : pending ? .pending : any ? .success : .none
+        let reading = Self.readCI(runs: actions.workflowRuns, sha: sha, checks: checks.checkRuns, combined: combined)
+        let (state, failing) = (reading.state, reading.failing)
         let commit = sha ?? combined.sha
 
         let previous = ci[name]?.state
+        // The headline comes from the Actions run; a repo with only external CI asks the commit for it (once per commit).
+        let title = await ciHeadline(name, commit: commit, runTitle: actions.workflowRuns.first?.displayTitle)
         let status = CIStatus(state: state, branch: branch, sha: commit,
                               url: URL(string: "https://github.com/\(name)/commit/\(commit)"),
-                              failing: failing, checkedAt: Date(),
-                              title: actions.workflowRuns.first?.displayTitle,
-                              updatedAt: latest.values.compactMap(\.updatedAt).max())
+                              failing: failing, checkedAt: Date(), title: title, updatedAt: reading.changedAt)
         // `checkedAt` always differs: only a real change is worth an assignment (and a re-render, and a save).
         ciCheckedAt[name] = status.checkedAt
         if var old = ci[name] {
@@ -1206,6 +1193,46 @@ final class Store {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI back to green",
                    subtitle: branch, body: "", quiet: true, url: status.url)
         }
+    }
+
+    /// What CI's three sources say about one commit.
+    struct CIReading: Equatable {
+        var state: CIState
+        var failing: [String]
+        /// The latest change among them: an Actions run, an external check run or a legacy status.
+        var changedAt: Date?
+    }
+
+    /// Folds Actions runs (the latest of each workflow, on `sha`), external check runs and legacy statuses into one
+    /// state, the names that failed and when it last changed. Any of the three can be all a repo has.
+    nonisolated static func readCI(runs: [GHWorkflowRuns.Run], sha: String?, checks: [GHCheckRuns.Run],
+                                   combined: GHCombinedStatus) -> CIReading {
+        var latest: [Int: GHWorkflowRuns.Run] = [:]
+        for run in runs where run.headSha == sha && latest[run.workflowId] == nil { latest[run.workflowId] = run }
+        let external = checks.filter { $0.app?.slug != "github-actions" }
+
+        let bad: Set<String> = ["failure", "timed_out", "action_required", "startup_failure"]
+        var failing = latest.values.filter { bad.contains($0.conclusion ?? "") }.map(\.name).sorted()
+        failing += external.filter { bad.contains($0.conclusion ?? "") }.map(\.name)
+        failing += combined.statuses.filter { $0.state == "failure" || $0.state == "error" }.map(\.context)
+        let pending = latest.values.contains { $0.status != "completed" }
+            || external.contains { $0.status != "completed" }
+            || combined.statuses.contains { $0.state == "pending" }
+        let any = !latest.isEmpty || !external.isEmpty || combined.totalCount > 0
+        let state: CIState = !failing.isEmpty ? .failure : pending ? .pending : any ? .success : .none
+        let changed = latest.values.compactMap(\.updatedAt)
+            + external.compactMap { $0.completedAt ?? $0.startedAt }
+            + combined.statuses.compactMap { $0.updatedAt ?? $0.createdAt }
+        return CIReading(state: state, failing: failing, changedAt: changed.max())
+    }
+
+    /// The commit's headline: the Actions run's title when there is one; else what the commit says, asked once per
+    /// commit (a repo with only external CI has no run to read it from).
+    func ciHeadline(_ name: String, commit: String, runTitle: String?) async -> String? {
+        if let runTitle { return runTitle }
+        if let known = ci[name], known.sha == commit, let title = known.title { return title }
+        let found: GHCommit? = try? await gh.get("/repos/\(name)/commits/\(commit)")
+        return found?.headline
     }
 
     /// GitHub's search returns at most 1000 results, 100 a page.
