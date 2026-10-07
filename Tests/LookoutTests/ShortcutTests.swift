@@ -71,6 +71,45 @@ import Testing
         #expect(store.settings.shortcuts == nil)
     }
 
+    @Test func hotKeysAreReleasedWhileSuspended() {
+        let hotKeys = HotKeys()
+        // An unlikely combination, so the test never fights a real shortcut for it.
+        hotKeys.set(90, Shortcut(keyCode: UInt16(kVK_F19), modifiers: [.control, .option, .command, .shift])) {}
+        defer { hotKeys.set(90, nil) }
+        #expect(hotKeys.registeredIDs == [90])
+        hotKeys.isSuspended = true
+        #expect(hotKeys.registeredIDs.isEmpty)
+        // A change made meanwhile applies on resume.
+        hotKeys.set(90, Shortcut(keyCode: UInt16(kVK_F18), modifiers: [.control, .option, .command, .shift])) {}
+        #expect(hotKeys.registeredIDs.isEmpty)
+        hotKeys.isSuspended = false
+        #expect(hotKeys.registeredIDs == [90])
+        hotKeys.set(90, nil)
+        hotKeys.isSuspended = true
+        hotKeys.isSuspended = false
+        #expect(hotKeys.registeredIDs.isEmpty)
+    }
+
+    @Test func startingARecorderStopsTheOneListening() {
+        let store = Store()
+        store.persists = false
+        var changes: [Bool] = []
+        store.onRecordingShortcutChange = { changes.append($0) }
+        var firstStopped = false
+        store.beginRecordingShortcut {
+            firstStopped = true
+            store.endRecordingShortcut()
+        }
+        #expect(store.isRecordingShortcut)
+        store.beginRecordingShortcut { store.endRecordingShortcut() }
+        #expect(firstStopped)
+        #expect(store.isRecordingShortcut)
+        // Released once the first stopped, then held again for the second.
+        #expect(changes == [true, false, true])
+        store.endRecordingShortcut()
+        #expect(!store.isRecordingShortcut)
+    }
+
     @Test func oldSettingsStillLoad() throws {
         let old = #"{"botHandles":[],"treatAppsAsBots":true,"pollInterval":60,"notifications":true,"reviewRequests":true,"didInitialReviewSync":true}"#
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(old.utf8))

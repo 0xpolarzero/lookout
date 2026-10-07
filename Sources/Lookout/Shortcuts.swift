@@ -208,7 +208,9 @@ struct ShortcutRecorder: View {
     private func start() {
         error = nil
         recording = true
-        store.isRecordingShortcut = true
+        // Stops any other recorder first, and releases the global hotkeys: Carbon would otherwise take a
+        // combination like Keep open's before it reaches the monitor below.
+        store.beginRecordingShortcut(stop: stop)
         tap = ModifierTap()
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .otherMouseDown]) { event in
             if event.type == .otherMouseDown {
@@ -250,9 +252,11 @@ struct ShortcutRecorder: View {
     }
 
     private func stop() {
+        // A recorder that was already stopped must not end the one that replaced it.
+        guard recording else { return }
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         recording = false
-        store.isRecordingShortcut = false
+        store.endRecordingShortcut()
     }
 }

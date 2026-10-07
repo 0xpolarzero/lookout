@@ -115,8 +115,11 @@ final class Store {
     /// Review requests the last complete search listed; nil until one has (then nothing is known to be gone).
     @ObservationIgnored private var requested: Set<String>?
     @ObservationIgnored var persists = true
-    /// While a shortcut is being recorded, the panel's key handler stands down.
-    @ObservationIgnored var isRecordingShortcut = false
+    /// Stops the shortcut recorder that is listening, if any. While one is, the panel's key handler stands down
+    /// and the global hotkeys are released, so the recorder sees every combination.
+    @ObservationIgnored private var stopRecorder: (() -> Void)?
+    var isRecordingShortcut: Bool { stopRecorder != nil }
+    @ObservationIgnored var onRecordingShortcutChange: ((Bool) -> Void)?
     /// Shows the inbox: where a summary banner leads.
     @ObservationIgnored var onOpenInbox: (() -> Void)?
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Void)?
@@ -559,6 +562,18 @@ final class Store {
         all[action.rawValue] = shortcut == action.defaultShortcut ? nil : shortcut
         settings.shortcuts = all.isEmpty ? nil : all
         if action.isGlobal { onGlobalShortcutChange?(action, self.shortcut(action)) }
+    }
+
+    /// A recorder starts listening; one that already was is stopped, so only one ever is.
+    func beginRecordingShortcut(stop: @escaping () -> Void) {
+        stopRecorder?()
+        stopRecorder = stop
+        onRecordingShortcutChange?(true)
+    }
+
+    func endRecordingShortcut() {
+        stopRecorder = nil
+        onRecordingShortcutChange?(false)
     }
 
     func addBot(_ handle: String) {

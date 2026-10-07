@@ -103,6 +103,16 @@ final class HotKeys {
     static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
     private static var handlers: [UInt32: () -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
+    /// The key combinations asked for, kept while suspended so they come back as they were.
+    private var combos: [UInt32: (shortcut: Shortcut, handler: () -> Void)] = [:]
+    /// While true, the key combinations are released so the keys reach the app (e.g. a shortcut being recorded).
+    var isSuspended = false {
+        didSet {
+            guard isSuspended != oldValue else { return }
+            for id in combos.keys { register(id) }
+        }
+    }
+    var registeredIDs: Set<UInt32> { Set(refs.keys) }
     private var taps: [UInt32: (key: UInt16, handler: () -> Void)] = [:]
     /// Mouse button shortcuts, caught (and kept from the app under the pointer) by an event tap.
     private var buttons: [UInt32: (button: Int, flags: NSEvent.ModifierFlags, handler: () -> Void)] = [:]
@@ -129,8 +139,8 @@ final class HotKeys {
 
     /// `nil` unregisters.
     func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void = {}) {
-        if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
-        HotKeys.handlers[id] = nil
+        combos[id] = nil
+        register(id)
         taps[id] = nil
         buttons[id] = nil
         defer { updateMonitors(); updateButtonTap() }
@@ -143,6 +153,15 @@ final class HotKeys {
             taps[id] = (shortcut.keyCode, handler)
             return
         }
+        combos[id] = (shortcut, handler)
+        register(id)
+    }
+
+    /// (Re)registers one combination with the system, or only releases it while suspended or removed.
+    private func register(_ id: UInt32) {
+        if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
+        HotKeys.handlers[id] = nil
+        guard !isSuspended, let (shortcut, handler) = combos[id] else { return }
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers,
                                          EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
@@ -300,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
         }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
+        store.onRecordingShortcutChange = { [weak self] on in self?.hotKeys.isSuspended = on }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         registerHotKey(.togglePanel)
         registerHotKey(.sessionSwitcher)
