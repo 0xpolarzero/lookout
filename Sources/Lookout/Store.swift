@@ -834,8 +834,8 @@ final class Store {
             let thread = info?[added[i].number]
             if let title = thread?.title { added[i].title = title }
             let isMentioned = mentioned.contains(added[i].id)
-            if commentKinds.contains(added[i].kind), isMentioned || thread != nil {
-                added[i].forYou = Self.isRelevant(added[i], thread: thread, mentioned: isMentioned, me: me)
+            if commentKinds.contains(added[i].kind) {
+                added[i].forYou = Self.relevance(added[i], thread: thread, mentioned: isMentioned, me: me)
             }
         }
         if !repo.allComments {
@@ -874,6 +874,9 @@ final class Store {
         var activity: [Date] = []
         /// Review thread root comment id → when I posted in that thread.
         var reviewActivity: [Int: [Date]] = [:]
+        /// The comments/reviews, or the review threads, were cut off: my earlier activity may be beyond them.
+        var activityTruncated = false
+        var reviewThreadsTruncated = false
     }
 
     /// GraphQL calls (40 threads each) for the threads new comments landed on: titles, authors and my participation.
@@ -893,13 +896,13 @@ final class Store {
     private func fetchThreadBatch(_ name: String, _ numbers: ArraySlice<Int>, participation: Bool, reviewThreads: Set<Int>,
                                   me: String) async throws -> [Int: ThreadInfo] {
         let parts = name.split(separator: "/")
-        let common = participation ? "title author { login } comments(last: 100) { nodes { author { login } createdAt } }" : "title"
+        let common = participation ? "title author { login } comments(last: 100) { pageInfo { hasPreviousPage } nodes { author { login } createdAt } }" : "title"
         var q = "query { repository(owner: \"\(parts[0])\", name: \"\(parts[1])\") {"
         for n in numbers {
             var pr = common
-            if participation { pr += " reviews(last: 50) { nodes { author { login } submittedAt } }" }
+            if participation { pr += " reviews(last: 50) { pageInfo { hasPreviousPage } nodes { author { login } submittedAt } }" }
             if reviewThreads.contains(n) {
-                pr += " reviewThreads(last: 60) { nodes { comments(first: 50) { nodes { databaseId author { login } createdAt } } } }"
+                pr += " reviewThreads(last: 60) { pageInfo { hasPreviousPage } nodes { comments(first: 50) { pageInfo { hasNextPage } nodes { databaseId author { login } createdAt } } } }"
             }
             q += " n\(n): issueOrPullRequest(number: \(n)) { ... on Issue { \(common) } ... on PullRequest { \(pr) } }"
         }
@@ -921,6 +924,9 @@ final class Store {
         func nodes(_ obj: Any?, _ key: String) -> [[String: Any]] {
             ((obj as? [String: Any])?[key] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
         }
+        func truncated(_ obj: Any?, _ key: String, _ flag: String) -> Bool {
+            (((obj as? [String: Any])?[key] as? [String: Any])?["pageInfo"] as? [String: Any])?[flag] as? Bool ?? false
+        }
         func login(_ node: [String: Any]) -> String? { ((node["author"] as? [String: Any])?["login"] as? String)?.lowercased() }
         func date(_ node: [String: Any], _ key: String) -> Date? { (node[key] as? String).flatMap { Self.isoFormatter.date(from: $0) } }
 
@@ -930,8 +936,11 @@ final class Store {
             var info = ThreadInfo(title: obj["title"] as? String, author: login(obj))
             info.activity = nodes(obj, "comments").filter { login($0) == me }.compactMap { date($0, "createdAt") }
                 + nodes(obj, "reviews").filter { login($0) == me }.compactMap { date($0, "submittedAt") }
+            info.activityTruncated = truncated(obj, "comments", "hasPreviousPage") || truncated(obj, "reviews", "hasPreviousPage")
+            info.reviewThreadsTruncated = truncated(obj, "reviewThreads", "hasPreviousPage")
             for thread in nodes(obj, "reviewThreads") {
                 let comments = nodes(thread, "comments")
+                if truncated(thread, "comments", "hasNextPage") { info.reviewThreadsTruncated = true }
                 guard let root = comments.first?["databaseId"] as? Int else { continue }
                 info.reviewActivity[root] = comments.filter { login($0) == me }.compactMap { date($0, "createdAt") }
             }
@@ -949,6 +958,14 @@ final class Store {
             return thread.reviewActivity[item.threadRoot ?? -1]?.contains { $0 < item.createdAt } ?? false
         }
         return thread.activity.contains { $0 < item.createdAt }
+    }
+
+    /// `isRelevant`, or nil when the thread was cut off before it could say: only a whole view can rule a comment out.
+    nonisolated static func relevance(_ item: InboxItem, thread: ThreadInfo?, mentioned: Bool, me: String) -> Bool? {
+        if isRelevant(item, thread: thread, mentioned: mentioned, me: me) { return true }
+        guard let thread else { return nil }
+        let cut = item.kind == .reviewComment ? thread.reviewThreadsTruncated : thread.activityTruncated
+        return cut ? nil : false
     }
 
     nonisolated static func mentions(_ body: String?, _ me: String) -> Bool {

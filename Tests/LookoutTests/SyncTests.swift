@@ -156,6 +156,22 @@ private func threads(_ body: Data) -> Any {
         #expect(s.items.sorted { $0.number < $1.number }.map(\.forYou) == [true, nil, nil])
     }
 
+    @Test func aThreadWhoseHistoryWasCutOffIsKept() async {
+        let (s, _) = store()
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in [comment(1, on: 7, by: "them", at: Date().addingTimeInterval(-600))] },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            // Someone else's thread whose comment list has earlier pages I can't see.
+            "/graphql": { _ in ["data": ["repository": ["n7": [
+                "title": "Seven", "author": ["login": "other"],
+                "comments": ["pageInfo": ["hasPreviousPage": true], "nodes": []], "reviews": ["nodes": []],
+            ]]]] },
+        ])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.map(\.forYou) == [nil])
+    }
+
     @Test func anErrorWithoutAPathLeavesTheWholeBatchUnknown() async {
         let (s, _) = store()
         StubGitHub.reset([

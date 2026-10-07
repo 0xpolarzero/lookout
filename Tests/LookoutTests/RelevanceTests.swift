@@ -38,6 +38,19 @@ private func comment(_ kind: EventKind, at offset: TimeInterval, root: Int? = ni
         #expect(!Store.isRelevant(comment(.reviewComment, at: -60, root: 9), thread: thread, mentioned: false, me: me))
     }
 
+    @Test func aCutOffThreadCantRuleACommentOut() {
+        var thread = Store.ThreadInfo(title: "t", author: "other", activity: [t0])
+        thread.activityTruncated = true
+        // Seeing my earlier comment is proof; not seeing one proves nothing when the history was cut.
+        #expect(Store.relevance(comment(.issueComment, at: 60), thread: thread, mentioned: false, me: me) == true)
+        #expect(Store.relevance(comment(.issueComment, at: -60), thread: thread, mentioned: false, me: me) == nil)
+        #expect(Store.relevance(comment(.reviewComment, at: 60, root: 9), thread: thread, mentioned: false, me: me) == false)
+        thread.reviewThreadsTruncated = true
+        #expect(Store.relevance(comment(.reviewComment, at: 60, root: 9), thread: thread, mentioned: false, me: me) == nil)
+        #expect(Store.relevance(comment(.issueComment, at: 0), thread: nil, mentioned: false, me: me) == nil)
+        #expect(Store.relevance(comment(.issueComment, at: 0), thread: nil, mentioned: true, me: me) == true)
+    }
+
     @Test func mentionAlwaysCounts() {
         let thread = Store.ThreadInfo(title: "t", author: "other")
         #expect(Store.isRelevant(comment(.prComment, at: 0), thread: thread, mentioned: true, me: me))
