@@ -589,16 +589,18 @@ import Testing
         func session(_ id: String, _ folder: String) -> ClaudeSession {
             ClaudeSession(id: id, title: id, folder: folder, lastActivity: Date())
         }
+        var runs = 0
+        s.nameFolders = { runs += 1; return FolderNames.names(for: $0) }
         s.claudeSessions = ["a": session("a", "/x/app"), "b": session("b", "/y/app")]
-        #expect(s.folderNames == ["/x/app": "x/app", "/y/app": "y/app"])
-        let seen = s.namedFoldersSeen
-        // A session's own change (its activity moves its time) leaves the folders as they were.
+        #expect(s.folderNames == ["/x/app": "x/app", "/y/app": "y/app"] && runs == 1)
+        // A session's own change (its activity moves its time) leaves the folders as they were: nothing is worked out again.
         s.claudeSessions["a"]?.lastActivity = Date().addingTimeInterval(60)
-        #expect(s.namedFoldersSeen == seen && s.folderNames["/x/app"] == "x/app")
-        // A new folder, or a muted one, does not.
+        s.agents.entries.append(AgentEntry(id: "a"))
+        #expect(runs == 1 && s.folderNames["/x/app"] == "x/app")
+        // A new folder, or a muted one, does: once each.
         s.claudeSessions["c"] = session("c", "/z/tool")
-        #expect(s.folderNames["/z/tool"] == "tool")
+        #expect(s.folderNames["/z/tool"] == "tool" && runs == 2)
         s.agents.mutedFolders = ["/w/app"]
-        #expect(s.folderNames["/w/app"] == "w/app" && s.folderNames["/x/app"] == "x/app")
+        #expect(s.folderNames["/w/app"] == "w/app" && s.folderNames["/x/app"] == "x/app" && runs == 3)
     }
 }

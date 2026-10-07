@@ -59,6 +59,8 @@ final class Store {
     var folderNames: [String: String] = [:]
     /// The folders `folderNames` was worked out for: the work is skipped while they are the same.
     @ObservationIgnored var namedFoldersSeen: Set<String>?
+    /// What works the names out (the tests count its runs).
+    @ObservationIgnored var nameFolders: (Set<String>) -> [String: String] = FolderNames.names(for:)
     /// Bumped whenever the rows the hub shows can change (agents, sessions, activity, tasks): a cheap memo/animation key.
     private(set) var agentsRevision = 0
     var claudeSessions: [String: ClaudeSession] = [:] {
