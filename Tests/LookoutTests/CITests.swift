@@ -163,6 +163,17 @@ import Testing
         #expect(CISpeech.list(["a", "b", "c"]) == "a, b and c")
     }
 
+    @Test func aQuietRepositoryStillTellsItsBranchAndHeadline() {
+        var passing = status(.success)
+        passing.title = "Fix the thing"
+        let entry = CIEntry(repo: RepoConfig(fullName: "apple/swift-format"), status: passing, state: .success, muted: true)
+        #expect(entry.tooltip == "apple/swift-format · main\nFix the thing")
+        #expect(entry.tipDetail == "Fix the thing")
+        #expect(entry.headline == "Fix the thing")
+        let unchecked = CIEntry(repo: entry.repo, status: nil, state: .none, muted: false)
+        #expect(unchecked.tipDetail == nil)
+    }
+
     @Test func aRepositoryNobodyAnsweredForIsSpokenAsNotChecked() {
         let unchecked = CIEntry(repo: RepoConfig(fullName: "apple/swift-format"), status: nil, state: .none, muted: false)
         #expect(CISpeech.value(unchecked, now: now) == "not checked")

@@ -118,7 +118,7 @@ struct CIRow: View {
 
     /// Compared here, in this row's own body: hovering another row doesn't rebuild the whole hub.
     private var selected: Bool { hub.selected("c:" + entry.id) }
-    private var failing: [String] { entry.state == .failure ? entry.status?.failing ?? [] : [] }
+    private var failing: [String] { entry.failingChecks }
 
     var body: some View {
         Button { store.openChecks(entry.repo) } label: {
@@ -146,23 +146,11 @@ struct CIRow: View {
         .accessibilityLabel(title)
         // The age said and the age shown come from the same minute, each from the clock in a view of its own.
         .spokenTime { content, now in content.accessibilityValue(CISpeech.value(entry, now: now)) }
-        .accessibilityHint([headline, "Opens its checks. More actions available."].filter { !$0.isEmpty }.joined(separator: ". "))
-        .help(tooltip)
-        // The keyboard's pick shows what a tooltip would (the failing checks and the headline are cut to one line).
-        .tip(title, tipDetail, focused: hub.keyboardPicked("c:" + entry.id), hover: false)
+        .inspection(of: entry, title: title, hub: hub)
         .ciActions(entry, store: store)
         .rowMenuTarget("c:" + entry.id, hub: hub)
         .voiceOverTarget("c:" + entry.id, hub: hub)
         .onHover { hover = $0; hub.pointer($0, over: "c:" + entry.id, ui: ui) }
-    }
-
-    /// The commit's headline, for VoiceOver: the row shows it cut to a line, or not at all when the failed checks take it.
-    private var headline: String { entry.status?.title ?? "" }
-
-    /// What the tooltip says under the repository.
-    private var tipDetail: String? {
-        let lines = tooltip.split(separator: "\n", omittingEmptySubsequences: true).dropFirst().map(String.init)
-        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     /// Line 2: the checks that failed, in red, or the commit's headline.
@@ -173,12 +161,37 @@ struct CIRow: View {
             Text(entry.status?.title ?? entry.status?.branch ?? "").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1)
         }
     }
+}
 
-    private var tooltip: String {
-        var lines = ["\(entry.repo.fullName) · \(entry.status?.branch ?? entry.repo.defaultBranch ?? "default branch")"]
-        if let headline = entry.status?.title, !headline.isEmpty { lines.append(headline) }
-        if !failing.isEmpty { lines.append("Failing: " + failing.joined(separator: ", ")) }
+/// What a repository row says about its latest commit: on hover, to the keyboard's pick, and to VoiceOver. A quiet row
+/// has no line for it, so this is where its branch and headline are.
+extension CIEntry {
+    var failingChecks: [String] { state == .failure ? status?.failing ?? [] : [] }
+
+    /// The commit's headline, for VoiceOver: the row shows it cut to a line, or not at all when the failed checks take it.
+    var headline: String { status?.title ?? "" }
+
+    var tooltip: String {
+        var lines = ["\(repo.fullName) · \(status?.branch ?? repo.defaultBranch ?? "default branch")"]
+        if !headline.isEmpty { lines.append(headline) }
+        if !failingChecks.isEmpty { lines.append("Failing: " + failingChecks.joined(separator: ", ")) }
         return lines.joined(separator: "\n")
+    }
+
+    /// What the tooltip says under the repository.
+    var tipDetail: String? {
+        let lines = tooltip.split(separator: "\n", omittingEmptySubsequences: true).dropFirst().map(String.init)
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+}
+
+private extension View {
+    /// The tooltip, the keyboard pick's tip and the VoiceOver hint of a repository row (`CIEntry.tooltip`).
+    func inspection(of entry: CIEntry, title: String, hub: HubState) -> some View {
+        accessibilityHint([entry.headline, "Opens its checks. More actions available."].filter { !$0.isEmpty }.joined(separator: ". "))
+            .help(entry.tooltip)
+            // The keyboard's pick shows what a tooltip would (the failing checks and the headline are cut to one line).
+            .tip(title, entry.tipDetail, focused: hub.keyboardPicked("c:" + entry.id), hover: false)
     }
 }
 
@@ -280,7 +293,7 @@ private struct CINameRow: View {
         .focusable(false)
         .accessibilityLabel(title)
         .spokenTime { content, now in content.accessibilityValue(CISpeech.value(entry, now: now)) }
-        .accessibilityHint("Opens its checks. More actions available.")
+        .inspection(of: entry, title: title, hub: hub)
         .ciActions(entry, store: store)
         .rowMenuTarget("c:" + entry.id, hub: hub)
         .voiceOverTarget("c:" + entry.id, hub: hub)
