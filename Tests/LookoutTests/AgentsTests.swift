@@ -46,6 +46,16 @@ import Testing
         #expect(s.iconTarget()?.id == "b")
     }
 
+    @Test func askingForAnIconOfAnOldSessionFoundThroughSearchPicksIt() {
+        let s = store([session("a"), session("old", minutesAgo: 3 * 24 * 60)])
+        #expect(entry(s, "old") == nil)
+        #expect(s.searchSessions("session old").map(\.id) == ["old"])
+        s.repickIcon("old")  // no key here, so nothing is asked for yet
+        #expect(s.iconTarget()?.id == "old")
+        #expect(s.allAgentRows.map(\.id) == ["a"])  // still unlisted
+        #expect(entry(s, "old")?.hiddenAt != nil)
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])

@@ -560,15 +560,20 @@ extension Store {
 
     /// Kept sessions go to the end of your list (any session: it doesn't have to be pending).
     func keepAgent(_ id: String) {
-        if !agents.entries.contains(where: { $0.id == id }), let session = claudeSessions[id] {
-            agents.entries.append(AgentEntry(id: id, seen: session.activity, focusedAt: session.lastFocused))
-            agents.assignColor(session.folderKey)
-        }
+        ensureEntry(id)
         guard let i = agents.entries.firstIndex(where: { $0.id == id }) else { return }
         var entry = agents.entries.remove(at: i)
         entry.kept = true
         entry.hiddenAt = nil
         agents.entries.append(entry)
+    }
+
+    /// Sessions Lookout holds no entry for (old, muted, past the first read's cap) get one when you customize or
+    /// keep them: hidden, so they stay unlisted until their next activity.
+    private func ensureEntry(_ id: String) {
+        guard !agents.entries.contains(where: { $0.id == id }), let session = claudeSessions[id] else { return }
+        agents.entries.append(AgentEntry(id: id, seen: session.activity, hiddenAt: session.activity, focusedAt: session.lastFocused))
+        agents.assignColor(session.folderKey)
     }
 
     /// Pending: hidden until its next activity. Kept: leaves your list (and comes back as pending on new activity).
@@ -653,6 +658,7 @@ extension Store {
 
     /// Replaces a session's icon (the old one is never offered again for it).
     func repickIcon(_ id: String) {
+        ensureEntry(id)
         mutateAgent(id) {
             if let icon = $0.icon { $0.rejectedIcons = ($0.rejectedIcons ?? []) + [icon] }
             $0.icon = nil
