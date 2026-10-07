@@ -46,10 +46,8 @@ struct GHRepo: Decodable {
 struct GHSearch<T: Decodable>: Decodable {
     let items: [T]
     let totalCount: Int?
+    /// GitHub gave up before searching everything: `items` may be missing some matches.
     let incompleteResults: Bool?
-
-    /// Nothing is missing from `items`: only then does an absent result mean it's gone.
-    var isComplete: Bool { incompleteResults != true && items.count >= (totalCount ?? 0) }
 }
 
 struct GHWorkflowRuns: Decodable {

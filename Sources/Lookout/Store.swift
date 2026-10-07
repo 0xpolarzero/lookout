@@ -1190,13 +1190,36 @@ final class Store {
         }
     }
 
+    /// GitHub's search returns at most 1000 results, 100 a page.
+    private static let reviewRequestPages = 10
+
     func syncReviewRequests() async {
-        guard let result: GHSearch<GHIssue> = try? await gh.get(
-            "/search/issues", ["q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "50"]) else { return }
+        var found: [GHIssue] = []
+        var complete = false
+        do {
+            for page in 1...Self.reviewRequestPages {
+                let result: GHSearch<GHIssue> = try await gh.get("/search/issues", [
+                    "q": "is:open is:pr user-review-requested:@me archived:false", "per_page": "100", "page": "\(page)"])
+                found += result.items
+                if result.incompleteResults == true { break }
+                if found.count >= (result.totalCount ?? (result.items.count < 100 ? found.count : .max)) {
+                    complete = true
+                    break
+                }
+                // A short page with more still to come: GitHub lost some, so what was read is not everything.
+                if result.items.count < 100 { break }
+            }
+        } catch { return }
+        applyReviewRequests(found, complete: complete)
+    }
+
+    /// `complete`: `found` is every pending request. Only then can a missing one be told from one that moved off the
+    /// pages read (past 1000 results, or a search GitHub cut short), which must not be marked answered.
+    func applyReviewRequests(_ found: [GHIssue], complete: Bool) {
         let first = !settings.didInitialReviewSync
         var current = Set<String>()
         var added: [InboxItem] = []
-        for pr in result.items {
+        for pr in found {
             let id = "rr#\(pr.id)"
             current.insert(id)
             guard let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
@@ -1217,15 +1240,16 @@ final class Store {
         }
         // Request disappeared: I reviewed it (or it was withdrawn/closed). A Done one is forgotten, so a new request
         // on the same PR starts fresh.
-        requested = result.isComplete ? current : requested.map { $0.union(current) }
-        if result.isComplete {
+        requested = complete ? current : requested.map { $0.union(current) }
+        if complete {
             for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
                 items[i].state = .addressed
             }
             items.removeAll { $0.kind == .reviewRequested && $0.state == .discarded && !current.contains($0.id) }
         }
         if first {
-            settings.didInitialReviewSync = true
+            // The rest of a partial first sync is still "what was already there", not news.
+            if complete { settings.didInitialReviewSync = true }
         } else {
             announce(added)
         }
