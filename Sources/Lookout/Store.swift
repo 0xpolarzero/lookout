@@ -363,9 +363,12 @@ final class Store {
     }
 
     private var effectivePollInterval: TimeInterval {
-        let base = settings.pollInterval
-        if hubOpen { return min(base, 30) }
-        return ProcessInfo.processInfo.isLowPowerModeEnabled ? base * 2 : base
+        Self.pollInterval(base: settings.pollInterval, hubOpen: hubOpen, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+
+    /// How often to poll: the setting, at most 30 s while the hub is open, and doubled in Low Power Mode whichever it is.
+    nonisolated static func pollInterval(base: TimeInterval, hubOpen: Bool, lowPower: Bool) -> TimeInterval {
+        (hubOpen ? min(base, 30) : base) * (lowPower ? 2 : 1)
     }
 
     /// Sleeps in slices so a change (hub opening, wake, new interval) can cut it short.
