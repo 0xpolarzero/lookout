@@ -164,8 +164,32 @@ import Testing
         let moved = Shortcut(keyCode: UInt16(kVK_ANSI_J), modifiers: [.control, .command])
         #expect(store.setShortcut(moved, for: .togglePanel) == nil)
         registrar.taken = [keep]
-        #expect(store.setShortcut(nil, for: .togglePanel) == .unavailable(keep))
+        #expect(store.resetShortcut(for: .togglePanel) == .unavailable(keep))
         #expect(store.shortcut(.togglePanel) == moved && registrar.registered[1] == moved)
+        withExtendedLifetime(globals) {}
+    }
+
+    @MainActor @Test func resetRefusesADefaultAnotherActionHasTakenAndKeepsTheWorkingKey() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        let globals = connected(store, registrar)
+        let keepDefault = ShortcutAction.togglePanel.defaultShortcut
+        let moved = Shortcut(keyCode: UInt16(kVK_ANSI_G), modifiers: [.control, .command])
+        store.setShortcut(moved, for: .togglePanel)
+        // Switch Claude session takes the key Keep open used to have: nothing holds it, so the recorder allows it.
+        #expect(store.shortcutConflict(keepDefault, for: .sessionSwitcher) == nil)
+        store.setShortcut(keepDefault, for: .sessionSwitcher)
+        let refusal = store.resetShortcut(for: .togglePanel)
+        #expect(refusal == .usedBy(.sessionSwitcher))
+        #expect(refusal?.message == "Already used for Switch Claude session")
+        #expect(store.shortcut(.togglePanel) == moved)
+        #expect(store.shortcut(.sessionSwitcher) == keepDefault)
+        #expect(registrar.registered == [1: moved, 2: keepDefault])
+        // Once the other action lets go of it, the reset goes through.
+        store.setShortcut(nil, for: .sessionSwitcher)
+        #expect(store.resetShortcut(for: .togglePanel) == nil)
+        #expect(store.shortcut(.togglePanel) == keepDefault)
+        #expect(registrar.registered == [1: keepDefault, 2: ShortcutAction.sessionSwitcher.defaultShortcut])
         withExtendedLifetime(globals) {}
     }
 

@@ -167,13 +167,31 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     }
 }
 
+extension Store {
+    /// The action that already holds `shortcut`, which `action` can't take as well.
+    func shortcutConflict(_ shortcut: Shortcut, for action: ShortcutAction) -> ShortcutAction? {
+        guard !shortcut.isUnassigned else { return nil }
+        return ShortcutAction.allCases.first { $0 != action && self.shortcut($0) == shortcut }
+    }
+
+    /// Back to the default, unless another action has taken that key since (the reset would give both the same key, and the
+    /// system would drop one of them) or another app has. Returns what stood in the way, with nothing changed.
+    @discardableResult
+    func resetShortcut(for action: ShortcutAction) -> ShortcutRefusal? {
+        if let other = shortcutConflict(action.defaultShortcut, for: action) { return .usedBy(other) }
+        return setShortcut(nil, for: action)
+    }
+}
+
 /// Why a shortcut wasn't taken: the sentence under its recorder.
 enum ShortcutRefusal: Equatable {
+    case usedBy(ShortcutAction)
     /// Another app holds a system-wide key: Lookout keeps the one it had.
     case unavailable(Shortcut)
 
     var message: String {
         switch self {
+        case .usedBy(let other): "Already used for \(other.title)"
         case .unavailable(let shortcut): "\(shortcut.display) is used by another app. Lookout keeps the old shortcut"
         }
     }
@@ -244,7 +262,7 @@ struct ShortcutRecorder: View {
         VStack(alignment: .trailing, spacing: Theme.Space.xs) {
             HStack(spacing: 4) {
                 if customized && !recording {
-                    Button { error = store.setShortcut(nil, for: action)?.message } label: {
+                    Button { error = store.resetShortcut(for: action)?.message } label: {
                         Image(systemName: "arrow.uturn.backward").font(Theme.Typography.glyph(9, .bold)).frame(width: 20, height: 20)
                     }
                     .buttonStyle(HoverFillButtonStyle(shape: Circle()))
@@ -324,8 +342,8 @@ struct ShortcutRecorder: View {
     }
 
     private func accept(_ shortcut: Shortcut) {
-        if let other = ShortcutAction.allCases.first(where: { $0 != action && store.shortcut($0) == shortcut }) {
-            error = "Already used for \(other.title)"
+        if let other = store.shortcutConflict(shortcut, for: action) {
+            error = ShortcutRefusal.usedBy(other).message
         } else if let refusal = store.setShortcut(shortcut, for: action) {
             error = refusal.message
         } else {
