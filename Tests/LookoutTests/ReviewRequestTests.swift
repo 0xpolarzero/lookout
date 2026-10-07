@@ -43,6 +43,19 @@ import Testing
         #expect(s.items.filter { $0.kind == .reviewRequested }.count == 130)
     }
 
+    @Test func aLaterPageFailingKeepsTheRequestsAlreadyFetched() async {
+        let first = "[" + (1...100).map { Self.issue($0) }.joined(separator: ",") + "]"
+        let s = store { request in
+            if Self.page(request) == "1" { return .init(200, #"{"total_count": 101, "incomplete_results": false, "items": \#(first)}"#) }
+            return .init(500, #"{"message": "Timed out"}"#)
+        }
+        s.applyReviewRequests([request(200)], complete: true)
+        await s.syncReviewRequests()
+        #expect(s.items.filter { $0.kind == .reviewRequested }.count == 101)
+        // Nothing the failed page might have held is taken for gone: a request that was there stays.
+        #expect(s.items.allSatisfy { $0.state.isOpen })
+    }
+
     @Test func aRequestOffThePagesReadIsNotMarkedAddressed() {
         let s = store { _ in .init(500, "") }
         s.applyReviewRequests([request(1), request(2)], complete: true)

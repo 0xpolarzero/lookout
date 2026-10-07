@@ -1209,7 +1209,11 @@ final class Store {
                 // A short page with more still to come: GitHub lost some, so what was read is not everything.
                 if result.items.count < 100 { break }
             }
-        } catch { return }
+        } catch {
+            // The pages that did arrive are real requests: kept, as a search that stopped short (nothing can be told missing).
+            if !found.isEmpty { applyReviewRequests(found, complete: false) }
+            return
+        }
         applyReviewRequests(found, complete: complete)
     }
 
