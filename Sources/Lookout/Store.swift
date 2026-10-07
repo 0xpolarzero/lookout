@@ -1479,19 +1479,22 @@ final class Store {
     }
 
     func prune(now: Date = Date()) {
+        // What ⌘Z could still bring back stays for the half minute it lasts, and a Done request that is still requested
+        // stays, or the next poll would bring it back unread: however old, however many newer items there are.
+        func protected(_ item: InboxItem) -> Bool {
+            if undoStack.holds(item.id, now: now) { return true }
+            return item.kind == .reviewRequested && item.state == .discarded && requested?.contains(item.id) ?? true
+        }
         func expired(_ item: InboxItem) -> Bool {
-            // What ⌘Z could still bring back stays for the half minute it lasts, however old the item is.
-            if undoStack.holds(item.id, now: now) { return false }
-            // A Done request that is still requested stays, or the next poll would bring it back unread.
-            if item.kind == .reviewRequested, item.state == .discarded, requested?.contains(item.id) ?? true { return false }
+            if protected(item) { return false }
             let age = now.timeIntervalSince(item.createdAt)
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
         if items.contains(where: expired) { items.removeAll(where: expired) }
-        // What ⌘Z could still bring back is outside the cap too.
-        let held = items.filter { undoStack.holds($0.id, now: now) }
+        // The protected ones are outside the cap too.
+        let held = items.filter(protected)
         if items.count - held.count > Self.itemCap {
-            let rest = items.filter { !undoStack.holds($0.id, now: now) }.sorted { $0.createdAt > $1.createdAt }
+            let rest = items.filter { !protected($0) }.sorted { $0.createdAt > $1.createdAt }
             items = held + rest.prefix(Self.itemCap)
         }
     }

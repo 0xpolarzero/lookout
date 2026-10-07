@@ -256,6 +256,29 @@ private func threads(_ body: Data) -> Any {
         #expect(s.items.isEmpty)
     }
 
+    @Test func aDoneRequestStillRequestedOutlivesTheItemCapOnceUndoHasExpired() async {
+        let (s, posted) = reviewStore()
+        await poll(s, [request(1)])
+        s.discard(s.items[0])
+        let done = s.items[0]
+        // Older than every other item, and 1,500 newer ones that fill the cap.
+        let now = Date()
+        let newer = (0..<Store.itemCap).map { i in
+            InboxItem(id: "n\(i)", repo: "a/r", kind: .issueComment, number: i, title: "t",
+                      snippet: "", author: "x", avatar: nil, authorIsApp: false, url: URL(string: "https://github.com/a/r")!,
+                      createdAt: now.addingTimeInterval(-Double(i) - 1), state: .unread)
+        }
+        s.items[0].createdAt = now.addingTimeInterval(-5 * 86400)
+        s.items += newer
+        s.prune(now: now.addingTimeInterval(UndoStack.validFor + 1))
+        #expect(s.items.contains { $0.id == done.id && $0.state == .discarded })
+        #expect(s.items.count == Store.itemCap + 1)
+        // Still requested at the next search: it stays Done, and nothing is announced again.
+        await poll(s, [request(1)])
+        #expect(s.items.filter { $0.id == done.id }.map(\.state) == [.discarded])
+        #expect(posted.ids == ["rr#1"])
+    }
+
     @Test func aTruncatedSearchDoesNotMakeRequestsDisappear() async {
         let (s, posted) = reviewStore()
         await poll(s, [request(1)])
