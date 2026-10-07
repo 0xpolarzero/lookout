@@ -101,4 +101,137 @@ import Testing
         updater.preview(.failed("The download didn't finish"))
         #expect(updater.showsInPill)
     }
+
+    @MainActor @Test(arguments: [Updater.Phase.available, .downloading, .ready, .failed("Can't write to /Applications")])
+    func skippingAVersionClearsItWhereverItStood(phase: Updater.Phase) {
+        let updater = Updater()
+        var skipped: String?
+        updater.onSkip = { skipped = $0 }
+        updater.preview(phase, version: "0.5.0", fraction: 0.4)
+        updater.skip()
+        #expect(skipped == "0.5.0")
+        #expect(updater.release == nil)
+        #expect(updater.phase == .idle)
+        #expect(!updater.showsInPill)
+    }
+
+    // MARK: Download, Skip and restart, with the network and the system stood in for
+
+    /// A zip's transfer that does nothing until the test says so (`resume()` finishes at once when `delivers`).
+    private final class FakeTransfer: UpdateTransfer, @unchecked Sendable {
+        let progress = Progress(totalUnitCount: 100)
+        let finish: @Sendable (URL?, URLResponse?, Error?) -> Void
+        let delivers: Bool
+        /// A real transfer reports its cancellation to its handler; one that had finished already does not.
+        let reportsCancel: Bool
+        private(set) var cancelled = false
+        init(delivers: Bool, reportsCancel: Bool, finish: @escaping @Sendable (URL?, URLResponse?, Error?) -> Void) {
+            self.delivers = delivers
+            self.reportsCancel = reportsCancel
+            self.finish = finish
+        }
+        func resume() { if delivers { deliver() } }
+        func cancel() {
+            cancelled = true
+            if reportsCancel { finish(nil, nil, URLError(.cancelled)) }
+        }
+        func deliver() {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("fake-\(UUID().uuidString).zip")
+            try? Data("zip".utf8).write(to: file)
+            let url = URL(string: "https://example.com/Lookout-9.9.9.zip")!
+            finish(file, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil), nil)
+        }
+    }
+
+    /// An updater that has found 9.9.9 and whose zip, checking and unpacking, and restart are the test's.
+    @MainActor private final class Rig {
+        let updater = Updater(current: "0.0.1", forceRelease: true)
+        private(set) var transfers: [FakeTransfer] = []
+        private(set) var prepared = 0
+        private(set) var installed: [URL] = []
+        let app = FileManager.default.temporaryDirectory.appendingPathComponent("lookout-fake-\(UUID().uuidString)/Lookout.app")
+        var installFailures: [String] = []
+
+        init(delivers: Bool, reportsCancel: Bool = true) {
+            let page = URL(string: "https://example.com")!
+            updater.latest = { Updater.Release(version: "9.9.9", zip: page, checksum: page, page: page) }
+            updater.transport = { [unowned self] _, finish in
+                let transfer = FakeTransfer(delivers: delivers, reportsCancel: reportsCancel, finish: finish)
+                transfers.append(transfer)
+                return transfer
+            }
+            updater.prepare = { [unowned self] _, _, _ in
+                prepared += 1
+                return app
+            }
+            updater.installer = { [unowned self] app in
+                installed.append(app)
+                if !installFailures.isEmpty { throw UpdateError(installFailures.removeFirst()) }
+            }
+        }
+
+        /// Waits (briefly) for what runs in the background.
+        func settle(_ done: () -> Bool) async throws {
+            for _ in 0..<200 where !done() { try await Task.sleep(for: .milliseconds(10)) }
+        }
+    }
+
+    @MainActor @Test func skipStopsTheTransferAndNothingItDoesLaterIsStaged() async throws {
+        let rig = Rig(delivers: false)
+        await rig.updater.check(manual: true)
+        rig.updater.download()
+        try await rig.settle { !rig.transfers.isEmpty }
+        let transfer = try #require(rig.transfers.first)
+        #expect(rig.updater.phase == .downloading)
+
+        rig.updater.skip()
+        #expect(transfer.cancelled)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(rig.updater.phase == .idle)
+        #expect(rig.updater.release == nil)
+        #expect(rig.updater.stagedPath == nil)
+        #expect(rig.prepared == 0)
+    }
+
+    @MainActor @Test func aTransferThatFinishesJustAfterSkipIsNotVerifiedOrStaged() async throws {
+        // The zip had arrived as Skip was clicked: its completion is delivered after, and must change nothing.
+        let rig = Rig(delivers: false, reportsCancel: false)
+        await rig.updater.check(manual: true)
+        rig.updater.download()
+        try await rig.settle { !rig.transfers.isEmpty }
+        let transfer = try #require(rig.transfers.first)
+
+        rig.updater.skip()
+        transfer.deliver()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(rig.prepared == 0)
+        #expect(rig.updater.phase == .idle)
+        #expect(rig.updater.stagedPath == nil)
+        #expect(!rig.updater.showsInPill)
+        // And the next release is free to download: nothing of the skipped one is left holding the slot.
+        await rig.updater.check(manual: true)
+        rig.updater.download()
+        try await rig.settle { rig.transfers.count == 2 }
+        #expect(rig.transfers.count == 2)
+    }
+
+    @MainActor @Test func aFailedRestartIsRetriedWithTheVerifiedAppNotDownloadedAgain() async throws {
+        let rig = Rig(delivers: true)
+        rig.installFailures = ["Can't write to /Applications"]
+        await rig.updater.check(manual: true)
+        rig.updater.download()
+        try await rig.settle { rig.updater.phase == .ready }
+        #expect(rig.updater.stagedPath == rig.app.path)
+
+        rig.updater.install()
+        #expect(rig.updater.phase == .failed("Can't write to /Applications"))
+        #expect(rig.updater.stagedPath == rig.app.path)
+
+        // "Try again" on the failed phase restarts into the same app.
+        rig.updater.advance()
+        #expect(rig.updater.phase == .installing)
+        #expect(rig.installed == [rig.app, rig.app])
+        #expect(rig.transfers.count == 1)
+        #expect(rig.prepared == 1)
+    }
 }

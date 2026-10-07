@@ -19,6 +19,8 @@ final class Updater {
         case ready
         case installing
         case failed(String)
+
+        var isFailed: Bool { if case .failed = self { true } else { false } }
     }
 
     struct Release: Equatable {
@@ -47,11 +49,24 @@ final class Updater {
     @ObservationIgnored var onSkip: (String) -> Void = { _ in }
     /// Looks up the newest release; tests swap it for a canned one.
     @ObservationIgnored var latest: () async throws -> Release = Updater.latest
+    /// The three places a test stands in for the network and the system: starting the zip's transfer, checking and
+    /// unpacking it (to the app it holds), and swapping the app in and quitting.
+    @ObservationIgnored var transport: (URL, @escaping @Sendable (URL?, URLResponse?, Error?) -> Void) -> any UpdateTransfer = {
+        URLSession.shared.downloadTask(with: $0, completionHandler: $1)
+    }
+    @ObservationIgnored var prepare: (URL, Release, URL) async throws -> URL = { zip, release, checksum in
+        try await Updater.verifyChecksum(of: zip, against: checksum)
+        // Unpacking and checking the signature take a while: not on the main thread.
+        return try await Task.detached(priority: .utility) { try Updater.unpack(zip, version: release.version) }.value
+    }
+    @ObservationIgnored var installer: (URL) throws -> Void = Updater.swapIn
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var work: Task<Void, Never>?
     @ObservationIgnored private var staged: URL?
     var stagedPath: String? { staged?.path }
     @ObservationIgnored private var progress: NSKeyValueObservation?
+    /// The zip in flight, so Skip can stop the transfer and not only the task waiting on it.
+    @ObservationIgnored private var transfer: (any UpdateTransfer)?
     @ObservationIgnored private var wake: NSObjectProtocol?
     /// Downloads started by an automatic check fail quietly and are tried again at the next check,
     /// unless the failure says the release can't be trusted (see `UpdateError.untrusted`).
@@ -171,20 +186,28 @@ final class Updater {
     func download() {
         guard let release, work == nil else { return }
         fraction = 0
+        // Whatever was verified for an older release is not this one.
+        staged = nil
         phase = .downloading
         work = Task {
-            defer { work = nil; progress = nil }
+            // Skipped meanwhile (`skip()` has cleared `work` and said where things stand): nothing here may publish.
+            defer { if !Task.isCancelled { work = nil; progress = nil } }
             do {
                 // Without a checksum there's nothing to trust the download against: don't even fetch it.
                 guard let checksum = release.checksum else { throw UpdateError("The release has no checksum to verify the download", untrusted: true) }
                 let zip = try await fetch(release.zip)
                 defer { try? FileManager.default.removeItem(at: zip) }
-                try await Self.verifyChecksum(of: zip, against: checksum)
-                staged = try Self.unpack(zip, version: release.version)
+                // Skipped while the transfer's completion was on its way: nothing more of it may be verified or staged.
+                try Task.checkCancellation()
+                let app = try await prepare(zip, release, checksum)
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: app.deletingLastPathComponent())
+                    return
+                }
+                staged = app
                 phase = .ready
-            } catch is CancellationError {
-                phase = .available
             } catch {
+                guard !Task.isCancelled else { return }
                 phase = quiet && (error as? UpdateError)?.untrusted != true ? .available : .failed(error.localizedDescription)
             }
             quiet = false
@@ -215,8 +238,9 @@ final class Updater {
     }
 
     private func fetch(_ url: URL) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let task = URLSession.shared.downloadTask(with: url) { file, response, error in
+        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { continuation in
+            let task = transport(url) { file, response, error in
                 if let error { return continuation.resume(throwing: error) }
                 guard let file, (response as? HTTPURLResponse)?.statusCode == 200 else {
                     return continuation.resume(throwing: UpdateError("The download failed"))
@@ -234,6 +258,7 @@ final class Updater {
                 let completed = p.fractionCompleted
                 Task { @MainActor in self?.report(completed) }
             }
+            transfer = task
             task.resume()
         }
     }
@@ -282,17 +307,23 @@ final class Updater {
 
     /// Quits, swaps the bundle (keeping the old one if that fails) and opens the new one.
     func install() {
-        guard phase == .ready, let staged else { return }
+        // Failed: the restart itself did, so the verified app is still here to try again with.
+        guard phase == .ready || phase.isFailed, let staged else { return }
+        phase = .installing
+        do {
+            try installer(staged)
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    private static func swapIn(_ staged: URL) throws {
         let target = Bundle.main.bundleURL
         let parent = target.deletingLastPathComponent()
         if target.path.contains("/AppTranslocation/") {
-            phase = .failed("Move Lookout to Applications (and clear its quarantine) to update it")
-            return
+            throw UpdateError("Move Lookout to Applications (and clear its quarantine) to update it")
         }
-        guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            phase = .failed("Can't write to \(parent.path)")
-            return
-        }
+        guard FileManager.default.isWritableFile(atPath: parent.path) else { throw UpdateError("Can't write to \(parent.path)") }
         let script = """
         while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
         backup="$2.previous"
@@ -306,13 +337,7 @@ final class Updater {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script, "sh", String(ProcessInfo.processInfo.processIdentifier), target.path, staged.path]
-        do {
-            try process.run()
-        } catch {
-            phase = .failed(error.localizedDescription)
-            return
-        }
-        phase = .installing
+        try process.run()
         NSApp.terminate(nil)
     }
 
@@ -341,6 +366,10 @@ final class Updater {
     func skip() {
         guard let release else { return }
         work?.cancel()
+        transfer?.cancel()
+        work = nil
+        progress = nil
+        quiet = false
         onSkip(release.version)
         self.release = nil
         phase = .idle
@@ -379,6 +408,14 @@ enum UpdateCheck {
         }
     }
 }
+
+/// What `Updater` needs of a zip's transfer (a `URLSessionDownloadTask`, or a test's stand-in).
+protocol UpdateTransfer: AnyObject {
+    var progress: Progress { get }
+    func resume()
+    func cancel()
+}
+extension URLSessionDownloadTask: UpdateTransfer {}
 
 struct UpdateError: LocalizedError {
     let message: String
