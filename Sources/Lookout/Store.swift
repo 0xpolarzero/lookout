@@ -1221,6 +1221,9 @@ final class Store {
     /// pages read (past 1000 results, or a search GitHub cut short), which must not be marked answered.
     func applyReviewRequests(_ found: [GHIssue], complete: Bool) {
         let first = !settings.didInitialReviewSync
+        // A first search that couldn't list everything (cut short, or past ten pages) leaves the rest of what was already there
+        // to turn up later: a request last touched before it is that backlog, one touched after it is news.
+        let baseline = settings.reviewBaselineAt
         var current = Set<String>()
         var added: [InboxItem] = []
         for pr in found {
@@ -1235,12 +1238,13 @@ final class Store {
                 added.append(items[i])
                 continue
             }
+            let backlog = first || baseline.map { pr.updatedAt <= $0 } == true
             let item = InboxItem(
                 id: id, repo: repoName(from: repoURL), kind: .reviewRequested, number: pr.number, title: pr.title,
                 snippet: snippet(pr.body), author: user.login, avatar: user.avatarUrl, authorIsApp: user.isApp,
-                url: pr.htmlUrl, createdAt: first ? pr.updatedAt : Date(), state: .unread)
+                url: pr.htmlUrl, createdAt: backlog ? pr.updatedAt : Date(), state: .unread)
             items.append(item)
-            added.append(item)
+            if !backlog { added.append(item) }
         }
         // Request disappeared: I reviewed it (or it was withdrawn/closed). A Done one is forgotten, so a new request
         // on the same PR starts fresh.
@@ -1252,11 +1256,13 @@ final class Store {
             items.removeAll { $0.kind == .reviewRequested && $0.state == .discarded && !current.contains($0.id) }
         }
         if first {
-            // The rest of a partial first sync is still "what was already there", not news.
-            if complete { settings.didInitialReviewSync = true }
-        } else {
-            announce(added)
+            // The first answer is the baseline, whether or not it was the whole list: from here on a request is told from backlog.
+            settings.didInitialReviewSync = true
+            settings.reviewBaselineAt = complete ? nil : Date()
+        } else if complete, baseline != nil {
+            settings.reviewBaselineAt = nil
         }
+        announce(added)
     }
 
     func prune() {

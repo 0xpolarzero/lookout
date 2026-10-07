@@ -73,12 +73,29 @@ import Testing
         #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
     }
 
-    @Test func aPartialFirstSyncIsStillTheFirst() {
-        let s = store { _ in .init(500, "") }
+    @Test func aFirstSearchThatIsCutShortStillArmsTheNotificationsForWhatComesLater() async {
+        let s = store { _ in .init(200, #"{"total_count": 5, "incomplete_results": true, "items": [\#(Self.issue(1))]}"#) }
         s.settings.didInitialReviewSync = false
-        s.applyReviewRequests([request(1)], complete: false)
-        #expect(!s.settings.didInitialReviewSync)
-        s.applyReviewRequests([request(1)], complete: true)
-        #expect(s.settings.didInitialReviewSync)
+        // GitHub cuts the first search short: the baseline is what it listed.
+        await s.syncReviewRequests()
+        #expect(s.settings.didInitialReviewSync && s.settings.reviewBaselineAt != nil)
+        // Backlog that turns up late (last touched before the baseline) is quiet; a request made since is news.
+        let fresh = Self.issue(3, updated: "2999-01-01T00:00:00Z")
+        s.gh.session = StubbedGitHub.session { _ in .init(200, #"{"total_count": 5, "incomplete_results": true, "items": [\#(Self.issue(1)), \#(Self.issue(2)), \#(fresh)]}"#) }
+        await s.syncReviewRequests()
+        let old = Date(timeIntervalSince1970: 1_767_225_600)  // 2026-01-01, what the fixtures were last touched
+        #expect(s.items.first { $0.id == "rr#2" }?.createdAt == old)
+        #expect(s.items.first { $0.id == "rr#3" }?.createdAt ?? old > old)
+        // A complete search has listed everything: the baseline is no longer needed.
+        s.gh.session = StubbedGitHub.session { _ in .init(200, #"{"total_count": 3, "incomplete_results": false, "items": [\#(Self.issue(1)), \#(Self.issue(2)), \#(fresh)]}"#) }
+        await s.syncReviewRequests()
+        #expect(s.settings.reviewBaselineAt == nil)
+    }
+
+    @Test func aCompleteFirstSearchLeavesNoBaseline() async {
+        let s = store { _ in .init(200, #"{"total_count": 1, "incomplete_results": false, "items": [\#(Self.issue(1))]}"#) }
+        s.settings.didInitialReviewSync = false
+        await s.syncReviewRequests()
+        #expect(s.settings.didInitialReviewSync && s.settings.reviewBaselineAt == nil)
     }
 }
