@@ -54,4 +54,12 @@ import Testing
         #expect(side == .right)
         #expect(abs(height - 0.5) < 0.001)
     }
+
+    @Test func aSideDropDocksAtTheHeightItWasDroppedAt() {
+        // Along a side the position counts from the top, as the bar rests: the upper quarter stays the upper quarter.
+        let (upper, fromTop) = EdgeSnap.snap(pill(30, 944 * 0.75), in: screen)
+        #expect(upper == .left && abs(fromTop - 0.25) < 0.001)
+        let (lower, below) = EdgeSnap.snap(pill(1490, 944 * 0.2), in: screen)
+        #expect(lower == .right && abs(below - 0.8) < 0.001)
+    }
 }
