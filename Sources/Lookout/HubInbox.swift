@@ -144,7 +144,7 @@ extension Store {
 extension LookoutHub {
     // MARK: Header
 
-    /// 36pt: the tabs, then search and the menu (their room is kept when the list is empty); typing, or ⌘F, swaps
+    /// 36pt: the tabs, then search and the menu (the menu's room is kept when the list is empty); typing, or ⌘F, swaps
     /// the tabs for the search field.
     @ViewBuilder var inboxHeader: some View {
         Group {
@@ -201,12 +201,13 @@ extension LookoutHub {
             tabs.fixedSize().layoutPriority(2)
             InboxHeaderCue(hub: hub)
             Spacer(minLength: 0)
+            // Search covers every tab and the sessions, so it stays whatever this tab holds.
+            IconButton(symbol: "magnifyingglass", help: "Search", detail: "⌘F") { hub.beginSearch() }
             if rows {
-                IconButton(symbol: "magnifyingglass", help: "Search", detail: "⌘F") { hub.beginSearch() }
                 InboxMenu(store: store, hub: hub)
             } else {
-                // Their room, so the tabs and the right edge don't jump when the first item arrives.
-                Color.clear.frame(width: 2 * Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
+                // Its room, so the right edge doesn't jump when the first item arrives.
+                Color.clear.frame(width: Theme.Metrics.iconButton, height: Theme.Metrics.iconButton)
             }
         }
         .padding(.trailing, 3)
