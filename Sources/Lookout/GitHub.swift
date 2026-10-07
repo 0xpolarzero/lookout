@@ -118,11 +118,16 @@ struct GitHubError: LocalizedError {
 final class GitHubClient: @unchecked Sendable {
     /// A different token is a different account: its quota and the answers it was given are not this one's.
     var token: String? {
-        didSet {
+        get { lock.withLock { storedToken } }
+        // The token, the generation and what belonged to the old token change together, so a request never pairs the new
+        // token with the previous generation.
+        set {
             lock.withLock {
+                let changed = storedToken != newValue
+                storedToken = newValue
                 generation += 1
                 rejected = false
-                guard token != oldValue else { return }
+                guard changed else { return }
                 coreRemaining = nil
                 coreResetsAt = nil
                 gqlRemaining = nil
@@ -130,6 +135,7 @@ final class GitHubClient: @unchecked Sendable {
             }
         }
     }
+    private var storedToken: String?
     /// GitHub answered 401 since the token was last set: it was revoked or has expired.
     var tokenRejected: Bool { lock.withLock { rejected } }
     private var rejected = false
@@ -288,7 +294,7 @@ final class GitHubClient: @unchecked Sendable {
         req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         req.setValue("Lookout", forHTTPHeaderField: "User-Agent")
         // Token and generation read together, so they describe the same credential.
-        let (current, sent) = lock.withLock { (token, generation) }
+        let (current, sent) = lock.withLock { (storedToken, generation) }
         if let current { req.setValue("Bearer \(current)", forHTTPHeaderField: "Authorization") }
         return (req, sent)
     }

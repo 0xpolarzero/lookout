@@ -141,4 +141,24 @@ import Testing
         _ = try await late.value
         #expect(client.rateRemaining == nil && client.remembered == 0)
     }
+
+    /// A request goes out with a token and the generation it was set under, however a poll and a login interleave.
+    @Test func aRejectionOfTheTokenARequestWentOutWithIsNotTakenForAStaleOne() async throws {
+        let client = GitHubClient()
+        let sentBad = OSAllocatedUnfairLock(initialState: false)
+        client.session = StubbedGitHub.session { request in
+            let bad = request.value(forHTTPHeaderField: "Authorization") == "Bearer bad"
+            if bad { sentBad.withLock { $0 = true } }
+            return bad ? .init(401, #"{"message": "Bad credentials"}"#) : .init(200, #"{"id": 7}"#)
+        }
+        for _ in 0..<500 {
+            client.token = "good"
+            sentBad.withLock { $0 = false }
+            async let swap: Void = Task.detached { client.token = "bad" }.value
+            async let poll: Counted? = try? await client.get("/user")
+            _ = await (swap, poll)
+            // The request carried the new token only along with its generation, so GitHub's answer to it counts.
+            if sentBad.withLock({ $0 }) { #expect(client.tokenRejected) }
+        }
+    }
 }
