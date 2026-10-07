@@ -485,7 +485,7 @@ private struct InboxCellLabel: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 }
 
-/// A repo in CI's lines: its name (and how many checks fail), opening its latest run.
+/// A repo in CI's lines: its name (and which checks fail), opening its latest run.
 struct RepoChip: View {
     let repo: RepoConfig
     let status: CIStatus?
@@ -496,17 +496,26 @@ struct RepoChip: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text(repo.name).font(Theme.Typography.control).foregroundStyle(Theme.text)
-                if state == .failure, let n = status?.failing.count, n > 0 {
-                    Text(plural(n, "check")).font(Theme.Typography.caption).foregroundStyle(Theme.red)
+                if state == .failure, let failing = status?.failing, !failing.isEmpty {
+                    Text(Self.failingSummary(failing)).font(Theme.Typography.caption).foregroundStyle(Theme.red)
+                        .lineLimit(1)
                 }
             }
             .padding(.horizontal, 8)
             .frame(height: 22)
         }
         .buttonStyle(HoverFillButtonStyle(shape: Capsule(), rest: Theme.Fill.hover, hover: Theme.Fill.selected))
-        .accessibilityLabel("\(repo.name), \(state == .none ? "no runs" : state.label)")
+        .accessibilityLabel("\(repo.name), \(state == .none ? "no runs" : state.label)"
+                            + (state == .failure ? ((status?.failing).map { ": " + $0.joined(separator: ", ") } ?? "") : ""))
         .accessibilityHint("Opens its latest checks")
         .tip(repo.fullName, detail)
+    }
+
+    /// The failing checks by name for the chip: the first two, cut short, and how many more ("build, lint +3").
+    static func failingSummary(_ names: [String], shown: Int = 2, width: Int = 16) -> String {
+        func cut(_ name: String) -> String { name.count > width ? name.prefix(width - 1).trimmingCharacters(in: .whitespaces) + "…" : name }
+        let head = names.prefix(shown).map(cut).joined(separator: ", ")
+        return names.count > shown ? "\(head) +\(names.count - shown)" : head
     }
 
     private var detail: String {

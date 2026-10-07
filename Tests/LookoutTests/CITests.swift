@@ -243,3 +243,16 @@ import Testing
         #expect(store.repoErrors["a/x"] == "Server error")
     }
 }
+
+@Suite struct FailingChecks {
+    @Test func theChipNamesTheFailingChecksAndCountsTheRest() {
+        #expect(RepoChip.failingSummary(["build"]) == "build")
+        #expect(RepoChip.failingSummary(["build", "lint"]) == "build, lint")
+        #expect(RepoChip.failingSummary(["build", "lint", "test", "deploy"]) == "build, lint +2")
+    }
+
+    @Test func aLongNameIsCutShort() {
+        #expect(RepoChip.failingSummary(["Linux build (release, arm64)"]) == "Linux build (re…")
+        #expect(RepoChip.failingSummary(["exactly sixteen!"]) == "exactly sixteen!")
+    }
+}
