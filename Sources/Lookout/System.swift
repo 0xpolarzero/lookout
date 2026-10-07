@@ -9,10 +9,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// A click: the item id, and the page the notification is about (for when the item is gone).
     var onOpen: ((_ id: String, _ url: String?) -> Void)?
     /// Tests: every post and withdrawal, whether or not the system would show it.
-    var onPost: ((String) -> Void)?
+    var onPost: ((UNNotificationRequest) -> Void)?
     var onRemove: (([String]) -> Void)?
     /// Tests: the banners that exist, delivered or still waiting, in place of asking the system.
     var lookup: ((@escaping ([UNNotificationRequest]) -> Void) -> Void)?
+    /// Bulk summaries ("7 new items") belong to no one item: identified by this and a unique suffix.
+    nonisolated static let summaryPrefix = "summary#"
     private var available: Bool { Bundle.main.bundleIdentifier != nil }
 
     func setup() {
@@ -22,21 +24,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    func post(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil) {
-        onPost?(id)
-        guard available else { return }
+    /// `repos`: the repositories a banner covers, so stopping to watch one can find it again.
+    func post(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil, repos: [String] = []) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.subtitle = subtitle
         content.body = body
-        content.userInfo = ["id": id, "url": url?.absoluteString ?? ""]
+        content.userInfo = ["id": id, "url": url?.absoluteString ?? "", "repos": repos]
         content.threadIdentifier = quiet ? "bots" : "main"
         if quiet {
             content.interruptionLevel = .passive
         } else {
             content.sound = .default
         }
-        let req = UNNotificationRequest(identifier: id.isEmpty ? UUID().uuidString : id, content: content, trigger: nil)
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        onPost?(req)
+        guard available else { return }
         UNUserNotificationCenter.current().add(req)
     }
 
@@ -54,11 +57,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         identifier.hasPrefix("https://github.com/\(repo)/commit/")
     }
 
-    /// Withdraws a repo's CI banners (the ones that can't be looked up by item), delivered or still waiting.
-    func removeCI(of repo: String) {
+    /// Summaries name the repos they cover.
+    nonisolated static func belongs(_ request: UNNotificationRequest, to repo: String) -> Bool {
+        if isCI(request.identifier, of: repo) { return true }
+        return request.identifier.hasPrefix(summaryPrefix)
+            && (request.content.userInfo["repos"] as? [String])?.contains(repo) == true
+    }
+
+    /// Withdraws a repo's CI and summary banners (the ones that can't be looked up by item), delivered or still waiting.
+    func removeBanners(of repo: String) {
         guard lookup != nil || available else { return }
         (lookup ?? Self.systemLookup) { [self] requests in
-            remove(requests.map(\.identifier).filter { Self.isCI($0, of: repo) })
+            remove(requests.filter { Self.belongs($0, to: repo) }.map(\.identifier))
         }
     }
 
@@ -293,6 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         registerHotKey(.togglePanel)
         registerHotKey(.sessionSwitcher)
+        store.onOpenInbox = { [weak self] in self?.hub?.showInbox() }
         store.onGlobalShortcutChange = { [weak self] action, _ in self?.registerHotKey(action) }
         store.onAgentsEnabledChange = { [weak self] _ in
             self?.registerHotKey(.sessionSwitcher)

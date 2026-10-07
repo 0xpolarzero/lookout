@@ -84,7 +84,7 @@ private func threads(_ body: Data) -> Any {
         repo.addedAt = Date().addingTimeInterval(-3600)
         s.repos = [repo]
         let posted = Box()
-        s.notifier.onPost = { posted.ids.append($0) }
+        s.notifier.onPost = { posted.ids.append($0.identifier) }
         return (s, posted)
     }
 
@@ -278,16 +278,49 @@ private func threads(_ body: Data) -> Any {
         #expect(withdrawn == ["a/r#c#1"])
     }
 
+    private func request(_ id: String) -> UNNotificationRequest {
+        UNNotificationRequest(identifier: id, content: UNMutableNotificationContent(), trigger: nil)
+    }
+
     @Test func removingARepoWithdrawsCIBannersStillWaitingToShow() {
         let (s, _) = store()
-        func request(_ id: String) -> UNNotificationRequest {
-            UNNotificationRequest(identifier: id, content: UNMutableNotificationContent(), trigger: nil)
-        }
         s.notifier.lookup = { $0([request("https://github.com/a/r/commit/abc"), request("https://github.com/b/q/commit/def")]) }
         var withdrawn: [String] = []
         s.notifier.onRemove = { withdrawn += $0 }
         s.removeRepo(s.repos[0])
         #expect(withdrawn == ["https://github.com/a/r/commit/abc"])
+    }
+
+    @Test func aBulkSummaryIsWithdrawnWithItsRepoAndOpensTheInbox() async {
+        let (s, _) = store(allComments: true)
+        var requests: [UNNotificationRequest] = []
+        s.notifier.onPost = { requests.append($0) }
+        let now = Date()
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in (1...5).map { comment($0, on: $0, by: "them", at: now.addingTimeInterval(-600)) } },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            "/graphql": threads,
+        ])
+        try? await s.syncConversations("a/r")
+        // Five arrivals make one summary, which says which repos it covers.
+        #expect(requests.count == 1)
+        let summary = requests[0]
+        #expect(summary.identifier.hasPrefix(Notifier.summaryPrefix))
+        #expect(Notifier.belongs(summary, to: "a/r"))
+        #expect(!Notifier.belongs(summary, to: "a/other"))
+
+        s.notifier.lookup = { $0([summary, self.request("unrelated")]) }
+        var withdrawn: [String] = []
+        s.notifier.onRemove = { withdrawn += $0 }
+        s.removeRepo(s.repos[0])
+        #expect(withdrawn.contains(summary.identifier))
+        #expect(!withdrawn.contains("unrelated"))
+
+        var opened = 0
+        s.onOpenInbox = { opened += 1 }
+        s.openNotification(id: summary.identifier, url: "")
+        #expect(opened == 1)
     }
 
     @Test func ciBannersAreToldApartByRepo() {

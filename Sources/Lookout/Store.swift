@@ -117,6 +117,8 @@ final class Store {
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
+    /// Shows the inbox: where a summary banner leads.
+    @ObservationIgnored var onOpenInbox: (() -> Void)?
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Void)?
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
     @ObservationIgnored let activityReader = Claude.ActivityReader()
@@ -155,15 +157,7 @@ final class Store {
 
     func start() {
         load()
-        notifier.onOpen = { [weak self] id, url in
-            guard let self else { return }
-            if let item = self.items.first(where: { $0.id == id }) {
-                self.open(item)
-            } else if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {
-                // The item is gone (its repo was removed, say): the page it was about still makes sense.
-                NSWorkspace.shared.open(url)
-            }
-        }
+        notifier.onOpen = { [weak self] id, url in self?.openNotification(id: id, url: url) }
         notifier.setup()
         updater.automatic = { [weak self] in self?.settings.checkUpdates ?? true }
         updater.skipped = { [weak self] in self?.settings.skippedVersion }
@@ -507,6 +501,18 @@ final class Store {
         save()
     }
 
+    /// A clicked banner: its item, a summary's inbox, or the page it was about.
+    func openNotification(id: String, url: String?) {
+        if let item = items.first(where: { $0.id == id }) {
+            open(item)
+        } else if id.hasPrefix(Notifier.summaryPrefix) {
+            onOpenInbox?()
+        } else if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {
+            // The item is gone (its repo was removed, say): the page it was about still makes sense.
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Playground: report what would open instead of opening it.
     @ObservationIgnored var interceptOpen: ((String) -> Void)?
 
@@ -644,7 +650,7 @@ final class Store {
     func removeRepo(_ repo: RepoConfig) {
         repos.removeAll { $0.id == repo.id }
         removeItems { $0.repo == repo.fullName && $0.kind != .reviewRequested }
-        notifier.removeCI(of: repo.fullName)
+        notifier.removeBanners(of: repo.fullName)
         ci[repo.fullName] = nil
         save()
     }
@@ -1139,8 +1145,9 @@ final class Store {
         guard !new.isEmpty else { return }
         let important = new.filter { !isLowPriority($0) }
         if new.count > 4 {
-            let repos = Set(new.map(\.repo)).sorted().joined(separator: ", ")
-            notify(id: "", title: "\(new.count) new items", subtitle: repos, body: "", quiet: important.isEmpty)
+            let repos = Set(new.map(\.repo)).sorted()
+            notify(id: Notifier.summaryPrefix + UUID().uuidString, title: "\(new.count) new items",
+                   subtitle: repos.joined(separator: ", "), body: "", quiet: important.isEmpty, repos: repos)
             return
         }
         for item in new {
@@ -1150,9 +1157,10 @@ final class Store {
         }
     }
 
-    private func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil) {
+    private func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil,
+                        repos: [String] = []) {
         guard settings.notifications, !isSnoozed else { return }
-        notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet, url: url)
+        notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet, url: url, repos: repos)
     }
 
     // MARK: Helpers

@@ -364,6 +364,13 @@ final class HubController {
         }
     }
 
+    /// A summary banner's click: the full view on the inbox, to see what arrived.
+    func showInbox() {
+        hub.go(.main)
+        hub.focus = .inbox
+        hub.pinned = true
+    }
+
     private func takeFocus() {
         let front = NSWorkspace.shared.frontmostApplication
         if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = front }
