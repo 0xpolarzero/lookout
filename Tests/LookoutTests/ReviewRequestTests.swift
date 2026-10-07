@@ -73,6 +73,40 @@ import Testing
         #expect(s.items.first { $0.id == "rr#1" }?.state == .unread)
     }
 
+    @Test func aSearchThatOutlivesTheSwitchAddsNothing() async {
+        let s = store { _ in .init(500, "") }
+        // Review requests is turned off while the page is out.
+        let gate = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { _ in
+            .init(200, #"{"total_count": 1, "incomplete_results": false, "items": [\#(Self.issue(1))]}"#, gate: gate)
+        }
+        let search = Task { await s.syncReviewRequests() }
+        while gate.held == 0 { await Task.yield() }
+        s.settings.reviewRequests = false
+        gate.open()
+        await search.value
+        #expect(s.items.isEmpty)
+        // Off and on again is a new switch too: what the old search brings back is not an answer to the new one.
+        s.settings.reviewRequests = true
+        let again = StubbedGitHub.Gate()
+        s.gh.session = StubbedGitHub.session { _ in
+            .init(200, #"{"total_count": 1, "incomplete_results": false, "items": [\#(Self.issue(2))]}"#, gate: again)
+        }
+        let second = Task { await s.syncReviewRequests() }
+        while again.held == 0 { await Task.yield() }
+        s.settings.reviewRequests = false
+        s.settings.reviewRequests = true
+        again.open()
+        await second.value
+        #expect(s.items.isEmpty)
+        // The next one, begun after the switch, is.
+        s.gh.session = StubbedGitHub.session { _ in
+            .init(200, #"{"total_count": 1, "incomplete_results": false, "items": [\#(Self.issue(2))]}"#)
+        }
+        await s.syncReviewRequests()
+        #expect(s.items.map(\.id) == ["rr#2"])
+    }
+
     @Test func aFirstSearchThatIsCutShortStillArmsTheNotificationsForWhatComesLater() async {
         let s = store { _ in .init(200, #"{"total_count": 5, "incomplete_results": true, "items": [\#(Self.issue(1))]}"#) }
         s.settings.didInitialReviewSync = false
