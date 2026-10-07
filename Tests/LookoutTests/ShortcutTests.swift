@@ -74,20 +74,28 @@ import Testing
     @Test func hotKeysAreReleasedWhileSuspended() {
         let hotKeys = HotKeys()
         // An unlikely combination, so the test never fights a real shortcut for it.
-        hotKeys.set(90, Shortcut(keyCode: UInt16(kVK_F19), modifiers: [.control, .option, .command, .shift])) {}
+        let f19 = Shortcut(keyCode: UInt16(kVK_F19), modifiers: [.control, .option, .command, .shift])
+        let f18 = Shortcut(keyCode: UInt16(kVK_F18), modifiers: [.control, .option, .command, .shift])
+        // Carbon rejects a combination twice in one app, so a second ID getting it shows the first was released.
+        func isFree(_ shortcut: Shortcut) -> Bool {
+            let probe = HotKeys()
+            probe.set(91, shortcut) {}
+            defer { probe.set(91, nil) }
+            return probe.registeredIDs == [91]
+        }
+        hotKeys.set(90, f19) {}
         defer { hotKeys.set(90, nil) }
-        #expect(hotKeys.registeredIDs == [90])
+        #expect(!isFree(f19))
         hotKeys.isSuspended = true
-        #expect(hotKeys.registeredIDs.isEmpty)
+        #expect(isFree(f19))
         // A change made meanwhile applies on resume.
-        hotKeys.set(90, Shortcut(keyCode: UInt16(kVK_F18), modifiers: [.control, .option, .command, .shift])) {}
-        #expect(hotKeys.registeredIDs.isEmpty)
+        hotKeys.set(90, f18) {}
+        #expect(isFree(f18))
         hotKeys.isSuspended = false
-        #expect(hotKeys.registeredIDs == [90])
+        #expect(isFree(f19))
+        #expect(!isFree(f18))
         hotKeys.set(90, nil)
-        hotKeys.isSuspended = true
-        hotKeys.isSuspended = false
-        #expect(hotKeys.registeredIDs.isEmpty)
+        #expect(isFree(f18))
     }
 
     @Test func startingARecorderStopsTheOneListening() {
