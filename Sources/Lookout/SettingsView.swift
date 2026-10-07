@@ -33,9 +33,9 @@ struct SettingsView: View {
                 Avatar(url: store.me?.avatarUrl, size: 30)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(store.me.map { "@\($0.login)" } ?? "Not connected").font(Theme.Typography.title)
-                    Text(store.tokenSource.map { "Token from \($0.rawValue)" } ?? (store.authError ?? ""))
+                    Text(store.unreachable ? "Couldn't reach GitHub" : store.tokenSource.map { "Token from \($0.rawValue)" } ?? (store.authError ?? ""))
                         .font(Theme.Typography.meta)
-                        .foregroundStyle(store.authError == nil ? Theme.tertiary : Theme.red)
+                        .foregroundStyle(store.unreachable ? Theme.amber : store.authError == nil ? Theme.tertiary : Theme.red)
                         .lineLimit(2)
                 }
                 Spacer()

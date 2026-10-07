@@ -44,4 +44,20 @@ import Testing
         while s.me == nil || s.isSyncing { await Task.yield() }
         #expect(asks.withLock { $0 } == 3 && s.me != nil)
     }
+
+    @Test func aFirstLookThatCantReachGitHubIsASyncProblemNotASignInOne() async {
+        let s = store()
+        answer(s) { _ in throw URLError(.notConnectedToInternet) }
+        await s.pollAll()
+        #expect(s.authError == nil && s.unreachable && s.me == nil)
+        // Through at the next poll: the sync is healthy again.
+        answer(s) { _ in Self.user }
+        await s.pollAll()
+        #expect(s.me?.login == "me" && !s.unreachable)
+        // A token GitHub refuses is still a sign-in problem.
+        s.me = nil
+        answer(s) { _ in .init(401, #"{"message": "Bad credentials"}"#) }
+        await s.pollAll()
+        #expect(s.authError != nil && !s.unreachable)
+    }
 }

@@ -80,6 +80,9 @@ final class Store {
     var me: GHUser?
     var tokenSource: TokenSource?
     var authError: String?
+    /// The first look at the account got no answer from GitHub (no network yet, a VPN down): nothing is known of the token, so
+    /// this is a sync problem, not a sign-in one, and the cached rows stay.
+    var unreachable = false
     var repoErrors: [String: String] = [:]
     var isSyncing = false
     var lastSync: Date?
@@ -659,6 +662,7 @@ final class Store {
                 gh.token = nil
                 me = nil
                 tokenSource = nil
+                unreachable = false
                 authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
                 return
             }
@@ -669,8 +673,15 @@ final class Store {
         do {
             me = try await gh.get("/user", as: GHUser.self)
             authError = nil
+            unreachable = false
         } catch {
+            if error is URLError {
+                // Only a missing or refused token is a sign-in problem.
+                unreachable = true
+                return
+            }
             me = nil
+            unreachable = false
             authError = error.localizedDescription
         }
     }

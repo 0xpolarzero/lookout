@@ -385,6 +385,10 @@ extension LookoutHub {
             return SyncState(color: Theme.red, text: "Sign-in problem", title: "Can't sign in to GitHub",
                              detail: error + "\nClick for Settings")
         }
+        if store.unreachable {
+            return SyncState(color: Theme.amber, text: "Not syncing", title: "Couldn't reach GitHub",
+                             detail: "Check your connection · Lookout tries again on its own\n" + refresh)
+        }
         let failed = store.repoErrors.keys.sorted()
         if !failed.isEmpty {
             return SyncState(color: Theme.amber, text: "\(plural(failed.count, "repo")) failed",
