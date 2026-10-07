@@ -603,7 +603,7 @@ struct BarTile: View {
         .frame(height: Theme.Metrics.row)
         .accessibilityLabel(row.session.title)
         .spokenValue(of: row)
-        .accessibilityHint("Opens it in Claude")
+        .accessibilityHint(row.spokenHint)
         .sessionMenu(row, store)
         .onHover {
             if $0 {

@@ -490,6 +490,7 @@ struct DrawerRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.session.title)
         .spokenValue(of: row)
+        .accessibilityHint(row.spokenHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { store.openAgent(row.id) }
     }

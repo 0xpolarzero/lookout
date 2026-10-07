@@ -274,16 +274,17 @@ import Testing
         #expect(AgentRow.spokenAge(20) == "just now" && AgentRow.spokenAge(3600) == "1 hour" && AgentRow.spokenAge(2 * 86400) == "2 days")
     }
 
-    @Test func aFinishedSessionSpeaksHowManyCommandsItLeftRunning() throws {
+    @Test func aFinishedSessionSpeaksHowManyCommandsItLeftRunningAndTheirNames() throws {
         let s = store([session("f", minutesAgo: 4)])
         s.claudeTasks = ["f": [ClaudeTask(id: "a", kind: .agent, title: "Review the changes", since: now),
                                ClaudeTask(id: "b", kind: .command, title: "Run the full test suite", since: now)]]
         let row = try #require(s.allAgentRows.first { $0.id == "f" })
         #expect(row.spokenValue(now: now) == "pending, 2 running, app, 4 minutes")
+        #expect(row.spokenHint == "Opens it in Claude. Running: Review the changes, Run the full test suite.")
         // Nothing left running: neither says anything of it.
         s.claudeTasks = [:]
         let clear = try #require(s.allAgentRows.first { $0.id == "f" })
-        #expect(!clear.spokenValue(now: now).contains("running"))
+        #expect(!clear.spokenValue(now: now).contains("running") && clear.spokenHint == "Opens it in Claude")
     }
 
     @Test func sessionsOfSameNamedProjectsSayWhichProjectTheyAreIn() throws {

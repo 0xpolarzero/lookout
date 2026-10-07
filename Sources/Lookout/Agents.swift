@@ -179,6 +179,12 @@ struct AgentRow: Identifiable, Hashable {
         return "\(stateName), \(projectName), \(Self.spokenAge(now.timeIntervalSince(since)))"
     }
 
+    /// For VoiceOver, after the value: what it left running, by name (the row shows a count, and the tooltip lists them).
+    var spokenHint: String {
+        guard !tasks.isEmpty else { return "Opens it in Claude" }
+        return "Opens it in Claude. Running: " + tasks.map(\.title).joined(separator: ", ") + "."
+    }
+
     /// `shortAgo` and `duration` in words, counted the same way.
     static func spokenAge(_ t: TimeInterval) -> String {
         let s = max(0, Int(t))
