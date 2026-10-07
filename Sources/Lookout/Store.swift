@@ -705,6 +705,8 @@ final class Store {
         // Signed out: look for a token when asked (Retry, a refresh) or once the backoff has passed.
         let asked = authRetry
         authRetry = false
+        // A 401 from outside a poll (adding a repo, suggestions) left the token and who it was cached.
+        if gh.tokenRejected { dropRejectedToken() }
         if me == nil, asked || Date().timeIntervalSince(lastAuthAttempt ?? .distantPast) >= Self.authBackoff {
             await authenticate()
         }

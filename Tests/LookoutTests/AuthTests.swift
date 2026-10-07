@@ -128,6 +128,25 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
         #expect(!gh.tokenRejected)
     }
 
+    @Test func aRejectionOutsideAPollIsDroppedByTheNextRefresh() async {
+        let s = store()
+        s.repos = [RepoConfig(fullName: "a/one")]
+        revoke()
+        #expect(await s.addRepo("a/two") != nil)
+        #expect(s.gh.tokenRejected)
+        StubAuthGitHub.handler = { req in
+            req.value(forHTTPHeaderField: "Authorization") == "Bearer fresh"
+                ? (200, req.url?.path == "/user" ? #"{"login":"me"}"# : "[]")
+                : (401, #"{"message":"Bad credentials"}"#)
+        }
+        s.resolveToken = { ("fresh", .ghCLI) }
+        await s.pollAll()
+        #expect(s.gh.token == "fresh")
+        #expect(!s.gh.tokenRejected)
+        #expect(s.me?.login == "me")
+        #expect(s.authError == nil)
+    }
+
     @Test func signedOutPollsDoNotSpawnGhEveryTime() async {
         let s = store()
         s.me = nil
