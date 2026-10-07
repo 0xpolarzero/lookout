@@ -76,7 +76,7 @@ enum Claude {
     /// Opens the conversation in the app (its own link format, the one it hands out for sessions).
     static func open(_ id: String) {
         guard let url = URL(string: "claude://claude.ai/epitaxy/\(id)") else { return }
-        NSWorkspace.shared.open(url)
+        Link.open(url)
     }
 
     /// Starts a new Code session in a folder (the app's own link, the one its dock menu uses for recent folders).
@@ -84,7 +84,7 @@ enum Claude {
         var components = URLComponents(string: "claude://code/new")
         components?.queryItems = [URLQueryItem(name: "folder", value: folder)]
         guard let url = components?.url else { return }
-        NSWorkspace.shared.open(url)
+        Link.open(url)
     }
 
     // MARK: Sessions

@@ -5,7 +5,7 @@ import Foundation
 struct JevClient {
     let key: String
     var endpoint = URL(string: "https://api.typesafe.ai/v1/systemone")!
-    var session = URLSession.shared
+    var session = Network.session
 
     struct Failure: LocalizedError {
         let message: String

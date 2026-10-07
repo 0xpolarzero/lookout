@@ -354,7 +354,7 @@ extension Store {
 
     /// A repo's latest checks on GitHub; the playground reports it instead.
     func openChecks(_ repo: RepoConfig) {
-        if let interceptOpen { interceptOpen("Open checks · \(repo.fullName)") } else { NSWorkspace.shared.open(checksURL(repo)) }
+        if let interceptOpen { interceptOpen("Open checks · \(repo.fullName)") } else { Link.open(checksURL(repo)) }
     }
 
     /// A scratch Claude session (no folder), through the same interception as every other open.

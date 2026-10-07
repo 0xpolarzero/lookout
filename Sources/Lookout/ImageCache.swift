@@ -27,6 +27,8 @@ final class ImageCache: @unchecked Sendable {
     /// Loads (or joins an in-flight load of) an image.
     func load(_ url: URL) async -> NSImage? {
         if let hit = cached(url) { return hit }
+        // Avatars are decoration: a test run keeps the placeholders and asks nobody for them.
+        guard !UnderTest.isRunning else { return nil }
         let task: Task<NSImage?, Never> = lock.withLock {
             if let t = inflight[url] { return t }
             let t = Task<NSImage?, Never> { [session] in

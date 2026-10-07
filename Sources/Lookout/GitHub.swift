@@ -137,7 +137,7 @@ final class GitHubClient: @unchecked Sendable {
     /// so it can't discard or overwrite what belongs to the newer token.
     private var generation = 0
     /// Swapped for a stub in tests.
-    var session = URLSession.shared
+    var session = Network.session
     /// Remaining calls in the core (REST) and GraphQL buckets.
     var rateRemaining: Int? { lock.withLock { coreRemaining } }
     var graphqlRemaining: Int? { lock.withLock { gqlRemaining } }
@@ -331,6 +331,8 @@ enum TokenSource: String {
 
 enum TokenProvider {
     static func resolve() -> (String, TokenSource)? {
+        // The Keychain, the environment and `gh` are all the user's: a test reaching here has not said where its token is.
+        if Keychain.backend == nil, UnderTest.refuses("the token lookup (Keychain, environment and gh)") { return nil }
         if let t = Keychain.read(), !t.isEmpty { return (t, .keychain) }
         let env = ProcessInfo.processInfo.environment
         if let t = env["GH_TOKEN"] ?? env["GITHUB_TOKEN"], !t.isEmpty { return (t, .environment) }
@@ -339,6 +341,7 @@ enum TokenProvider {
     }
 
     private static func ghCLIToken() -> String? {
+        guard !UnderTest.refuses("gh, spawned for its token") else { return nil }
         let candidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
         guard let path = candidates.first(where: FileManager.default.isExecutableFile) else { return nil }
         let p = Process()
@@ -355,9 +358,18 @@ enum TokenProvider {
     }
 }
 
+/// Where the Keychain's items are kept, when not in the system's: a test's own.
+protocol SecretStore: Sendable {
+    func read(_ account: String) -> String?
+    func write(_ secret: String, _ account: String) -> Bool
+    func delete(_ account: String)
+}
+
 enum Keychain {
     static let github = "github-token"
     static let typesafe = "typesafe-key"
+    /// Replaces the system's Keychain, which a test run never reaches: one that touches it stops (see `UnderTest`).
+    nonisolated(unsafe) static var backend: SecretStore?
 
     private static func base(_ account: String) -> [String: Any] {
         [
@@ -369,6 +381,8 @@ enum Keychain {
 
     static func read(_ account: String = github) -> String? {
         guard !Store.isDemo else { return nil }
+        if let backend { return backend.read(account) }
+        guard !UnderTest.refuses("the Keychain, reading \(account)") else { return nil }
         var q = base(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -380,6 +394,8 @@ enum Keychain {
     /// Whether it was kept. An item already there is updated in place, so a failed save leaves the old one.
     @discardableResult
     static func write(_ token: String, _ account: String = github) -> Bool {
+        if let backend { return backend.write(token, account) }
+        guard !UnderTest.refuses("the Keychain, writing \(account)") else { return false }
         let data = Data(token.utf8)
         let status = SecItemUpdate(base(account) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         guard status == errSecItemNotFound else { return status == errSecSuccess }
@@ -389,6 +405,8 @@ enum Keychain {
     }
 
     static func delete(_ account: String = github) {
+        if let backend { return backend.delete(account) }
+        guard !UnderTest.refuses("the Keychain, deleting \(account)") else { return }
         SecItemDelete(base(account) as CFDictionary)
     }
 }

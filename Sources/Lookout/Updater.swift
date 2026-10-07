@@ -67,7 +67,7 @@ final class Updater {
     /// The three places a test stands in for the network and the system: starting the zip's transfer, checking and
     /// unpacking it (to the app it holds), and swapping the app in and quitting.
     @ObservationIgnored var transport: (URL, @escaping @Sendable (URL?, URLResponse?, Error?) -> Void) -> any UpdateTransfer = {
-        URLSession.shared.downloadTask(with: $0, completionHandler: $1)
+        Network.session.downloadTask(with: $0, completionHandler: $1)
     }
     @ObservationIgnored var prepare: (URL, Release, URL) async throws -> URL = { zip, release, checksum in
         try await Updater.verifyChecksum(of: zip, against: checksum)
@@ -187,7 +187,7 @@ final class Updater {
         }
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Network.session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw UpdateError("GitHub didn't answer (\((response as? HTTPURLResponse)?.statusCode ?? 0))") }
         let payload = try JSONDecoder().decode(Payload.self, from: data)
         guard let zip = payload.assets.first(where: { $0.name.hasPrefix("Lookout-") && $0.name.hasSuffix(".zip") }) else {
@@ -237,7 +237,7 @@ final class Updater {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(from: checksum)
+            (data, response) = try await Network.session.data(from: checksum)
         } catch {
             throw UpdateError("Couldn't read the release checksum", untrusted: true)
         }
@@ -352,6 +352,7 @@ final class Updater {
         xattr -dr com.apple.quarantine "$2" 2>/dev/null
         open "$2"
         """
+        guard !UnderTest.refuses("the update swap (it replaces the app and quits)") else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script, "sh", String(ProcessInfo.processInfo.processIdentifier), target.path, staged.path]

@@ -335,7 +335,7 @@ private struct UpdateActions: View {
     var body: some View {
         let version = updater.release?.version ?? ""
         if let page = updater.release?.page {
-            Button("What's new in \(version)") { NSWorkspace.shared.open(page) }
+            Button("What's new in \(version)") { Link.open(page) }
         }
         Button("Skip \(version)") { updater.skip() }
     }
@@ -614,7 +614,7 @@ struct NewSessionRow: View {
     /// The app's new-session link with no folder opens its composer with none picked: a scratch session.
     static func startScratch() {
         guard let url = URL(string: "claude://code/new") else { return }
-        NSWorkspace.shared.open(url)
+        Link.open(url)
     }
 }
 

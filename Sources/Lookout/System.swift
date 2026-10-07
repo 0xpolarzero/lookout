@@ -15,7 +15,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     var lookup: ((@escaping ([UNNotificationRequest]) -> Void) -> Void)?
     /// Bulk summaries ("7 new items") belong to no one item: identified by this and a unique suffix.
     nonisolated static let summaryPrefix = "summary#"
-    private var available: Bool { Bundle.main.bundleIdentifier != nil }
+    /// Banners need an app bundle; a test run, hosted in one or not, never has the system's.
+    private var available: Bool { Self.canReachSystem }
+    private nonisolated static var canReachSystem: Bool { Bundle.main.bundleIdentifier != nil && !UnderTest.isRunning }
 
     func setup() {
         guard available else { return }
@@ -26,7 +28,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Whether macOS refuses this app's banners: said no at the first prompt, or turned off since in System Settings.
     static func isBlocked() async -> Bool {
-        guard Bundle.main.bundleIdentifier != nil else { return false }
+        guard canReachSystem else { return false }
         return await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
     }
 
@@ -319,6 +321,7 @@ enum LaunchAtLogin {
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
 
     static func set(_ on: Bool) throws {
+        guard !UnderTest.refuses("the login item (Launch at login)") else { return }
         if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
     }
 }

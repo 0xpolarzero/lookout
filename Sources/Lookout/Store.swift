@@ -200,6 +200,16 @@ final class Store {
 
     private static let isoFormatter = ISO8601DateFormatter()
 
+    /// Where the state is kept, when not in the user's own file: a test's, in a folder of its own. A test run that reaches the
+    /// user's file stops (see `UnderTest`).
+    @ObservationIgnored var stateFile: URL?
+
+    /// The file the state is read from and written to; nil when a test has not said where, and was stopped for it.
+    private var file: URL? {
+        if let stateFile { return stateFile }
+        return UnderTest.refuses("the saved state (Application Support/Lookout/state.json)") ? nil : Self.fileURL
+    }
+
     private static let fileURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Lookout", isDirectory: true)
@@ -434,7 +444,7 @@ final class Store {
     private func load() {
         loading = true
         defer { loading = false }
-        guard let data = try? Data(contentsOf: Self.fileURL) else { return }
+        guard let file, let data = try? Data(contentsOf: file) else { return }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         guard let state = try? dec.decode(PersistedState.self, from: data) else { return }
@@ -450,7 +460,8 @@ final class Store {
 
     /// Coalesced: the write happens shortly after the last call, off the main thread.
     func save() {
-        guard persists, !loading else { return }
+        // (Asked now, not when the write comes: a test that reaches the user's file is stopped where it did.)
+        guard persists, !loading, file != nil else { return }
         savedRevision = persistedRevision
         saveDirty = true
         saveTask?.cancel()
@@ -472,9 +483,9 @@ final class Store {
             if wait { Self.writer.sync {} }
             return
         }
+        guard let url = file else { return }
         saveDirty = false
         let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents))
-        let url = Self.fileURL
         let write: @Sendable () -> Void = {
             let enc = JSONEncoder()
             enc.dateEncodingStrategy = .iso8601
@@ -618,7 +629,7 @@ final class Store {
             onOpenInbox?()
         } else if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {
             // The item is gone (its repo was removed, say): the page it was about still makes sense.
-            NSWorkspace.shared.open(url)
+            Link.open(url)
         }
     }
 
@@ -626,7 +637,7 @@ final class Store {
     @ObservationIgnored var interceptOpen: ((String) -> Void)?
 
     func open(_ item: InboxItem) {
-        if let interceptOpen { interceptOpen("Open on GitHub · \(item.title)") } else { NSWorkspace.shared.open(item.url) }
+        if let interceptOpen { interceptOpen("Open on GitHub · \(item.title)") } else { Link.open(item.url) }
         if item.state == .unread { markRead(item) }
     }
 

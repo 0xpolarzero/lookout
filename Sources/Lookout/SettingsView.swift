@@ -122,7 +122,7 @@ struct SettingsView: View {
                     ActionButton("Open Settings") {
                         let id = Bundle.main.bundleIdentifier.map { "?id=\($0)" } ?? ""
                         if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension\(id)") {
-                            NSWorkspace.shared.open(url)
+                            Link.open(url)
                         }
                     }
                 }
