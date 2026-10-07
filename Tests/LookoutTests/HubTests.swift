@@ -969,6 +969,29 @@ import Testing
         #expect(hub.query.isEmpty && !hub.inbox.searchOpen)
     }
 
+    @Test func keepAndHideActOnTheSelectedResultWithTheSearchFieldFocused() {
+        let (window, _) = editingWindow("lcu")
+        defer { window.close() }
+        hub.query = "lcu"
+        hub.inbox.searchOpen = true
+        hub.inbox.searchFocused = true
+        let session = store.agentRows.pending[0]
+        hub.query = session.session.title
+        pick("a:" + session.id)
+        #expect(keys.targets().contains("a:" + session.id))
+        #expect(window.firstResponder is NSText)
+        // ⌘K keeps it and ⌘⌫ hides it, the field's own ⌘⌫ (delete to the start of the line) notwithstanding.
+        #expect(press(kVK_ANSI_K, .command, "k", in: window))
+        #expect(store.agentRows.kept.contains { $0.id == session.id })
+        #expect(press(kVK_Delete, .command, "\u{7f}", in: window))
+        #expect(store.agents.entries.first { $0.id == session.id }?.hiddenAt != nil && hub.query == session.session.title)
+        // With nothing picked, or no action bound to the chord, they stay the field's.
+        hub.selection = nil
+        #expect(!press(kVK_ANSI_K, .command, "k", in: window) && !press(kVK_Delete, .command, "\u{7f}", in: window))
+        pick(firstItem)
+        #expect(!press(kVK_ANSI_P, .command, "p", in: window))
+    }
+
     // MARK: Menus
 
     @Test func theKeysDoNothingWhileNothingIsKept() {

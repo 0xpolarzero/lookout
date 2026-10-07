@@ -341,6 +341,11 @@ extension HubKeys {
         // Open is the user's to rebind, ⌘O included, which the field would otherwise swallow with the other
         // modifier combinations. A bare letter is still typed.
         if Shortcut(event) == store.shortcut(.openItem), !typesText(event) { return openResult() }
+        // So are the chords of the row actions (Keep, Hide, Done, ...), which act on the picked result as they do off the
+        // search; the field keeps a chord only when no action is bound to it, or nothing is picked to act on.
+        let shortcut = Shortcut(event)
+        if shortcut.hasCommandLikeModifier, isBound(shortcut),
+           rowCommand(shortcut, targets: targets(), event: event, flags: event.modifierFlags.intersection(Shortcut.relevant)) { return true }
         guard event.modifierFlags.intersection(Shortcut.relevant).isEmpty else { return nil }
         switch Int(event.keyCode) {
         case kVK_Escape:
