@@ -521,7 +521,7 @@ struct InboxSearchField: View {
     let summary: String
     /// Whether the summary is drawn: not for "No match", which the body says once (it is still announced).
     var showsSummary = true
-    /// The rows the results show: when they change, the pick follows (edits to the field don't go through the keys).
+    /// The rows the results show: when they or the query change, the pick follows (edits to the field don't go through the keys).
     let targets: [String]
     @FocusState private var focused: Bool
 
@@ -557,7 +557,9 @@ struct InboxSearchField: View {
             if isFocused { DispatchQueue.main.async { (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil) } }
         }
         .onDisappear { hub.inbox.searchFocused = false }
+        // The rows changing, or the query changing over rows that stay the same (a sole result, with nothing picked yet).
         .onChange(of: targets) { hub.reconcileSelection(among: targets, ui: ui) }
+        .onChange(of: hub.query) { hub.reconcileSelection(among: targets, ui: ui) }
         // What was found, said once the typing has paused, and again when the result changes under a query that stays (a poll
         // brought a match, Claude started a session): the count said is the one now on screen, and an older one is dropped.
         .task(id: SearchSaid(query: hub.query, summary: summary)) {

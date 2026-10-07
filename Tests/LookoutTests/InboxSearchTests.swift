@@ -69,6 +69,20 @@ import Testing
         #expect(r.hub.selection == nil)
     }
 
+    @Test func aQueryOverTheSameRowsStillPicksTheResult() {
+        let r = rig()
+        let ui = UIState()
+        r.store.items = [item("1", title: "Format ranges")]
+        // Nothing picked, and the one row is shown with or without the query: the rows don't change, the query does.
+        let before = r.store.hubTargets(r.hub)
+        r.hub.query = "format"
+        #expect(r.store.hubTargets(r.hub) == before)
+        r.hub.reconcileSelection(among: r.store.hubTargets(r.hub), ui: ui)
+        #expect(r.hub.selection == "i:1")
+        #expect(r.keys.key(key(kVK_Return)))
+        #expect(r.opened.titles == ["Open on GitHub · Format ranges"])
+    }
+
     // MARK: The configured Open shortcut
 
     /// A window whose field editor has the keyboard, as it does while the search field is focused.
