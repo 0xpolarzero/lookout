@@ -313,7 +313,8 @@ extension Store {
 
     private func makeRow(_ session: ClaudeSession, _ entry: AgentEntry?, label: String?) -> AgentRow {
         AgentRow(session: session, entry: entry ?? AgentEntry(id: session.id),
-                 label: label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
+                 // Sessions outside the cache (hidden ones found through search) still show their saved label.
+                 label: label ?? entry?.label ?? AgentLabel.candidates(session.title, folder: session.folderName).first ?? "··",
                  color: projectColor(session.folderKey),
                  activity: session.running ? claudeActivity[session.id] : nil,
                  tasks: session.running ? [] : claudeTasks[session.id] ?? [],

@@ -28,6 +28,14 @@ import Testing
 
     private func entry(_ s: Store, _ id: String) -> AgentEntry? { s.agents.entries.first { $0.id == id } }
 
+    @Test func searchShowsTheSavedLabelOfAHiddenSession() {
+        let s = store([session("a"), session("b")])
+        s.setAgentLabel("a", "🔥")
+        s.dismissAgent("a")
+        #expect(s.agentRows.pending.map(\.id) == ["b"])
+        #expect(s.searchSessions("session").first { $0.id == "a" }?.label == "🔥")
+    }
+
     @Test func firstReadOffersRecentSessionsOnly() {
         let s = store([session("a", minutesAgo: 30), session("old", minutesAgo: 3 * 24 * 60)], dots: ["a"])
         #expect(s.agents.entries.map(\.id) == ["a"])
