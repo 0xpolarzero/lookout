@@ -1,3 +1,5 @@
+import CryptoKit
+import Foundation
 import Testing
 @testable import Lookout
 
@@ -15,5 +17,37 @@ import Testing
     @MainActor @Test func devBuildsNeverUpdate() {
         // Tests don't run from a release bundle.
         #expect(!Updater().isRelease)
+    }
+
+    @MainActor @Test func aReleaseWithoutChecksumIsNeverStaged() async throws {
+        let updater = Updater(forceRelease: true)
+        updater.preview(.available)
+        #expect(updater.release?.checksum == nil)
+        updater.download()
+        // It fails before fetching anything, so it settles without the network.
+        for _ in 0..<100 { if updater.phase != .downloading(0) { break }; try await Task.sleep(for: .milliseconds(20)) }
+        guard case .failed(let message) = updater.phase else { Issue.record("phase \(updater.phase)"); return }
+        #expect(message.contains("no checksum"))
+        #expect(updater.stagedPath == nil)
+    }
+
+    @Test func checksumMustMatchTheZip() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("lookout-checksum-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let zip = dir.appendingPathComponent("Lookout-1.0.0.zip")
+        let contents = Data("zip".utf8)
+        try contents.write(to: zip)
+        let digest = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+
+        func checksum(_ text: String) throws -> URL {
+            let file = dir.appendingPathComponent(UUID().uuidString + ".sha256")
+            try Data(text.utf8).write(to: file)
+            return file
+        }
+        try await Updater.verifyChecksum(of: zip, against: checksum("\(digest.uppercased())  Lookout-1.0.0.zip\n"))
+        await #expect(throws: UpdateError.self) { try await Updater.verifyChecksum(of: zip, against: checksum(String(repeating: "0", count: 64))) }
+        await #expect(throws: UpdateError.self) { try await Updater.verifyChecksum(of: zip, against: checksum("")) }
+        await #expect(throws: UpdateError.self) { try await Updater.verifyChecksum(of: zip, against: dir.appendingPathComponent("missing.sha256")) }
     }
 }

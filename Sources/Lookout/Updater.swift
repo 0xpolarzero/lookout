@@ -159,14 +159,11 @@ final class Updater {
         work = Task {
             defer { work = nil; progress = nil }
             do {
+                // Without a checksum there's nothing to trust the download against: don't even fetch it.
+                guard let checksum = release.checksum else { throw UpdateError("The release has no checksum to verify the download") }
                 let zip = try await fetch(release.zip)
                 defer { try? FileManager.default.removeItem(at: zip) }
-                if let checksum = release.checksum {
-                    let (data, _) = try await URLSession.shared.data(from: checksum)
-                    let expected = String(decoding: data, as: UTF8.self).split(separator: " ").first.map(String.init)?.lowercased()
-                    let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-                    guard expected == actual else { throw UpdateError("The download is corrupted (checksum mismatch)") }
-                }
+                try await Self.verifyChecksum(of: zip, against: checksum)
                 staged = try Self.unpack(zip, version: release.version)
                 phase = .ready
             } catch is CancellationError {
@@ -176,6 +173,21 @@ final class Updater {
             }
             quiet = false
         }
+    }
+
+    /// The `.sha256` asset holds `<hex digest>  <file name>`; the zip must hash to that digest.
+    nonisolated static func verifyChecksum(of zip: URL, against checksum: URL) async throws {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(from: checksum)
+        } catch {
+            throw UpdateError("Couldn't read the release checksum")
+        }
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw UpdateError("Couldn't read the release checksum") }
+        let expected = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isWhitespace).first.map { $0.lowercased() }
+        let actual = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
+        guard expected == actual else { throw UpdateError("The download is corrupted (checksum mismatch)") }
     }
 
     private func fetch(_ url: URL) async throws -> URL {
