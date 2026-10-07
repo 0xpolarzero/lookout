@@ -3,26 +3,42 @@ import ApplicationServices
 
 struct SettingsView: View {
     @Bindable var store: Store
+    let hub: HubState
+    @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var token = ""
     @State private var botInput = ""
     @State private var typesafeKey = ""
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
 
+    static let updatesID = "updates"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.lg) {
-                account
-                notifications
-                bots
-                extensions
-                shortcuts
-                updates
-                general
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                    account
+                    notifications
+                    bots
+                    extensions
+                    shortcuts
+                    updates.id(Self.updatesID)
+                    general
+                }
+                .padding(Theme.Space.lg)
             }
-            .padding(Theme.Space.lg)
+            .scrollIndicators(.never)
+            // Check for Updates asked for its section: the page was just opened, or was open and scrolled elsewhere.
+            .onAppear { Task { scroll(proxy, animated: false) } }
+            .onChange(of: hub.settingsScroll) { scroll(proxy, animated: true) }
         }
-        .scrollIndicators(.never)
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard let id = hub.settingsScroll?.id else { return }
+        hub.settingsScroll = nil
+        if animated { withAnimation(Theme.Motion.hover.resolved(reduce: reduce)) { proxy.scrollTo(id, anchor: .top) } }
+        else { proxy.scrollTo(id, anchor: .top) }
     }
 
     // MARK: Sections

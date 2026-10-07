@@ -33,6 +33,13 @@ final class HubState {
     func requestScroll(_ id: String) {
         keyboardSelection = ScrollRequest(id: id, seq: (keyboardSelection?.seq ?? 0) + 1)
     }
+    /// Asks Settings to scroll to a section (by name), once it is open: where Check for Updates shows what it found.
+    var settingsScroll: ScrollRequest?
+    /// Opens Settings at its Updates section, also when Settings is open already, scrolled elsewhere.
+    func showUpdates() {
+        go(.settings)
+        settingsScroll = ScrollRequest(id: SettingsView.updatesID, seq: (settingsScroll?.seq ?? 0) + 1)
+    }
     @ObservationIgnored var sessionMemo = SessionSearchMemo()
     /// The last search's results (see `Store.hubItems`).
     @ObservationIgnored var searchMemo = SearchMemo()
@@ -328,7 +335,7 @@ struct LookoutHub: View {
             if store.updater.isRelease {
                 // Settings' update row says what the check finds (up to date, or why it failed); the bar has no room to.
                 Button("Check for Updates") {
-                    hub.go(.settings)
+                    hub.showUpdates()
                     Task { await store.updater.update(manual: true) }
                 }
             }

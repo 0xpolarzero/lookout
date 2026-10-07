@@ -229,3 +229,22 @@ import Testing
         #expect(out[0] >= 260 && out[0] <= 300.5 && abs(out[2] - out[0]) < 1.5, "\(out)")
     }
 }
+
+@Suite struct SettingsScrolling {
+    @MainActor @Test func checkForUpdatesAsksForTheUpdatesSectionEveryTime() {
+        let hub = HubState()
+        hub.showUpdates()
+        #expect(hub.page == .settings)
+        let first = hub.settingsScroll
+        #expect(first?.id == SettingsView.updatesID)
+        // Settings open already, and scrolled elsewhere (the request was taken): asking again is a new request.
+        hub.settingsScroll = nil
+        hub.showUpdates()
+        #expect(hub.page == .settings)
+        #expect(hub.settingsScroll?.id == SettingsView.updatesID)
+        // Not taken yet: still a different request, so what watches it sees a change.
+        let pending = hub.settingsScroll
+        hub.showUpdates()
+        #expect(hub.settingsScroll != pending)
+    }
+}
