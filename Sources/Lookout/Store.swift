@@ -99,6 +99,13 @@ final class Store {
     @ObservationIgnored private var pollNow = false
     /// Where the token comes from; replaced in tests (the real one can spawn `gh`).
     @ObservationIgnored var resolveToken: @Sendable () -> (String, TokenSource)? = { TokenProvider.resolve() }
+    /// Keeps a token pasted in Settings in the Keychain, or removes it with nil (replaced in tests).
+    @ObservationIgnored var keepToken: (String?) -> Void = { token in
+        if let token, !token.isEmpty { Keychain.write(token) } else { Keychain.delete() }
+    }
+    /// Counts the changes made in Settings; the token held was found under `foundAt`, and is looked for again once they differ.
+    @ObservationIgnored private var credentialsChanged = 0
+    @ObservationIgnored private var foundAt = 0
     @ObservationIgnored private var lastAuthAttempt: Date?
     @ObservationIgnored private var authRetry = false
     /// Signed out, polls look for a new token this rarely: each look can spawn `gh auth token`.
@@ -640,19 +647,25 @@ final class Store {
 
     // MARK: Auth
 
+    /// Signs in with the token held, else the one `resolveToken` finds. A token already held is asked about as it is: finding one
+    /// reads the Keychain and may run `gh`, which a poll that fails (offline, a VPN down, GitHub's own trouble) would do every
+    /// minute. Only no token, one GitHub refused (`dropRejectedToken`), or a change in Settings (`setToken`) looks again.
     func authenticate() async {
-        lastAuthAttempt = Date()
-        let resolve = resolveToken
-        let resolved = await Task.detached { resolve() }.value
-        guard let (token, source) = resolved else {
-            gh.token = nil
-            me = nil
-            tokenSource = nil
-            authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
-            return
+        if gh.token == nil || foundAt != credentialsChanged {
+            lastAuthAttempt = Date()
+            let find = resolveToken
+            let resolved = await Task.detached(operation: find).value
+            guard let (token, source) = resolved else {
+                gh.token = nil
+                me = nil
+                tokenSource = nil
+                authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
+                return
+            }
+            gh.token = token
+            tokenSource = source
+            foundAt = credentialsChanged
         }
-        gh.token = token
-        tokenSource = source
         do {
             me = try await gh.get("/user", as: GHUser.self)
             authError = nil
@@ -673,8 +686,9 @@ final class Store {
     }
 
     func setToken(_ token: String?) {
-        if let token, !token.isEmpty { Keychain.write(token) } else { Keychain.delete() }
+        keepToken(token)
         me = nil
+        credentialsChanged += 1
         refreshNow()
     }
 
@@ -770,12 +784,13 @@ final class Store {
             prune()
             if persistedRevision != savedRevision { save() }
         }
-        // Signed out: look for a token when asked (Retry, a refresh) or once the backoff has passed.
+        // Signed out: look for a token when asked (Retry, a refresh) or once the backoff has passed. One already held is
+        // asked about at every poll: that is a request, not a look in the Keychain and `gh`.
         let asked = authRetry
         authRetry = false
         // A 401 from outside a poll (adding a repo, suggestions) left the token and who it was cached.
         if gh.tokenRejected { dropRejectedToken() }
-        if me == nil, asked || Date().timeIntervalSince(lastAuthAttempt ?? .distantPast) >= Self.authBackoff {
+        if me == nil, asked || gh.token != nil || Date().timeIntervalSince(lastAuthAttempt ?? .distantPast) >= Self.authBackoff {
             await authenticate()
         }
         guard me != nil else { return }

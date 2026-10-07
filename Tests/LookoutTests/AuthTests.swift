@@ -150,6 +150,7 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
     @Test func signedOutPollsDoNotSpawnGhEveryTime() async {
         let s = store()
         s.me = nil
+        s.gh.token = nil
         let looks = Counter()
         s.resolveToken = { looks.bump(); return nil }
         await s.pollAll()
