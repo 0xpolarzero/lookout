@@ -33,6 +33,7 @@ struct InboxBarCell: View {
         let needsYou: Int
         let hovering: Bool
         @Environment(\.resolved) private var resolved
+        @Environment(\.accessibilityReduceMotion) private var reduce
 
         var body: some View {
             let lit = needsYou > 0
@@ -41,7 +42,7 @@ struct InboxBarCell: View {
                     Text(needsYou > 99 ? "99+" : "\(needsYou)")
                         .font(.system(size: needsYou > 99 ? 11 : 13, weight: .bold, design: .rounded).monospacedDigit())
                         .foregroundStyle(Theme.onTint)
-                        .contentTransition(.numericText(value: Double(needsYou)))
+                        .contentTransition(reduce ? .opacity : .numericText(value: Double(needsYou)))
                 } else {
                     Image(systemName: "tray").font(Theme.Typography.glyph(13, .regular)).foregroundStyle(Theme.secondary)
                 }
