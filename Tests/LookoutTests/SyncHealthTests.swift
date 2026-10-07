@@ -83,4 +83,29 @@ import Testing
         for _ in 0..<500 where s.me?.login != "b" || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(s.me?.login == "b" && s.gh.token == "B" && s.authError == nil)
     }
+
+    @Test func aResetLearnedByARefreshByHandBringsTheNextCheckForwardToIt() async {
+        let s = store()
+        s.me = GHUser(login: "me", avatarUrl: nil, type: nil)
+        s.repos = [RepoConfig(fullName: "a/one")]
+        let reset = Date(timeIntervalSince1970: Date().addingTimeInterval(2).timeIntervalSince1970.rounded(.up))
+        let exhausted = OSAllocatedUnfairLock(initialState: false)
+        let afterReset = OSAllocatedUnfairLock(initialState: 0)
+        answer(s) { _ in
+            let spent = exhausted.withLock { $0 } && Date() < reset
+            if exhausted.withLock({ $0 }), !spent { afterReset.withLock { $0 += 1 } }
+            return .init(200, "[]", headers: [
+                "x-ratelimit-resource": "core", "x-ratelimit-remaining": spent ? "0" : "4000",
+                "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970)),
+            ])
+        }
+        // Checking every minute: the loop is asleep for most of one when the refresh by hand finds the budget spent.
+        s.restartPolling()
+        defer { s.stopPolling() }
+        while s.lastSync == nil || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
+        exhausted.withLock { $0 = true }
+        s.refreshNow()
+        for _ in 0..<600 where afterReset.withLock({ $0 }) == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(afterReset.withLock { $0 } > 0)
+    }
 }

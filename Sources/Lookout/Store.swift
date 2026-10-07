@@ -115,6 +115,8 @@ final class Store {
     /// Signed out, polls look for a new token this rarely: each look can spawn `gh auth token`.
     private static let authBackoff: TimeInterval = 300
     @ObservationIgnored private var sleeper: Task<Void, Never>?
+    /// When the sleeper is due to wake.
+    @ObservationIgnored private var sleeperWakes: Date?
     @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var saveDirty = false
@@ -302,8 +304,7 @@ final class Store {
     }
 
     func restartPolling() {
-        pollTask?.cancel()
-        sleeper?.cancel()
+        stopPolling()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -311,6 +312,11 @@ final class Store {
                 await self.sleepUntilNextPoll()
             }
         }
+    }
+
+    func stopPolling() {
+        pollTask?.cancel()
+        sleeper?.cancel()
     }
 
     func refreshNow() {
@@ -356,6 +362,7 @@ final class Store {
             let seconds = wait
             let task = Task<Void, Never> { try? await Task.sleep(for: .seconds(seconds)) }
             sleeper = task
+            sleeperWakes = Date(timeIntervalSinceNow: seconds)
             await task.value
         }
     }
@@ -800,6 +807,8 @@ final class Store {
             lastSync = Date()
             if rateRemaining != gh.rateRemaining { rateRemaining = gh.rateRemaining }
             rateResetsAt = gh.rateResetsAt
+            // A reset learned now (a refresh by hand) may come before the wake the sleeper was set for: it sets that again.
+            if gh.rateRemaining == 0, let reset = rateResetsAt, reset > Date(), let wakes = sleeperWakes, reset < wakes { sleeper?.cancel() }
             prune()
             if persistedRevision != savedRevision { save() }
             if refreshQueued {
