@@ -29,8 +29,6 @@ final class Store {
             persistedRevision &+= 1
         }
     }
-    /// Done, taken back with ⌘Z or the inbox's undo line.
-    let undoStack = UndoStack()
     var settings = AppSettings() {
         didSet {
             memo = Memo()
@@ -646,13 +644,9 @@ final class Store {
         notifier.remove([item.id])
     }
     func markUnread(_ item: InboxItem) { mutate(item.id) { $0.state = .unread } }
-    /// Moves an item to Done, with an undo for the next 30 s (the state it was in comes back, unread included).
     func discard(_ item: InboxItem) {
-        guard let before = items.first(where: { $0.id == item.id })?.state else { return }
         mutate(item.id) { $0.state = .discarded }
         notifier.remove([item.id])
-        guard before.isOpen else { return }
-        undoStack.push("Moved to Done", itemIDs: [item.id]) { [self] in undoDone(item.id, to: before) }
     }
     func restore(_ item: InboxItem) { mutate(item.id) { $0.state = .read } }
 
@@ -1480,11 +1474,10 @@ final class Store {
     }
 
     func prune(now: Date = Date()) {
-        // What ⌘Z could still bring back stays for the half minute it lasts, and a Done request that is still requested
-        // stays, or the next poll would bring it back unread: however old, however many newer items there are.
+        // A Done request that is still requested stays, or the next poll would bring it back unread: however old, however
+        // many newer items there are.
         func protected(_ item: InboxItem) -> Bool {
-            if undoStack.holds(item.id, now: now) { return true }
-            return item.kind == .reviewRequested && item.state == .discarded && requested?.contains(item.id) ?? true
+            item.kind == .reviewRequested && item.state == .discarded && requested?.contains(item.id) ?? true
         }
         func expired(_ item: InboxItem) -> Bool {
             if protected(item) { return false }

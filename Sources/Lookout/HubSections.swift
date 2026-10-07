@@ -116,18 +116,6 @@ extension LookoutHub {
         .frame(minHeight: Theme.Metrics.line)
     }
 
-    /// After a Done, for a few seconds: what happened and a way to take it back (⌘Z does it for 30 s). Nothing otherwise.
-    var undoLine: some View {
-        Group {
-            if let entry = store.undoStack.line {
-                linkRow(entry.message, action: "Undo") { store.undoLast() }
-                    .tip("Undo", "Puts it back · ⌘Z")
-                    .transition(.opacity)
-            }
-        }
-        .motion(Theme.Motion.fade, value: store.undoStack.line?.id)
-    }
-
     // MARK: Section headers
 
     /// A section's header: its title and status on the left, its actions on the right; 30pt tall.
