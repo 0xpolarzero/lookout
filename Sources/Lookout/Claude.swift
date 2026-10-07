@@ -267,8 +267,16 @@ enum Claude {
         case "WebSearch": return "Searching the web"
         case "WebFetch": return "Reading " + ((input["url"] as? String).flatMap { URL(string: $0)?.host } ?? "a web page")
         case "TodoWrite": return "Planning"
-        case "AskUserQuestion": return "Asking you a question"
-        case "ExitPlanMode": return "Waiting for you to approve a plan"
+        // Stopped on you: the row's second line is the question itself, or the plan's title, when the input has it.
+        case "AskUserQuestion":
+            let first = (input["questions"] as? [[String: Any]])?.first?["question"] as? String
+            return first.flatMap { $0.isEmpty ? nil : short($0, 120) } ?? "Asking you a question"
+        case "ExitPlanMode":
+            // A plan is Markdown: its first line is usually a heading.
+            let title = (input["plan"] as? String)?.split(separator: "\n").lazy
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#*").union(.whitespaces)) }
+                .first { !$0.isEmpty }
+            return title.map { "Approve the plan: " + short($0, 96) } ?? "Waiting for you to approve a plan"
         case "Skill": return "Using " + ((input["skill"] as? String) ?? "a skill")
         default:
             if name.hasPrefix("mcp__") {
