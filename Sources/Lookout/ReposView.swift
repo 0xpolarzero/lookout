@@ -98,17 +98,22 @@ struct ReposView: View {
         guard !name.isEmpty, !adding else { return }
         adding = true
         error = nil
+        let draft = input
         Task {
             let err = await store.addRepo(name)
             adding = false
             error = err
             if err == nil {
-                input = ""
-                fieldFocused = false
+                // The field stays editable while the add runs: whatever was typed meanwhile is the next one, and stays.
+                input = Self.field(afterAdding: draft, typed: input)
+                if input.isEmpty { fieldFocused = false }
                 overList = false
             }
         }
     }
+
+    /// What the field holds once the add of `draft` went through: emptied, unless something else was typed meanwhile.
+    static func field(afterAdding draft: String, typed: String) -> String { typed == draft ? "" : typed }
 }
 
 private struct SuggestionRow: View {
