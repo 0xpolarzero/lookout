@@ -281,8 +281,8 @@ struct RepoCard: View {
         Menu {
             Button("Open on GitHub") { NSWorkspace.shared.open(repo.url) }
             Button("Open Actions") { NSWorkspace.shared.open(repo.url.appendingPathComponent("actions")) }
-            if let url = store.ci[repo.fullName]?.url {
-                Button("Open latest commit checks") { NSWorkspace.shared.open(url) }
+            if store.ci[repo.fullName]?.url != nil {
+                Button("Open latest commit checks") { store.openChecks(repo) }
             }
             Divider()
             Button("Stop watching", role: .destructive) { store.removeRepo(repo) }

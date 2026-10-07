@@ -347,10 +347,14 @@ extension Store {
         hubItems(hub).map { "i:" + $0.id } + hubSessions(hub).map { "a:" + $0.id }
     }
 
-    /// A repo's latest CI run on GitHub (its Actions page until a run is known); the playground reports it instead.
+    /// A repo's checks for its latest commit (its Actions page until a run is known).
+    func checksURL(_ repo: RepoConfig) -> URL {
+        ci[repo.fullName]?.url?.appendingPathComponent("checks") ?? repo.url.appendingPathComponent("actions")
+    }
+
+    /// A repo's latest checks on GitHub; the playground reports it instead.
     func openChecks(_ repo: RepoConfig) {
-        let url = ci[repo.fullName]?.url ?? repo.url.appendingPathComponent("actions")
-        if let interceptOpen { interceptOpen("Open checks · \(repo.fullName)") } else { NSWorkspace.shared.open(url) }
+        if let interceptOpen { interceptOpen("Open checks · \(repo.fullName)") } else { NSWorkspace.shared.open(checksURL(repo)) }
     }
 
     /// A scratch Claude session (no folder), through the same interception as every other open.
