@@ -105,13 +105,55 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
 // MARK: - Global hotkeys
 
+/// What registers a key combination with the system: Carbon, or a stand-in under test.
+protocol HotKeyBackend {
+    /// What holds the registration, or nil when another app holds the combination.
+    func register(_ shortcut: Shortcut, id: UInt32) -> AnyObject?
+    func unregister(_ registration: AnyObject)
+}
+
+/// Carbon hot keys, which the system delivers to the app wherever the keys are pressed.
+final class CarbonHotKeys: HotKeyBackend {
+    private final class Registration {
+        let ref: EventHotKeyRef
+        init(_ ref: EventHotKeyRef) { self.ref = ref }
+    }
+
+    init() {
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var id = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                              MemoryLayout<EventHotKeyID>.size, nil, &id)
+            HotKeys.handlers[id.id]?()
+            return noErr
+        }, 1, &spec, nil, nil)
+    }
+
+    func register(_ shortcut: Shortcut, id: UInt32) -> AnyObject? {
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers,
+                                         EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
+                                         GetApplicationEventTarget(), 0, &ref)
+        if status == noErr, let ref { return Registration(ref) }
+        NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))")
+        return nil
+    }
+
+    func unregister(_ registration: AnyObject) {
+        if let registration = registration as? Registration { UnregisterEventHotKey(registration.ref) }
+    }
+}
+
 /// System-wide shortcuts, one registration per id. Matched by key position, so any keyboard layout works.
 /// Key combinations go through Carbon hot keys; lone modifier taps (e.g. right ⌘) through event monitors,
 /// which need Accessibility access to see the keys typed in other apps.
 final class HotKeys {
     static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
-    private static var handlers: [UInt32: () -> Void] = [:]
-    private var refs: [UInt32: EventHotKeyRef] = [:]
+    fileprivate static var handlers: [UInt32: () -> Void] = [:]
+    /// Where the key combinations are registered with the system.
+    private let backend: HotKeyBackend
+    private var refs: [UInt32: AnyObject] = [:]
     /// The key combinations asked for, kept while suspended so they come back as they were.
     private var combos: [UInt32: (shortcut: Shortcut, handler: () -> Void)] = [:]
     /// While true, the key combinations are released so the keys reach the app (e.g. a shortcut being recorded).
@@ -137,15 +179,8 @@ final class HotKeys {
     /// Taps are ignored while this is true (e.g. while a shortcut is being recorded).
     var paused: () -> Bool = { false }
 
-    init() {
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
-            var id = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
-                              MemoryLayout<EventHotKeyID>.size, nil, &id)
-            HotKeys.handlers[id.id]?()
-            return noErr
-        }, 1, &spec, nil, nil)
+    init(backend: HotKeyBackend = CarbonHotKeys()) {
+        self.backend = backend
     }
 
     /// `nil` unregisters. A system-wide key that another app holds is refused (`false`), and what the action had stays
@@ -164,7 +199,7 @@ final class HotKeys {
             release(id)
             combos[id] = (shortcut, handler)
             if isSuspended {
-                UnregisterEventHotKey(ref)
+                backend.unregister(ref)
             } else {
                 refs[id] = ref
                 HotKeys.handlers[id] = handler
@@ -179,7 +214,7 @@ final class HotKeys {
 
     /// Lets go of whatever `id` holds, of every kind.
     private func release(_ id: UInt32) {
-        if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
+        if let ref = refs.removeValue(forKey: id) { backend.unregister(ref) }
         combos[id] = nil
         HotKeys.handlers[id] = nil
         taps[id] = nil
@@ -187,19 +222,13 @@ final class HotKeys {
     }
 
     /// Asks the system for a key combination, which it refuses when another app holds it.
-    private func claim(_ shortcut: Shortcut, _ id: UInt32) -> EventHotKeyRef? {
-        var ref: EventHotKeyRef?
-        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), shortcut.carbonModifiers,
-                                         EventHotKeyID(signature: OSType(0x4C4B4F54), id: id),
-                                         GetApplicationEventTarget(), 0, &ref)
-        if status == noErr, let ref { return ref }
-        NSLog("Lookout: global shortcut \(shortcut.display) unavailable (\(status))")
-        return nil
+    private func claim(_ shortcut: Shortcut, _ id: UInt32) -> AnyObject? {
+        backend.register(shortcut, id: id)
     }
 
     /// (Re)registers one combination with the system, or only releases it while suspended or removed.
     private func register(_ id: UInt32) {
-        if let ref = refs.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
+        if let ref = refs.removeValue(forKey: id) { backend.unregister(ref) }
         HotKeys.handlers[id] = nil
         guard !isSuspended, let (shortcut, handler) = combos[id], let ref = claim(shortcut, id) else { return }
         refs[id] = ref

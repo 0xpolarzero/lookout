@@ -71,14 +71,30 @@ import Testing
         #expect(store.settings.shortcuts == nil)
     }
 
-    @Test func hotKeysAreReleasedWhileSuspended() {
-        let hotKeys = HotKeys()
-        // An unlikely combination, so the test never fights a real shortcut for it.
+    /// The system's hot keys as Carbon keeps them: a combination one registration holds is refused to another.
+    private final class HeldKeys: HotKeyBackend {
+        private final class Registration { let shortcut: Shortcut; init(_ shortcut: Shortcut) { self.shortcut = shortcut } }
+        private var held: [Shortcut] = []
+
+        func register(_ shortcut: Shortcut, id: UInt32) -> AnyObject? {
+            guard !held.contains(shortcut) else { return nil }
+            held.append(shortcut)
+            return Registration(shortcut)
+        }
+
+        func unregister(_ registration: AnyObject) {
+            guard let registration = registration as? Registration, let index = held.firstIndex(of: registration.shortcut) else { return }
+            held.remove(at: index)
+        }
+    }
+
+    private func hotKeysAreReleasedWhileSuspended(_ backend: HotKeyBackend) {
+        let hotKeys = HotKeys(backend: backend)
         let f19 = Shortcut(keyCode: UInt16(kVK_F19), modifiers: [.control, .option, .command, .shift])
         let f18 = Shortcut(keyCode: UInt16(kVK_F18), modifiers: [.control, .option, .command, .shift])
-        // Carbon rejects a combination twice in one app, so a second ID getting it shows the first was released.
+        // A combination can be registered once, so a second ID getting it shows the first was released.
         func isFree(_ shortcut: Shortcut) -> Bool {
-            let probe = HotKeys()
+            let probe = HotKeys(backend: backend)
             probe.set(91, shortcut) {}
             defer { probe.set(91, nil) }
             return probe.registeredIDs == [91]
@@ -96,6 +112,17 @@ import Testing
         #expect(!isFree(f18))
         hotKeys.set(90, nil)
         #expect(isFree(f18))
+    }
+
+    @Test func hotKeysAreReleasedWhileSuspended() {
+        hotKeysAreReleasedWhileSuspended(HeldKeys())
+    }
+
+    /// Registers F18 and F19 with the real system, which another app holding one would fail: only when asked for, with
+    /// `LOOKOUT_REAL_HOTKEYS=1`.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOKOUT_REAL_HOTKEYS"] != nil))
+    func systemHotKeysAreReleasedWhileSuspended() {
+        hotKeysAreReleasedWhileSuspended(CarbonHotKeys())
     }
 
     @Test func startingARecorderStopsTheOneListening() {
