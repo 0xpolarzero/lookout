@@ -252,6 +252,8 @@ final class HubKeys {
         // read. With nothing picked to act on, or once a search has started, it is a letter like any other.
         if hub.query.isEmpty, isBound(shortcut), markAllRead(shortcut) || rowCommand(shortcut, targets: targets()) { return true }
         if startsSearch(event, flags: flags) {
+            // Searching looks everywhere, and the field is in the inbox's header: no section stays expanded without it.
+            if hub.focus != nil { withAnimation(LookoutHub.refocus.resolved(reduce: LookoutHub.reduceNow)) { hub.focus = nil } }
             hub.startSearch(replaying: event)
             return true
         }

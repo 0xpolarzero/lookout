@@ -49,6 +49,12 @@ import Testing
         #expect(press(kVK_ANSI_T, [], "t") && hub.searchOpen && hub.pendingKeys.count == 1)
     }
 
+    @Test func typingWithASectionExpandedStartsTheSearchInTheInbox() {
+        // The inbox header holds the field, and an expanded CI or Sessions section leaves it out.
+        hub.focus = .ci
+        #expect(press(kVK_ANSI_Z, [], "z") && hub.searchOpen && hub.focus == nil)
+    }
+
     @Test func spaceStillTypesInASearchThatHasStarted() {
         // Space is the default Mark read key: it acts on the picked row until a search has started, then it is a space.
         #expect(press(kVK_Space, [], " ") && store.items[0].state == .read)
