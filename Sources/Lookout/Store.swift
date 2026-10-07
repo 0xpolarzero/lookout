@@ -1055,7 +1055,15 @@ final class Store {
         for pr in result.items {
             let id = "rr#\(pr.id)"
             current.insert(id)
-            guard !items.contains(where: { $0.id == id }), let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
+            guard let user = pr.user, let repoURL = pr.repositoryUrl else { continue }
+            if let i = items.firstIndex(where: { $0.id == id }) {
+                // Back after I dealt with it: a new request. (Done while still requested stays Done.)
+                guard items[i].state == .addressed else { continue }
+                items[i].state = .unread
+                items[i].createdAt = first ? pr.updatedAt : Date()
+                added.append(items[i])
+                continue
+            }
             let item = InboxItem(
                 id: id, repo: repoName(from: repoURL), kind: .reviewRequested, number: pr.number, title: pr.title,
                 snippet: snippet(pr.body), author: user.login, avatar: user.avatarUrl, authorIsApp: user.isApp,
@@ -1063,9 +1071,13 @@ final class Store {
             items.append(item)
             added.append(item)
         }
-        // Request disappeared: I reviewed it (or it was withdrawn/closed).
-        for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
-            items[i].state = .addressed
+        // Request disappeared: I reviewed it (or it was withdrawn/closed). A Done one is forgotten, so a new request
+        // on the same PR starts fresh.
+        if result.isComplete {
+            for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
+                items[i].state = .addressed
+            }
+            items.removeAll { $0.kind == .reviewRequested && $0.state == .discarded && !current.contains($0.id) }
         }
         if first {
             settings.didInitialReviewSync = true

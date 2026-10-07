@@ -134,4 +134,61 @@ private func threads(_ body: Data) -> Any {
         #expect(s.items.count == 45)
         #expect(StubGitHub.paths.filter { $0 == "/graphql" }.count == 2)
     }
+
+    // MARK: Review requests
+
+    private func request(_ id: Int, number: Int = 5) -> [String: Any] {
+        ["id": id, "number": number, "title": "Fix it", "body": "", "user": user("them"),
+         "html_url": "https://github.com/a/r/pull/\(number)", "repository_url": "https://api.github.com/repos/a/r",
+         "created_at": stamp(Date()), "updated_at": stamp(Date()), "pull_request": ["url": "https://api.github.com/repos/a/r/pulls/\(number)"]]
+    }
+
+    /// Polls with `open` as the search result (`total` is what GitHub says exists, if more than it returned).
+    private func poll(_ s: Store, _ open: [[String: Any]], total: Int? = nil) async {
+        StubGitHub.reset(["/search/issues": { _ in
+            ["items": open, "total_count": total ?? open.count, "incomplete_results": false]
+        }])
+        await s.syncReviewRequests()
+    }
+
+    private func reviewStore() -> (Store, posted: Box) {
+        let (s, posted) = store()
+        s.settings.didInitialReviewSync = true
+        return (s, posted)
+    }
+
+    @Test func aRequestThatWentAwayAfterDoneComesBackUnread() async {
+        let (s, posted) = reviewStore()
+        await poll(s, [request(1)])
+        #expect(posted.ids == ["rr#1"])
+        s.discard(s.items[0])
+        await poll(s, [request(1)])  // still requested: Done sticks
+        #expect(s.items.first?.state == .discarded)
+        #expect(posted.ids == ["rr#1"])
+        await poll(s, [])  // I reviewed it
+        await poll(s, [request(1)])  // and was asked again
+        #expect(s.items.map(\.state) == [.unread])
+        #expect(posted.ids == ["rr#1", "rr#1"])
+    }
+
+    @Test func aRequestThatWentAwayAfterBeingAnsweredComesBackUnread() async {
+        let (s, posted) = reviewStore()
+        await poll(s, [request(1)])
+        await poll(s, [])
+        #expect(s.items.first?.state == .addressed)
+        await poll(s, [request(1)])
+        #expect(s.items.map(\.state) == [.unread])
+        #expect(posted.ids == ["rr#1", "rr#1"])
+    }
+
+    @Test func aTruncatedSearchDoesNotMakeRequestsDisappear() async {
+        let (s, posted) = reviewStore()
+        await poll(s, [request(1)])
+        s.discard(s.items[0])
+        await poll(s, [request(2)], total: 2)  // request 1 just didn't fit in the page
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .discarded)
+        await poll(s, [request(1)], total: 1)
+        #expect(s.items.first { $0.id == "rr#1" }?.state == .discarded)
+        #expect(posted.ids == ["rr#1", "rr#2"])
+    }
 }
