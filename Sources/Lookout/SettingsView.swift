@@ -465,6 +465,7 @@ private struct RemovableTag: View {
     let removeLabel: String
     var tip: String? = nil
     let remove: () -> Void
+    @FocusState private var removeFocused: Bool
 
     var body: some View {
         HStack(spacing: 4) {
@@ -475,7 +476,8 @@ private struct RemovableTag: View {
             .buttonStyle(HoverFillButtonStyle(shape: Circle()))
             .foregroundStyle(Theme.tertiary)
             .accessibilityLabel(removeLabel)
-            .tip(removeLabel)
+            .focused($removeFocused)
+            .tip(removeLabel, focused: removeFocused)
         }
         .font(Theme.Typography.control)
         .padding(.leading, 9)

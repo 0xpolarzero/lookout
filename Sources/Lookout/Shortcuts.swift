@@ -302,6 +302,7 @@ struct ShortcutRecorder: View {
     @State private var window: NSWindow?
     @State private var error: String?
     @State private var tap = ModifierTap()
+    @FocusState private var resetFocused: Bool
 
     var body: some View {
         let current = store.shortcut(action)
@@ -318,7 +319,8 @@ struct ShortcutRecorder: View {
                     .buttonStyle(HoverFillButtonStyle(shape: Circle()))
                     .foregroundStyle(Theme.tertiary)
                     .accessibilityLabel("Reset \(action.title) to default")
-                    .tip("Reset", "Back to \(action.defaultShortcut.display)")
+                    .focused($resetFocused)
+                    .tip("Reset", "Back to \(action.defaultShortcut.display)", focused: resetFocused)
                 }
                 Button { recording ? stop() : start() } label: {
                     Text(recording ? "Press keys…" : current.display)

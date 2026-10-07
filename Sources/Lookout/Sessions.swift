@@ -294,6 +294,7 @@ struct LabelEditor: View {
 struct UpdateButton: View {
     let updater: Updater
     let horizontal: Bool
+    @FocusState private var focused: Bool
 
     var body: some View {
         let version = updater.release?.version ?? ""
@@ -301,7 +302,8 @@ struct UpdateButton: View {
         .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover))
         .accessibilityLabel(Self.label(updater, version: version))
         .accessibilityHint(tooltip(version).0)
-        .tip(tooltip(version).0, tooltip(version).1)
+        .focused($focused)
+        .tip(tooltip(version).0, tooltip(version).1, focused: focused)
         .contextMenu { UpdateActions(updater: updater) }
     }
 
@@ -343,6 +345,7 @@ private struct UpdateActions: View {
 /// only on macOS 15 and later.
 struct UpdateMenu: View {
     let updater: Updater
+    @FocusState private var focused: Bool
 
     var body: some View {
         Menu { UpdateActions(updater: updater) } label: {
@@ -355,7 +358,8 @@ struct UpdateMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("More about this update")
-        .tip("More about this update", "Release notes, or skip this version")
+        .focused($focused)
+        .tip("More about this update", "Release notes, or skip this version", focused: focused)
     }
 }
 
@@ -548,13 +552,16 @@ struct NewSessionRow: View {
     }
 
     static let maxTiles = 4
+    @FocusState private var scratchFocused: Bool
+    @FocusState private var menuFocused: Bool
 
     var body: some View {
         let folders = store.agentFolders
         HStack(spacing: 5) {
             Button { store.startScratchSession() } label: { NewSessionLabel(style: style) }
                 .buttonStyle(HoverFillButtonStyle())
-                .tip("New session", "Scratch chat, no folder · or pick a project")
+                .focused($scratchFocused)
+                .tip("New session", "Scratch chat, no folder · or pick a project", focused: scratchFocused)
 
             let shown = Array(folders.prefix(Self.maxTiles))
             let initials = Self.initials(shown.map { store.folderName($0) })
@@ -584,7 +591,8 @@ struct NewSessionRow: View {
         .fixedSize()
         .foregroundStyle(Theme.tertiary)
         .frame(width: 20, height: 22)
-        .tip("New session in…", "Every project, by name")
+        .focused($menuFocused)
+        .tip("New session in…", "Every project, by name", focused: menuFocused)
     }
 
     /// Two letters per project, told apart from the others shown: the first letters of its first two words
@@ -651,13 +659,15 @@ private struct ProjectTile: View {
     let initials: String
     let color: Color?
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) { ProjectTileFace(initials: initials, color: color) }
             // The face does its own hover look (a ring), so the style adds no fill.
             .buttonStyle(HoverFillButtonStyle(shape: Theme.Radius.shape(Theme.Radius.xs), hover: .clear, pressed: .clear))
             .accessibilityLabel("New session in \(name)")
-            .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+            .focused($focused)
+            .tip("New session in \(name)", folder.replacingOccurrences(of: NSHomeDirectory(), with: "~"), focused: focused)
     }
 }
 

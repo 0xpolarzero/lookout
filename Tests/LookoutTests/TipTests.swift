@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import Observation
+import SwiftUI
 import Testing
 @testable import Lookout
 
@@ -48,6 +50,42 @@ import Testing
         #expect(center.current?.id == shown.id)
         center.dismiss(ifShowing: shown.id)
         #expect(center.current == nil)
+        #expect(TipCenter.visible == nil)
+    }
+
+    /// A control's focus, which a test moves.
+    @MainActor @Observable final class Focus { var on = false }
+
+    struct Tipped: View {
+        let focus: Focus
+
+        var body: some View {
+            Color.clear.frame(width: 40, height: 40)
+                .tip("Settings", "⌘,", focused: focus.on)
+                .tipSpace()
+                .frame(width: 200, height: 100)
+        }
+    }
+
+    @MainActor @Test func aControlsTipShowsOnceItHasHadKeyboardFocusForASecondAndGoesWithIt() async throws {
+        _ = NSApplication.shared
+        let focus = Focus()
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 200, height: 100), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: Tipped(focus: focus))
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close(); TipCenter.visible?.dismiss() }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(TipCenter.visible == nil)
+        focus.on = true
+        // Not at once: a Tab through a row of controls doesn't flash each one's tip.
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(TipCenter.visible == nil)
+        try await Task.sleep(for: .milliseconds(1000))
+        #expect(TipCenter.visible?.current?.title == "Settings")
+        focus.on = false
+        try await Task.sleep(for: .milliseconds(200))
         #expect(TipCenter.visible == nil)
     }
 }

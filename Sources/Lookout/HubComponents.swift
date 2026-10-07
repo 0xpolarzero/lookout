@@ -493,6 +493,7 @@ struct RepoChip: View {
     let status: CIStatus?
     let state: CIState
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) {
@@ -512,7 +513,8 @@ struct RepoChip: View {
         .accessibilityLabel("\(repo.name), \(state == .none ? "no runs" : state.label)"
                             + (state == .failure ? ((status?.failing).map { ": " + $0.joined(separator: ", ") } ?? "") : ""))
         .accessibilityHint("Opens its latest checks")
-        .tip(repo.fullName, detail)
+        .focused($focused)
+        .tip(repo.fullName, detail, focused: focused)
     }
 
     /// The failing checks by name for the chip: the first two, cut short, and how many more ("build, lint +3").
@@ -537,13 +539,15 @@ struct RepoChip: View {
 struct NewSessionTile: View {
     var size: CGFloat = Theme.Metrics.chip
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) { NewSessionTileLabel(size: size) }
             .buttonStyle(HoverFillButtonStyle(shape: Tile.shape(size), rest: Theme.Fill.field, hover: Theme.Fill.tile))
             .accessibilityLabel("New session")
             .accessibilityHint("Scratch chat, or pick a project")
-            .tip("New session", "Scratch chat, or pick a project")
+            .focused($focused)
+            .tip("New session", "Scratch chat, or pick a project", focused: focused)
     }
 }
 

@@ -59,10 +59,12 @@ struct IconButton: View {
     var tint: Color = Theme.secondary
     var active = false
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         let button = Button(action: action) { IconButtonLabel(symbol: symbol, size: size, tint: tint, active: active) }
             .buttonStyle(HoverFillButtonStyle(shape: Circle(), hover: Theme.Fill.hover, isActive: active))
+            .focused($focused)
             .accessibilityLabel(label ?? help)
             .accessibilityHint(detail.flatMap { $0.isEmpty ? nil : $0 } ?? "")
 
@@ -70,7 +72,7 @@ struct IconButton: View {
         if help.isEmpty {
             button
         } else {
-            button.tip(help, detail)
+            button.tip(help, detail, focused: focused)
         }
     }
 }
@@ -351,6 +353,8 @@ final class TipCenter {
 private struct Tip: ViewModifier {
     let title: String
     let detail: String?
+    /// The control's own keyboard focus: its tip shows after a second, and goes when the focus does.
+    let focused: Bool
     @State private var id = UUID()
     @State private var anchor = CGRect.zero
     @State private var pending: Task<Void, Never>?
@@ -383,6 +387,18 @@ private struct Tip: ViewModifier {
                 if inside {
                     pending = Task {
                         try? await Task.sleep(for: .milliseconds(300))
+                        guard !Task.isCancelled else { return }
+                        show()
+                    }
+                } else {
+                    center?.dismiss(ifShowing: id)
+                }
+            }
+            .onChange(of: focused) { _, focused in
+                pending?.cancel()
+                if focused {
+                    pending = Task {
+                        try? await Task.sleep(for: .seconds(1))
                         guard !Task.isCancelled else { return }
                         show()
                     }
@@ -476,7 +492,8 @@ extension View {
     /// Hosts tooltips for everything inside (use once, at the root of the panel).
     func tipSpace() -> some View { modifier(TipSpaceModifier()) }
 
-    func tip(_ title: String, _ detail: String? = nil) -> some View {
-        modifier(Tip(title: title, detail: detail))
+    /// A tooltip for a control: on hover, and after a second on keyboard focus when it hands over its own `focused`.
+    func tip(_ title: String, _ detail: String? = nil, focused: Bool = false) -> some View {
+        modifier(Tip(title: title, detail: detail, focused: focused))
     }
 }

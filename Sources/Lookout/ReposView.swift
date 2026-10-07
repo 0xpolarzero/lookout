@@ -185,6 +185,7 @@ struct RepoCard: View {
     let store: Store
     @State private var dropTarget = false
     @State private var hover = false
+    @FocusState private var menuFocused: Bool
     @Environment(\.previewTip) private var previewTip
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -251,19 +252,19 @@ struct RepoCard: View {
         let on = repo.events.contains(kind)
         let filtered = kind != .issueOpened && kind != .prOpened && !repo.allComments
         let detail = filtered ? "Only on your threads, @mentions and replies to you" : kind.tipDetail
-        return BadgeButton(symbol: kind.symbol, color: kind.color, on: on, label: kind.toggleLabel) { store.toggle(kind, on: repo) }
-            .tip(kind.toggleLabel, detail + (on ? "" : "\nOff · click to turn on"))
+        return BadgeButton(symbol: kind.symbol, color: kind.color, on: on, label: kind.toggleLabel,
+                           tip: detail + (on ? "" : "\nOff · click to turn on")) { store.toggle(kind, on: repo) }
     }
 
     private var allCommentsBadge: some View {
         let hasComments = !repo.events.isDisjoint(with: [.issueComment, .prComment, .reviewComment])
-        return BadgeButton(symbol: "bubble.left.and.bubble.right.fill", color: Theme.accent, on: repo.allComments, label: "All comments") {
+        return BadgeButton(symbol: "bubble.left.and.bubble.right.fill", color: Theme.accent, on: repo.allComments,
+                           label: "All comments", tipTitle: repo.allComments ? "All comments" : "Comments for you",
+                           tip: repo.allComments ? "Every comment in this repo" : "Click to get every comment, not only the ones for you") {
             store.toggleAllComments(repo)
         }
         .opacity(hasComments ? 1 : 0.35)
         .disabled(!hasComments)
-        .tip(repo.allComments ? "All comments" : "Comments for you",
-             repo.allComments ? "Every comment in this repo" : "Click to get every comment, not only the ones for you")
     }
 
     private var ciBadge: some View {
@@ -277,10 +278,9 @@ struct RepoCard: View {
             detail += "\n" + failing.prefix(4).joined(separator: "\n")
         }
         return BadgeButton(symbol: symbol, color: state == .none ? Theme.secondary : state.color, on: on, label: "CI",
-                           value: on ? "\(state.label), shown on the bar" : "Hidden from the bar") {
+                           value: on ? "\(state.label), shown on the bar" : "Hidden from the bar", tip: detail) {
             store.toggle(.ciMain, on: repo)
         }
-        .tip("CI", detail)
     }
 
     private var menu: some View {
@@ -300,7 +300,8 @@ struct RepoCard: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("More actions for \(repo.fullName)")
-        .tip("More", "Open on GitHub, or stop watching")
+        .focused($menuFocused)
+        .tip("More", "Open on GitHub, or stop watching", focused: menuFocused)
     }
 }
 
@@ -311,7 +312,11 @@ private struct BadgeButton: View {
     var label = ""
     /// What VoiceOver reads as the state; defaults to On/Off.
     var value: String? = nil
+    /// Its tooltip: the title (the label, unless another says more) and what it adds.
+    var tipTitle: String? = nil
+    let tip: String
     let action: () -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         Button(action: action) { BadgeLabel(symbol: symbol, color: color, on: on) }
@@ -322,6 +327,8 @@ private struct BadgeButton: View {
                 pressed: on ? color.opacity(0.32) : Theme.Fill.selected))
             .accessibilityLabel(label)
             .accessibilityValue(value ?? (on ? "On" : "Off"))
+            .focused($focused)
+            .tip(tipTitle ?? label, tip, focused: focused)
     }
 }
 
