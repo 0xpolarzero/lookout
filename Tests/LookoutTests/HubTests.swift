@@ -248,3 +248,16 @@ import Testing
         #expect(hub.settingsScroll != pending)
     }
 }
+
+@Suite struct EdgeFlag {
+    @Test func edgeFlagNamesTheDemoBarsEdge() {
+        #expect(HubController.edge(in: ["Lookout", "--demo", "agents", "--edge", "top"]) == .top)
+        #expect(HubController.edge(in: ["Lookout", "--edge", "left", "--open"]) == .left)
+    }
+
+    @Test func noEdgeOrAnUnknownOneLeavesTheDefault() {
+        #expect(HubController.edge(in: ["Lookout", "--demo"]) == nil)
+        #expect(HubController.edge(in: ["Lookout", "--edge"]) == nil)
+        #expect(HubController.edge(in: ["Lookout", "--edge", "middle"]) == nil)
+    }
+}

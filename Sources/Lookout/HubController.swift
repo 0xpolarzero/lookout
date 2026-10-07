@@ -154,10 +154,15 @@ final class HubController {
     private let trigger = HoverTrigger(size: NSSize(width: 10, height: 10))
     private var globalMouse: Any?
 
-    /// `demo`: on the right edge and nothing saved, so trying it never moves your real bar.
-    init(store: Store, demo: Bool = false) {
+    /// The edge `--edge` names, if it names one.
+    nonisolated static func edge(in arguments: [String]) -> DockEdge? {
+        arguments.firstIndex(of: "--edge").flatMap { arguments.dropFirst($0 + 1).first }.flatMap(DockEdge.init(rawValue:))
+    }
+
+    /// `demo`: on the right edge (or the one `--edge` names) and nothing saved, so trying it never moves your real bar.
+    init(store: Store, demo: Bool = false, arguments: [String] = CommandLine.arguments) {
         self.store = store
-        ui = demo ? UIState(persists: false, edge: .right) : UIState()
+        ui = demo ? UIState(persists: false, edge: Self.edge(in: arguments) ?? .right) : UIState()
         keys = HubKeys(store: store, ui: ui, hub: hub)
         // The screen you're looking at: the one with the mouse.
         screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]

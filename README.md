@@ -56,7 +56,7 @@ Releases are signed with one self-signed certificate, so macOS keeps Lookout's A
 
 ## Dev flags
 
-    .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty|agents] --open   # mock data, nothing saved
+    .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty|agents] [--open] [--edge left|right|top|bottom]   # mock data, nothing saved
     .build/debug/Lookout --claude [--watch]                      # what the Claude extension reads; --watch prints live changes
     .build/debug/Lookout --playground                            # the bar on a fake desktop, demo data, every edge
     .build/debug/Lookout --playground-shots <dir>                # render the bar's states (rest, hover, open, pages) as PNGs
@@ -65,6 +65,7 @@ Releases are signed with one self-signed certificate, so macOS keeps Lookout's A
     build/Lookout.app/Contents/MacOS/Lookout --update 0.1.0   # pretend to be 0.1.0: check, download and verify the latest release
     .build/debug/Lookout --check owner/repo [--days N] [--all]   # headless live sync, prints the inbox
     .build/debug/Lookout --check owner/repo --thread 123         # what Lookout knows about one thread
+    scripts/idle-cpu.sh                                          # release build's CPU at rest and kept open, on the demo data (puts the bar on screen for minutes)
     swift test
 
 State: `~/Library/Application Support/Lookout/state.json`.
