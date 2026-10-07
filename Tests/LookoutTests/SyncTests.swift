@@ -234,6 +234,21 @@ private func threads(_ body: Data) -> Any {
         #expect(posted.ids == ["rr#1", "rr#1"])
     }
 
+    @Test func aDoneRequestStillRequestedOutlivesPruning() async {
+        let (s, posted) = reviewStore()
+        await poll(s, [request(1)])
+        s.discard(s.items[0])
+        s.items[0].createdAt = Date().addingTimeInterval(-90 * 86400)
+        s.prune()  // nothing listed it yet since launch: can't tell it's gone
+        #expect(s.items.count == 1)
+        await poll(s, [request(1)])
+        s.prune()
+        #expect(s.items.map(\.state) == [.discarded])
+        #expect(posted.ids == ["rr#1"])
+        await poll(s, [])  // gone: forgotten
+        #expect(s.items.isEmpty)
+    }
+
     @Test func aTruncatedSearchDoesNotMakeRequestsDisappear() async {
         let (s, posted) = reviewStore()
         await poll(s, [request(1)])

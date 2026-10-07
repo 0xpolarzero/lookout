@@ -112,6 +112,8 @@ final class Store {
     @ObservationIgnored private var claudeDeadline: Date?
     /// When each repo's CI was last checked, live (the persisted `checkedAt` only changes with the status).
     @ObservationIgnored private var ciCheckedAt: [String: Date] = [:]
+    /// Review requests the last complete search listed; nil until one has (then nothing is known to be gone).
+    @ObservationIgnored private var requested: Set<String>?
     @ObservationIgnored var persists = true
     /// While a shortcut is being recorded, the panel's key handler stands down.
     @ObservationIgnored var isRecordingShortcut = false
@@ -1103,6 +1105,7 @@ final class Store {
         }
         // Request disappeared: I reviewed it (or it was withdrawn/closed). A Done one is forgotten, so a new request
         // on the same PR starts fresh.
+        requested = result.isComplete ? current : requested.map { $0.union(current) }
         if result.isComplete {
             for i in items.indices where items[i].kind == .reviewRequested && items[i].state.isOpen && !current.contains(items[i].id) {
                 items[i].state = .addressed
@@ -1116,9 +1119,11 @@ final class Store {
         }
     }
 
-    private func prune() {
+    func prune() {
         let now = Date()
         func expired(_ item: InboxItem) -> Bool {
+            // A Done request that is still requested stays, or the next poll would bring it back unread.
+            if item.kind == .reviewRequested, item.state == .discarded, requested?.contains(item.id) ?? true { return false }
             let age = now.timeIntervalSince(item.createdAt)
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
