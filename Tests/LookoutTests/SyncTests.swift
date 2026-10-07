@@ -17,6 +17,13 @@ final class StubGitHub: URLProtocol {
         }
     }
 
+    /// The session a store gets, so its requests are answered here and nowhere else.
+    static var session: URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubGitHub.self]
+        return URLSession(configuration: config)
+    }
+
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "api.github.com" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
@@ -74,11 +81,10 @@ private func threads(_ body: Data) -> Any {
 
 @MainActor
 @Suite(.serialized) struct Sync {
-    init() { URLProtocol.registerClass(StubGitHub.self) }
-
     private func store(allComments: Bool = false) -> (Store, posted: Box) {
         let s = Store()
         s.persists = false
+        s.gh.session = StubGitHub.session
         s.me = GHUser(login: "me", avatarUrl: nil, type: "User")
         var repo = RepoConfig(fullName: "a/r", allComments: allComments)
         repo.addedAt = Date().addingTimeInterval(-3600)

@@ -309,10 +309,10 @@ enum Claude {
         return folders
     }
 
-    /// Files under `tasksRoot` that a process of yours has as its output: the shell commands still running. A command's
-    /// output stays open exactly as long as it runs, so this is the system's answer, with no timeout to guess.
-    static func openTaskOutputs() -> Set<String> {
-        let prefix = tasksRoot.path + "/"
+    /// Files under `root` (`tasksRoot`) that a process of yours has as its output: the shell commands still running. A
+    /// command's output stays open exactly as long as it runs, so this is the system's answer, with no timeout to guess.
+    static func openTaskOutputs(under root: URL = tasksRoot) -> Set<String> {
+        let prefix = root.path + "/"
         let uid = getuid()
         var pids = [pid_t](repeating: 0, count: Int(proc_listallpids(nil, 0)) + 64)
         let count = Int(proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)))

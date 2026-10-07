@@ -32,6 +32,8 @@ enum AccessibilityTree {
         _ = enabled
         let store = Store()
         Demo.populate(store, scenario)
+        // The Repositories page asks GitHub for suggestions: a GitHub of its own, with nothing to suggest.
+        store.gh.session = StubbedGitHub.session { _ in .init(200, "[]") }
         store.agents.expanded = true
         let hub = HubState()
         let view = LookoutHub(store: store, ui: UIState(persists: false, edge: edge), hub: hub, maxLength: 700, maxWidth: size.width)

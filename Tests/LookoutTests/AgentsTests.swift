@@ -571,9 +571,13 @@ import Testing
 
     @Test func runningCommandsHoldTheirOutputOpen() throws {
         let fm = FileManager.default
-        let folder = Claude.tasksRoot.appendingPathComponent("lookout-tests-\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? fm.removeItem(at: folder) }
+        // A folder of its own, not Claude's.
+        let made = fm.temporaryDirectory.appendingPathComponent("lookout-tests-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: made.appendingPathComponent("p/s/tasks", isDirectory: true), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: made) }
+        // The system names a file by its real path (/private/var, not /var).
+        let root = URL(fileURLWithPath: made.path.withCString { realpath($0, nil).map { String(cString: $0) } } ?? made.path)
+        let folder = root.appendingPathComponent("p/s/tasks", isDirectory: true)
         let output = folder.appendingPathComponent("b1.output")
         fm.createFile(atPath: output.path, contents: nil)
         let process = Process()
@@ -581,10 +585,10 @@ import Testing
         process.arguments = ["10"]
         process.standardOutput = try FileHandle(forWritingTo: output)
         try process.run()
-        #expect(Claude.openTaskOutputs().contains(output.path))
+        #expect(Claude.openTaskOutputs(under: root).contains(output.path))
         process.terminate()
         process.waitUntilExit()
-        #expect(!Claude.openTaskOutputs().contains(output.path))
+        #expect(!Claude.openTaskOutputs(under: root).contains(output.path))
     }
 
     @Test func rejectsOtherFiles() {
