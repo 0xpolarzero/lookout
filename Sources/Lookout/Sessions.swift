@@ -280,7 +280,7 @@ struct UpdateButton: View {
         let version = updater.release?.version ?? ""
         Button { updater.advance() } label: { UpdateLabel(updater: updater, horizontal: horizontal, version: version) }
         .buttonStyle(HoverFillButtonStyle(shape: Capsule(), hover: Theme.Fill.hover))
-        .accessibilityLabel(Self.label(updater.phase, version: version))
+        .accessibilityLabel(Self.label(updater, version: version))
         .accessibilityHint(tooltip(version).0)
         .tip(tooltip(version).0, tooltip(version).1)
         .contextMenu { UpdateActions(updater: updater) }
@@ -290,7 +290,7 @@ struct UpdateButton: View {
     private func tooltip(_ version: String) -> (String, String?) {
         switch updater.phase {
         case .available: ("Lookout \(version) is available", "Click to download it · right-click for more")
-        case .downloading(let fraction): ("Downloading Lookout \(version)… \(Int(fraction * 100))%", nil)
+        case .downloading: ("Downloading Lookout \(version)… \(Int(updater.fraction * 100))%", nil)
         case .ready: ("Lookout \(version) is ready", "Click to restart into it")
         case .installing: ("Installing Lookout \(version)…", nil)
         case .failed(let message): ("Update failed: \(message)", "Click to try again")
@@ -298,9 +298,9 @@ struct UpdateButton: View {
         }
     }
 
-    fileprivate static func label(_ phase: Updater.Phase, version: String) -> String {
-        switch phase {
-        case .downloading(let fraction): "\(Int(fraction * 100))%"
+    fileprivate static func label(_ updater: Updater, version: String) -> String {
+        switch updater.phase {
+        case .downloading: "\(Int(updater.fraction * 100))%"
         case .ready, .installing: "Restart to update"
         case .failed: "Retry update"
         default: "Update to \(version)"
@@ -350,7 +350,8 @@ private struct UpdateLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             ZStack {
-                if case .downloading(let fraction) = updater.phase {
+                if updater.phase == .downloading {
+                    let fraction = updater.fraction
                     Circle().stroke(Theme.Fill.selected, lineWidth: 2).padding(3)
                     Circle().trim(from: 0, to: max(0.03, fraction))
                         .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -368,7 +369,7 @@ private struct UpdateLabel: View {
             }
             .frame(width: 28, height: 28)
             if horizontal && hover {
-                Text(UpdateButton.label(updater.phase, version: version))
+                Text(UpdateButton.label(updater, version: version))
                     .font(Theme.Typography.heading)
                     .foregroundStyle(Theme.text)
                     .padding(.trailing, 8)

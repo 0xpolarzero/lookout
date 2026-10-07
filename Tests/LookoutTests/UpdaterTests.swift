@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Observation
 import Testing
 @testable import Lookout
 
@@ -25,7 +26,7 @@ import Testing
         #expect(updater.release?.checksum == nil)
         updater.download()
         // It fails before fetching anything, so it settles without the network.
-        for _ in 0..<100 { if updater.phase != .downloading(0) { break }; try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<100 { if updater.phase != .downloading { break }; try await Task.sleep(for: .milliseconds(20)) }
         guard case .failed(let message) = updater.phase else { Issue.record("phase \(updater.phase)"); return }
         #expect(message.contains("no checksum"))
         #expect(updater.stagedPath == nil)
@@ -63,5 +64,41 @@ import Testing
         await #expect(throws: UpdateError.self) { try await Updater.verifyChecksum(of: zip, against: checksum(String(repeating: "0", count: 64))) }
         await #expect(throws: UpdateError.self) { try await Updater.verifyChecksum(of: zip, against: checksum("")) }
         await #expect(throws: UpdateError.self) { try await Updater.verifyChecksum(of: zip, against: dir.appendingPathComponent("missing.sha256")) }
+    }
+
+    /// Whether anything read inside `read` is invalidated by `change`.
+    @MainActor private func invalidates(reading read: () -> Void, by change: () -> Void) -> Bool {
+        final class Flag: @unchecked Sendable { var set = false }
+        let flag = Flag()
+        withObservationTracking(read) { flag.set = true }
+        change()
+        return flag.set
+    }
+
+    @MainActor @Test func aDownloadsProgressRedrawsOnlyWhatDrawsIt() {
+        // A download from a check is silent but its progress arrives many times a second: the hub reads whether
+        // the update shows and what phase it is in, not how far along it is.
+        let updater = Updater()
+        updater.preview(.downloading, version: "0.5.0")
+        let hub = invalidates(reading: { _ = updater.showsInPill; _ = updater.phase; _ = updater.release }) {
+            for completed in stride(from: 0.0, through: 1.0, by: 0.013) { updater.report(completed) }
+        }
+        #expect(!hub)
+        #expect(updater.fraction == 0.98)
+        // The update cell and Settings do read it.
+        #expect(invalidates(reading: { _ = updater.fraction }) { updater.report(0.99) })
+        // The phase changing is another matter: the cell turns into a restart button.
+        #expect(invalidates(reading: { _ = updater.showsInPill; _ = updater.phase }) { updater.preview(.ready, version: "0.5.0") })
+    }
+
+    @MainActor @Test func theUpdateShowsInThePillOnceThereIsOneToActOn() {
+        let updater = Updater()
+        #expect(!updater.showsInPill)
+        updater.preview(.available)
+        #expect(updater.showsInPill)
+        updater.preview(.idle)
+        #expect(!updater.showsInPill)
+        updater.preview(.failed("The download didn't finish"))
+        #expect(updater.showsInPill)
     }
 }
