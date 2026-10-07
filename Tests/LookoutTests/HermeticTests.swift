@@ -57,7 +57,7 @@ private final class Reached: @unchecked Sendable {
         let secrets = MemorySecrets()
         Keychain.backend = secrets
         defer { Keychain.backend = nil }
-        let reached = try await Reached.during {
+        let reached = await Reached.during {
             let s = Store()
             s.persists = false
             s.gh.session = StubbedGitHub.session { _ in .init(200, "[]") }
