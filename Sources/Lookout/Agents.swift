@@ -702,8 +702,13 @@ extension Store {
         }
     }
 
-    /// Replaces a session's icon (the old one is never offered again for it).
+    /// Whether icons can be picked now: on, with a key. Without that a session keeps the icon it has, but can't get another.
+    var canPickIcons: Bool { agents.enabled && agents.iconsEnabled && hasTypesafeKey }
+
+    /// Replaces a session's icon (the old one is never offered again for it). Not while nothing could pick the next:
+    /// the session would be left with none.
     func repickIcon(_ id: String) {
+        guard canPickIcons else { return }
         ensureEntry(id)
         mutateAgent(id) {
             if let icon = $0.icon { $0.rejectedIcons = ($0.rejectedIcons ?? []) + [icon] }

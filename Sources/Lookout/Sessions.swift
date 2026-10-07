@@ -245,7 +245,7 @@ struct LabelEditor: View {
                 .font(Theme.Typography.meta)
                 .foregroundStyle(Theme.accent)
             }
-            if store.agents.iconsEnabled && store.hasTypesafeKey && row.entry.label == nil {
+            if store.canPickIcons && row.entry.label == nil {
                 Button(row.entry.icon == nil ? "Pick an icon" : "Pick another icon") {
                     store.repickIcon(row.id)
                     dismiss()

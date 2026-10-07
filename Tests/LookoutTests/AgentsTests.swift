@@ -245,6 +245,23 @@ import Testing
         #expect(s.folderName("/customer-b/app") == "customer-b/app")
     }
 
+    @Test func aPickedIconStaysWhenNoneCanBePickedToReplaceIt() {
+        let s = store([session("a")])
+        s.agents.entries[0].icon = "hammer"
+        // Icons off: the icon is kept (and shown), and cannot be repicked.
+        #expect(!s.canPickIcons)
+        s.repickIcon("a")
+        #expect(s.agents.entries[0].icon == "hammer" && s.agents.entries[0].rejectedIcons == nil)
+        s.agents.iconsEnabled = true
+        s.repickIcon("a")
+        #expect(s.agents.entries[0].icon == "hammer")
+        // On, with a key: the old one goes, and is not offered again.
+        s.hasTypesafeKey = true
+        #expect(s.canPickIcons)
+        s.repickIcon("a")
+        #expect(s.agents.entries[0].icon == nil && s.agents.entries[0].rejectedIcons == ["hammer"])
+    }
+
     @Test func keptOrderAndReorder() {
         let s = store([session("a"), session("b"), session("c")])
         s.keepAgent("b")
