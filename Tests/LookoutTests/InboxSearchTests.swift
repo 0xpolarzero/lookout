@@ -83,6 +83,25 @@ import Testing
         #expect(r.opened.titles == ["Open on GitHub · Format ranges"])
     }
 
+    @Test func aQueryEditedWithSessionsFocusedPicksAShownSession() {
+        let r = rig()
+        let ui = UIState()
+        r.store.agents.enabled = true
+        r.store.ingest([], appUnread: [], claudeFrontmost: false, now: sessionsNow)
+        r.store.ingest([session("a1"), session("a2")], appUnread: [], claudeFrontmost: false, now: sessionsNow)
+        r.store.items = [item("1", title: "Session a2 crashes")]
+        r.hub.focus = .agents
+        r.hub.query = "session"
+        r.hub.selection = "a:a1"
+        // The pick goes, and a session and an inbox item still match: the pick lands on the session, the one shown.
+        r.hub.query = "session a2"
+        #expect(r.store.hubTargets(r.hub) == ["i:1", "a:a2"])
+        r.hub.reconcileSelection(among: r.store.shownHubTargets(r.hub), ui: ui)
+        #expect(r.hub.selection == "a:a2")
+        #expect(r.keys.key(key(kVK_Return)))
+        #expect(r.opened.titles == ["Open in Claude · Session a2"])
+    }
+
     // MARK: The configured Open shortcut
 
     /// A window whose field editor has the keyboard, as it does while the search field is focused.

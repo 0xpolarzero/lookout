@@ -67,6 +67,9 @@ extension Store {
     func hubTargets(_ hub: HubState) -> [String] {
         hubItems(hub).map { "i:" + $0.id } + hub.ciTargets(self) + hubSessionIDs(hub).map { "a:" + $0 }
     }
+
+    /// Those of them on screen: a focused section shrinks the others, and ↩ opens only what shows.
+    func shownHubTargets(_ hub: HubState) -> [String] { hubTargets(hub).filter(hub.isVisible) }
 }
 
 /// Why the inbox has nothing to list, in the order DESIGN.md 5.9 gives them: the first that applies wins.
@@ -157,7 +160,7 @@ extension LookoutHub {
     }
 
     var searchField: some View {
-        InboxSearchField(hub: hub, ui: ui, summary: searchCount, showsSummary: !searchFoundNothing, targets: store.hubTargets(hub))
+        InboxSearchField(hub: hub, ui: ui, summary: searchCount, showsSummary: !searchFoundNothing, targets: store.shownHubTargets(hub))
     }
 
     /// What the search found, by kind, each group counted even at none: "3 items · 0 sessions".
