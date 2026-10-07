@@ -118,6 +118,8 @@ final class Store {
     /// Counts the changes made in Settings; the token held was found under `foundAt`, and is looked for again once they differ.
     @ObservationIgnored private var credentialsChanged = 0
     @ObservationIgnored private var foundAt = 0
+    /// A token was just saved or taken away: the sign-in that fails next is its result and is said aloud (a poll's isn't).
+    @ObservationIgnored private(set) var awaitingSignIn = false
     @ObservationIgnored private var lastAuthAttempt: Date?
     @ObservationIgnored private var authRetry = false
     @ObservationIgnored private var refreshQueued = false
@@ -731,7 +733,7 @@ final class Store {
                 me = nil
                 tokenSource = nil
                 unreachable = false
-                authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
+                signInFailed("No GitHub token found. Run `gh auth login`, or paste a token in Settings.")
                 return
             }
             gh.token = token
@@ -743,6 +745,7 @@ final class Store {
             guard asked == credentialsChanged else { return }
             me = user
             authError = nil
+            awaitingSignIn = false
             unreachable = false
         } catch {
             guard asked == credentialsChanged else { return }
@@ -753,8 +756,17 @@ final class Store {
             }
             me = nil
             unreachable = false
-            authError = error.localizedDescription
+            signInFailed(error.localizedDescription)
         }
+    }
+
+    /// Sets the sign-in problem. The editor in Settings closes once the Keychain has a token, before GitHub answers, so the
+    /// refusal of what was just saved is said too, once; a later poll's is only shown.
+    private func signInFailed(_ reason: String) {
+        authError = reason
+        guard awaitingSignIn else { return }
+        awaitingSignIn = false
+        Announce.say(reason, again: true)
     }
 
     /// Revoked or expired: forget the token and who it was, so the next look resolves one again
@@ -777,6 +789,7 @@ final class Store {
             Keychain.delete()
         }
         me = nil
+        awaitingSignIn = true
         credentialsChanged += 1
         refreshNow()
         return true
