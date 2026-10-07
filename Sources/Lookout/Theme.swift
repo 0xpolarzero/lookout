@@ -282,7 +282,62 @@ final class TipCenter {
         var anchor: CGRect
     }
 
-    var current: Request?
+    private(set) var current: Request?
+
+    /// The centre showing a tooltip right now, so the hub's Esc handling can dismiss it before anything else.
+    private(set) static weak var visible: TipCenter?
+
+    /// Key monitors that exist only while a tooltip is up: nothing listens (or wakes the app) otherwise.
+    @ObservationIgnored private var monitors: [Any] = []
+
+    var isWatchingKeys: Bool { !monitors.isEmpty }
+
+    func show(_ request: Request) {
+        current = request
+        Self.visible = self
+        watchEscape()
+    }
+
+    func move(_ id: UUID, to anchor: CGRect) {
+        if current?.id == id { current?.anchor = anchor }
+    }
+
+    func dismiss() {
+        current = nil
+        if Self.visible === self { Self.visible = nil }
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
+    }
+
+    func dismiss(ifShowing id: UUID) {
+        if current?.id == id { dismiss() }
+    }
+
+    deinit { monitors.forEach(NSEvent.removeMonitor) }
+
+    /// Esc dismisses the tooltip and is consumed only then, ahead of the hub's own Esc (back, close).
+    @discardableResult static func dismissVisible(for event: NSEvent) -> Bool {
+        guard let center = visible, isEscape(event) else { return false }
+        center.dismiss()
+        return true
+    }
+
+    static func isEscape(_ event: NSEvent) -> Bool {
+        event.keyCode == 53 && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+    }
+
+    private func watchEscape() {
+        guard monitors.isEmpty else { return }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { event in
+            Self.dismissVisible(for: event) ? nil : event
+        }) { monitors.append(local) }
+        // While another app has the keys: it still gets the Esc (a global monitor can't take it), and only
+        // delivers with Accessibility access, which is checked without asking.
+        guard AXIsProcessTrusted() else { return }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            if Self.isEscape(event) { self?.dismiss() }
+        }) { monitors.append(global) }
+    }
 }
 
 private struct Tip: ViewModifier {
@@ -308,7 +363,7 @@ private struct Tip: ViewModifier {
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TipSpace.name)) } action: { frame in
                 anchor = frame
-                if center?.current?.id == id { center?.current?.anchor = frame }
+                center?.move(id, to: frame)
             }
             .onAppear {
                 if previewTip == title {
@@ -323,15 +378,15 @@ private struct Tip: ViewModifier {
                         guard !Task.isCancelled else { return }
                         show()
                     }
-                } else if center?.current?.id == id {
-                    center?.current = nil
+                } else {
+                    center?.dismiss(ifShowing: id)
                 }
             }
-            .onDisappear { if center?.current?.id == id { center?.current = nil } }
+            .onDisappear { center?.dismiss(ifShowing: id) }
     }
 
     private func show() {
-        center?.current = TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor)
+        center?.show(TipCenter.Request(id: id, title: title, detail: detail, anchor: anchor))
     }
 }
 
@@ -398,6 +453,8 @@ private struct TipSpaceModifier: ViewModifier {
             .coordinateSpace(.named(TipSpace.name))
             .environment(\.tipCenter, center)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            // Its key monitors go with it.
+            .onDisappear { center.dismiss() }
             .overlay(alignment: .topLeading) {
                 if let request = center.current {
                     TipBubble(request: request, bounds: size)

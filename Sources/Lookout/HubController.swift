@@ -342,7 +342,8 @@ final class HubController {
             // Only a Bool crosses the isolation hop: NSEvent is not Sendable.
             let consumed = MainActor.assumeIsolated {
                 guard self.window.isKeyWindow, !self.store.isRecordingShortcut else { return false }
-                return self.keys.key(event)
+                // A tooltip on screen takes the first Esc.
+                return TipCenter.dismissVisible(for: event) || self.keys.key(event)
             }
             return consumed ? nil : event
         }) { monitors.append(local) }
