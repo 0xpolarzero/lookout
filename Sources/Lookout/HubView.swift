@@ -226,7 +226,9 @@ final class HubKeys {
             return true
         }
         if markAllRead(shortcut) { return true }
-        return rowCommand(shortcut, targets: targets)
+        if rowCommand(shortcut, targets: targets) { return true }
+        // What no action is bound to: ⌘Z takes back the last Done.
+        return flags == .command && event.charactersIgnoringModifiers == "z" && store.undoLast()
     }
 
     /// What a key types, when it is printable text (not a control character or a function key).
@@ -550,6 +552,7 @@ struct LookoutHub: View {
         .modifier(probe(.inbox))
         if showsDetail && !shrunk(.inbox) {
             Group {
+                row(cell: { EmptyView() }, detail: { undoLine })
                 if items.isEmpty {
                     row(cell: { EmptyView() }, detail: { emptyInbox })
                 }
@@ -875,6 +878,13 @@ struct LookoutHub: View {
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            undoLine.padding(.horizontal, Self.inset - Theme.Space.md)
+            inboxList
+        }
+    }
+
+    private var inboxList: some View {
         CappedScroll(cap: max(160, min(maxLength - Self.cell - 150 - ciExtra, Self.listCap)), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
             AdaptiveStack(count: items.count, spacing: 1) {
                 if items.isEmpty { emptyInbox }
@@ -979,15 +989,18 @@ struct LookoutHub: View {
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
-                          alignment: .leading, spacing: 1) {
-                    ForEach(items) { itemRow($0).id("i:" + $0.id) }
+            VStack(alignment: .leading, spacing: 0) {
+                undoLine.padding(.horizontal, Self.inset - Theme.Space.md)
+                CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
+                              alignment: .leading, spacing: 1) {
+                        ForEach(items) { itemRow($0).id("i:" + $0.id) }
+                    }
+                    .padding(.horizontal, Self.inset)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal, Self.inset)
-                .padding(.vertical, 8)
+                .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
             }
-            .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
         case .ci:
             ciColumn
         default:

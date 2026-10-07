@@ -29,6 +29,8 @@ final class Store {
             persistedRevision &+= 1
         }
     }
+    /// Done, taken back with ⌘Z or the inbox's undo line.
+    let undoStack = UndoStack()
     var settings = AppSettings() {
         didSet {
             memo = Memo()
@@ -617,9 +619,13 @@ final class Store {
         notifier.remove([item.id])
     }
     func markUnread(_ item: InboxItem) { mutate(item.id) { $0.state = .unread } }
+    /// Moves an item to Done, with an undo for the next 30 s (the state it was in comes back, unread included).
     func discard(_ item: InboxItem) {
+        guard let before = items.first(where: { $0.id == item.id })?.state else { return }
         mutate(item.id) { $0.state = .discarded }
         notifier.remove([item.id])
+        guard before.isOpen else { return }
+        undoStack.push("Moved to Done", itemIDs: [item.id]) { [self] in undoDone(item.id, to: before) }
     }
     func restore(_ item: InboxItem) { mutate(item.id) { $0.state = .read } }
 
@@ -1421,19 +1427,26 @@ final class Store {
         announce(added)
     }
 
-    func prune() {
-        let now = Date()
+    func prune(now: Date = Date()) {
         func expired(_ item: InboxItem) -> Bool {
+            // What ⌘Z could still bring back stays for the half minute it lasts, however old the item is.
+            if undoStack.holds(item.id, now: now) { return false }
             // A Done request that is still requested stays, or the next poll would bring it back unread.
             if item.kind == .reviewRequested, item.state == .discarded, requested?.contains(item.id) ?? true { return false }
             let age = now.timeIntervalSince(item.createdAt)
             return (!item.state.isOpen && age > 14 * 86400) || age > 60 * 86400
         }
         if items.contains(where: expired) { items.removeAll(where: expired) }
-        if items.count > 1500 {
-            items = Array(items.sorted { $0.createdAt > $1.createdAt }.prefix(1500))
+        // What ⌘Z could still bring back is outside the cap too.
+        let held = items.filter { undoStack.holds($0.id, now: now) }
+        if items.count - held.count > Self.itemCap {
+            let rest = items.filter { !undoStack.holds($0.id, now: now) }.sorted { $0.createdAt > $1.createdAt }
+            items = held + rest.prefix(Self.itemCap)
         }
     }
+
+    /// The most items kept, newest first, whatever their age.
+    static let itemCap = 1500
 
     // MARK: Notifications
 
