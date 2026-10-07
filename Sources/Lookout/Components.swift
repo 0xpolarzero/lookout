@@ -305,3 +305,16 @@ enum Tile {
 func plural(_ n: Int, _ singular: String, _ plural: String? = nil) -> String {
     "\(n) \(n == 1 ? singular : plural ?? singular + "s")"
 }
+
+/// Says something aloud to VoiceOver: what appears or fails without anyone looking at it.
+enum Announce {
+    /// A moment after what asked for it, so a window taking the keyboard doesn't talk over it.
+    @MainActor
+    static func say(_ text: String, after delay: Duration = .milliseconds(300)) {
+        guard NSApp != nil, NSWorkspace.shared.isVoiceOverEnabled else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            AccessibilityNotification.Announcement(text).post()
+        }
+    }
+}

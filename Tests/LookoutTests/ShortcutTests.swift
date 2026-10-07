@@ -193,6 +193,24 @@ import Testing
         withExtendedLifetime(globals) {}
     }
 
+    @MainActor @Test func turningTheExtensionOnSaysWhenAnotherAppHoldsTheSessionKey() {
+        let store = Store()
+        let registrar = FakeRegistrar()
+        store.persists = false
+        store.agents.enabled = false
+        var said: [String] = []
+        let globals = GlobalShortcuts(store: store, registrar: registrar, perform: { _ in }) { said.append($0) }
+        globals.start()
+        registrar.taken = [ShortcutAction.sessionSwitcher.defaultShortcut]
+        store.agents.enabled = true
+        store.onAgentsEnabledChange?(true)
+        #expect(said == ["Switch Claude session: ⌃⌥S is used by another app, so it does nothing"])
+        // Nothing to say once it takes.
+        registrar.taken = []
+        store.onAgentsEnabledChange?(true)
+        #expect(said.count == 1 && registrar.registered[2] == ShortcutAction.sessionSwitcher.defaultShortcut)
+    }
+
     @MainActor @Test func aClearedGlobalShortcutIsUnregisteredNotRegisteredAsNothing() {
         let store = Store()
         let registrar = FakeRegistrar()

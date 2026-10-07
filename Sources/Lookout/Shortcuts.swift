@@ -218,19 +218,27 @@ final class GlobalShortcuts {
     private let store: Store
     private let registrar: HotKeyRegistrar
     private let perform: (ShortcutAction) -> Void
+    private let say: (String) -> Void
 
-    /// `perform` runs on the main queue when a global shortcut is pressed.
-    init(store: Store, registrar: HotKeyRegistrar, perform: @escaping (ShortcutAction) -> Void) {
+    /// `perform` runs on the main queue when a global shortcut is pressed; `say` speaks what nothing on screen shows.
+    init(store: Store, registrar: HotKeyRegistrar, perform: @escaping (ShortcutAction) -> Void,
+         say: ((String) -> Void)? = nil) {
         self.store = store
         self.registrar = registrar
         self.perform = perform
+        self.say = say ?? { Announce.say($0) }
     }
 
     /// Registers both and follows the store from here on.
     func start() {
         for action in ShortcutAction.allCases where action.isGlobal { register(action) }
         store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) ?? true }
-        store.onAgentsEnabledChange = { [weak self] _ in self?.register(.sessionSwitcher) }
+        store.onAgentsEnabledChange = { [weak self] _ in
+            guard let self, !self.register(.sessionSwitcher) else { return }
+            // Turning the extension on is what registers it, and nothing on screen says it did not take: the recorder only
+            // does in Settings.
+            say("\(ShortcutAction.sessionSwitcher.title): \(store.shortcut(.sessionSwitcher).display) is used by another app, so it does nothing")
+        }
     }
 
     /// `shortcut` is what the store is about to set, or its current one. `false` when the system refused it.
