@@ -227,6 +227,9 @@ protocol HotKeyRegistrar: AnyObject {
     /// `nil` unregisters. A shortcut that can't be registered is refused (`false`), and what `id` held stays held.
     @discardableResult
     func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool
+    /// While true, the combinations are released so their keys reach the app; they are registered again when it turns false,
+    /// which another app holding one meanwhile refuses.
+    var isSuspended: Bool { get set }
 }
 
 extension HotKeys: HotKeyRegistrar {}
@@ -265,6 +268,14 @@ final class GlobalShortcuts {
             // does in Settings.
             self.announceRefusal(.sessionSwitcher)
         }
+    }
+
+    /// Releases the system-wide keys while a shortcut is recorded, and takes them back after. A key another app claimed
+    /// meanwhile is refused as at launch: Settings warns, it is said, and it is tried again with every call.
+    func suspend(_ on: Bool) {
+        registrar.isSuspended = on
+        guard !on else { return }
+        for action in ShortcutAction.allCases where action.isGlobal && !register(action) { announceRefusal(action) }
     }
 
     private func announceRefusal(_ action: ShortcutAction) {
@@ -341,6 +352,12 @@ struct ShortcutRecorder: View {
                     .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
                     // Wider than the keycap it sits under, so a conflict reads on two lines at most.
                     .frame(maxWidth: 220, alignment: .trailing)
+            }
+            if held != nil, error == nil, !recording {
+                ActionButton("Try again") {
+                    Announce.say(store.retryShortcut(action) ? "\(current.display) works again" : "\(current.display) is still used by another app",
+                                 again: true)
+                }
             }
         }
         // A refusal belongs to the key it was about.

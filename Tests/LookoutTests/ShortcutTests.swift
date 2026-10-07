@@ -301,6 +301,35 @@ import Testing
         #expect(!store.isShortcutHeldByAnotherApp(.togglePanel))
     }
 
+    @MainActor @Test func aKeyAnotherAppTookWhileRecordingIsWarnedAboutAndCanBeTriedAgain() {
+        let store = Store()
+        store.persists = false
+        let registrar = FakeRegistrar()
+        var said: [String] = []
+        let globals = GlobalShortcuts(store: store, registrar: registrar, perform: { _ in }) { said.append($0) }
+        globals.start()
+        let held = ShortcutAction.togglePanel.defaultShortcut
+        #expect(registrar.registered[1] == held)
+        globals.suspend(true)
+        #expect(registrar.registered[1] == nil)
+        registrar.taken = [held]
+        globals.suspend(false)
+        #expect(registrar.registered[1] == nil)
+        #expect(store.isShortcutHeldByAnotherApp(.togglePanel))
+        #expect(said == ["Keep open: \(held.display) is used by another app, so it does nothing"])
+        // The other app lets go: asking again registers it and clears the warning.
+        registrar.taken = []
+        #expect(store.retryShortcut(.togglePanel))
+        #expect(registrar.registered[1] == held)
+        #expect(!store.isShortcutHeldByAnotherApp(.togglePanel))
+        // Still held, it stays warned about.
+        registrar.taken = [held]
+        globals.suspend(true)
+        globals.suspend(false)
+        #expect(!store.retryShortcut(.togglePanel))
+        #expect(store.isShortcutHeldByAnotherApp(.togglePanel))
+    }
+
     @MainActor @Test func aRefusedReplacementKeepsTheWarningOfTheKeyStillStored() {
         let store = Store()
         let registrar = FakeRegistrar()
@@ -355,12 +384,23 @@ private final class FakeRegistrar: HotKeyRegistrar {
     var received: [Shortcut?] = []
     /// Keys that other apps hold.
     var taken: Set<Shortcut> = []
+    /// What was asked for, which comes back when the keys are no longer suspended (unless another app has taken it).
+    private var asked: [UInt32: Shortcut] = [:]
+    var isSuspended = false {
+        didSet {
+            guard isSuspended != oldValue else { return }
+            registered = [:]
+            guard !isSuspended else { return }
+            for (id, shortcut) in asked.sorted(by: { $0.key < $1.key }) where !taken.contains(shortcut) { registered[id] = shortcut }
+        }
+    }
 
     func set(_ id: UInt32, _ shortcut: Shortcut?, handler: @escaping () -> Void) -> Bool {
         received.append(shortcut)
-        guard let shortcut else { registered[id] = nil; return true }
+        guard let shortcut else { registered[id] = nil; asked[id] = nil; return true }
         if taken.contains(shortcut) || registered.contains(where: { $0.key != id && $0.value == shortcut }) { return false }
-        registered[id] = shortcut
+        asked[id] = shortcut
+        if !isSuspended { registered[id] = shortcut }
         return true
     }
 }

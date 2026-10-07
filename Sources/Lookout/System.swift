@@ -374,7 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
         }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
-        store.onRecordingShortcutChange = { [weak self] on in self?.hotKeys.isSuspended = on }
+store.onRecordingShortcutChange = { [weak self] on in self?.globalShortcuts?.suspend(on) }
         store.onOpenInbox = { [weak self] in self?.hub?.showInbox() }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         let globals = GlobalShortcuts(store: store, registrar: hotKeys) { [weak self] action in

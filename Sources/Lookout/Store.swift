@@ -694,6 +694,11 @@ final class Store {
         return nil
     }
 
+    /// Asks the system again for the stored system-wide key another app held, which it may have let go of since.
+    func retryShortcut(_ action: ShortcutAction) -> Bool {
+        !action.isGlobal || onGlobalShortcutChange?(action, shortcut(action)) != false
+    }
+
     /// A recorder starts listening; one that already was is stopped, so only one ever is.
     func beginRecordingShortcut(stop: @escaping () -> Void) {
         stopRecorder?()
