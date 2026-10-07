@@ -22,6 +22,7 @@ import Testing
         Demo.populate(store, .agents)
         store.agents.expanded = true
         let log = log
+        store.persists = false
         store.interceptOpen = { log.opened.append($0) }
         keys = HubKeys(store: store, ui: UIState(persists: false, edge: .right), hub: hub)
         keys.onClose = { log.closed += 1 }
@@ -102,6 +103,23 @@ import Testing
         #expect(hub.selection != first)
         #expect(press(kVK_Return, [], "\r", in: window))
         #expect(log.opened.count == 1)
+    }
+
+    @Test func aReturnOrEnterBoundToAnotherActionDoesThatInsteadOfOpening() {
+        let (window, _) = editingWindow("zig")
+        defer { window.close() }
+        searching("zig")
+        let target = keys.targets().first { $0.hasPrefix("i:") }!
+        keys.select(target)
+        let item = store.items.first { "i:" + $0.id == target }!
+        let was = item.state
+        store.setShortcut(Shortcut(keyCode: UInt16(kVK_ANSI_KeypadEnter)), for: .toggleRead)
+        #expect(press(kVK_ANSI_KeypadEnter, [], "\r", in: window))
+        #expect(store.items.first { $0.id == item.id }?.state != was && log.opened.isEmpty)
+        #expect(press(kVK_ANSI_KeypadEnter, [], "\r", in: window))
+        #expect(store.items.first { $0.id == item.id }?.state == was && log.opened.isEmpty)
+        // Return, still Open's, opens.
+        #expect(press(kVK_Return, [], "\r", in: window) && log.opened.count == 1)
     }
 
     @Test func returnOpensNothingOnceTheTypingFilteredThePickOut() {

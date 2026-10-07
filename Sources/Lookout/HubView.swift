@@ -359,12 +359,12 @@ final class HubKeys {
 // MARK: Search field
 
 extension HubKeys {
-    /// A key while the search field has focus: Esc clears and ends the search, ↑↓ walk the results, ↩ or the configured
-    /// Open shortcut opens one, and the row actions, Mark all as read and ⌘, work as off the search. Everything else (typing,
-    /// ⌫, Space, ⌘Z) is the field's own: nil leaves the key to it.
+    /// A key while the search field has focus: Esc clears and ends the search, ↑↓ walk the results, the configured Open
+    /// shortcut opens one (so does ↩ or keypad Enter, unless bound to another action), and the row actions, Mark all as read
+    /// and ⌘, work as off the search. Everything else (typing, ⌫, Space, ⌘Z) is the field's own: nil leaves the key to it.
     fileprivate func searchKey(_ event: NSEvent, flags: NSEvent.ModifierFlags, shortcut: Shortcut) -> Bool? {
         // Open is the user's to rebind, ⌘O included, which the field would otherwise swallow. A bare letter is typed.
-        if shortcut == store.shortcut(.openItem), !typesText(event) { return openResult() }
+        if shortcut == store.shortcut(.openItem), !typesText(event) { return openResult(shortcut) }
         // So are the chords of the row actions (Keep, Remove, Done, ...), which act on the picked result as they do off the
         // search; the field keeps a chord only when no action is bound to it, or nothing is picked to act on.
         if shortcut.hasCommandLikeModifier, isBound(shortcut), rowCommand(shortcut, targets: targets()) { return true }
@@ -383,7 +383,9 @@ extension HubKeys {
         case kVK_UpArrow, kVK_DownArrow:
             move(down: Int(event.keyCode) == kVK_DownArrow, in: targets())
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            return openResult()
+            // A Return or Enter the user bound to another action does that action; one with no assignment submits the search.
+            if shortcut == store.shortcut(.refresh) { store.refreshNow(); return true }
+            return openResult(isBound(shortcut) ? shortcut : store.shortcut(.openItem))
         default:
             return nil
         }
@@ -395,11 +397,11 @@ extension HubKeys {
         ShortcutAction.allCases.contains { !$0.isGlobal && store.shortcut($0) == shortcut }
     }
 
-    /// Opens the pick as Open does off the search, only if the results still show it: a row the typing has since filtered
-    /// out is not opened. nil leaves the key to the field.
-    private func openResult() -> Bool? {
+    /// Does what `shortcut` does to the pick off the search (Open for a key bound to nothing), only if the results still show
+    /// it: a row the typing has since filtered out is left alone. nil leaves the key to the field.
+    private func openResult(_ shortcut: Shortcut) -> Bool? {
         guard let selection = hub.selection, targets().contains(selection) else { return nil }
-        return rowCommand(store.shortcut(.openItem), targets: targets()) ? true : nil
+        return rowCommand(shortcut, targets: targets()) ? true : nil
     }
 
     /// Whether a field would put this key in its text: a printable character without ⌃⌥⌘.
