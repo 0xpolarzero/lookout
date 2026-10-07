@@ -6,9 +6,11 @@ import UserNotifications
 // MARK: - Notifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
-    var onOpen: ((String) -> Void)?
-    /// Tests: every post, whether or not the system would show it.
+    /// A click: the item id, and the page the notification is about (for when the item is gone).
+    var onOpen: ((_ id: String, _ url: String?) -> Void)?
+    /// Tests: every post and withdrawal, whether or not the system would show it.
     var onPost: ((String) -> Void)?
+    var onRemove: (([String]) -> Void)?
     private var available: Bool { Bundle.main.bundleIdentifier != nil }
 
     func setup() {
@@ -18,14 +20,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    func post(id: String, title: String, subtitle: String, body: String, quiet: Bool) {
+    func post(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil) {
         onPost?(id)
         guard available else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.subtitle = subtitle
         content.body = body
-        content.userInfo = ["id": id]
+        content.userInfo = ["id": id, "url": url?.absoluteString ?? ""]
         content.threadIdentifier = quiet ? "bots" : "main"
         if quiet {
             content.interruptionLevel = .passive
@@ -38,8 +40,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Withdraws banners for items that were read, discarded or filtered out.
     func remove(_ ids: [String]) {
-        guard available, !ids.isEmpty else { return }
+        guard !ids.isEmpty else { return }
+        onRemove?(ids)
+        guard available else { return }
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
+    /// CI banners are identified by their commit page, which says which repo they belong to.
+    nonisolated static func isCI(_ identifier: String, of repo: String) -> Bool {
+        identifier.hasPrefix("https://github.com/\(repo)/commit/")
+    }
+
+    /// Withdraws a repo's CI banners (the ones that can't be looked up by item).
+    func removeCI(of repo: String) {
+        guard available else { return }
+        UNUserNotificationCenter.current().getDeliveredNotifications { [self] delivered in
+            remove(delivered.map(\.request.identifier).filter { Self.isCI($0, of: repo) })
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
@@ -49,8 +67,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        let id = response.notification.request.content.userInfo["id"] as? String ?? ""
-        DispatchQueue.main.async { self.onOpen?(id) }
+        let info = response.notification.request.content.userInfo
+        let id = info["id"] as? String ?? ""
+        let url = info["url"] as? String
+        DispatchQueue.main.async { self.onOpen?(id, url) }
         completionHandler()
     }
 }

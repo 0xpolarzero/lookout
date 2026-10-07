@@ -191,4 +191,27 @@ private func threads(_ body: Data) -> Any {
         #expect(s.items.first { $0.id == "rr#1" }?.state == .discarded)
         #expect(posted.ids == ["rr#1", "rr#2"])
     }
+
+    // MARK: Removing a repo
+
+    private func item(_ id: String, _ repo: String, _ kind: EventKind) -> InboxItem {
+        InboxItem(id: id, repo: repo, kind: kind, number: 1, title: "t", snippet: "", author: "x", avatar: nil,
+                  authorIsApp: false, url: URL(string: "https://github.com/\(repo)/issues/1")!, createdAt: Date(), state: .unread)
+    }
+
+    @Test func removingARepoWithdrawsItsBanners() {
+        let (s, _) = store()
+        s.items = [item("a/r#c#1", "a/r", .issueComment), item("rr#9", "a/r", .reviewRequested), item("b/q#c#2", "b/q", .issueComment)]
+        var withdrawn: [String] = []
+        s.notifier.onRemove = { withdrawn += $0 }
+        s.removeRepo(s.repos[0])
+        #expect(s.items.map(\.id) == ["rr#9", "b/q#c#2"])
+        #expect(withdrawn == ["a/r#c#1"])
+    }
+
+    @Test func ciBannersAreToldApartByRepo() {
+        #expect(Notifier.isCI("https://github.com/a/r/commit/abc", of: "a/r"))
+        #expect(!Notifier.isCI("https://github.com/a/r2/commit/abc", of: "a/r"))
+        #expect(!Notifier.isCI("a/r#c#1", of: "a/r"))
+    }
 }

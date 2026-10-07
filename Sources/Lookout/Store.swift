@@ -153,11 +153,12 @@ final class Store {
 
     func start() {
         load()
-        notifier.onOpen = { [weak self] id in
+        notifier.onOpen = { [weak self] id, url in
             guard let self else { return }
             if let item = self.items.first(where: { $0.id == id }) {
                 self.open(item)
-            } else if let url = URL(string: id), url.scheme == "https" {
+            } else if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {
+                // The item is gone (its repo was removed, say): the page it was about still makes sense.
                 NSWorkspace.shared.open(url)
             }
         }
@@ -640,7 +641,8 @@ final class Store {
 
     func removeRepo(_ repo: RepoConfig) {
         repos.removeAll { $0.id == repo.id }
-        items.removeAll { $0.repo == repo.fullName && $0.kind != .reviewRequested }
+        removeItems { $0.repo == repo.fullName && $0.kind != .reviewRequested }
+        notifier.removeCI(of: repo.fullName)
         ci[repo.fullName] = nil
         save()
     }
@@ -1039,10 +1041,10 @@ final class Store {
 
         if previous == .success || previous == .pending, state == .failure {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI failing on \(branch)",
-                   subtitle: failing.prefix(3).joined(separator: ", "), body: "", quiet: false)
+                   subtitle: failing.prefix(3).joined(separator: ", "), body: "", quiet: false, url: status.url)
         } else if previous == .failure, state == .success {
             notify(id: "https://github.com/\(name)/commit/\(commit)", title: "\(name) · CI back to green",
-                   subtitle: branch, body: "", quiet: true)
+                   subtitle: branch, body: "", quiet: true, url: status.url)
         }
     }
 
@@ -1111,13 +1113,13 @@ final class Store {
         for item in new {
             let path = item.path.map { " · \($0)" } ?? ""
             notify(id: item.id, title: "\(item.kind.label) · \(item.repo)#\(item.number)", subtitle: item.title,
-                   body: "@\(item.author)\(path): \(item.snippet)", quiet: isLowPriority(item))
+                   body: "@\(item.author)\(path): \(item.snippet)", quiet: isLowPriority(item), url: item.url)
         }
     }
 
-    private func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool) {
+    private func notify(id: String, title: String, subtitle: String, body: String, quiet: Bool, url: URL? = nil) {
         guard settings.notifications, !isSnoozed else { return }
-        notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet)
+        notifier.post(id: id, title: title, subtitle: subtitle, body: body, quiet: quiet, url: url)
     }
 
     // MARK: Helpers
