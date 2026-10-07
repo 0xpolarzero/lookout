@@ -56,4 +56,56 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
         #expect(await s.addRepo("other/tool") == nil)
         #expect(s.repos.map(\.allComments) == [false])
     }
+
+    private func revoke() {
+        StubAuthGitHub.handler = { _ in (401, #"{"message":"Bad credentials"}"#) }
+    }
+
+    @Test func aRevokedTokenAndItsIdentityAreDropped() async {
+        let s = store()
+        s.repos = [RepoConfig(fullName: "a/one")]
+        revoke()
+        await s.pollAll()
+        #expect(s.me == nil)
+        #expect(s.gh.token == nil)
+        #expect(s.authError != nil)
+    }
+
+    @Test func retryPicksUpTheTokenFromANewLogin() async {
+        let s = store()
+        s.repos = [RepoConfig(fullName: "a/one")]
+        revoke()
+        await s.pollAll()
+        StubAuthGitHub.handler = { req in
+            req.value(forHTTPHeaderField: "Authorization") == "Bearer fresh"
+                ? (200, req.url?.path == "/user" ? #"{"login":"me"}"# : "[]")
+                : (401, #"{"message":"Bad credentials"}"#)
+        }
+        s.resolveToken = { ("fresh", .ghCLI) }
+        s.refreshNow()
+        while s.me == nil || s.isSyncing { await Task.yield() }
+        #expect(s.gh.token == "fresh")
+        #expect(s.me?.login == "me")
+        #expect(s.authError == nil)
+    }
+
+    @Test func signedOutPollsDoNotSpawnGhEveryTime() async {
+        let s = store()
+        s.me = nil
+        let looks = Counter()
+        s.resolveToken = { looks.bump(); return nil }
+        await s.pollAll()
+        await s.pollAll()
+        await s.pollAll()
+        #expect(looks.count == 1)
+        s.refreshNow()  // asked for: looks again
+        while looks.count < 2 { await Task.yield() }
+    }
+}
+
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var count: Int { lock.withLock { n } }
+    func bump() { lock.withLock { n += 1 } }
 }

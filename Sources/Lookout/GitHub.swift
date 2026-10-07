@@ -93,7 +93,12 @@ struct GitHubError: LocalizedError {
 
 /// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
 final class GitHubClient: @unchecked Sendable {
-    var token: String?
+    var token: String? {
+        didSet { lock.withLock { rejected = false } }
+    }
+    /// GitHub answered 401 since the token was last set: it was revoked or has expired.
+    var tokenRejected: Bool { lock.withLock { rejected } }
+    private var rejected = false
     /// Swapped for a stub in tests.
     var session = URLSession.shared
     /// Remaining calls in the core (REST) and GraphQL buckets.
@@ -197,7 +202,9 @@ final class GitHubClient: @unchecked Sendable {
         guard !(200..<300).contains(http.statusCode) else { return }
         let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
         switch http.statusCode {
-        case 401: throw GitHubError(message: "GitHub rejected the token")
+        case 401:
+            lock.withLock { rejected = true }
+            throw GitHubError(message: "GitHub rejected the token")
         case 404: throw GitHubError(message: "Not found (or no access)")
         default: throw GitHubError(message: message ?? "GitHub error \(http.statusCode)")
         }

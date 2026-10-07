@@ -94,6 +94,12 @@ final class Store {
     @ObservationIgnored private var hubOpen = false
     @ObservationIgnored private var systemAsleep = false
     @ObservationIgnored private var pollNow = false
+    /// Where the token comes from; replaced in tests (the real one can spawn `gh`).
+    @ObservationIgnored var resolveToken: @Sendable () -> (String, TokenSource)? = { TokenProvider.resolve() }
+    @ObservationIgnored private var lastAuthAttempt: Date?
+    @ObservationIgnored private var authRetry = false
+    /// Signed out, polls look for a new token this rarely: each look can spawn `gh auth token`.
+    private static let authBackoff: TimeInterval = 300
     @ObservationIgnored private var sleeper: Task<Void, Never>?
     @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var saveTask: Task<Void, Never>?
@@ -286,6 +292,7 @@ final class Store {
     }
 
     func refreshNow() {
+        authRetry = true
         Task { await pollAll() }
     }
 
@@ -568,8 +575,11 @@ final class Store {
     // MARK: Auth
 
     func authenticate() async {
-        let resolved = await Task.detached { TokenProvider.resolve() }.value
+        lastAuthAttempt = Date()
+        let resolve = resolveToken
+        let resolved = await Task.detached { resolve() }.value
         guard let (token, source) = resolved else {
+            gh.token = nil
             me = nil
             tokenSource = nil
             authError = "No GitHub token found. Run `gh auth login`, or paste a token in Settings."
@@ -584,6 +594,16 @@ final class Store {
             me = nil
             authError = error.localizedDescription
         }
+    }
+
+    /// Revoked or expired: forget the token and who it was, so the next look resolves one again
+    /// (the user may have run `gh auth login` meanwhile).
+    private func dropRejectedToken() {
+        gh.token = nil
+        me = nil
+        tokenSource = nil
+        lastAuthAttempt = nil
+        authError = "GitHub rejected the token. Run `gh auth login` again, then Retry."
     }
 
     func setToken(_ token: String?) {
@@ -682,8 +702,14 @@ final class Store {
             prune()
             if persistedRevision != savedRevision { save() }
         }
-        if me == nil { await authenticate() }
+        // Signed out: look for a token when asked (Retry, a refresh) or once the backoff has passed.
+        let asked = authRetry
+        authRetry = false
+        if me == nil, asked || Date().timeIntervalSince(lastAuthAttempt ?? .distantPast) >= Self.authBackoff {
+            await authenticate()
+        }
         guard me != nil else { return }
+        defer { if gh.tokenRejected { dropRejectedToken() } }
         await withTaskGroup(of: Void.self) { group in
             var names = repos.map(\.fullName).makeIterator()
             for _ in 0..<4 {

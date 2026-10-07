@@ -39,6 +39,9 @@ struct SettingsView: View {
                         .lineLimit(2)
                 }
                 Spacer()
+                if store.authError != nil {
+                    ActionButton("Retry") { store.refreshNow() }
+                }
                 if store.tokenSource == .keychain {
                     ActionButton("Use gh CLI") { store.setToken(nil) }
                 }
