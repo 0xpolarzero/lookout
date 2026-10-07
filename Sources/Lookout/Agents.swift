@@ -558,8 +558,9 @@ extension Store {
             .map { $0 }
     }
 
-    /// Kept sessions go to the end of your list (any session: it doesn't have to be pending).
+    /// Kept sessions go to the end of your list (any session: it doesn't have to be pending). One already kept stays where it is.
     func keepAgent(_ id: String) {
+        guard agents.entries.first(where: { $0.id == id })?.kept != true else { return }
         ensureEntry(id)
         guard let i = agents.entries.firstIndex(where: { $0.id == id }) else { return }
         var entry = agents.entries.remove(at: i)
