@@ -1163,7 +1163,13 @@ final class Store {
         let check = Task { @MainActor [self] in
             // A check `endCIChecks` already gave up on leaves what a newer one registered.
             defer { if ciTickets[name] == ticket { ciChecks[name] = nil } }
-            publishCI(name, try await (ciFetch ?? fetchCI)(repo), ticket: ticket)
+            do {
+                publishCI(name, try await (ciFetch ?? fetchCI)(repo), ticket: ticket)
+            } catch {
+                // Overtaken (CI switched off, the repo removed, a newer check begun): the fault is no news of the source as it is
+                // now, so it must not be blamed on it.
+                if ciTickets[name] == ticket { throw error }
+            }
         }
         ciChecks[name] = check
         try await check.value

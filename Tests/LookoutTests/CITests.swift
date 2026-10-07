@@ -218,4 +218,28 @@ import Testing
         await check
         #expect(store.ci.isEmpty)
     }
+
+    @Test func aLateFailureDoesNotBringBackAFaultCIWasClearedOf() async throws {
+        let (store, answers) = store()
+        store.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        store.settings.reviewRequests = false
+        async let poll: () = store.pollAll()
+        try await eventually { answers.waiting.count == 1 }
+        // CI is switched off while the check is out, and the check then fails.
+        store.toggle(.ciMain, on: store.repos[0])
+        answers.fail(0, "Server error")
+        await poll
+        #expect(store.repoErrors.isEmpty)
+    }
+
+    @Test func aFailureOfTheCurrentCheckIsAFault() async throws {
+        let (store, answers) = store()
+        store.me = GHUser(login: "me", avatarUrl: nil, type: "User")
+        store.settings.reviewRequests = false
+        async let poll: () = store.pollAll()
+        try await eventually { answers.waiting.count == 1 }
+        answers.fail(0, "Server error")
+        await poll
+        #expect(store.repoErrors["a/x"] == "Server error")
+    }
 }
