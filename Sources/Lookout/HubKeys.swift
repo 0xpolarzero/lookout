@@ -347,7 +347,7 @@ extension HubKeys {
         // Open is the user's to rebind, ⌘O included, which the field would otherwise swallow with the other
         // modifier combinations. A bare letter is still typed.
         let shortcut = Shortcut(event)
-        if shortcut == store.shortcut(.openItem), !typesText(event) { return openResult() }
+        if shortcut == store.shortcut(.openItem), !typesText(event) { return openResult(event) }
         // So are the chords of the row actions (Keep, Hide, Done, ...), which act on the picked result as they do off the
         // search; the field keeps a chord only when no action is bound to it, or nothing is picked to act on.
         if shortcut.hasCommandLikeModifier, isBound(shortcut),
@@ -363,21 +363,18 @@ extension HubKeys {
         case kVK_UpArrow, kVK_DownArrow:
             move(down: Int(event.keyCode) == kVK_DownArrow, in: targets())
         case kVK_Return:
-            return openResult()
+            return openResult(event)
         default:
             return nil
         }
         return true
     }
 
-    /// Opens the pick, only if it is a row the results show: one the typing has since filtered out is not opened.
-    private func openResult() -> Bool? {
-        guard let selection = hub.selection, targets().contains(selection) else { return nil }
-        let id = String(selection.dropFirst(2))
-        if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) { store.open(item) }
-        else if selection.hasPrefix("a:") { store.openAgent(id) }
-        else { return nil }
-        return true
+    /// Opens the pick as Open does off the search, only if it is a row the results show: one the typing has since filtered out
+    /// is not opened. Every target is one (a CI row, Passing, "+N more" and New session too, which an empty search shows).
+    private func openResult(_ event: NSEvent) -> Bool? {
+        let open = store.shortcut(.openItem)
+        return rowCommand(open, targets: targets(), event: event, flags: []) ? true : nil
     }
 
     /// Whether a field would put this key in its text: a printable character without ⌃⌥⌘.

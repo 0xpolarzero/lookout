@@ -969,6 +969,30 @@ import Testing
         #expect(hub.query.isEmpty && !hub.inbox.searchOpen)
     }
 
+    @Test func returnInAnEmptySearchFieldActivatesTheCIAndSessionRowsToo() {
+        let (window, _) = editingWindow()
+        defer { window.close() }
+        hub.inbox.searchOpen = true
+        hub.inbox.searchFocused = true
+        #expect(hub.query.isEmpty)
+        let ci = keys.targets().first { $0.hasPrefix("c:") && $0 != "c:passing" }!
+        pick(ci)
+        #expect(window.firstResponder is NSText)
+        #expect(press(kVK_Return, [], "\r", in: window))
+        #expect(log.opened.last?.hasPrefix("Open checks") == true)
+        // Passing opens in place, New session starts one, and "+N more" shows the rest.
+        let open = hub.ciPassingOpen
+        pick("c:passing")
+        #expect(press(kVK_Return, [], "\r", in: window) && hub.ciPassingOpen == !open)
+        let opened = log.opened.count
+        pick("s:new")
+        #expect(press(kVK_Return, [], "\r", in: window) && log.opened.count == opened + 1)
+        if keys.targets().contains("s:more") {
+            pick("s:more")
+            #expect(press(kVK_Return, [], "\r", in: window) && hub.sessionsExpanded)
+        }
+    }
+
     @Test func keepAndHideActOnTheSelectedResultWithTheSearchFieldFocused() {
         let (window, _) = editingWindow("lcu")
         defer { window.close() }
