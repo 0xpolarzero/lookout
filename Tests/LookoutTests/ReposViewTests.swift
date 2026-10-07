@@ -2,11 +2,36 @@ import Foundation
 import Testing
 @testable import Lookout
 
-@Suite struct AddingARepository {
+@MainActor
+@Suite(.serialized) struct AddingARepository {
     @Test func theFieldIsEmptiedOnlyIfItStillReadsAsItDidWhenTheAddBegan() {
         #expect(ReposView.field(afterAdding: "owner/one", typed: "owner/one") == "")
         // The next repository, typed while the add ran, is not erased with the first.
         #expect(ReposView.field(afterAdding: "owner/one", typed: "owner/two") == "owner/two")
+    }
+
+    @Test func aFailedAddIsSaidAndASuccessfulOneIsNot() {
+        var said: [String] = []
+        Announce.reset()
+        Announce.sink = { said.append($0) }
+        defer { Announce.reset() }
+        #expect(ReposView.said(nil) == nil && said.isEmpty)
+        #expect(ReposView.said("Not found (or no access)") == "Not found (or no access)")
+        #expect(said == ["Not found (or no access)"])
+    }
+
+    @Test func aRefusedLaunchAtLoginIsSaidWithTheReasonLeftOnScreen() {
+        struct Refused: LocalizedError { var errorDescription: String? { "Operation not permitted" } }
+        var said: [String] = []
+        Announce.reset()
+        Announce.sink = { said.append($0) }
+        defer { Announce.reset() }
+        #expect(SettingsView.launchFailure(turningOn: true, using: { _ in }) == nil && said.isEmpty)
+        #expect(SettingsView.launchFailure(turningOn: true, using: { _ in throw Refused() }) == "Operation not permitted")
+        #expect(said == ["Couldn't turn on Launch at login"])
+        // Turning it off is a different sentence: not the same words twice.
+        #expect(SettingsView.launchFailure(turningOn: false, using: { _ in throw Refused() }) == "Operation not permitted")
+        #expect(said.last == "Couldn't turn off Launch at login")
     }
 }
 

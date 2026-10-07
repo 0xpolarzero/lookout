@@ -81,6 +81,17 @@ struct SettingsView: View {
         }
     }
 
+    /// Turns Launch at login on or off; what the system refused with shows under the toggle, and is said too.
+    static func launchFailure(turningOn on: Bool, using set: (Bool) throws -> Void) -> String? {
+        do {
+            try set(on)
+            return nil
+        } catch {
+            Announce.say("Couldn't turn \(on ? "on" : "off") Launch at login")
+            return error.localizedDescription
+        }
+    }
+
     private func saveToken() {
         guard !token.isEmpty else { return }
         guard store.setToken(token) else {
@@ -391,7 +402,7 @@ struct SettingsView: View {
             }
             toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, on in
-                    do { try LaunchAtLogin.set(on); launchError = nil } catch { launchError = error.localizedDescription }
+                    launchError = Self.launchFailure(turningOn: on, using: LaunchAtLogin.set)
                 }
             if let launchError { Text(launchError).font(Theme.Typography.meta).foregroundStyle(Theme.red) }
             toggle("Keep the bar centered on its edge", isOn: Binding(

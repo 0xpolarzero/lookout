@@ -102,7 +102,7 @@ struct ReposView: View {
         Task {
             let err = await store.addRepo(name)
             adding = false
-            error = err
+            error = Self.said(err)
             if err == nil {
                 // The field stays editable while the add runs: whatever was typed meanwhile is the next one, and stays.
                 input = Self.field(afterAdding: draft, typed: input)
@@ -110,6 +110,12 @@ struct ReposView: View {
                 overList = false
             }
         }
+    }
+
+    /// The sentence that appears under the field is said too, once (the list it joins is not what VoiceOver is on).
+    static func said(_ failure: String?) -> String? {
+        if let failure { Announce.say(failure) }
+        return failure
     }
 
     /// What the field holds once the add of `draft` went through: emptied, unless something else was typed meanwhile.
