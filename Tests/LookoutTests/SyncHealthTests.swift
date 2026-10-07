@@ -78,6 +78,29 @@ import Testing
         #expect(asks.withLock { $0 } == 3 && s.me?.login == "me")
     }
 
+    @Test func checkingSignInLooksForATokenAgainEvenOnTheTimer() async {
+        let s = Store.unsaved()
+        let asks = OSAllocatedUnfairLock(initialState: 0)
+        s.resolveToken = { asks.withLock { $0 += 1 }; return nil }
+        s.gh.transport = { _ in SyncHealth.reply(200, #"{"login": "me", "avatar_url": null, "type": "User"}"#) }
+        var refreshes = 0
+        s.interceptRefresh = { refreshes += 1 }
+        // Not signed out for want of a token (yet): nothing to check.
+        s.checkSignIn()
+        #expect(refreshes == 0)
+        await s.pollAll(automatic: true)
+        #expect(asks.withLock { $0 } == 1 && s.authError == SignInFailure.missingToken)
+        // `gh auth login` was run: asking checks at once, and the timer's next poll looks too.
+        s.resolveToken = { asks.withLock { $0 += 1 }; return ("token", .ghCLI) }
+        s.checkSignIn(announcing: true)
+        #expect(refreshes == 1 && s.awaitingSignIn)
+        await s.pollAll(automatic: true)
+        #expect(asks.withLock { $0 } == 2 && s.me?.login == "me")
+        // Signed in: coming back to the app asks nothing.
+        s.checkSignIn()
+        #expect(refreshes == 1)
+    }
+
     @Test func stoppingAFailedRepositoryClearsItsFault() {
         let s = Store.unsaved()
         s.repos = [RepoConfig(fullName: "a/one"), RepoConfig(fullName: "a/two")]

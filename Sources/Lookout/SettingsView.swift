@@ -269,6 +269,10 @@ struct SettingsView: View {
                             // What failed, for whoever wants it: the missing token is the sentence already.
                             .help(error == SignInFailure.missingToken ? "" : error)
                             .accessibilityValue(error == SignInFailure.missingToken ? "" : error)
+                        // After the instruction it asks to be followed: the buttons beside the sentence have no room for a third.
+                        if error == SignInFailure.missingToken {
+                            BorderedButton("Check sign-in") { store.checkSignIn(announcing: true) }.padding(.top, Theme.Space.xs)
+                        }
                     }
                 }
             }
@@ -281,6 +285,8 @@ struct SettingsView: View {
         .padding(.vertical, Theme.Space.sm)
         .frame(minHeight: Theme.Metrics.formRow)
         .accessibilityElement(children: .contain)
+        // `gh auth login` is run in Terminal, which this comes back from.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in store.checkSignIn() }
     }
 
     private var tokenField: some View {

@@ -717,7 +717,7 @@ final class Store {
     /// Signs in with the token held, else the one `resolveToken` finds. A token already held is asked about as it is: finding one
     /// reads the Keychain and may run `gh`, which a poll that fails (offline, a VPN down, GitHub's own trouble) would do every
     /// minute. Only no token, one GitHub refused, or a change in Settings (`setToken`) looks again; and when the last look found
-    /// nothing, a poll on the timer (`automatic`) doesn't repeat it: something the user does (Check now, opening the hub) does.
+    /// nothing, a poll on the timer (`automatic`) doesn't repeat it: something the user does (Check now, opening the hub, Check sign-in) does.
     func authenticate(automatic: Bool = false) async {
         if gh.token == nil {
             if automatic, noTokenFound { return }
@@ -746,6 +746,15 @@ final class Store {
                 signInFailed(error.localizedDescription)
             }
         }
+    }
+
+    /// `gh auth login` was run, or a token made, while Lookout waited with none: the look the poll skips is made now (the button
+    /// in Settings, and coming back to the app, which is where Terminal is left from). Silent unless asked, as Check now is.
+    func checkSignIn(announcing: Bool = false) {
+        guard me == nil, authError == SignInFailure.missingToken else { return }
+        noTokenFound = false
+        if announcing { awaitingSignIn = true }
+        refreshNow()
     }
 
     /// Signing in failed. The Keychain took a token and GitHub then refused it, say, which the form can't tell: the result of
