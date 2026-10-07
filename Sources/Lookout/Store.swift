@@ -157,8 +157,8 @@ final class Store {
     @ObservationIgnored private var stopRecorder: (() -> Void)?
     var isRecordingShortcut: Bool { stopRecorder != nil }
     @ObservationIgnored var onRecordingShortcutChange: ((Bool) -> Void)?
-    /// Shows the inbox: where a summary banner leads.
-    @ObservationIgnored var onOpenInbox: (() -> Void)?
+    /// Shows the inbox on a tab: where a summary banner leads.
+    @ObservationIgnored var onOpenInbox: ((InboxFilter) -> Void)?
     /// Registers a global shortcut system-wide; `false` when the system refuses it.
     @ObservationIgnored var onGlobalShortcutChange: ((ShortcutAction, Shortcut) -> Bool)?
     /// The system-wide shortcuts the system last refused to register (another app holds the key), by the key it refused:
@@ -221,7 +221,7 @@ final class Store {
 
     func start() {
         load()
-        notifier.onOpen = { [weak self] id, url in self?.openNotification(id: id, url: url) }
+        notifier.onOpen = { [weak self] id, url, quiet in self?.openNotification(id: id, url: url, quiet: quiet) }
         notifier.setup()
         updater.automatic = { [weak self] in self?.settings.checkUpdates ?? true }
         updater.skipped = { [weak self] in self?.settings.skippedVersion }
@@ -621,12 +621,12 @@ final class Store {
         save()
     }
 
-    /// A clicked banner: its item, a summary's inbox, or the page it was about.
-    func openNotification(id: String, url: String?) {
+    /// A clicked banner: its item, a summary's inbox (on Bots when it only covered bots), or the page it was about.
+    func openNotification(id: String, url: String?, quiet: Bool = false) {
         if let item = items.first(where: { $0.id == id }) {
             open(item)
         } else if id.hasPrefix(Notifier.summaryPrefix) {
-            onOpenInbox?()
+            onOpenInbox?(quiet ? .bots : .needsYou)
         } else if let url = [url, id].lazy.compactMap({ $0.flatMap { URL(string: $0) } }).first(where: { $0.scheme == "https" }) {
             // The item is gone (its repo was removed, say): the page it was about still makes sense.
             Link.open(url)

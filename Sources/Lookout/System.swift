@@ -6,8 +6,8 @@ import UserNotifications
 // MARK: - Notifications
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
-    /// A click: the item id, and the page the notification is about (for when the item is gone).
-    var onOpen: ((_ id: String, _ url: String?) -> Void)?
+    /// A click: the item id, the page the notification is about (for when the item is gone), and whether it was a quiet one.
+    var onOpen: ((_ id: String, _ url: String?, _ quiet: Bool) -> Void)?
     /// Tests: every post and withdrawal, whether or not the system would show it.
     var onPost: ((UNNotificationRequest) -> Void)?
     var onRemove: (([String]) -> Void)?
@@ -38,7 +38,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.title = title
         content.subtitle = subtitle
         content.body = body
-        content.userInfo = ["id": id, "url": url?.absoluteString ?? "", "repos": repos]
+        content.userInfo = ["id": id, "url": url?.absoluteString ?? "", "repos": repos, "quiet": quiet]
         content.threadIdentifier = quiet ? "bots" : "main"
         if quiet {
             content.interruptionLevel = .passive
@@ -97,7 +97,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let info = response.notification.request.content.userInfo
         let id = info["id"] as? String ?? ""
         let url = info["url"] as? String
-        DispatchQueue.main.async { self.onOpen?(id, url) }
+        let quiet = info["quiet"] as? Bool ?? false
+        DispatchQueue.main.async { self.onOpen?(id, url, quiet) }
         completionHandler()
     }
 }
@@ -375,7 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotKeys.paused = { [weak self] in self?.store.isRecordingShortcut ?? false }
 store.onRecordingShortcutChange = { [weak self] on in self?.globalShortcuts?.suspend(on) }
-        store.onOpenInbox = { [weak self] in self?.hub?.showInbox() }
+        store.onOpenInbox = { [weak self] in self?.hub?.showInbox($0) }
         // Default ⌃⌥L: ⌃⌥Space is macOS's "next input source".
         let globals = GlobalShortcuts(store: store, registrar: hotKeys) { [weak self] action in
             switch action {

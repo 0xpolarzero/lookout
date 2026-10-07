@@ -33,6 +33,14 @@ final class HubState {
     func requestScroll(_ id: String) {
         keyboardSelection = ScrollRequest(id: id, seq: (keyboardSelection?.seq ?? 0) + 1)
     }
+    /// The full view on the inbox, on the tab holding what just arrived: no search or earlier tab hides it.
+    func showInbox(_ tab: InboxFilter) {
+        go(.main)
+        endSearch()
+        filter = tab
+        focus = .inbox
+        pinned = true
+    }
     /// Asks Settings to scroll to a section (by name), once it is open: where Check for Updates shows what it found.
     var settingsScroll: ScrollRequest?
     /// Opens Settings at its Updates section, also when Settings is open already, scrolled elsewhere.

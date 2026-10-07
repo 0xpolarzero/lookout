@@ -368,10 +368,8 @@ final class HubController {
     }
 
     /// A summary banner's click: the full view on the inbox, to see what arrived.
-    func showInbox() {
-        hub.go(.main)
-        hub.focus = .inbox
-        hub.pinned = true
+    func showInbox(_ tab: InboxFilter) {
+        hub.showInbox(tab)
     }
 
     private func takeFocus() {

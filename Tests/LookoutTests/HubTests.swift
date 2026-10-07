@@ -27,6 +27,21 @@ import Testing
     }
 }
 
+@MainActor
+@Suite struct HubInbox {
+    @Test func showingTheInboxClearsASearchAndPicksTheTabOfTheArrivals() {
+        let hub = HubState()
+        hub.go(.settings)
+        hub.filter = .done
+        hub.query = "nothing like it"
+        hub.startSearch()
+        hub.showInbox(.bots)
+        #expect(hub.page == .main && hub.pinned && hub.focus == .inbox)
+        #expect(hub.filter == .bots)
+        #expect(hub.query.isEmpty && !hub.searchOpen)
+    }
+}
+
 @Suite struct CappedScrollFit {
     @Test func stopsOnTheLastRowThatFits() {
         #expect(CappedScrollSpace.fit(cap: 100, edges: [36, 72, 108, 144]) == 72)

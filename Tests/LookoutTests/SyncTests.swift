@@ -324,9 +324,31 @@ private func threads(_ body: Data) -> Any {
         #expect(!withdrawn.contains("unrelated"))
 
         var opened = 0
-        s.onOpenInbox = { opened += 1 }
-        s.openNotification(id: summary.identifier, url: "")
+        var tabs: [InboxFilter] = []
+        s.onOpenInbox = { opened += 1; tabs.append($0) }
+        s.openNotification(id: summary.identifier, url: "", quiet: summary.content.userInfo["quiet"] as? Bool ?? false)
         #expect(opened == 1)
+        #expect(tabs == [.needsYou])
+    }
+
+    @Test func aSummaryOfBotsOnlyOpensTheBotsTab() async {
+        let (s, _) = store(allComments: true)
+        s.settings.botHandles = ["helper"]
+        var requests: [UNNotificationRequest] = []
+        s.notifier.onPost = { requests.append($0) }
+        let now = Date()
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in (1...5).map { comment($0, on: $0, by: "helper", at: now.addingTimeInterval(-600)) } },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            "/graphql": threads,
+        ])
+        try? await s.syncConversations("a/r")
+        #expect(requests.count == 1)
+        var tabs: [InboxFilter] = []
+        s.onOpenInbox = { tabs.append($0) }
+        s.openNotification(id: requests[0].identifier, url: "", quiet: requests[0].content.userInfo["quiet"] as? Bool ?? false)
+        #expect(tabs == [.bots])
     }
 
     @Test func ciBannersAreToldApartByRepo() {
