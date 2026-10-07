@@ -5,8 +5,21 @@ import SwiftUI
 /// `--demo [scenario]`: fake data for trying the UI without touching GitHub or the saved state.
 @MainActor
 enum Demo {
+    /// `busy` to `agents` are the plain `--demo` sets. The rest are the states that empty a list or break the sync, each on
+    /// top of the `agents` data (the bar with everything on it) unless noted, so a shot shows the state in a realistic bar.
     enum Scenario: String, CaseIterable {
         case busy, botsOnly, allClear, snoozed, error, empty, agents
+        // Inbox and sync causes.
+        case signedOut, reposFailed, rateLimited, needsYouEmpty, botsEmpty, doneEmpty, firstSync, syncFault
+        // An inbox longer than any list shows.
+        case inboxMany
+        // CI.
+        case noCI, allPassing, manyCI, ciRunning
+        // Sessions, replacing the `agents` ones: a handful of each state, and long lists.
+        case sessionsWaiting, sessionsWorking, sessionsUnread, sessionsNewActivity, sessionsScratch, sessionsNone, sessions12
+        case sessionsManyNew, sessionsWaiting10
+        // The update tile.
+        case updateAvailable, updateDownloading, updateReady
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -41,11 +54,11 @@ enum Demo {
         case .busy:
             break
         case .botsOnly:
-            store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
-            for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+            nothingForYou(store)
+            passing(store)
         case .allClear:
             store.items = store.items.filter { !$0.state.isOpen }
-            for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+            passing(store)
         case .snoozed:
             store.settings.snoozeUntil = Calendar.current.date(bySettingHour: 18, minute: 30, second: 0, of: now)
                 .map { $0 > now ? $0 : now.addingTimeInterval(3600) }
@@ -62,70 +75,283 @@ enum Demo {
             store.ci = [:]
             store.items = []
             store.settings.reviewRequests = false
+        case .signedOut:
+            agents(store, now)
+            store.me = nil
+            store.tokenSource = nil
+            store.lastSync = nil
+            store.rateRemaining = nil
+            store.authError = "No GitHub token found"
+        case .reposFailed:
+            agents(store, now)
+            store.repoErrors = ["ziglang/zig": "Not found (or no access)", "e2b-dev/runtime": "Forbidden"]
+        case .rateLimited:
+            agents(store, now)
+            store.rateRemaining = 0
+        case .needsYouEmpty:
+            // Nothing for you, CI healthy, bot items still unread: all caught up.
+            agents(store, now)
+            nothingForYou(store)
+            passing(store)
+        case .botsEmpty:
+            agents(store, now)
+            store.items = store.items.filter { !($0.state.isOpen && store.isLowPriority($0)) }
+        case .doneEmpty:
+            agents(store, now)
+            store.items = store.items.filter { $0.state.isOpen }
+        case .firstSync:
+            agents(store, now)
+            store.lastSync = nil
+            store.isSyncing = true
+            store.items = []
+            store.ci = [:]
+            store.rateRemaining = nil
+        case .syncFault:
+            // Several poll intervals old: the sync status reads "Not syncing".
+            agents(store, now)
+            store.lastSync = now.addingTimeInterval(-3600)
+        case .inboxMany:
+            agents(store, now)
+            let titles = ["Cache the avatar lookups", "Dark mode for the Settings window", "Snooze until Monday", "Open the right repo on click",
+                          "Hide read items after a day", "Keyboard shortcut for Mark all read", "Tab order in the footer", "Menu bar icon option",
+                          "Group by repository", "Notifications repeat after wake", "Sort Done by repository", "Search inside snippets"]
+            store.items += titles.enumerated().map { index, title in
+                InboxItem(id: "many-\(index)", repo: "0xpolarzero/lookout", kind: .issueOpened, number: 30 + index, title: title,
+                          snippet: "", author: ["kylef", "mattt", "allevato"][index % 3], avatar: nil, authorIsApp: false,
+                          url: URL(string: "https://github.com/0xpolarzero/lookout/issues/\(30 + index)")!,
+                          createdAt: now.addingTimeInterval(-Double(130 + index * 40) * 60), state: .unread)
+            }
+        case .noCI:
+            agents(store, now)
+            for i in store.repos.indices { store.repos[i].events.remove(.ciMain) }
+            store.ci = [:]
+        case .allPassing:
+            agents(store, now)
+            passing(store)
+        case .manyCI:
+            agents(store, now)
+            manyCI(store, now)
+        case .ciRunning:
+            // Nothing failing: what was running stays running.
+            agents(store, now)
+            for key in store.ci.keys where store.ci[key]?.state == .failure { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+        case .sessionsWaiting:
+            // w2's activity is what an AskUserQuestion call yields: its first question, as the transcript reader reports it.
+            sessions(store, now, [
+                .init(session("w1", "LCU update notifications", "lcu", minutes: 2, blocked: true,
+                              detail: "Should updates install silently, or ask first each time?"), unread: true),
+                .init(session("w2", "Release notes wording", "lookout", minutes: 5, running: true), unread: true),
+                .init(session("w3", "CI failure diagnosis", "microsandbox", minutes: 40, detail: "Fixed the flaky sandbox test.")),
+            ], activity: ["w2": ClaudeActivity(text: "Which tone should the release notes take?", since: now.addingTimeInterval(-300),
+                                               waitsForYou: true)])
+        case .sessionsWorking:
+            sessions(store, now, [
+                .init(session("k1", "Agent completion notifications", "lookout", minutes: 1, running: true)),
+                .init(session("k2", "CI failure diagnosis", "microsandbox", minutes: 4, detail: "Reviewing the sandbox changes."), unread: true),
+                .init(session("k3", "Transfer setup", "lcu", minutes: 120, detail: "Both remotes point at the new org.")),
+            ], activity: ["k1": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-90))],
+                     tasks: ["k2": [
+                        ClaudeTask(id: "a1", kind: .agent, title: "Review the sandbox changes", since: now.addingTimeInterval(-190),
+                                   activity: ClaudeActivity(text: "Reading sandbox.rs", since: now.addingTimeInterval(-5))),
+                        ClaudeTask(id: "a2", kind: .agent, title: "Check the other CI jobs", since: now.addingTimeInterval(-70)),
+                        ClaudeTask(id: "b1", kind: .command, title: "Run the full test suite", since: now.addingTimeInterval(-370)),
+                     ]])
+        case .sessionsUnread:
+            sessions(store, now, [
+                .init(session("u1", "CI failure diagnosis", "microsandbox", minutes: 4, detail: "Fixed the flaky sandbox test."), unread: true),
+                .init(session("u2", "Calculator display reading", "lcu", minutes: 15, detail: "The display reads 1,234.5."), unread: true),
+                .init(session("u3", "Game recommendations", nil, minutes: 60, detail: "Single-player or online squads?"), unread: true),
+                .init(session("u4", "Transfer setup", "lookout", minutes: 300, detail: "Transfer is done.")),
+            ])
+        case .sessionsNewActivity:
+            // Nothing kept: every session is new activity, offered to keep or hide.
+            sessions(store, now, [
+                .init(session("n1", "CI failure diagnosis", "microsandbox", minutes: 4, detail: "Fixed the flaky sandbox test."),
+                      kept: false, unread: true),
+                .init(session("n2", "Calculator display reading", "lcu", minutes: 15, detail: "The display reads 1,234.5."),
+                      kept: false, unread: true),
+                .init(session("n3", "Game recommendations", nil, minutes: 60, detail: "Single-player or online squads?"), kept: false),
+                .init(session("n4", "Transfer setup", "lookout", minutes: 300, detail: "Transfer is done."), kept: true),
+            ])
+        case .sessionsScratch:
+            sessions(store, now, [
+                .init(session("s1", "Game recommendations", nil, minutes: 25, detail: "Single-player immersion or online squads?"),
+                      unread: true),
+                .init(session("s2", "Regex for semver tags", nil, minutes: 90, detail: "Use `^v\\d+\\.\\d+\\.\\d+$`.")),
+                .init(session("s3", "Agent completion notifications", "lookout", minutes: 3, detail: "Done; tests pass."), unread: true),
+            ])
+        case .sessionsNone:
+            sessions(store, now, [])
+        case .sessions12:
+            sessions12(store, now)
+        case .sessionsManyNew:
+            sessionsManyNew(store, now)
+        case .sessionsWaiting10:
+            // Twelve sessions, ten of them waiting: none of them may be hidden.
+            questions(store, now, total: 12, waiting: 10)
+        case .updateAvailable:
+            agents(store, now)
+            store.updater.preview(.available, version: "0.5.0")
+        case .updateDownloading:
+            agents(store, now)
+            store.updater.preview(.downloading, version: "0.5.0", fraction: 0.42)
+        case .updateReady:
+            agents(store, now)
+            store.updater.preview(.ready, version: "0.5.0")
         }
+    }
+
+    /// Only the bot items and the finished ones left: nothing is for you.
+    private static func nothingForYou(_ store: Store) {
+        store.items = store.items.filter { store.isLowPriority($0) || !$0.state.isOpen }
+    }
+
+    /// Every CI repo green.
+    private static func passing(_ store: Store) {
+        for key in store.ci.keys { store.ci[key]?.state = .success; store.ci[key]?.failing = [] }
+    }
+
+    /// 15 repositories with CI: two failing, two running, eleven passing.
+    private static func manyCI(_ store: Store, _ now: Date) {
+        let names = ["0xpolarzero/lookout", "apple/swift-format", "ziglang/zig", "amontlabs/lcu", "e2b-dev/runtime",
+                     "superradcompany/microsandbox", "apple/swift-argument-parser", "pointfreeco/swift-composable-architecture",
+                     "vapor/vapor", "swiftlang/swift-package-manager", "tuist/tuist", "realm/SwiftLint", "Alamofire/Alamofire",
+                     "hummingbird-project/hummingbird", "apple/swift-nio"]
+        store.repos = names.map { RepoConfig(fullName: $0) }
+        let failing: [String: [String]] = ["apple/swift-format": ["Linux / build", "Windows / test"], "vapor/vapor": ["Unit tests (5.10)"]]
+        let running: Set<String> = ["ziglang/zig", "apple/swift-nio"]
+        store.ci = Dictionary(uniqueKeysWithValues: names.enumerated().map { index, name in
+            let state: CIState = failing[name] != nil ? .failure : running.contains(name) ? .pending : .success
+            return (name, CIStatus(state: state, branch: "main", sha: String(format: "%010x", 0x9a133ca0 + index * 977),
+                                   failing: failing[name] ?? [], checkedAt: now, title: "Commit headline \(index + 1)",
+                                   updatedAt: now.addingTimeInterval(-Double(index + 1) * 2300)))
+        })
     }
 
     static let hoverID = "demo-hover"
     static let selectedID = "demo-selected"
     static let blockedAgentID = "local_demo-lcu"
 
-    /// The Claude sessions extension, on, with kept and pending sessions in every state.
-    static func agents(_ store: Store, _ now: Date) {
-        func session(_ id: String, _ title: String, _ folder: String?, minutes: Double, turns: Int = 4,
-                     blocked: Bool = false, detail: String = "", running: Bool = false) -> ClaudeSession {
-            let at = now.addingTimeInterval(-minutes * 60)
-            return ClaudeSession(id: id, title: title, folder: folder.map { "/Users/me/code/\($0)" }, completedTurns: turns,
-                                 lastActivity: at, lastFocused: at.addingTimeInterval(-600), lastUserMessage: at.addingTimeInterval(-90),
-                                 summary: running ? nil : ClaudeSession.Summary(blocked: blocked, detail: detail), running: running)
+    /// A session as the Claude app reports it: a finished turn with a summary, or (`running`) mid-turn.
+    private static func session(_ id: String, _ title: String, _ folder: String?, minutes: Double, turns: Int = 4,
+                                blocked: Bool = false, detail: String = "", running: Bool = false) -> ClaudeSession {
+        let at = Date().addingTimeInterval(-minutes * 60)
+        return ClaudeSession(id: id, title: title, folder: folder.map { "/Users/me/code/\($0)" }, completedTurns: turns,
+                             lastActivity: at, lastFocused: at.addingTimeInterval(-600), lastUserMessage: at.addingTimeInterval(-90),
+                             summary: running ? nil : ClaudeSession.Summary(blocked: blocked, detail: detail), running: running)
+    }
+
+    /// A session and how Lookout lists it: kept or new activity, read or not.
+    private struct Listed {
+        var session: ClaudeSession
+        var kept = true
+        var unread = false
+        var label: String?
+        var icon: String?
+
+        init(_ session: ClaudeSession, kept: Bool = true, unread: Bool = false, label: String? = nil, icon: String? = nil) {
+            self.session = session
+            self.kept = kept
+            self.unread = unread
+            self.label = label
+            self.icon = icon
         }
-        let sessions = [
-            session(blockedAgentID, "LCU update notifications", "lcu", minutes: 2, blocked: true,
-                    detail: "Should updates install silently, or ask first each time?"),
-            session("local_demo-ci", "CI failure diagnosis", "microsandbox", minutes: 4,
-                    detail: "Fixed the flaky sandbox test; CI is green on the branch."),
-            session("local_demo-lookout", "Agent completion notifications", "lookout", minutes: 1, running: true),
-            session("local_demo-transfer", "Repository ownership transfer setup", "microsandbox", minutes: 180,
-                    detail: "Transfer is done; both remotes point at the new org."),
-            session("local_demo-linux", "LCU JavaScript sandbox on Linux", "microsandbox", minutes: 1500,
-                    detail: "Sandbox runs on Linux; two follow-ups listed."),
-            session("local_demo-calc", "Calculator display reading", "lcu-research", minutes: 1,
-                    detail: "The display reads 1,234.5; the screenshot is attached."),
-            session("local_demo-games", "Game recommendations", nil, minutes: 25,
-                    detail: "Single-player immersion or online squads?"),
-            session("local_demo-storage", "Sandbox storage directory customization", "microsandbox", minutes: 2900,
-                    detail: "Storage path is configurable through the CLI and the env."),
-        ]
-        store.claudeSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+    }
+
+    /// The Claude sessions extension, on, with these sessions. `colors` pins each project's colour; the others get the
+    /// least used one, in listing order. `unlisted` are known to the app but without an entry: only found by search.
+    private static func sessions(_ store: Store, _ now: Date, _ listed: [Listed], activity: [String: ClaudeActivity] = [:],
+                                 tasks: [String: [ClaudeTask]] = [:], colors: [String: Int] = [:],
+                                 unlisted: [ClaudeSession] = []) {
+        store.claudeSessions = Dictionary(uniqueKeysWithValues: (listed.map(\.session) + unlisted).map { ($0.id, $0) })
         store.claudeLink = .ok
-        store.claudeActivity = ["local_demo-lookout": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-20))]
-        store.claudeTasks = ["local_demo-ci": [
-            ClaudeTask(id: "a1", kind: .agent, title: "Review the sandbox changes", since: now.addingTimeInterval(-190),
-                       activity: ClaudeActivity(text: "Reading sandbox.rs", since: now.addingTimeInterval(-5))),
-            ClaudeTask(id: "a2", kind: .agent, title: "Check the other CI jobs", since: now.addingTimeInterval(-70),
-                       activity: ClaudeActivity(text: "Thinking", since: now.addingTimeInterval(-2))),
-            ClaudeTask(id: "b1", kind: .command, title: "Run the full test suite", since: now.addingTimeInterval(-370)),
-        ]]
+        store.claudeActivity = activity
+        store.claudeTasks = tasks
         var state = AgentsState()
-        state.folderColors = ["/Users/me/code/lcu": 0, "/Users/me/code/microsandbox": 1, "/Users/me/code/lookout": 2,
-                              "/Users/me/code/lcu-research": 3]
+        state.folderColors = colors
+        for folder in listed.compactMap(\.session.folder) { state.assignColor(folder) }
         state.enabled = true
         state.enabledAt = now.addingTimeInterval(-86400)
         state.seeded = true
-        func entry(_ id: String, kept: Bool, unread: Bool, label: String? = nil, icon: String? = nil) -> AgentEntry {
-            let s = store.claudeSessions[id]!
-            return AgentEntry(id: id, kept: kept, label: label, unread: unread, seen: s.activity, focusedAt: s.lastFocused, icon: icon)
-        }
         state.iconsEnabled = true
-        state.entries = [
-            entry(blockedAgentID, kept: true, unread: true, icon: "bell.badge"),
-            entry("local_demo-ci", kept: true, unread: true, icon: "ladybug"),
-            entry("local_demo-lookout", kept: true, unread: false),
-            entry("local_demo-transfer", kept: true, unread: false, icon: "key"),
-            entry("local_demo-linux", kept: true, unread: false, label: "🐧"),
-            entry("local_demo-calc", kept: false, unread: true),
-            entry("local_demo-games", kept: false, unread: false),
-        ]
+        state.entries = listed.map { l in
+            AgentEntry(id: l.session.id, kept: l.kept, label: l.label, unread: l.unread, seen: l.session.activity,
+                       focusedAt: l.session.lastFocused, icon: l.icon)
+        }
         store.agents = state
+    }
+
+    /// The sessions in every state: a waiting one, a working one, finished ones (unread and read), new activity.
+    static func agents(_ store: Store, _ now: Date) {
+        let listed = [
+            Listed(session(blockedAgentID, "LCU update notifications", "lcu", minutes: 2, blocked: true,
+                           detail: "Should updates install silently, or ask first each time?"), unread: true, icon: "bell.badge"),
+            Listed(session("local_demo-ci", "CI failure diagnosis", "microsandbox", minutes: 4,
+                           detail: "Fixed the flaky sandbox test; CI is green on the branch."), unread: true, icon: "ladybug"),
+            Listed(session("local_demo-lookout", "Agent completion notifications", "lookout", minutes: 1, running: true)),
+            Listed(session("local_demo-transfer", "Repository ownership transfer setup", "microsandbox", minutes: 180,
+                           detail: "Transfer is done; both remotes point at the new org."), icon: "key"),
+            Listed(session("local_demo-linux", "LCU JavaScript sandbox on Linux", "microsandbox", minutes: 1500,
+                           detail: "Sandbox runs on Linux; two follow-ups listed."), label: "\u{1F427}"),
+            Listed(session("local_demo-calc", "Calculator display reading", "lcu-research", minutes: 1,
+                           detail: "The display reads 1,234.5; the screenshot is attached."), kept: false, unread: true),
+            Listed(session("local_demo-games", "Game recommendations", nil, minutes: 25,
+                           detail: "Single-player immersion or online squads?"), kept: false),
+        ]
+        let hidden = session("local_demo-storage", "Sandbox storage directory customization", "microsandbox", minutes: 2900,
+                             detail: "Storage path is configurable through the CLI and the env.")
+        sessions(store, now, listed, activity: ["local_demo-lookout": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-20))],
+                 tasks: ["local_demo-ci": [
+                    ClaudeTask(id: "a1", kind: .agent, title: "Review the sandbox changes", since: now.addingTimeInterval(-190),
+                               activity: ClaudeActivity(text: "Reading sandbox.rs", since: now.addingTimeInterval(-5))),
+                    ClaudeTask(id: "a2", kind: .agent, title: "Check the other CI jobs", since: now.addingTimeInterval(-70),
+                               activity: ClaudeActivity(text: "Thinking", since: now.addingTimeInterval(-2))),
+                    ClaudeTask(id: "b1", kind: .command, title: "Run the full test suite", since: now.addingTimeInterval(-370)),
+                 ]],
+                 colors: ["/Users/me/code/lcu": 0, "/Users/me/code/microsandbox": 1, "/Users/me/code/lookout": 2,
+                          "/Users/me/code/lcu-research": 3],
+                 unlisted: [hidden])
+    }
+
+    /// Twelve sessions: one waiting, one working, the rest finished, two of them new activity. More than the bar shows.
+    private static func sessions12(_ store: Store, _ now: Date) {
+        let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
+        var listed = [
+            Listed(session("t0", "LCU update notifications", "lcu", minutes: 2, blocked: true,
+                           detail: "Should updates install silently, or ask first each time?"), unread: true),
+            Listed(session("t1", "Agent completion notifications", "lookout", minutes: 1, running: true)),
+        ]
+        for i in 2..<12 {
+            listed.append(Listed(session("t\(i)", "Session number \(i)", projects[i % projects.count], minutes: Double(i * 17),
+                                         detail: "Finished turn \(i)."), kept: i < 10, unread: i % 3 == 0))
+        }
+        sessions(store, now, listed, activity: ["t1": ClaudeActivity(text: "Running swift test", since: now.addingTimeInterval(-90))])
+    }
+
+    /// One waiting, two kept, and eleven with new activity: more than that group lists.
+    private static func sessionsManyNew(_ store: Store, _ now: Date) {
+        let projects = ["lcu", "microsandbox", "lookout", "lcu-research"]
+        var listed = [
+            Listed(session("m0", "LCU update notifications", "lcu", minutes: 2, blocked: true,
+                           detail: "Should updates install silently, or ask first each time?"), unread: true),
+            Listed(session("m1", "Transfer setup", "lookout", minutes: 200, detail: "Both remotes point at the new org.")),
+            Listed(session("m2", "Calculator display reading", "lcu", minutes: 90, detail: "The display reads 1,234.5.")),
+        ]
+        for i in 0..<11 {
+            listed.append(Listed(session("m\(i + 3)", "New activity \(i + 1)", projects[i % projects.count], minutes: Double(3 + i * 11),
+                                         detail: "Finished turn \(i + 1)."), kept: false, unread: i % 2 == 0))
+        }
+        sessions(store, now, listed)
+    }
+
+    /// `total` sessions, the first `waiting` of them waiting for you: more than the bar has room for.
+    private static func questions(_ store: Store, _ now: Date, total: Int, waiting: Int) {
+        let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
+        let listed = (0..<total).map { i in
+            Listed(session("q\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 7 + 1), blocked: i < waiting,
+                           detail: i < waiting ? "Which one should it be?" : "Finished turn \(i)."), unread: i < waiting)
+        }
+        sessions(store, now, listed)
     }
 
     private static func items(_ now: Date) -> [InboxItem] {

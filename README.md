@@ -56,7 +56,11 @@ Releases are signed with one self-signed certificate, so macOS keeps Lookout's A
 
 ## Dev flags
 
-    .build/debug/Lookout --demo [busy|botsOnly|allClear|snoozed|error|empty|agents] [--open] [--edge left|right|top|bottom]   # mock data, nothing saved
+    .build/debug/Lookout --demo [scenario] [--open] [--edge left|right|top|bottom]   # mock data, nothing saved
+    #   scenarios: busy botsOnly allClear snoozed error empty agents (the plain sets), and one per state that empties a list or
+    #   breaks the sync: signedOut reposFailed rateLimited needsYouEmpty botsEmpty doneEmpty firstSync syncFault inboxMany
+    #   noCI allPassing manyCI ciRunning sessionsWaiting sessionsWorking sessionsUnread sessionsNewActivity sessionsScratch
+    #   sessionsNone sessions12 sessionsManyNew sessionsWaiting10 updateAvailable updateDownloading updateReady
     .build/debug/Lookout --claude [--watch]                      # what the Claude extension reads; --watch prints live changes
     .build/debug/Lookout --playground                            # the bar on a fake desktop, demo data, every edge
     .build/debug/Lookout --playground-shots <dir>                # render the bar's states (rest, hover, open, pages) as PNGs
