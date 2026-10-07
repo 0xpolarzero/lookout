@@ -57,3 +57,28 @@ import Testing
         #expect(line.range(of: pattern, options: .regularExpression) != nil, "\(line)")
     }
 }
+
+@MainActor
+@Suite struct PulseLoop {
+    private func loop() -> CABasicAnimation? {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 40, height: 40), styleMask: [.borderless], backing: .buffered, defer: false)
+        let view = PulseView()
+        view.frame = NSRect(x: 0, y: 0, width: 20, height: 20)
+        window.contentView?.addSubview(view)
+        // A test process has no screen to be occluded on: the window counts as showing.
+        view.windowShowing = { _ in true }
+        view.set(animated: true, rest: 1, from: 1, to: 0.3, duration: 1, smooth: true)
+        return view.layer?.animation(forKey: "pulse") as? CABasicAnimation
+    }
+
+    @Test func theLoopRunsInCoreAnimationBetweenItsTwoOpacities() throws {
+        let a = try #require(loop())
+        #expect(a.keyPath == "opacity" && a.autoreverses && a.repeatCount == .infinity)
+        #expect(a.fromValue as? Double == 1 && a.toValue as? Double == 0.3)
+    }
+
+    @Test func theLoopAsksForNoMoreThanThirtyFramesASecond() throws {
+        let range = try #require(loop()).preferredFrameRateRange
+        #expect(range.maximum <= 30 && range.preferred.map { $0 <= 30 } == true && range.minimum >= 10)
+    }
+}
