@@ -233,6 +233,9 @@ import Testing
         let a = try #require(rows.first { $0.id == "a" }), b = try #require(rows.first { $0.id == "b" })
         #expect(a.projectName == "customer-a/app" && b.projectName == "customer-b/app")
         #expect(s.searchSessions("customer-b").map(\.id) == ["b"])
+        // Same title, same state: VoiceOver still tells them apart by project, wherever a session is shown.
+        #expect(a.stateName == b.stateName && a.spokenValue != b.spokenValue)
+        #expect(a.spokenValue.contains("customer-a/app") && b.spokenValue.contains("customer-b/app"))
         // The name follows the folders: with the other project gone, the folder's own name is enough again.
         s.claudeSessions["a"] = nil
         #expect(s.folderName("/customer-b/app") == "app")

@@ -600,7 +600,7 @@ struct BarTile: View {
         .buttonStyle(.plain)
         .frame(height: Theme.Metrics.row)
         .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.stateName)
+        .accessibilityValue(row.spokenValue)
         .accessibilityHint("Opens it in Claude")
         .sessionMenu(row, store)
         .onHover {
@@ -652,7 +652,7 @@ struct SessionBlock: View {
         // One button for the card (named, with its state); the hover actions stay reachable inside it.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.stateName)
+        .accessibilityValue(row.spokenValue)
         .accessibilityHint("Opens it in Claude")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { store.openAgent(row.id) }

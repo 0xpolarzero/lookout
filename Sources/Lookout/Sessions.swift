@@ -27,7 +27,7 @@ struct AgentTile: View {
         }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
-            .accessibilityValue(row.stateName)
+            .accessibilityValue(row.spokenValue)
             .overlay {
                 if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
             }
@@ -470,7 +470,7 @@ struct DrawerRow: View {
         .onHover { if $0 { ui.drawerSelection = row.id } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.session.title)
-        .accessibilityValue(row.stateName)
+        .accessibilityValue(row.spokenValue)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { store.openAgent(row.id) }
     }

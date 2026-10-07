@@ -168,6 +168,10 @@ struct AgentRow: Identifiable, Hashable {
         }
     }
 
+    /// What VoiceOver reads after the title, on every surface that shows a session: its state and its project, so two sessions
+    /// with the same title in `customer-a/app` and `customer-b/app` don't sound alike.
+    var spokenValue: String { "\(stateName), \(projectName)" }
+
     /// "3 running": what's left in the background, after the status.
     var tasksText: String? { tasks.isEmpty ? nil : "\(tasks.count) running" }
 
