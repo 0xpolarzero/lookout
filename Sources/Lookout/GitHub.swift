@@ -94,6 +94,8 @@ struct GitHubError: LocalizedError {
 /// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
 final class GitHubClient: @unchecked Sendable {
     var token: String?
+    /// Swapped for a stub in tests.
+    var session = URLSession.shared
     /// Remaining calls in the core (REST) and GraphQL buckets.
     var rateRemaining: Int? { lock.withLock { coreRemaining } }
     var graphqlRemaining: Int? { lock.withLock { gqlRemaining } }
@@ -142,7 +144,7 @@ final class GitHubClient: @unchecked Sendable {
         }
         if let cached { req.setValue(cached.etag, forHTTPHeaderField: "If-None-Match") }
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         let http = resp as! HTTPURLResponse
         trackRate(http)
         if http.statusCode == 304, let cached { return cached.data }
@@ -163,7 +165,7 @@ final class GitHubClient: @unchecked Sendable {
         var req = request(URL(string: "https://api.github.com/graphql")!)
         req.httpMethod = "POST"
         req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await session.data(for: req)
         let http = resp as! HTTPURLResponse
         trackRate(http)
         try check(http, data)
