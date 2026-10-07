@@ -63,7 +63,9 @@ Releases are signed with one self-signed certificate, so macOS keeps Lookout's A
     #   sessionsNone sessions12 sessionsManyNew sessionsWaiting10 updateAvailable updateDownloading updateReady
     .build/debug/Lookout --claude [--watch]                      # what the Claude extension reads; --watch prints live changes
     .build/debug/Lookout --playground                            # the bar on a fake desktop, demo data, every edge
-    .build/debug/Lookout --playground-shots <dir>                # render the bar's states (rest, hover, open, pages) as PNGs
+    .build/debug/Lookout --playground-shots <dir> [name...]      # render the bar's states as PNGs, offscreen: every edge, every
+    #   demo scenario, Reduce Motion / Increase Contrast / Differentiate variants and a 1280x720 screen; shot names are
+    #   <edge>-<state> (right-open, top-rest-signed-out...), and only those containing one of the names given are rendered
     .build/debug/Lookout --classic                               # the old pill and panel
     .build/debug/Lookout --snapshot docs/screenshots                                 # render the old pill and panel's states
     build/Lookout.app/Contents/MacOS/Lookout --update 0.1.0   # pretend to be 0.1.0: check, download and verify the latest release
