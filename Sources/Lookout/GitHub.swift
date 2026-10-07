@@ -98,14 +98,25 @@ struct GitHubError: LocalizedError {
 
 /// Thin REST/GraphQL client. Remembers ETags so unchanged polls come back as 304s, which don't count against the rate limit.
 final class GitHubClient: @unchecked Sendable {
+    /// A different token is a different account: its quota and the answers it was given are not this one's.
     var token: String? {
-        didSet { lock.withLock { generation += 1; rejected = false } }
+        didSet {
+            lock.withLock {
+                generation += 1
+                rejected = false
+                guard token != oldValue else { return }
+                coreRemaining = nil
+                coreResetsAt = nil
+                gqlRemaining = nil
+                etags = [:]
+            }
+        }
     }
     /// GitHub answered 401 since the token was last set: it was revoked or has expired.
     var tokenRejected: Bool { lock.withLock { rejected } }
     private var rejected = false
-    /// Counts token changes. A 401 only counts against the token its request was sent with,
-    /// so one that lands after a newer token took over can't discard it.
+    /// Counts token changes. What a request sent under an older one brings back (a 401, the quota, the ETag) is dropped,
+    /// so it can't discard or overwrite what belongs to the newer token.
     private var generation = 0
     /// Swapped for a stub in tests.
     var session = URLSession.shared
@@ -210,13 +221,14 @@ final class GitHubClient: @unchecked Sendable {
 
         let (data, resp) = try await session.data(for: req)
         let http = resp as! HTTPURLResponse
-        trackRate(http)
+        trackRate(http, sent: sent)
         if http.statusCode == 304, let cached {
             return Answer(data: cached.data, key: key, etag: cached.etag, notModified: true, decoded: cached.decoded)
         }
         try check(http, data, sent: sent)
         guard let etag = http.value(forHTTPHeaderField: "ETag") else { return Answer(data: data) }
         lock.withLock {
+            guard generation == sent else { return }
             etagClock += 1
             let family = Self.family(of: key)
             // A newer commit's answers replace the older commit's: those are never asked for again.
@@ -244,7 +256,7 @@ final class GitHubClient: @unchecked Sendable {
         req.httpBody = try JSONSerialization.data(withJSONObject: ["query": query])
         let (data, resp) = try await session.data(for: req)
         let http = resp as! HTTPURLResponse
-        trackRate(http)
+        trackRate(http, sent: sent)
         try check(http, data, sent: sent)
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw GitHubError(message: "Bad GraphQL response")
@@ -263,16 +275,17 @@ final class GitHubClient: @unchecked Sendable {
         return (req, sent)
     }
 
-    private func trackRate(_ http: HTTPURLResponse) {
+    private func trackRate(_ http: HTTPURLResponse, sent: Int) {
         guard let r = http.value(forHTTPHeaderField: "x-ratelimit-remaining").flatMap(Int.init) else { return }
         switch http.value(forHTTPHeaderField: "x-ratelimit-resource") {
         case "core":
             let reset = http.value(forHTTPHeaderField: "x-ratelimit-reset").flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) }
             lock.withLock {
+                guard generation == sent else { return }
                 coreRemaining = r
                 coreResetsAt = reset
             }
-        case "graphql": lock.withLock { gqlRemaining = r }
+        case "graphql": lock.withLock { if generation == sent { gqlRemaining = r } }
         default: break
         }
     }

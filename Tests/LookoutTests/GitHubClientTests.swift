@@ -115,4 +115,30 @@ import Testing
         let _: Counted = try await client.get("/repos/o/r/issues")
         #expect(asked.withLock { $0 } == 2)
     }
+
+    @Test func anotherTokenStartsWithItsOwnBudgetAndNothingTheOldOneAskedForReachesIt() async throws {
+        let client = GitHubClient()
+        let reset = Date().addingTimeInterval(600)
+        let gate = StubbedGitHub.Gate()
+        client.token = "a"
+        client.session = StubbedGitHub.session { request in
+            // The old account's last answer is still on its way when the token changes.
+            .init(200, #"{"id": 7}"#, headers: [
+                "x-ratelimit-resource": "core", "x-ratelimit-remaining": "0", "ETag": "\"e\"",
+                "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970)),
+            ], gate: request.url!.path == "/search/slow" ? gate : nil)
+        }
+        let _: Counted = try await client.get("/repos/o/r/issues")
+        #expect(client.rateRemaining == 0 && client.remembered == 1)
+        let late = Task { let _: Counted = try await client.get("/search/slow") }
+        while gate.held == 0 { await Task.yield() }
+        client.token = "b"
+        #expect(client.rateRemaining == nil && client.rateResetsAt == nil && client.remembered == 0)
+        let _: Counted = try await client.get("/user")
+        #expect(client.rateRemaining == 0)
+        client.token = "c"
+        gate.open()
+        _ = try await late.value
+        #expect(client.rateRemaining == nil && client.remembered == 0)
+    }
 }
