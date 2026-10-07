@@ -115,6 +115,34 @@ import Testing
         #expect(!updater.showsInPill)
     }
 
+    @MainActor @Test func aCheckThatFailsTheSameWayTwiceIsCountedTwice() async {
+        let updater = Updater(current: "0.0.1", forceRelease: true)
+        updater.latest = { throw UpdateError("GitHub didn't answer (502)") }
+        await updater.check(manual: false)
+        #expect(updater.failures == 0)
+        #expect(updater.shownError == nil)
+        await updater.check(manual: true)
+        let first = updater.failures
+        #expect(first == 1)
+        #expect(updater.shownError == "GitHub didn't answer (502)")
+        // Same words, still a new failure for whoever says it.
+        await updater.check(manual: true)
+        #expect(updater.failures == first + 1)
+        #expect(updater.shownError == "GitHub didn't answer (502)")
+    }
+
+    @MainActor @Test func aFailedDownloadOrRestartIsTheErrorShownAndCountedEachTime() {
+        let updater = Updater()
+        updater.preview(.idle)
+        #expect(updater.shownError == nil)
+        updater.preview(.failed("The download didn't finish"))
+        let first = updater.failures
+        #expect(updater.shownError == "The download didn't finish")
+        updater.preview(.downloading)
+        updater.preview(.failed("The download didn't finish"))
+        #expect(updater.failures == first + 1)
+    }
+
     // MARK: Download, Skip and restart, with the network and the system stood in for
 
     /// A zip's transfer that does nothing until the test says so (`resume()` finishes at once when `delivers`).

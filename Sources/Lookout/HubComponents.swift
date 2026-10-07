@@ -702,6 +702,20 @@ struct SelectionSync: View {
     }
 }
 
+/// Says a failed update check, download or restart to VoiceOver, wherever it was asked for (Settings' row is not always
+/// on screen), from a view of its own: only this body reads the updater's failures.
+struct UpdateAnnouncer: View {
+    let updater: Updater
+
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0)
+            .onChange(of: updater.failures) {
+                guard let error = updater.shownError, NSWorkspace.shared.isVoiceOverEnabled else { return }
+                AccessibilityNotification.Announcement(error).post()
+            }
+    }
+}
+
 /// Your sessions in the hub can be dragged onto one another to reorder them, when `enabled` (the bar's tiles at
 /// rest are plain buttons).
 struct ReorderIf: ViewModifier {

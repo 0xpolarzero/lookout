@@ -344,6 +344,7 @@ struct LookoutHub: View {
         }
         .environment(\.colorScheme, .dark)
         .background(SelectionSync(ui: ui, hub: hub))
+        .background(UpdateAnnouncer(updater: store.updater))
     }
 
     // MARK: Data

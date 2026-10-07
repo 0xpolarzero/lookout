@@ -33,7 +33,12 @@ final class Updater {
     static let repo = "0xpolarzero/lookout"
     static let interval: TimeInterval = 3600
 
-    private(set) var phase: Phase = .idle { didSet { refreshPill() } }
+    private(set) var phase: Phase = .idle {
+        didSet {
+            refreshPill()
+            if case .failed = phase { failures += 1 }
+        }
+    }
     private(set) var release: Release? { didSet { refreshPill() } }
     /// The download's progress in whole percents (0...1). Read only by the views that draw it, so the hub, which reads
     /// `showsInPill`, is not redrawn as it moves.
@@ -42,6 +47,16 @@ final class Updater {
     private(set) var lastCheck: Date?
     /// Why the last check failed (only surfaced when you asked for it).
     private(set) var checkError: String?
+    /// Every failure that was shown, counted: the same one again (a retry that fails as the last did) is still news to
+    /// say, and `shownError` alone does not change.
+    private(set) var failures = 0
+
+    /// The failure there is to show, if any: a download or restart that failed, or a check that did. Settings' row
+    /// draws it and the hub says it, from wherever the check was asked for.
+    var shownError: String? {
+        if case .failed(let message) = phase { return message }
+        return phase == .idle ? checkError : nil
+    }
 
     /// Asked before each automatic check, and whether a found version was skipped.
     @ObservationIgnored var automatic: () -> Bool = { true }
@@ -153,7 +168,10 @@ final class Updater {
             release = found
             phase = .available
         } catch {
-            if manual { checkError = error.localizedDescription }
+            if manual {
+                checkError = error.localizedDescription
+                failures += 1
+            }
         }
     }
 
