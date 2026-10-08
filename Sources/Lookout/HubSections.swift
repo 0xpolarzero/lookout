@@ -157,6 +157,9 @@ extension LookoutHub {
     /// Repo chips on one CI line before the rest fold into "+N".
     static let ciChipLimit = 4
     static let ciLineOrder: [CIState] = ciOrder + [.none]
+    /// A CI line's height in the hover panel: a chip and a little air, so the lines sit close. Open on the sides,
+    /// the lines keep the bar's cell height beside their counts, so the bar doesn't get shorter than at rest.
+    static let ciLineHeight: CGFloat = 26
 
     /// The repos in a CI state; `.none` is the ones with no run (nothing known yet, or no checks).
     func ciRepos(listedIn state: CIState) -> [RepoConfig] {
@@ -221,8 +224,8 @@ extension LookoutHub {
     }
 
     /// The repos in a CI state, as chips that open their checks.
-    /// `compact`: along the top and bottom, where lines don't have to match the bar's cells.
-    func ciLine(_ state: CIState, compact: Bool = false) -> some View {
+    /// `tight`: in the hover panel, where lines don't have to match the bar's cells.
+    func ciLine(_ state: CIState, tight: Bool = false) -> some View {
         let repos = ciRepos(listedIn: state)
         // Repos without a run only get a line when there are some.
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -249,8 +252,8 @@ extension LookoutHub {
             }
         }
         .padding(.horizontal, Theme.Space.md)
-        .padding(.vertical, compact ? 1 : Theme.Space.xs)
-        .frame(maxWidth: .infinity, minHeight: compact ? 24 : Theme.Metrics.line, alignment: .leading)
+        .padding(.vertical, tight ? 2 : Theme.Space.xs)
+        .frame(maxWidth: .infinity, minHeight: tight ? Self.ciLineHeight : Theme.Metrics.line, alignment: .leading)
     }
 
     // MARK: Agents

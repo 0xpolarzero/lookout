@@ -968,14 +968,20 @@ struct LookoutHub: View {
             if store.ciRepos.isEmpty {
                 linkRow("No CI shown", action: "Choose repositories") { hub.go(.repos) }
             } else {
-                // The state's name starts each line, coloured; its count is in the strip above.
-                ForEach(Self.ciLineOrder, id: \.self) { state in
-                    if state != CIState.none || !ciRepos(listedIn: .none).isEmpty { ciLine(state, compact: true) }
+                // The states with repos in them, one after the other, wrapping onto more lines only when they
+                // don't fit; the counts, empty states' included, are in the strip above.
+                FlowLayout(spacing: 6) {
+                    ForEach(Self.ciLineOrder, id: \.self) { state in
+                        if !ciRepos(listedIn: state).isEmpty { ciGroup(state).padding(.trailing, 8) }
+                    }
                 }
+                .padding(.horizontal, Theme.Space.md)
             }
         }
         .padding(.horizontal, Self.inset)
         .padding(.vertical, 6)
+        // At least as tall as the new session row beside it (under the same line), so the two lines meet.
+        .frame(maxWidth: .infinity, minHeight: Self.newSessionBlock, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
         .opacity(searching ? 0.4 : 1)
     }
@@ -1009,9 +1015,35 @@ struct LookoutHub: View {
             Hairline(inset: Self.inset + 10).padding(.bottom, Theme.Space.xs)
             NewSessionRow(store: store, style: .twoLines)
                 .padding(.horizontal, Self.inset)
-                .padding(.bottom, 8)
+                .padding(.bottom, Self.newSessionBlock - Theme.Space.xs - 44)
         }
         .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    /// Along the top and bottom, under the line above the new session row: the row (44) and the air around it.
+    /// CI's column, under the same line beside it, is at least this tall.
+    static let newSessionBlock: CGFloat = Theme.Space.xs + 44 + 8
+
+    /// One CI state along the top and bottom: its name, coloured, then its repos' chips (a few, then "+N").
+    func ciGroup(_ state: CIState) -> some View {
+        let repos = ciRepos(listedIn: state)
+        return HStack(spacing: 5) {
+            Text(state == CIState.none ? "No runs" : state.title)
+                .font(Theme.Typography.count)
+                .foregroundStyle(state.color)
+                .padding(.trailing, 3)
+            ForEach(repos.prefix(Self.ciChipLimit), id: \.fullName) { repo in
+                RepoChip(repo: repo, status: store.ci[repo.fullName], state: state) { store.openChecks(repo) }
+            }
+            if repos.count > Self.ciChipLimit {
+                let rest = repos.dropFirst(Self.ciChipLimit)
+                Text("+\(rest.count)").font(Theme.Typography.control).foregroundStyle(Theme.secondary)
+                    .padding(.horizontal, 4).frame(height: 22)
+                    .accessibilityLabel("\(rest.count) more")
+                    .tip("\(rest.count) more", rest.map(\.fullName).joined(separator: "\n"))
+            }
+        }
+        .frame(height: 24)
     }
 
     func twoLineRow(_ r: AgentRow) -> some View {

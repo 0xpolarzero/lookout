@@ -328,7 +328,7 @@ extension LookoutHub {
             ciHeader.frame(height: Self.peekLine)
             ForEach(Self.ciLineOrder, id: \.self) { state in
                 // Repos without a run only get their line when there are some.
-                if state != CIState.none || !ciRepos(listedIn: .none).isEmpty { ciLine(state).frame(minHeight: Self.peekLine) }
+                if state != CIState.none || !ciRepos(listedIn: .none).isEmpty { ciLine(state, tight: true) }
             }
         }
     }
