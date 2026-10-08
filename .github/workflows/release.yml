@@ -25,8 +25,14 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
+      # One suite at a time: run in parallel, the suites that host windows can leave the main run loop with nothing to
+      # wait on, and the test process then exits 0 partway through. The summary line is required for the same reason:
+      # a run that stopped early must never count as a pass.
       - name: Test
-        run: swift test
+        run: |
+          set -o pipefail
+          swift test --no-parallel 2>&1 | tee test.log
+          grep -Eq "Test run with [0-9]+ tests? .*passed" test.log || { echo "::error::The test run ended without its summary"; exit 1; }
 
       # One certificate for every release: macOS keeps Accessibility access across updates, and the in-app
       # updater only installs a release signed by the same certificate as the running app.
