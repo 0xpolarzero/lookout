@@ -80,27 +80,6 @@ private struct AgentTileFace: View {
     }
 }
 
-/// A tile for the idle sessions folded away: "+N", or a chevron to fold them again.
-struct IdleTile: View {
-    let count: Int
-    let open: Bool
-    var size: CGFloat = 26
-
-    var body: some View {
-        Group {
-            if open {
-                Image(systemName: "chevron.up").font(.system(size: size * 0.38, weight: .bold))
-            } else {
-                Text("+\(count)").font(.system(size: size * 0.38, weight: .bold, design: .rounded)).minimumScaleFactor(0.6)
-            }
-        }
-        .foregroundStyle(Theme.secondary)
-        .frame(width: size, height: size)
-        .overlay(Tile.shape(size).strokeBorder(Theme.tertiary, style: StrokeStyle(lineWidth: 1, dash: [2.5, 2])))
-        .contentShape(Rectangle())
-    }
-}
-
 /// "Running swift test · 3m", ticking.
 struct WorkingText: View {
     let row: AgentRow
@@ -221,7 +200,7 @@ struct AgentActions: View {
         RowActions {
             if !keepsInline {
                 IconButton(symbol: row.entry.kept ? "pin.slash" : "pin", help: row.entry.kept ? "Unpin" : "Pin",
-                           detail: (row.entry.kept ? "Folds into the idle ones once it's quiet" : "Stays on the bar") + " · \(store.shortcut(.keepSession).display)", size: size) {
+                           detail: (row.entry.kept ? "Leaves the list an hour after it goes quiet" : "Stays on the bar") + " · \(store.shortcut(.keepSession).display)", size: size) {
                     store.togglePin(row.id)
                 }
             }

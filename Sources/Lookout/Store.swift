@@ -78,6 +78,14 @@ final class Store {
             agentsRevision &+= 1
         }
     }
+    /// Bumped when a recent session ages out of the list (see `Store.recentWindow`).
+    var recentTick = 0 {
+        didSet {
+            agentCache = nil
+            agentsRevision &+= 1
+        }
+    }
+    @ObservationIgnored var recentExpiry: Timer?
     /// Subagents and commands still running in sessions whose turn is over.
     var claudeTasks: [String: [ClaudeTask]] = [:] {
         didSet {

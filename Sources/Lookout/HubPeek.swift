@@ -235,11 +235,9 @@ extension LookoutHub {
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
                 // Group by group, each line as tall as the bar's slot beside it.
-                ForEach(Array(sections.enumerated()), id: \.element.group) { i, section in
-                    if !searching && (section.group != .idle || !section.rows.isEmpty) {
+                ForEach(sections) { section in
+                    if !searching {
                         groupLabel(section, twoLines: false).frame(height: Self.groupLine)
-                    } else if section.group == .idle && i > 0 {
-                        Color.clear.frame(height: Self.groupLine)
                     }
                     ForEach(section.rows) { r in
                         DrawerRow(row: r, store: store, ui: ui, number: 0, showsKept: searching, inHub: true, secondLine: slotHeight(r) > Theme.Metrics.row)
@@ -247,7 +245,6 @@ extension LookoutHub {
                             .sessionMenu(r, store)
                             .modifier(ReorderIf(enabled: section.group == .pinned && !searching, row: r, store: store))
                     }
-                    if section.group == .idle { idleLine(twoLines: false).frame(height: Theme.Metrics.row) }
                 }
                 NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.row)
             default:

@@ -90,7 +90,7 @@ enum AgentStatus {
 }
 
 /// Where a session is listed, in this order: what needs you, what finished, what's working, your pinned ones, then
-/// the idle rest (folded behind a "+N" until you open it).
+/// the recent rest: unpinned and quiet, listed for `Store.recentWindow` after their last activity so you can pin them.
 enum AgentGroup: Int, CaseIterable, Identifiable {
     case needsYou, done, working, pinned, idle
     var id: Int { rawValue }
@@ -100,7 +100,7 @@ enum AgentGroup: Int, CaseIterable, Identifiable {
         case .done: "Done"
         case .working: "Working"
         case .pinned: "Pinned"
-        case .idle: "Idle"
+        case .idle: "Recent"
         }
     }
 }
@@ -320,6 +320,7 @@ extension Store {
     /// properties, so SwiftUI keeps tracking them; `agentCache` is dropped whenever one of them changes.
     private var cache: AgentCache {
         let state = agents, sessions = claudeSessions, activity = claudeActivity, tasks = claudeTasks
+        _ = recentTick
         if let agentCache { return agentCache }
         let built = buildAgentCache(state, sessions, activity, tasks)
         agentCache = built
@@ -334,12 +335,19 @@ extension Store {
         var folderOrder: [String] = []
         for (s, _) in ordered where !folderOrder.contains(s.folderKey) { folderOrder.append(s.folderKey) }
         let kept = folderOrder.flatMap { folder in ordered.filter { $0.0.folderKey == folder } }
+        // Unpinned ones stay while they work or wait to be read, and for an hour after their last activity; then
+        // only a search finds them.
+        let now = Date(), cutoff = now.addingTimeInterval(-Self.recentWindow)
         let pending = sessions.values
             .compactMap { s -> (ClaudeSession, AgentEntry)? in
                 guard let e = byID[s.id], !e.kept, e.hiddenAt == nil, !muted.contains(s.folderKey) else { return nil }
+                guard s.running || e.unread || s.lastActivity > cutoff else { return nil }
                 return (s, e)
             }
             .sorted { $0.0.lastActivity > $1.0.lastActivity }
+        // The list is read again when the next of them ages out.
+        let quiet = pending.filter { !$0.0.running && !$0.1.unread }.map { $0.0.lastActivity + Self.recentWindow }
+        scheduleRecentExpiry(quiet.min().map { $0.timeIntervalSince(now) })
         let all = kept + pending
         let labels = AgentLabel.assign(all.map { (id: $0.0.id, title: $0.0.title, custom: $0.1.label) },
                                        folders: Dictionary(all.map { ($0.0.id, $0.0.folderName) }, uniquingKeysWith: { a, _ in a }))
@@ -359,7 +367,7 @@ extension Store {
         for row in allRows where !row.session.folderKey.isEmpty && !folders.contains(row.session.folderKey) {
             folders.append(row.session.folderKey)
         }
-        // Pinned ones in your order, idle ones by recency (as pending already is), the rest most recent first.
+        // Pinned ones in your order, recent ones by recency (as pending already is), the rest most recent first.
         let sections = AgentGroup.allCases.compactMap { group -> AgentSection? in
             var rows = allRows.filter { $0.group == group }
             if group.rawValue < AgentGroup.pinned.rawValue {
@@ -370,6 +378,20 @@ extension Store {
         return AgentCache(rows: (keptRows, pendingRows), all: allRows, sections: sections,
                           counts: (blocked + allRows.filter(\.waitsForYou).count, unread.count - blocked),
                           folders: folders, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
+    }
+
+    /// How long an unpinned session that went quiet stays listed.
+    static let recentWindow: TimeInterval = 3600
+
+    private func scheduleRecentExpiry(_ delay: TimeInterval?) {
+        recentExpiry?.invalidate()
+        recentExpiry = nil
+        guard let delay else { return }
+        let timer = Timer(timeInterval: max(1, delay + 1), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.recentTick &+= 1 }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        recentExpiry = timer
     }
 
     /// Kept sessions in your order, grouped by project (projects in the order their first session appears), then
@@ -674,7 +696,7 @@ extension Store {
         agents.assignColor(session.folderKey)
     }
 
-    /// Pins it, or unpins a pinned one (it stays listed, folding into the idle ones once it's quiet).
+    /// Pins it, or unpins a pinned one (it stays listed as recent, leaving an hour after its last activity).
     func togglePin(_ id: String) {
         if agents.entries.first(where: { $0.id == id })?.kept == true {
             mutateAgent(id) { $0.kept = false }

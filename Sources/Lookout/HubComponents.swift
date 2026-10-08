@@ -374,7 +374,7 @@ extension Store {
             hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
             return result
         }
-        return agentSections.flatMap { $0.group == .idle && !hub.idleOpen ? [] : $0.rows }
+        return agentSections.flatMap(\.rows)
     }
 }
 

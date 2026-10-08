@@ -20,8 +20,6 @@ final class HubState {
     }
     /// No hover panels until the pointer has left the bar (set when the full view closes).
     var quiet = false
-    /// The idle sessions unfolded from their "+N".
-    var idleOpen = false
     var page: HubPage = .main
     /// "i:<item id>" or "a:<session id>": the row the keys act on.
     var selection: String?
@@ -530,19 +528,13 @@ struct LookoutHub: View {
     /// What the inbox list animates on: its items changing, or the filter or search swapping them.
     struct ListKey: Equatable { let revision: Int; let filter: InboxFilter; let query: String }
     var listKey: ListKey { ListKey(revision: store.itemsRevision, filter: hub.filter, query: hub.query) }
-    /// The sessions by group; searching, one untitled group of the matches. Folded, the idle group has no rows (its
-    /// "+N" counts `idleCount`).
+    /// The sessions by group; searching, one untitled group of the matches.
     var agentSections: [AgentSection] {
         if searching {
             let rows = store.hubSessions(hub)
             return rows.isEmpty ? [] : [AgentSection(group: .pinned, rows: rows)]
         }
-        return store.agentSections.map { $0.group == .idle && !hub.idleOpen ? AgentSection(group: .idle, rows: []) : $0 }
-    }
-    var idleCount: Int { searching ? 0 : store.agentSections.first { $0.group == .idle }?.rows.count ?? 0 }
-
-    func toggleIdle() {
-        withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.idleOpen.toggle() }
+        return store.agentSections
     }
 
     /// Over a group's sessions: its name and count (none when searching: the matches are one list).
@@ -738,12 +730,10 @@ struct LookoutHub: View {
         let sections = agentSections
         VStack(alignment: side, spacing: 0) {
             ForEach(Array(sections.enumerated()), id: \.element.group) { i, section in
-                if !searching && (section.group != .idle || !section.rows.isEmpty) {
+                if !searching {
                     row(cell: { groupMark(first: i == 0) },
                         detail: { groupLabel(section, twoLines: false) })
                         .frame(height: Self.groupLine)
-                } else if section.group == .idle && i > 0 {
-                    row(cell: { groupMark(first: false) }, detail: { EmptyView() }).frame(height: Self.groupLine)
                 }
                 ForEach(section.rows) { r in
                     // Its first line level with the tile; what it did, or what it left running, under it.
@@ -753,11 +743,6 @@ struct LookoutHub: View {
                         .capEdge()
                         .id("a:" + r.id)
                 }
-                if section.group == .idle {
-                    row(cell: { idleTile }, detail: { idleLine(twoLines: false) })
-                        .frame(height: showsDetail ? nil : Theme.Metrics.row)
-                        .capEdge()
-                }
             }
         }
     }
@@ -765,27 +750,6 @@ struct LookoutHub: View {
     /// Between groups on the bar, a short line; over the first, nothing.
     func groupMark(first: Bool) -> some View {
         Capsule().fill(first ? .clear : Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: Self.groupLine)
-    }
-
-    /// The idle sessions' "+N", or the chevron folding them again.
-    var idleTile: some View {
-        Button { toggleIdle() } label: { IdleTile(count: idleCount, open: hub.idleOpen, size: 26) }
-            .buttonStyle(.plain)
-            .frame(height: Theme.Metrics.row)
-            .accessibilityLabel(hub.idleOpen ? "Hide idle sessions" : "\(idleCount) idle sessions")
-    }
-
-    /// Beside it: "3 idle", or "Hide idle".
-    func idleLine(twoLines: Bool) -> some View {
-        Button { toggleIdle() } label: {
-            Text(hub.idleOpen ? "Hide idle" : "\(idleCount) idle")
-                .font(Theme.Typography.body)
-                .foregroundStyle(Theme.secondary)
-                .padding(.leading, twoLines ? 10 : 8)
-                .frame(maxWidth: .infinity, minHeight: Theme.Metrics.row, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     /// Heights the two lists may scroll within: what's left once the fixed parts are laid out, inbox first.
@@ -875,7 +839,6 @@ struct LookoutHub: View {
                         ForEach(Array(agentSections.enumerated()), id: \.element.group) { i, section in
                             if i > 0 { Capsule().fill(Theme.Fill.selected).frame(width: 1.5, height: 14) }
                             ForEach(section.rows) { tile($0, size: 26) }
-                            if section.group == .idle { idleTile }
                         }
                     }
                 }
@@ -1044,7 +1007,7 @@ struct LookoutHub: View {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
             CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(count)) {
-                // By group: what needs you first, then what's done, working, pinned; the idle ones folded.
+                // By group: what needs you first, then what's done, working, pinned; the recent ones.
                 AdaptiveStack(count: count, alignment: .leading, spacing: 0) {
                     agentGroupList(sections)
                 }
@@ -1092,29 +1055,14 @@ struct LookoutHub: View {
         sessionBlock(r, twoLines: true).capEdge().id("a:" + r.id)
     }
 
-    /// Along the top and bottom: each group under its label, a row per session with its tile; the idle ones' "+N" last.
+    /// Along the top and bottom: each group under its label, a row per session with its tile.
     @ViewBuilder func agentGroupList(_ sections: [AgentSection]) -> some View {
         ForEach(sections) { section in
-            if !searching && (section.group != .idle || !section.rows.isEmpty) {
+            if !searching {
                 groupLabel(section, twoLines: true).padding(.top, 6).padding(.bottom, 2)
             }
             ForEach(section.rows) { r in
                 twoLineRow(r).modifier(ReorderIf(enabled: section.group == .pinned && !searching, row: r, store: store))
-            }
-            if section.group == .idle {
-                HStack(spacing: 9) {
-                    IdleTile(count: idleCount, open: hub.idleOpen, size: 24)
-                    Text(hub.idleOpen ? "Hide idle" : "\(idleCount) idle").font(Theme.Typography.body).foregroundStyle(Theme.secondary)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 40)
-                .contentShape(Rectangle())
-                .onTapGesture { toggleIdle() }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(hub.idleOpen ? "Hide idle sessions" : "\(idleCount) idle sessions")
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAction { toggleIdle() }
             }
         }
     }
