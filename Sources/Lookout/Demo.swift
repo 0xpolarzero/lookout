@@ -338,8 +338,9 @@ enum Demo {
             Listed(session("m2", "Calculator display reading", "lcu", minutes: 90, detail: "The display reads 1,234.5.")),
         ]
         for i in 0..<11 {
-            listed.append(Listed(session("m\(i + 3)", "New activity \(i + 1)", projects[i % projects.count], minutes: Double(3 + i * 11),
-                                         detail: "Finished turn \(i + 1)."), kept: false, unread: i % 2 == 0))
+            let made = session("m\(i + 3)", "New activity \(i + 1)", projects[i % projects.count], minutes: Double(3 + i * 11),
+                               detail: "Finished turn \(i + 1).")
+            listed.append(Listed(made, kept: false, unread: i % 2 == 0))
         }
         sessions(store, now, listed)
     }
@@ -347,9 +348,14 @@ enum Demo {
     /// `total` sessions, the first `waiting` of them waiting for you: more than the bar has room for.
     private static func questions(_ store: Store, _ now: Date, total: Int, waiting: Int) {
         let projects = ["lcu", "microsandbox", "lookout", "lcu-research", "zig-docs"]
-        let listed = (0..<total).map { i in
-            Listed(session("q\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 7 + 1), blocked: i < waiting,
-                           detail: i < waiting ? "Which one should it be?" : "Finished turn \(i)."), unread: i < waiting)
+        // Built a step at a time: as one expression, older compilers give up type-checking it.
+        var listed: [Listed] = []
+        for i in 0..<total {
+            let isWaiting = i < waiting
+            let detail = isWaiting ? "Which one should it be?" : "Finished turn \(i)."
+            let made = session("q\(i)", "Question number \(i)", projects[i % projects.count], minutes: Double(i * 7 + 1),
+                               blocked: isWaiting, detail: detail)
+            listed.append(Listed(made, unread: isWaiting))
         }
         sessions(store, now, listed)
     }
