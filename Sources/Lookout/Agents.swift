@@ -192,12 +192,11 @@ struct AgentRow: Identifiable, Hashable {
     var stateName: String {
         // A pending session keeps what it left running: "pending, 2 running".
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
-        if pending && !unread && status != .running && status != .blocked { return "pending" + running }
         switch status {
         case .blocked: return "waiting"
         case .running: return "working"
         case .finished: return (unread ? "done, unread" : "done") + running
-        case .idle: return (pending ? "pending" : "idle") + running
+        case .idle: return (entry.kept ? "pinned" : "idle") + running
         }
     }
 

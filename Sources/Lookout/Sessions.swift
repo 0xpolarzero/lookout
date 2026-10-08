@@ -453,6 +453,8 @@ struct DrawerRow: View {
     var inHub = false
     /// Inside a larger block that draws the highlight itself (title and details hover as one).
     var plain = false
+    /// One-line rows: what it asks, did or is doing, under the title (the hover panel's sessions that need a look).
+    var secondLine = false
 
     var body: some View {
         let selected = ui.drawerSelection == row.id
@@ -467,15 +469,19 @@ struct DrawerRow: View {
                     .lineLimit(1)
                 if twoLines {
                     HStack(spacing: 4) {
-                        ProjectLabel(name: row.projectName, color: row.color).foregroundStyle(Theme.tertiary)
-                        Text("·").foregroundStyle(Theme.tertiary)
-                        status
-                        if showsKept && !row.entry.kept {
-                            Text("· not in your list").foregroundStyle(Theme.tertiary)
+                        if showsKept {
+                            Text(row.projectName).foregroundStyle(Theme.tertiary)
+                            Text("·").foregroundStyle(Theme.tertiary)
+                            status
+                            if !row.entry.kept { Text("· not pinned").foregroundStyle(Theme.tertiary) }
+                        } else {
+                            meta
                         }
                     }
                     .font(Theme.Typography.caption)
                     .lineLimit(1)
+                } else if secondLine {
+                    DetailLine(row: row)
                 }
             }
             .layoutPriority(1)
@@ -486,7 +492,8 @@ struct DrawerRow: View {
             } else if !twoLines {
                 // In a hub block the actions are laid over this spot instead: the status steps aside without the
                 // row changing size.
-                status.font(Theme.Typography.caption.monospacedDigit()).lineLimit(1).truncationMode(.middle)
+                Group { if showsKept { status } else { meta } }
+                    .font(Theme.Typography.caption.monospacedDigit()).lineLimit(1).truncationMode(.middle)
                     .frame(maxWidth: busy ? 170 : 110, alignment: .trailing)
                     .fixedSize(horizontal: busy, vertical: false)
                     .layoutPriority(busy ? 2 : 0)
@@ -541,8 +548,7 @@ struct DrawerRow: View {
                 // Its age moves with the same clock as the one VoiceOver is told.
                 Ticking(coarse: true) { now in
                     let text = row.statusText(now: now)
-                    Text(row.pending && !row.unread ? (row.entry.kept || showsKept ? text : "pending") : text)
-                        .foregroundStyle(row.statusColor)
+                    Text(text).foregroundStyle(row.statusColor)
                 }
                 if let tasks = row.tasksText {
                     Text("·").foregroundStyle(Theme.tertiary)
@@ -550,6 +556,43 @@ struct DrawerRow: View {
                 }
             }
         }
+    }
+}
+
+extension DrawerRow {
+    /// Its project and how long ago, in grey: the group it's listed under already says its state. While it works, how
+    /// long the turn has run; after a turn, what it left running.
+    @ViewBuilder var meta: some View {
+        HStack(spacing: 4) {
+            Text(row.projectName)
+            Ticking(coarse: true) { now in
+                Text("· " + (row.session.running ? AgentRow.duration(now.timeIntervalSince(row.workingSince ?? now)) : shortAgo(row.session.lastActivity, now: now)))
+            }
+            if let tasks = row.tasksText { Text("· \(tasks)") }
+        }
+        .foregroundStyle(Theme.tertiary)
+    }
+}
+
+/// Under a session's title: the question it's asking or what it did (its last summary), or what it's doing now.
+struct DetailLine: View {
+    let row: AgentRow
+
+    var body: some View {
+        Group {
+            if row.session.running {
+                Text(row.activity?.text ?? "Working").foregroundStyle(Theme.secondary)
+            } else if !row.summaryText.characters.isEmpty {
+                Text(row.summaryText).foregroundStyle(Theme.secondary)
+            } else if !row.tasks.isEmpty {
+                RunningLine(tasks: row.tasks)
+            } else {
+                Text(" ")
+            }
+        }
+        .font(Theme.Typography.meta)
+        .lineLimit(1)
+        .truncationMode(.tail)
     }
 }
 

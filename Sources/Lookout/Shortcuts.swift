@@ -140,8 +140,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .markAllRead: "Mark all as read"
         case .refresh: "Refresh now"
         case .sessionSwitcher: "Switch Claude session"
-        case .keepSession: "Keep a pending session"
-        case .removeSession: "Remove a session"
+        case .keepSession: "Pin or unpin a session"
+        case .removeSession: "Hide a session until its next activity"
         }
     }
 

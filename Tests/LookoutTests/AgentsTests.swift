@@ -168,12 +168,13 @@ import Testing
         s.claudeActivity["asking"] = ClaudeActivity(text: "Asking you a question", since: now, waitsForYou: true)
         // Stopped on a question mid-turn counts as waiting, not as the working session it is still marked as.
         #expect(s.agentRows.kept.first { $0.id == "asking" }?.waitsForYou == true)
-        #expect(s.sessionShortcutPick?.id == "done")
-        // Reading the finished one leaves the question to go to, ahead of the first kept session, which needs nothing.
-        s.toggleAgentRead("done")
+        // A question comes before a finished turn.
         #expect(s.sessionShortcutPick?.id == "asking")
-        // Nothing needs you: the first kept one.
+        // Answered: the finished one.
         s.claudeActivity["asking"] = nil
+        #expect(s.sessionShortcutPick?.id == "done")
+        // Nothing needs you: the first kept one.
+        s.toggleAgentRead("done")
         #expect(s.sessionShortcutPick?.id == s.agentRows.kept.first?.id)
     }
 
@@ -294,11 +295,11 @@ import Testing
         let s = store([session("f", minutesAgo: 4), session("w", messageMinutesAgo: 2, running: true)])
         let rows = s.allAgentRows
         let finished = try #require(rows.first { $0.id == "f" }), working = try #require(rows.first { $0.id == "w" })
-        #expect(finished.statusText(now: now) == "4m" && finished.spokenValue(now: now) == "pending, app, 4 minutes")
+        #expect(finished.statusText(now: now) == "4m" && finished.spokenValue(now: now) == "idle, app, 4 minutes")
         #expect(working.workingText(now: now).hasSuffix("2m") && working.spokenValue(now: now) == "working, app, 2 minutes")
         // Three minutes on, both say it: the value is not the one the row was drawn with.
         let later = now.addingTimeInterval(180)
-        #expect(finished.statusText(now: later) == "7m" && finished.spokenValue(now: later) == "pending, app, 7 minutes")
+        #expect(finished.statusText(now: later) == "7m" && finished.spokenValue(now: later) == "idle, app, 7 minutes")
         #expect(working.workingText(now: later).hasSuffix("5m") && working.spokenValue(now: later) == "working, app, 5 minutes")
         #expect(AgentRow.spokenAge(20) == "just now" && AgentRow.spokenAge(3600) == "1 hour" && AgentRow.spokenAge(2 * 86400) == "2 days")
     }
@@ -308,7 +309,7 @@ import Testing
         s.claudeTasks = ["f": [ClaudeTask(id: "a", kind: .agent, title: "Review the changes", since: now),
                                ClaudeTask(id: "b", kind: .command, title: "Run the full test suite", since: now)]]
         let row = try #require(s.allAgentRows.first { $0.id == "f" })
-        #expect(row.spokenValue(now: now) == "pending, 2 running, app, 4 minutes")
+        #expect(row.spokenValue(now: now) == "idle, 2 running, app, 4 minutes")
         #expect(row.spokenHint == "Opens it in Claude. Running: Review the changes, Run the full test suite.")
         // Nothing left running: neither says anything of it.
         s.claudeTasks = [:]

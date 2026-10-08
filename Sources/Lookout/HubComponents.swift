@@ -373,8 +373,7 @@ extension Store {
             hub.sessionMemo = SessionSearchMemo(query: hub.query, revision: agentsRevision, result: result)
             return result
         }
-        let rows = agentRows
-        return rows.kept + rows.pending.prefix(LookoutHub.pendingTiles)
+        return agentSections.flatMap { $0.group == .idle && !hub.idleOpen ? [] : $0.rows }
     }
 }
 
@@ -583,15 +582,6 @@ struct RunningLine: View {
     }
 }
 
-/// A session's turn summary on one line: Markdown (**bold**, `code`) shown as such.
-struct SummaryText: View {
-    let row: AgentRow
-
-    var body: some View {
-        Text(row.summaryText).font(Theme.Typography.meta).foregroundStyle(Theme.tertiary).lineLimit(1)
-    }
-}
-
 /// A session's tile in the bar; opens it in Claude. Its highlight is compared here, in its own body, so hovering a
 /// tile doesn't rebuild the whole hub. No tooltip: hovering opens the sessions' panel, a row beside each tile.
 struct BarTile: View {
@@ -675,22 +665,14 @@ struct SessionBlock: View {
 
     /// A grid card's one line under its title, always there so every card is the same height: the turn's summary,
     /// else what's still running (the count is in the status above either way).
-    @ViewBuilder private var cardDetail: some View {
-        if summary != nil {
-            SummaryText(row: row)
-        } else if !row.tasks.isEmpty {
-            RunningLine(tasks: row.tasks)
-        } else {
-            Text(" ").font(Theme.Typography.meta)
-        }
-    }
+    private var cardDetail: some View { DetailLine(row: row) }
 
     /// At most two short lines: the turn's summary, and what's still running after it.
     @ViewBuilder private var details: some View {
-        if summary != nil || !row.tasks.isEmpty {
+        if row.session.running || summary != nil || !row.tasks.isEmpty {
             VStack(alignment: .leading, spacing: 1) {
-                if summary != nil { SummaryText(row: row) }
-                if !row.tasks.isEmpty { RunningLine(tasks: row.tasks) }
+                DetailLine(row: row)
+                if summary != nil && !row.tasks.isEmpty { RunningLine(tasks: row.tasks) }
             }
         }
     }

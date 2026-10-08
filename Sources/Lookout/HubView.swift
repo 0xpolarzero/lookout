@@ -20,6 +20,8 @@ final class HubState {
     }
     /// No hover panels until the pointer has left the bar (set when the full view closes).
     var quiet = false
+    /// The idle sessions unfolded from their "+N".
+    var idleOpen = false
     var page: HubPage = .main
     /// "i:<item id>" or "a:<session id>": the row the keys act on.
     var selection: String?
@@ -330,7 +332,7 @@ final class HubKeys {
         if selection.hasPrefix("a:") {
             if shortcut == store.shortcut(.openItem) { store.openAgent(id) }
             else if shortcut == store.shortcut(.toggleRead) { store.toggleAgentRead(id) }
-            else if shortcut == store.shortcut(.keepSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.keepAgent(id) } }
+            else if shortcut == store.shortcut(.keepSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.togglePin(id) } }
             else if shortcut == store.shortcut(.removeSession) { withAnimation(Theme.Motion.fade.resolved(reduce: LookoutHub.reduceNow)) { store.dismissAgent(id) } }
             else { return false }
             return true
@@ -455,7 +457,6 @@ struct LookoutHub: View {
     static let ciWidth: CGFloat = 300
     static let pageWidth: CGFloat = 480
     /// How many pending sessions the hub lists before the rest stay hidden.
-    static let pendingTiles = 4
     /// The hub's one coordinate space name (the hosting root's).
     static let rootSpace = "hub-root"
     /// Animations: pass through `.motion` / `.resolved(reduce:)`, which follow Reduce Motion live.
@@ -528,11 +529,34 @@ struct LookoutHub: View {
     /// What the inbox list animates on: its items changing, or the filter or search swapping them.
     struct ListKey: Equatable { let revision: Int; let filter: InboxFilter; let query: String }
     var listKey: ListKey { ListKey(revision: store.itemsRevision, filter: hub.filter, query: hub.query) }
-    var agentRows: (kept: [AgentRow], pending: [AgentRow]) {
-        if searching { return (store.hubSessions(hub), []) }
-        let rows = store.agentRows
-        return (rows.kept, Array(rows.pending.prefix(Self.pendingTiles)))
+    /// The sessions by group; searching, one untitled group of the matches. Folded, the idle group has no rows (its
+    /// "+N" counts `idleCount`).
+    var agentSections: [AgentSection] {
+        if searching {
+            let rows = store.hubSessions(hub)
+            return rows.isEmpty ? [] : [AgentSection(group: .pinned, rows: rows)]
+        }
+        return store.agentSections.map { $0.group == .idle && !hub.idleOpen ? AgentSection(group: .idle, rows: []) : $0 }
     }
+    var idleCount: Int { searching ? 0 : store.agentSections.first { $0.group == .idle }?.rows.count ?? 0 }
+
+    func toggleIdle() {
+        withAnimation(Theme.Motion.fade.resolved(reduce: reduce)) { hub.idleOpen.toggle() }
+    }
+
+    /// Over a group's sessions: its name and count (none when searching: the matches are one list).
+    func groupLabel(_ section: AgentSection, twoLines: Bool) -> some View {
+        Eyebrow(section.group.title, count: section.rows.count)
+            .padding(.leading, twoLines ? 10 : 8)
+    }
+
+    /// Sessions that need a look get their detail under the title beside the bar, and the room for it.
+    func slotHeight(_ r: AgentRow) -> CGFloat {
+        r.group.rawValue < AgentGroup.pinned.rawValue && !searching ? Self.tallSlot : Theme.Metrics.row
+    }
+    static let tallSlot: CGFloat = Theme.Metrics.row + 14
+    /// The line above a group beside the bar (the first group's sits under the asterisk).
+    static let groupLine: CGFloat = 14
 
     // MARK: Vertical (left / right edges)
 
@@ -710,45 +734,57 @@ struct LookoutHub: View {
     }
 
     @ViewBuilder var sessionRows: some View {
-        let rows = agentRows
+        let sections = agentSections
         VStack(alignment: side, spacing: 0) {
-            // By project, a line between projects, and draggable onto one another, as along the top and bottom.
-            let starts = projectStarts(rows.kept)
-            ForEach(rows.kept) { r in
-                // Its first line level with the tile; what it did, or what it left running, under it.
-                row(alignment: .top, cell: { tile(r, size: 26) }, detail: { sessionBlock(r, twoLines: false) })
-                    .modifier(ReorderIf(enabled: showsDetail, row: r, store: store))
-                    .modifier(GroupRule(on: showsDetail && starts.contains(r.id)))
-                    .capEdge()
-                    .id("a:" + r.id)
-            }
-            if !rows.pending.isEmpty {
-                row(cell: { Capsule().fill(Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: 14) },
-                    detail: { pendingLabel(twoLines: false) })
-                ForEach(rows.pending) { r in
-                    row(alignment: .top, cell: { tile(r, size: 22) }, detail: { sessionBlock(r, twoLines: false) })
+            ForEach(Array(sections.enumerated()), id: \.element.group) { i, section in
+                if !searching && (section.group != .idle || !section.rows.isEmpty) {
+                    row(cell: { groupMark(first: i == 0) },
+                        detail: { groupLabel(section, twoLines: false) })
+                        .frame(height: Self.groupLine)
+                } else if section.group == .idle && i > 0 {
+                    row(cell: { groupMark(first: false) }, detail: { EmptyView() }).frame(height: Self.groupLine)
+                }
+                ForEach(section.rows) { r in
+                    // Its first line level with the tile; what it did, or what it left running, under it.
+                    row(alignment: .top, cell: { tile(r, size: 26).frame(height: showsDetail ? nil : slotHeight(r)) },
+                        detail: { sessionBlock(r, twoLines: false) })
+                        .modifier(ReorderIf(enabled: showsDetail && section.group == .pinned, row: r, store: store))
                         .capEdge()
                         .id("a:" + r.id)
+                }
+                if section.group == .idle {
+                    row(cell: { idleTile }, detail: { idleLine(twoLines: false) })
+                        .frame(height: showsDetail ? nil : Theme.Metrics.row)
+                        .capEdge()
                 }
             }
         }
     }
 
-    /// The kept sessions that begin a project's run after the first (none when searching): a line goes above each.
-    /// Rows stay keyed by their own session, so reordering never rebuilds them.
-    func projectStarts(_ kept: [AgentRow]) -> Set<String> {
-        guard !searching else { return [] }
-        var starts: Set<String> = []
-        for (prev, next) in zip(kept, kept.dropFirst()) where prev.session.folderKey != next.session.folderKey {
-            starts.insert(next.id)
-        }
-        return starts
+    /// Between groups on the bar, a short line; over the first, nothing.
+    func groupMark(first: Bool) -> some View {
+        Capsule().fill(first ? .clear : Theme.Fill.selected).frame(width: 14, height: 1.5).frame(height: Self.groupLine)
     }
 
-    /// "PENDING", aligned with the text of the rows under it (two-line rows pad 10, one-line 8).
-    func pendingLabel(twoLines: Bool) -> some View {
-        Eyebrow("Pending")
-            .padding(.leading, twoLines ? 10 : 8)
+    /// The idle sessions' "+N", or the chevron folding them again.
+    var idleTile: some View {
+        Button { toggleIdle() } label: { IdleTile(count: idleCount, open: hub.idleOpen, size: 26) }
+            .buttonStyle(.plain)
+            .frame(height: Theme.Metrics.row)
+            .accessibilityLabel(hub.idleOpen ? "Hide idle sessions" : "\(idleCount) idle sessions")
+    }
+
+    /// Beside it: "3 idle", or "Hide idle".
+    func idleLine(twoLines: Bool) -> some View {
+        Button { toggleIdle() } label: {
+            Text(hub.idleOpen ? "Hide idle" : "\(idleCount) idle")
+                .font(Theme.Typography.body)
+                .foregroundStyle(Theme.secondary)
+                .padding(.leading, twoLines ? 10 : 8)
+                .frame(maxWidth: .infinity, minHeight: Theme.Metrics.row, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Heights the two lists may scroll within: what's left once the fixed parts are laid out, inbox first.
@@ -835,11 +871,10 @@ struct LookoutHub: View {
                         agentsHeader.transition(.hubReveal)
                     } else {
                         // (At rest: the tiles.)
-                        let rows = agentRows
-                        ForEach(rows.kept) { tile($0, size: 26) }
-                        if !rows.pending.isEmpty {
-                            Capsule().fill(Theme.Fill.selected).frame(width: 1.5, height: 14)
-                            ForEach(rows.pending) { tile($0, size: 22) }
+                        ForEach(Array(agentSections.enumerated()), id: \.element.group) { i, section in
+                            if i > 0 { Capsule().fill(Theme.Fill.selected).frame(width: 1.5, height: 14) }
+                            ForEach(section.rows) { tile($0, size: 26) }
+                            if section.group == .idle { idleTile }
                         }
                     }
                 }
@@ -1002,23 +1037,15 @@ struct LookoutHub: View {
 
     /// The sessions along the top and bottom: one per line, read top to bottom like the inbox beside them.
     var agentsColumn: some View {
-        let rows = agentRows
+        let sections = agentSections
+        let count = sections.reduce(0) { $0 + $1.rows.count }
         return VStack(alignment: .leading, spacing: 0) {
             // Directly under the Sessions header (in the strip above).
             ClaudeNotice(store: store).padding(.horizontal, Self.inset + 8)
-            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(rows.kept.count + rows.pending.count)) {
-                // Your sessions by project, a line between projects; then the pending ones, labelled.
-                AdaptiveStack(count: rows.kept.count + rows.pending.count, alignment: .leading, spacing: 0) {
-                    let starts = projectStarts(rows.kept)
-                    ForEach(rows.kept) { r in
-                        if starts.contains(r.id) { groupDivider }
-                        twoLineRow(r).modifier(AgentReorder(row: r, store: store))
-                    }
-                    if !rows.pending.isEmpty {
-                        if !rows.kept.isEmpty { groupDivider }
-                        pendingLabel(twoLines: true).padding(.bottom, 4)
-                        ForEach(rows.pending) { twoLineRow($0) }
-                    }
+            CappedScroll(cap: min(maxLength - Self.cell - 60, Self.listCap + 90), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(count)) {
+                // By group: what needs you first, then what's done, working, pinned; the idle ones folded.
+                AdaptiveStack(count: count, alignment: .leading, spacing: 0) {
+                    agentGroupList(sections)
                 }
                 .padding(.horizontal, Self.inset)
                 .padding(.top, 8)
@@ -1062,6 +1089,33 @@ struct LookoutHub: View {
 
     func twoLineRow(_ r: AgentRow) -> some View {
         sessionBlock(r, twoLines: true).capEdge().id("a:" + r.id)
+    }
+
+    /// Along the top and bottom: each group under its label, a row per session with its tile; the idle ones' "+N" last.
+    @ViewBuilder func agentGroupList(_ sections: [AgentSection]) -> some View {
+        ForEach(sections) { section in
+            if !searching && (section.group != .idle || !section.rows.isEmpty) {
+                groupLabel(section, twoLines: true).padding(.top, 6).padding(.bottom, 2)
+            }
+            ForEach(section.rows) { r in
+                twoLineRow(r).modifier(ReorderIf(enabled: section.group == .pinned && !searching, row: r, store: store))
+            }
+            if section.group == .idle {
+                HStack(spacing: 9) {
+                    IdleTile(count: idleCount, open: hub.idleOpen, size: 24)
+                    Text(hub.idleOpen ? "Hide idle" : "\(idleCount) idle").font(Theme.Typography.body).foregroundStyle(Theme.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 40)
+                .contentShape(Rectangle())
+                .onTapGesture { toggleIdle() }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(hub.idleOpen ? "Hide idle sessions" : "\(idleCount) idle sessions")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { toggleIdle() }
+            }
+        }
     }
 
     /// A line between one project's sessions and the next's.
@@ -1212,17 +1266,6 @@ struct AgentReorder: ViewModifier {
         content
             .modifier(Reorderable(row: row, store: store, dropTarget: $target))
             .overlay(Theme.Radius.shape(Theme.Radius.md).strokeBorder(target ? Theme.accent : .clear, lineWidth: 1.5))
-    }
-}
-
-/// A line along a row's top edge, taking no room of its own: between projects, the rows stay level with the bar's tiles.
-struct GroupRule: ViewModifier {
-    let on: Bool
-
-    func body(content: Content) -> some View {
-        content.overlay(alignment: .top) {
-            if on { Hairline(inset: 8) }
-        }
     }
 }
 

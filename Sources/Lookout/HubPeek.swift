@@ -231,23 +231,23 @@ extension LookoutHub {
             case .ci:
                 peekCI
             case .agents:
-                let rows = agentRows
+                let sections = agentSections
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                // By project and draggable, like the full view's.
-                let starts = projectStarts(rows.kept)
-                ForEach(rows.kept) { r in
-                    DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.row)
-                        .sessionMenu(r, store)
-                        .modifier(GroupRule(on: starts.contains(r.id)))
-                        .modifier(AgentReorder(row: r, store: store))
-                }
-                if !rows.pending.isEmpty {
-                    pendingLabel(twoLines: false).frame(height: 14)
-                    ForEach(rows.pending) { r in
-                        DrawerRow(row: r, store: store, ui: ui, number: 0, inHub: true).frame(height: Theme.Metrics.row)
-                            .sessionMenu(r, store)
+                // Group by group, each line as tall as the bar's slot beside it.
+                ForEach(Array(sections.enumerated()), id: \.element.group) { i, section in
+                    if !searching && (section.group != .idle || !section.rows.isEmpty) {
+                        groupLabel(section, twoLines: false).frame(height: Self.groupLine)
+                    } else if section.group == .idle && i > 0 {
+                        Color.clear.frame(height: Self.groupLine)
                     }
+                    ForEach(section.rows) { r in
+                        DrawerRow(row: r, store: store, ui: ui, number: 0, showsKept: searching, inHub: true, secondLine: slotHeight(r) > Theme.Metrics.row)
+                            .frame(height: slotHeight(r))
+                            .sessionMenu(r, store)
+                            .modifier(ReorderIf(enabled: section.group == .pinned && !searching, row: r, store: store))
+                    }
+                    if section.group == .idle { idleLine(twoLines: false).frame(height: Theme.Metrics.row) }
                 }
                 NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.row)
             default:
@@ -270,19 +270,8 @@ extension LookoutHub {
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
-                let rows = agentRows
                 CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        let starts = projectStarts(rows.kept)
-                        ForEach(rows.kept) { r in
-                            if starts.contains(r.id) { groupDivider }
-                            twoLineRow(r).modifier(AgentReorder(row: r, store: store))
-                        }
-                        if !rows.pending.isEmpty {
-                            pendingLabel(twoLines: true).padding(.top, 6).padding(.bottom, 2)
-                            ForEach(rows.pending) { twoLineRow($0) }
-                        }
-                    }
+                    VStack(alignment: .leading, spacing: 2) { agentGroupList(agentSections) }
                 }
                 NewSessionRow(store: store, style: .twoLines)
             default:
