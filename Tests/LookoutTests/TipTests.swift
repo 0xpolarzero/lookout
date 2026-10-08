@@ -82,10 +82,16 @@ import Testing
         // Not at once: a Tab through a row of controls doesn't flash each one's tip.
         try await Task.sleep(for: .milliseconds(400))
         #expect(TipCenter.visible == nil)
-        try await Task.sleep(for: .milliseconds(1000))
+        // Waited for rather than slept on: a busy machine (CI, parallel suites) can run the second late.
+        try await eventually { TipCenter.visible != nil }
         #expect(TipCenter.visible?.current?.title == "Settings")
         focus.on = false
-        try await Task.sleep(for: .milliseconds(200))
+        try await eventually { TipCenter.visible == nil }
         #expect(TipCenter.visible == nil)
     }
+}
+
+/// Waits for `condition`, which something the test started brings about.
+@MainActor private func eventually(_ condition: () -> Bool) async throws {
+    for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
 }
