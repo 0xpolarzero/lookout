@@ -7,7 +7,7 @@ import Testing
 
 /// Done can be taken back: ⌘Z and the line's button, for 30 seconds, through polls and pruning.
 @MainActor
-@Suite struct Undo {
+@Suite(.hostsWindows) struct Undo {
     private func item(_ id: String, state: ItemState = .unread, age: TimeInterval = 60) -> InboxItem {
         InboxItem(id: id, repo: "a/one", kind: .issueComment, number: 1, title: "t \(id)", snippet: "", author: "x", avatar: nil,
                   authorIsApp: false, url: URL(string: "https://github.com/a/one")!, createdAt: Date().addingTimeInterval(-age),

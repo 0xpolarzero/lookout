@@ -5,7 +5,7 @@ import SwiftUI
 import Testing
 @testable import Lookout
 
-@Suite(.serialized) struct TipEscape {
+@Suite(.serialized, .hostsWindows) struct TipEscape {
     private func key(_ code: UInt16, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
         NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
                          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)!

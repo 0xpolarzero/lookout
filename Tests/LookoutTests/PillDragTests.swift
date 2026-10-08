@@ -3,7 +3,7 @@ import Testing
 @testable import Lookout
 
 @MainActor
-@Suite struct PillDrag {
+@Suite(.hostsWindows) struct PillDrag {
     private func event(_ type: NSEvent.EventType, _ x: CGFloat, _ y: CGFloat, in window: NSWindow) -> NSEvent {
         NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: y), modifierFlags: [], timestamp: 0,
                            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!

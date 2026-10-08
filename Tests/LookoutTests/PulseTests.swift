@@ -5,7 +5,7 @@ import Testing
 /// What the idle gate reads from the rings: how many loop, and a word when that changes (a covered window or Reduce Motion
 /// takes the loop away, and a measurement without one would pass for free).
 @MainActor
-@Suite(.serialized) struct PulseLoops {
+@Suite(.serialized, .hostsWindows) struct PulseLoops {
     @MainActor private final class Host {
         var showing = true
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 40), styleMask: .borderless, backing: .buffered, defer: false)
@@ -59,7 +59,7 @@ import Testing
 }
 
 @MainActor
-@Suite struct PulseLoop {
+@Suite(.hostsWindows) struct PulseLoop {
     private func loop() -> CABasicAnimation? {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 40, height: 40), styleMask: [.borderless], backing: .buffered, defer: false)
         let view = PulseView()

@@ -313,7 +313,7 @@ import Testing
     }
 }
 
-@Suite struct FailingChecks {
+@Suite(.hostsWindows) struct FailingChecks {
     @Test func theChipNamesTheFailingChecksAndCountsTheRest() {
         #expect(RepoChip.failingSummary(["build"]) == "build")
         #expect(RepoChip.failingSummary(["build", "lint"]) == "build, lint")

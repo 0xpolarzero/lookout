@@ -62,7 +62,7 @@ enum AccessibilityTree {
 }
 
 @MainActor
-@Suite struct AccessibilityTreeTests {
+@Suite(.hostsWindows) struct AccessibilityTreeTests {
     /// What the hub in `state` has for a control without a name, wherever it is.
     private func unnamed(_ state: String, edge: DockEdge = .right, scenario: Demo.Scenario = .agents,
                          configure: @escaping (Store, HubState) -> Void) async throws -> [String] {

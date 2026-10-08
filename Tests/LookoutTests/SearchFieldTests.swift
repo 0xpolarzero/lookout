@@ -7,7 +7,7 @@ import Testing
 
 /// The hub's keys against the search field, a real text field: what it keeps for typing, and what stays the hub's.
 @MainActor
-@Suite struct SearchFieldKeys {
+@Suite(.hostsWindows) struct SearchFieldKeys {
     private let store = Store()
     private let hub = HubState()
     private let keys: HubKeys
@@ -290,7 +290,7 @@ import Testing
 
 /// The field itself, mounted: what is typed into it lands in the query, as it would from a paste or an input method.
 @MainActor
-@Suite struct SearchFieldView {
+@Suite(.hostsWindows) struct SearchFieldView {
     @Test func whatTheFieldIsGivenLandsInTheQueryAndPicksTheFirstResult() throws {
         let store = Store()
         Demo.populate(store, .agents)

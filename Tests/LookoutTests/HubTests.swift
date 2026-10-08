@@ -69,7 +69,7 @@ import Testing
 }
 
 @MainActor
-@Suite struct CappedScrollHosted {
+@Suite(.hostsWindows) struct CappedScrollHosted {
     @Observable final class Count { var n: Int; init(_ n: Int) { self.n = n } }
 
     private struct Changing: View {
