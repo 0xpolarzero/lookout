@@ -428,6 +428,13 @@ struct LookoutHub: View {
     @State var peekLeave: Task<Void, Never>?
     /// The bar's size and the open panel's natural size, to place the panel against the bar's ends.
     @State var barSize: CGSize = .zero
+    /// On the sides, the open column's height without its filler: what it lacks to be as tall as the bar at rest
+    /// (whose sessions take a tile each, where open the new ones share a line) is room given to the inbox.
+    @State var openContent: CGFloat = 0
+    var openFiller: CGFloat {
+        guard showsDetail, !edge.isHorizontal, barSize.height > 0, openContent > 0 else { return 0 }
+        return max(0, barSize.height - openContent)
+    }
     /// The CI block's measured height: what it takes beyond its usual few lines comes off the inbox's room.
     @State var ciHeight: CGFloat = 0
     static let ciUsual: CGFloat = 150
@@ -568,6 +575,10 @@ struct LookoutHub: View {
         }
         // Opaque, so the page sliding out from under it doesn't show through.
         .background(Theme.bg)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            let content = height - openFiller
+            if showsDetail, abs(openContent - content) > 0.5 { openContent = content }
+        }
     }
 
     /// Beside the settings cell: on the left edge, the same pieces mirrored, so pin and repositories sit by
@@ -612,7 +623,9 @@ struct LookoutHub: View {
     @ViewBuilder var mainRows: some View {
         // Inbox
         VStack(alignment: side, spacing: 0) {
-            row(cell: { inboxIcon.padding(.top, 2).padding(.bottom, 4) }, detail: { inboxHeader.padding(.top, 6) })
+            // Top-aligned, so the icon stays where it is at rest whatever the header beside it takes.
+            row(alignment: .top, cell: { inboxIcon.padding(.top, 2).padding(.bottom, 4) },
+                detail: { inboxHeader.padding(.top, 6) })
         }
         .modifier(probe(.inbox))
         if showsDetail && !shrunk(.inbox) {
@@ -634,6 +647,7 @@ struct LookoutHub: View {
                 }
                 // Its own width, so a scroller can't widen it and push its rows off the bar's column.
                 .frame(width: Self.cell + Self.detail)
+                if openFiller > 0 { Color.clear.frame(width: Self.cell + Self.detail, height: openFiller) }
             }
             .transition(.hubReveal)
         }

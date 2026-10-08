@@ -89,6 +89,29 @@ enum AgentStatus {
     case running, blocked, finished, idle
 }
 
+/// Where a session is listed, in this order: what needs you, what finished, what's working, your pinned ones, then
+/// the idle rest (folded behind a "+N" until you open it).
+enum AgentGroup: Int, CaseIterable, Identifiable {
+    case needsYou, done, working, pinned, idle
+    var id: Int { rawValue }
+    var title: String {
+        switch self {
+        case .needsYou: "Needs you"
+        case .done: "Done"
+        case .working: "Working"
+        case .pinned: "Pinned"
+        case .idle: "Idle"
+        }
+    }
+}
+
+/// One group's sessions, as the bar and the lists show them.
+struct AgentSection: Identifiable, Hashable {
+    let group: AgentGroup
+    let rows: [AgentRow]
+    var id: AgentGroup { group }
+}
+
 struct AgentRow: Identifiable, Hashable {
     var session: ClaudeSession
     var entry: AgentEntry
@@ -118,6 +141,13 @@ struct AgentRow: Identifiable, Hashable {
 
     /// Mid-turn but stopped on you (a question, a plan): counts as waiting, not as working.
     var waitsForYou: Bool { session.running && activity?.waitsForYou == true }
+
+    var group: AgentGroup {
+        if waitsForYou { return .needsYou }
+        if session.running { return .working }
+        if entry.unread { return session.summary?.blocked == true ? .needsYou : .done }
+        return entry.kept ? .pinned : .idle
+    }
 
     var status: AgentStatus {
         if waitsForYou { return .blocked }
@@ -277,6 +307,7 @@ enum AgentLabel {
 struct AgentCache {
     var rows: (kept: [AgentRow], pending: [AgentRow])
     var all: [AgentRow]
+    var sections: [AgentSection]
     var counts: (blocked: Int, done: Int)
     var folders: [String]
     var entries: [String: AgentEntry]
@@ -329,7 +360,15 @@ extension Store {
         for row in allRows where !row.session.folderKey.isEmpty && !folders.contains(row.session.folderKey) {
             folders.append(row.session.folderKey)
         }
-        return AgentCache(rows: (keptRows, pendingRows), all: allRows,
+        // Pinned ones in your order, idle ones by recency (as pending already is), the rest most recent first.
+        let sections = AgentGroup.allCases.compactMap { group -> AgentSection? in
+            var rows = allRows.filter { $0.group == group }
+            if group.rawValue < AgentGroup.pinned.rawValue {
+                rows.sort { $0.session.lastActivity > $1.session.lastActivity }
+            }
+            return rows.isEmpty ? nil : AgentSection(group: group, rows: rows)
+        }
+        return AgentCache(rows: (keptRows, pendingRows), all: allRows, sections: sections,
                           counts: (blocked + allRows.filter(\.waitsForYou).count, unread.count - blocked),
                           folders: folders, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
@@ -337,6 +376,9 @@ extension Store {
     /// Kept sessions in your order, grouped by project (projects in the order their first session appears), then
     /// pending ones, most recent first. Labels are unique across both.
     var agentRows: (kept: [AgentRow], pending: [AgentRow]) { cache.rows }
+
+    /// The listed sessions by group (`AgentGroup`), empty groups left out.
+    var agentSections: [AgentSection] { cache.sections }
 
     /// A row for any session, kept or not (search results show sessions Lookout hasn't listed).
     func row(_ session: ClaudeSession, _ entry: AgentEntry? = nil, label: String? = nil) -> AgentRow {
@@ -417,7 +459,7 @@ extension Store {
     /// unread), else the first kept one. A question mid-turn is still `running`, so "unread and not running" alone skipped it.
     var sessionShortcutPick: AgentRow? {
         let rows = agentRows
-        return (rows.kept + rows.pending).first { $0.waitsForYou || ($0.unread && !$0.session.running) } ?? rows.kept.first
+        return agentSections.first { $0.group == .needsYou || $0.group == .done }?.rows.first ?? rows.kept.first
     }
 
     /// Unread sessions waiting on you (amber) and the other unread finished ones (blue).
@@ -631,6 +673,15 @@ extension Store {
         guard !agents.entries.contains(where: { $0.id == id }), let session = claudeSessions[id] else { return }
         agents.entries.append(AgentEntry(id: id, seen: session.activity, hiddenAt: session.activity, focusedAt: session.lastFocused))
         agents.assignColor(session.folderKey)
+    }
+
+    /// Pins it, or unpins a pinned one (it stays listed, folding into the idle ones once it's quiet).
+    func togglePin(_ id: String) {
+        if agents.entries.first(where: { $0.id == id })?.kept == true {
+            mutateAgent(id) { $0.kept = false }
+        } else {
+            keepAgent(id)
+        }
     }
 
     /// Pending: hidden until its next activity. Kept: leaves your list (and comes back as pending on new activity).

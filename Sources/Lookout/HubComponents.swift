@@ -430,12 +430,14 @@ private struct InboxCellLabel: View {
     var body: some View {
         Group {
             if vertical {
-                // Always as tall as icon + count, so the bar never shifts: the tray just slides to the middle.
+                // At rest always as tall as icon + count, so the bar never shifts: with nothing to count the tray slides
+                // to the middle, but not when the count is only hidden because the tabs beside it show it.
                 ZStack(alignment: .top) {
-                    icon.offset(y: badge == nil ? 9 : 0)
+                    icon.offset(y: badge == nil && showsCount ? 9 : 0)
                     if let badge { badge.offset(y: 32) }
                 }
-                .frame(height: 47, alignment: .top)
+                // Beside the tabs, no count to leave room for: just the tray.
+                .frame(height: showsCount ? 47 : 28, alignment: .top)
             } else {
                 HStack(spacing: 6) {
                     icon

@@ -401,7 +401,8 @@ enum PlaygroundShots {
         store.agents.expanded = true
         let ui = UIState(persists: false, edge: shot.edge)
         let hub = HubState()
-        hub.pinned = shot.pinned
+        // Kept open a moment after showing at rest, as in use: the hub measures the bar at rest first.
+        if shot.pinned { Task { try? await Task.sleep(for: .seconds(0.5)); hub.pinned = true } }
         hub.page = shot.page
         hub.query = shot.query
         hub.focus = shot.focus

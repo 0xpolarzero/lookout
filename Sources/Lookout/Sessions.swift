@@ -4,8 +4,9 @@ import SwiftUI
 // Session and inbox views shared by the hub: tiles, rows, actions, label editor, update button, and the
 // menus / status lines the hub ports next (claude link, rate limit, session and inbox context menus).
 
-/// A session's tile: its two letters (or emoji) on its status colour. Working agents get a pulsing dot in the
-/// corner; pending sessions are a size smaller and dimmer.
+/// A session's tile: its two letters (or emoji, or icon). Its state is a badge in the corner: amber "?" when it needs
+/// you, blue check when it's done and unread, a pulsing dot while it works (or left something running), a pin when
+/// it's pinned and quiet. Only the first two fill the tile with colour.
 struct AgentTile: View {
     let row: AgentRow
     var size: CGFloat = 26
@@ -13,51 +14,50 @@ struct AgentTile: View {
 
     var body: some View {
         let shape = Tile.shape(size)
-        // Busy (Claude answering, or a subagent or command still running after it): the tile fades and pulses,
-        // quieter than the sessions waiting on you. The face is rendered to an image that Core Animation fades.
         let busy = (row.session.running && !row.waitsForYou) || !row.tasks.isEmpty
-        Group {
-            if busy {
-                Pulse(from: 0.6, to: 0.28, duration: 1.1, id: AgentTileFace.Key(row: row, size: size)) {
-                    AgentTileFace(row: row, size: size)
-                }
-            } else {
-                AgentTileFace(row: row, size: size)
-            }
-        }
+        let group = row.group
+        AgentTileFace(row: row, size: size)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.session.title)
             .spokenValue(of: row)
             .overlay {
                 if selected { shape.strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5).padding(-3) }
             }
-            // The project's colour, as an underline.
-            .overlay(alignment: .bottom) {
-                if let color = row.color {
-                    Capsule().fill(color.opacity(row.pending ? 0.6 : 1))
-                        .frame(width: size * 0.62, height: max(2.5, size * 0.12))
-                        .offset(y: size * 0.12 + 2.5)
+            .overlay(alignment: .topTrailing) {
+                let d = max(10, size * 0.46)
+                Group {
+                    if group == .needsYou || group == .done, let tint = row.tint {
+                        Image(systemName: group == .needsYou ? "questionmark" : "checkmark")
+                            .font(.system(size: d * 0.58, weight: .heavy))
+                            .foregroundStyle(Theme.onTint)
+                            .frame(width: d, height: d)
+                            .background(Circle().fill(tint))
+                            .background(Circle().fill(Theme.bg).padding(-1.5))
+                    } else if busy {
+                        PulseBlock(color: Theme.text, diameter: d * 0.62, from: 0.95, to: 0.25, duration: 1.1)
+                            .background(Circle().fill(Theme.bg).padding(-1.5))
+                    }
+                }
+                .offset(x: d * 0.32, y: -d * 0.32)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if group == .pinned && !busy {
+                    let d = max(9, size * 0.4)
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: d * 0.62, weight: .semibold))
+                        .foregroundStyle(Theme.tertiary)
+                        .frame(width: d, height: d)
+                        .background(Circle().fill(Theme.bg))
+                        .offset(x: d * 0.3, y: d * 0.3)
                 }
             }
     }
 }
 
-/// The tile itself, without its busy pulse (what `Pulse` renders to an image).
+/// The tile itself: its face on its colour.
 private struct AgentTileFace: View {
     let row: AgentRow
     var size: CGFloat
-
-    /// What the face depends on.
-    struct Key: Hashable {
-        let label: String
-        let icon: String?
-        let tint: Color?
-        let pending: Bool
-        let size: CGFloat
-        init(row: AgentRow, size: CGFloat) {
-            label = row.label; icon = row.icon; tint = row.tint; pending = row.pending; self.size = size
-        }
-    }
 
     var body: some View {
         let shape = Tile.shape(size)
@@ -77,7 +77,27 @@ private struct AgentTileFace: View {
             .foregroundStyle(row.tint == nil ? Theme.text.opacity(0.88) : Theme.onTint)
             .frame(width: size, height: size)
             .background(shape.fill(row.tint ?? Theme.Fill.tile))
-            .opacity(row.pending ? 0.55 : 1)
+    }
+}
+
+/// A tile for the idle sessions folded away: "+N", or a chevron to fold them again.
+struct IdleTile: View {
+    let count: Int
+    let open: Bool
+    var size: CGFloat = 26
+
+    var body: some View {
+        Group {
+            if open {
+                Image(systemName: "chevron.up").font(.system(size: size * 0.38, weight: .bold))
+            } else {
+                Text("+\(count)").font(.system(size: size * 0.38, weight: .bold, design: .rounded)).minimumScaleFactor(0.6)
+            }
+        }
+        .foregroundStyle(Theme.secondary)
+        .frame(width: size, height: size)
+        .overlay(Tile.shape(size).strokeBorder(Theme.tertiary, style: StrokeStyle(lineWidth: 1, dash: [2.5, 2])))
+        .contentShape(Rectangle())
     }
 }
 
@@ -87,7 +107,7 @@ struct WorkingText: View {
 
     var body: some View {
         Ticking { now in
-            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.claude)
+            Text(row.workingText(now: now)).foregroundStyle(row.waitsForYou ? Theme.amber : Theme.secondary)
         }
     }
 }
@@ -168,7 +188,7 @@ struct Reorderable: ViewModifier {
     @Binding var dropTarget: Bool
 
     func body(content: Content) -> some View {
-        if row.pending {
+        if row.group != .pinned {
             content
         } else {
             content
@@ -199,27 +219,24 @@ struct AgentActions: View {
 
     var body: some View {
         RowActions {
-            if row.pending && !keepsInline {
-                IconButton(symbol: "pin.fill", help: "Keep", detail: "Pins it to your list · \(store.shortcut(.keepSession).display)", size: size) {
-                    store.keepAgent(row.id)
+            if !keepsInline {
+                IconButton(symbol: row.entry.kept ? "pin.slash" : "pin", help: row.entry.kept ? "Unpin" : "Pin",
+                           detail: (row.entry.kept ? "Folds into the idle ones once it's quiet" : "Stays on the bar") + " · \(store.shortcut(.keepSession).display)", size: size) {
+                    store.togglePin(row.id)
                 }
-                IconButton(symbol: "xmark", help: "Remove", detail: "Until its next activity · \(store.shortcut(.removeSession).display)", size: size) {
-                    store.dismissAgent(row.id)
+            }
+            if row.unread {
+                IconButton(symbol: "checkmark", help: "Mark as read", detail: store.shortcut(.toggleRead).display, size: size) {
+                    store.toggleAgentRead(row.id)
                 }
             } else {
-                if row.unread {
-                    IconButton(symbol: "checkmark", help: "Mark as read", detail: store.shortcut(.toggleRead).display, size: size) {
-                        store.toggleAgentRead(row.id)
-                    }
-                } else {
-                    IconButton(symbol: "circle.fill", help: "Mark as unread", detail: store.shortcut(.toggleRead).display, size: size) {
-                        store.toggleAgentRead(row.id)
-                    }
+                IconButton(symbol: "circle.fill", help: "Mark as unread", detail: store.shortcut(.toggleRead).display, size: size) {
+                    store.toggleAgentRead(row.id)
                 }
-                if !row.pending {
-                    IconButton(symbol: "xmark", help: "Remove", detail: "Comes back as pending on new activity · \(store.shortcut(.removeSession).display)", size: size) {
-                        store.dismissAgent(row.id)
-                    }
+            }
+            if !keepsInline {
+                IconButton(symbol: "xmark", help: "Hide", detail: "Until its next activity · \(store.shortcut(.removeSession).display)", size: size) {
+                    store.dismissAgent(row.id)
                 }
             }
             IconButton(symbol: "arrow.up.right", help: "Open in Claude", detail: store.shortcut(.openItem).display, size: size) {
@@ -692,7 +709,7 @@ private struct ProjectTileFace: View {
 
 // MARK: - Kept for the hub to adopt (the classic UI's menus and warnings)
 
-/// A session's context menu: open, read state, label, keep/remove, project colour, mute.
+/// A session's context menu: open, read state, label, pin/hide, project colour, mute.
 struct SessionMenu: View {
     let row: AgentRow
     let store: Store
@@ -704,12 +721,8 @@ struct SessionMenu: View {
         Button(row.unread ? "Mark as read" : "Mark as unread") { store.toggleAgentRead(row.id) }
         Button("Change label…") { editLabel() }
         Divider()
-        if row.pending {
-            Button("Keep") { store.keepAgent(row.id) }
-            Button("Remove") { store.dismissAgent(row.id) }
-        } else {
-            Button("Remove") { store.dismissAgent(row.id) }
-        }
+        Button(row.entry.kept ? "Unpin" : "Pin") { store.togglePin(row.id) }
+        Button("Hide until its next activity") { store.dismissAgent(row.id) }
         if !row.session.folderKey.isEmpty {
             Menu("Colour for \(row.projectName)") {
                 ForEach(Theme.projectColorNames.indices, id: \.self) { i in
