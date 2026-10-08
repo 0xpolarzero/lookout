@@ -233,7 +233,7 @@ final class HubKeys {
             else { close() }
             return true
         }
-        // A control the Tab ring is on (a button, a tab) takes Return and Space itself, not the picked row.
+        // A control the Tab ring is on (Undo, a button, a tab) takes Return and Space itself, not the picked row.
         if flags.isEmpty, event.window?.firstResponder is NSControl,
            [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space].contains(Int(event.keyCode)) { return false }
         if flags == .command, event.charactersIgnoringModifiers == "," {
@@ -263,7 +263,9 @@ final class HubKeys {
             return true
         }
         if markAllRead(shortcut) { return true }
-        return rowCommand(shortcut, targets: targets)
+        if rowCommand(shortcut, targets: targets) { return true }
+        // What no action is bound to: ⌘Z takes back the last Done.
+        return flags == .command && event.charactersIgnoringModifiers == "z" && store.undoLast()
     }
 
     /// Whether the key types something into a field: a printable character (not Space before the first one), or a dead key
@@ -615,6 +617,7 @@ struct LookoutHub: View {
         .modifier(probe(.inbox))
         if showsDetail && !shrunk(.inbox) {
             Group {
+                row(cell: { EmptyView() }, detail: { undoLine })
                 if items.isEmpty {
                     row(cell: { EmptyView() }, detail: { emptyInbox })
                 }
@@ -940,6 +943,13 @@ struct LookoutHub: View {
 
     /// The inbox's list along the top and bottom: what's left once CI's lines are under it.
     var inboxColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            undoLine.padding(.horizontal, Self.inset - Theme.Space.md)
+            inboxList
+        }
+    }
+
+    private var inboxList: some View {
         CappedScroll(cap: max(160, min(maxLength - Self.cell - 150 - ciExtra, Self.listCap)), hub: hub, lazy: AdaptiveStack<EmptyView>.isLazy(items.count)) {
             AdaptiveStack(count: items.count, spacing: 1) {
                 if items.isEmpty { emptyInbox }
@@ -1044,15 +1054,18 @@ struct LookoutHub: View {
     @ViewBuilder func focusedBody(_ section: HubSection) -> some View {
         switch section {
         case .inbox:
-            CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
-                          alignment: .leading, spacing: 1) {
-                    ForEach(items) { itemRow($0).id("i:" + $0.id) }
+            VStack(alignment: .leading, spacing: 0) {
+                undoLine.padding(.horizontal, Self.inset - Theme.Space.md)
+                CappedScroll(cap: maxLength - Self.cell - 16, hub: hub, lazy: true) {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top), GridItem(.flexible(), spacing: Theme.Space.sm, alignment: .top)],
+                              alignment: .leading, spacing: 1) {
+                        ForEach(items) { itemRow($0).id("i:" + $0.id) }
+                    }
+                    .padding(.horizontal, Self.inset)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal, Self.inset)
-                .padding(.vertical, 8)
+                .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
             }
-            .overlay(alignment: .topLeading) { if items.isEmpty { emptyInbox.padding(Self.inset) } }
         case .ci:
             ciColumn
         default:

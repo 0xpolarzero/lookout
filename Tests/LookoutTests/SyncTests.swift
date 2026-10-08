@@ -256,7 +256,7 @@ private func threads(_ body: Data) -> Any {
         #expect(s.items.isEmpty)
     }
 
-    @Test func aDoneRequestStillRequestedOutlivesTheItemCap() async {
+    @Test func aDoneRequestStillRequestedOutlivesTheItemCapOnceUndoHasExpired() async {
         let (s, posted) = reviewStore()
         await poll(s, [request(1)])
         s.discard(s.items[0])
@@ -270,7 +270,7 @@ private func threads(_ body: Data) -> Any {
         }
         s.items[0].createdAt = now.addingTimeInterval(-5 * 86400)
         s.items += newer
-        s.prune(now: now)
+        s.prune(now: now.addingTimeInterval(UndoStack.validFor + 1))
         #expect(s.items.contains { $0.id == done.id && $0.state == .discarded })
         #expect(s.items.count == Store.itemCap + 1)
         // Still requested at the next search: it stays Done, and nothing is announced again.

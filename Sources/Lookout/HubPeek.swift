@@ -309,6 +309,7 @@ extension LookoutHub {
 
     /// The inbox list in a panel: scrolls once it's long.
     @ViewBuilder var peekInbox: some View {
+        undoLine
         if items.isEmpty {
             emptyInbox
         } else {

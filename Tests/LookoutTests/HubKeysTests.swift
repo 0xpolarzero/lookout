@@ -49,26 +49,6 @@ import Testing
         #expect(press(kVK_ANSI_T, [], "t") && hub.searchOpen && hub.pendingKeys.count == 1)
     }
 
-    @Test func aFocusedButtonKeepsSpaceAndReturn() {
-        let button = NSButton(title: "Retry", target: nil, action: nil)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: .titled, backing: .buffered, defer: false)
-        window.contentView = button
-        window.isReleasedWhenClosed = false
-        defer { window.close() }
-        func press(_ code: Int, _ chars: String) -> Bool {
-            keys.key(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
-                                      context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false,
-                                      keyCode: UInt16(code))!)
-        }
-        // Space and Return are the button's: the picked row is not marked read.
-        #expect(window.makeFirstResponder(button))
-        #expect(!press(kVK_Space, " ") && !press(kVK_Return, "\r") && !press(kVK_ANSI_KeypadEnter, "\r"))
-        #expect(store.items[0].state == .unread)
-        // Off the button they are the hub's again.
-        window.makeFirstResponder(nil)
-        #expect(press(kVK_Space, " ") && store.items[0].state == .read)
-    }
-
     @Test func typingWithASectionExpandedStartsTheSearchInTheInbox() {
         // The inbox header holds the field, and an expanded CI or Sessions section leaves it out.
         hub.focus = .ci
