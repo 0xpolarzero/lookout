@@ -61,13 +61,18 @@ final class StubAuthGitHub: URLProtocol, @unchecked Sendable {
         }
     }
 
-    @Test func aRepoStartsWithOnlyCommentsForYouWhoeverOwnsIt() async {
+    @Test func aRepoYouOwnStartsWithAllComments() async {
         let s = store()
         serveRepo("Me/tool")
         #expect(await s.addRepo("me/tool") == nil)
+        #expect(s.repos.map(\.allComments) == [true])
+    }
+
+    @Test func someoneElsesRepoStartsWithOnlyCommentsForYou() async {
+        let s = store()
         serveRepo("other/tool")
         #expect(await s.addRepo("other/tool") == nil)
-        #expect(s.repos.map(\.allComments) == [false, false])
+        #expect(s.repos.map(\.allComments) == [false])
     }
 
     private func revoke() {
