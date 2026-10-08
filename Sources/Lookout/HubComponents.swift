@@ -45,8 +45,9 @@ enum CappedScrollSpace {
     }
 }
 
-/// A vertical stack that is lazy only for long lists: a list of up to 150 rows is laid out whole, so every row's edge is measured
-/// (`CappedScroll` can then cut between rows, not through one).
+/// A vertical stack that is lazy only for long lists: a list of up to 40 rows is laid out whole, so every row's edge is measured
+/// (`CappedScroll` can then cut between rows, not through one). Past that, building every row at once stalls a switch of
+/// filter (a Done list of 140 took most of a second); a lazy list cuts on its rows' pitch instead.
 struct AdaptiveStack<Content: View>: View {
     let count: Int
     var alignment: HorizontalAlignment = .center
@@ -54,7 +55,7 @@ struct AdaptiveStack<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     /// Whether a list of `count` rows is laid out lazily.
-    static func isLazy(_ count: Int) -> Bool { count > 150 }
+    static func isLazy(_ count: Int) -> Bool { count > 40 }
 
     var body: some View {
         if !Self.isLazy(count) {

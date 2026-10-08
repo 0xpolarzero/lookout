@@ -434,7 +434,8 @@ struct LookoutHub: View {
     /// (whose sessions take a tile each, where open the new ones share a line) is room given to the inbox.
     @State var openContent: CGFloat = 0
     var openFiller: CGFloat {
-        guard showsDetail, !edge.isHorizontal, barSize.height > 0, openContent > 0 else { return 0 }
+        // An empty inbox stays one line: no room for nothing.
+        guard showsDetail, !edge.isHorizontal, !items.isEmpty, barSize.height > 0, openContent > 0 else { return 0 }
         return max(0, barSize.height - openContent)
     }
     /// The CI block's measured height: what it takes beyond its usual few lines comes off the inbox's room.
@@ -592,7 +593,7 @@ struct LookoutHub: View {
             // footer once open. In the full view, dragging the line above them sizes the sessions' list.
             sectionDivider
             VStack(alignment: side, spacing: 0) {
-                row(cell: { Group { if expanded { settingsCell } else { controlsCell } }.padding(.vertical, 9) },
+                row(cell: { Group { if expanded { settingsCell.padding(.vertical, 5) } else { controlsCell.padding(.vertical, 9) } } },
                     detail: { footerDetail })
             }
             .modifier(probe(.controls))
@@ -615,7 +616,7 @@ struct LookoutHub: View {
                 Spacer(minLength: 0)
                 syncStatus
             }
-            .frame(height: 40)
+            .frame(height: Self.footerHeight)
         } else {
             footer
         }

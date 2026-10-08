@@ -85,15 +85,12 @@ extension LookoutHub {
         .tip(f.label, detail)
     }
 
+    /// One quiet line where the list would be: nothing to act on, so nothing to draw the eye.
     var emptyInbox: some View {
-        HStack(spacing: 8) {
-            Image(systemName: searching ? "magnifyingglass" : hub.filter == .needsYou ? "checkmark.circle.fill" : "tray")
-                .font(Theme.Typography.glyph(12))
-                .foregroundStyle(hub.filter == .needsYou && !searching ? Theme.green : Theme.tertiary)
-                .accessibilityHidden(true)
+        HStack(spacing: 0) {
             Text(searching ? "No inbox item matches" : hub.filter == .needsYou ? "All caught up"
                  : hub.filter == .bots ? "Bots are quiet" : "Nothing here yet")
-                .font(Theme.Typography.body).foregroundStyle(Theme.secondary)
+                .font(Theme.Typography.body).foregroundStyle(Theme.tertiary)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Theme.Space.md)
@@ -300,23 +297,29 @@ extension LookoutHub {
     var pinButton: some View {
         IconButton(symbol: hub.pinned ? "pin.fill" : "pin", help: hub.pinned ? "Unpin" : "Keep open",
                    detail: store.shortcut(.togglePanel).display,
-                   size: IconButton.Size.bar, tint: hub.pinned ? Theme.amber : Theme.secondary, active: hub.pinned) {
+                   size: footerButton, tint: hub.pinned ? Theme.amber : Theme.secondary, active: hub.pinned) {
             hub.pinned.toggle()
         }
     }
 
     var reposButton: some View {
         IconButton(symbol: "square.stack.3d.up.fill", help: "Repositories", detail: "Watched repos and what they notify",
-                   size: IconButton.Size.bar, active: hub.page == .repos) { hub.go(.repos) }
+                   size: footerButton, active: hub.page == .repos) { hub.go(.repos) }
     }
 
     /// Lit on Settings; on Repositories too beside the bar, where the repositories button hides with the rows.
     var settingsCell: some View {
-        IconButton(symbol: "gearshape.fill", help: "Settings", detail: "⌘,", size: IconButton.Size.bar,
+        IconButton(symbol: "gearshape.fill", help: "Settings", detail: "⌘,", size: footerButton,
                    active: hub.page == .settings || (hub.page == .repos && !edge.isHorizontal)) { hub.go(.settings) }
     }
 
     // MARK: Footer
+
+    /// The bar actions' size: header-size in the open column's footer, so it stays one compact line; the bar's size
+    /// along the top and bottom, where they sit in the bar itself.
+    var footerButton: CGFloat { edge.isHorizontal ? IconButton.Size.bar : IconButton.Size.header }
+    /// The open column's footer: a header-size button and 5pt above and below.
+    static let footerHeight: CGFloat = 34
 
     /// Beside the settings cell: how syncing is going, then pin and repositories.
     var footer: some View {
@@ -327,7 +330,7 @@ extension LookoutHub {
             pinButton
             reposButton
         }
-        .frame(height: 40)
+        .frame(height: Self.footerHeight)
     }
 
     /// Sync state, as a dot and a few words: problems first, then checking, snoozed, and up to date.
