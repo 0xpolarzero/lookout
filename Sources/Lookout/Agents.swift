@@ -145,7 +145,10 @@ struct AgentRow: Identifiable, Hashable {
     var group: AgentGroup {
         if waitsForYou { return .needsYou }
         if session.running { return .working }
-        if entry.unread { return session.summary?.blocked == true ? .needsYou : .done }
+        if entry.unread && session.summary?.blocked == true { return .needsYou }
+        // Turn over but subagents or commands it started still run: it isn't done, it picks up again when they finish.
+        if !tasks.isEmpty { return .working }
+        if entry.unread { return .done }
         return entry.kept ? .pinned : .idle
     }
 
@@ -153,14 +156,17 @@ struct AgentRow: Identifiable, Hashable {
         if waitsForYou { return .blocked }
         if session.running { return .running }
         if session.summary?.blocked == true { return .blocked }
+        if !tasks.isEmpty { return .running }
         return entry.unread ? .finished : .idle
     }
 
-    /// What the strip shows: amber waiting, blue done and unread, grey otherwise.
+    /// What the strip shows: amber waiting, blue done and unread, grey otherwise (working, or left something running).
     var tint: Color? {
-        if waitsForYou { return Theme.amber }
-        guard !session.running, entry.unread else { return nil }
-        return session.summary?.blocked == true ? Theme.amber : Theme.accent
+        switch group {
+        case .needsYou: Theme.amber
+        case .done: Theme.accent
+        default: nil
+        }
     }
 
     /// When the running turn began, if known.
@@ -194,7 +200,7 @@ struct AgentRow: Identifiable, Hashable {
         let running = tasks.isEmpty ? "" : ", \(tasks.count) running"
         switch status {
         case .blocked: return "waiting"
-        case .running: return "working"
+        case .running: return "working" + running
         case .finished: return (unread ? "done, unread" : "done") + running
         case .idle: return (entry.kept ? "pinned" : "idle") + running
         }
@@ -341,12 +347,12 @@ extension Store {
         let pending = sessions.values
             .compactMap { s -> (ClaudeSession, AgentEntry)? in
                 guard let e = byID[s.id], !e.kept, e.hiddenAt == nil, !muted.contains(s.folderKey) else { return nil }
-                guard s.running || e.unread || s.lastActivity > cutoff else { return nil }
+                guard s.running || e.unread || tasks[s.id]?.isEmpty == false || s.lastActivity > cutoff else { return nil }
                 return (s, e)
             }
             .sorted { $0.0.lastActivity > $1.0.lastActivity }
         // The list is read again when the next of them ages out.
-        let quiet = pending.filter { !$0.0.running && !$0.1.unread }.map { $0.0.lastActivity + Self.recentWindow }
+        let quiet = pending.filter { !$0.0.running && !$0.1.unread && tasks[$0.0.id]?.isEmpty != false }.map { $0.0.lastActivity + Self.recentWindow }
         scheduleRecentExpiry(quiet.min().map { $0.timeIntervalSince(now) })
         let all = kept + pending
         let labels = AgentLabel.assign(all.map { (id: $0.0.id, title: $0.0.title, custom: $0.1.label) },
@@ -361,8 +367,6 @@ extension Store {
             let current = Set(allRows.compactMap { $0.session.summary?.detail })
             summaryTexts = summaryTexts.filter { current.contains($0.key) }
         }
-        let unread = allRows.filter { $0.unread && !$0.session.running }
-        let blocked = unread.filter { $0.session.summary?.blocked == true }.count
         var folders: [String] = []
         for row in allRows where !row.session.folderKey.isEmpty && !folders.contains(row.session.folderKey) {
             folders.append(row.session.folderKey)
@@ -376,7 +380,7 @@ extension Store {
             return rows.isEmpty ? nil : AgentSection(group: group, rows: rows)
         }
         return AgentCache(rows: (keptRows, pendingRows), all: allRows, sections: sections,
-                          counts: (blocked + allRows.filter(\.waitsForYou).count, unread.count - blocked),
+                          counts: (allRows.filter { $0.group == .needsYou }.count, allRows.filter { $0.group == .done }.count),
                           folders: folders, entries: byID, labels: Dictionary(allRows.map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
 

@@ -309,12 +309,35 @@ import Testing
         s.claudeTasks = ["f": [ClaudeTask(id: "a", kind: .agent, title: "Review the changes", since: now),
                                ClaudeTask(id: "b", kind: .command, title: "Run the full test suite", since: now)]]
         let row = try #require(s.allAgentRows.first { $0.id == "f" })
-        #expect(row.spokenValue(now: now) == "idle, 2 running, app, 4 minutes")
+        #expect(row.spokenValue(now: now) == "working, 2 running, app, 4 minutes")
         #expect(row.spokenHint == "Opens it in Claude. Running: Review the changes, Run the full test suite.")
         // Nothing left running: neither says anything of it.
         s.claudeTasks = [:]
         let clear = try #require(s.allAgentRows.first { $0.id == "f" })
         #expect(!clear.spokenValue(now: now).contains("running") && clear.spokenHint == "Opens it in Claude")
+    }
+
+    @Test func anUnreadSessionWithWorkStillRunningIsWorkingUntilItEnds() throws {
+        let s = store([session("f", minutesAgo: 4)], dots: ["f"])
+        s.claudeTasks = ["f": [ClaudeTask(id: "a", kind: .agent, title: "Review the changes", since: now)]]
+        let row = try #require(s.allAgentRows.first { $0.id == "f" })
+        #expect(row.unread && row.group == .working && row.status == .running && row.tint == nil)
+        #expect(row.stateName == "working, 1 running" && row.statusText(now: now) == "working")
+        #expect(s.agentSections.map(\.group) == [.working] && s.agentCounts.done == 0 && s.agentCounts.blocked == 0)
+        #expect(s.sessionShortcutPick?.id != "f")
+        // The work ends: still unread, so it is done again.
+        s.claudeTasks = [:]
+        let done = try #require(s.allAgentRows.first { $0.id == "f" })
+        #expect(done.unread && done.group == .done && done.status == .finished && done.tint == Theme.accent)
+        #expect(done.stateName == "done, unread" && s.agentCounts.done == 1 && s.sessionShortcutPick?.id == "f")
+    }
+
+    @Test func aBlockedSessionWithWorkStillRunningStillNeedsYou() throws {
+        let s = store([session("b", minutesAgo: 4, blocked: true)], dots: ["b"])
+        s.claudeTasks = ["b": [ClaudeTask(id: "c", kind: .command, title: "Run the full test suite", since: now)]]
+        let row = try #require(s.allAgentRows.first { $0.id == "b" })
+        #expect(row.group == .needsYou && row.status == .blocked && row.tint == Theme.amber)
+        #expect(s.agentCounts.blocked == 1 && s.agentCounts.done == 0)
     }
 
     @Test func sessionsOfSameNamedProjectsSayWhichProjectTheyAreIn() throws {

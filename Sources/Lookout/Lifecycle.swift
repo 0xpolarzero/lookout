@@ -14,7 +14,7 @@ enum Lifecycle {
     static func line(_ store: Store) -> String {
         let rows = store.allAgentRows
         // The ones that pulse: working and not waiting on you (see `AgentTile`).
-        let working = rows.filter { $0.session.running && !$0.waitsForYou }.count
+        let working = rows.filter { $0.group == .working }.count
         let showing = NSApp.windows.contains { $0.isVisible && $0.occlusionState.contains(.visible) }
         return "lifecycle: sessions=\(rows.count) working=\(working) rings=\(PulseView.looping) "
             + "showing=\(showing ? 1 : 0) reduceMotion=\(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 1 : 0)\n"
