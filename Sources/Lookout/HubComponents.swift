@@ -367,6 +367,9 @@ extension Store {
     /// Sessions as the hub lists them: yours and the pending ones, or any session matching the search.
     func hubSessions(_ hub: HubState) -> [AgentRow] {
         guard agents.enabled else { return [] }
+        let searching = !hub.query.trimmingCharacters(in: .whitespaces).isEmpty
+        // Router only: no session rows to walk, but a search finds them.
+        if sessionsHidden && !searching { return [] }
         if !hub.query.trimmingCharacters(in: .whitespaces).isEmpty {
             let memo = hub.sessionMemo
             if memo.revision == agentsRevision, memo.query == hub.query { return memo.result }

@@ -168,8 +168,10 @@ import Testing
         return s
     }
 
+    /// Waits until `until` holds, for as long as a loaded machine may take (a watchdog, not a timing assumption).
     private func settle(_ until: () -> Bool) async {
-        for _ in 0..<1000 where !until() { try? await Task.sleep(nanoseconds: 10_000_000) }
+        let deadline = Date().addingTimeInterval(60)
+        while !until(), Date() < deadline { try? await Task.sleep(nanoseconds: 10_000_000) }
     }
 
     @Test func aTurnBecomesChatLinesReceiptsAndAddressedCards() async {
@@ -211,6 +213,8 @@ import Testing
         let dir = TempDir()
         let s = store(dir)
         let agent = RouterAgent(store: s)
+        var resolved: [String: String?] = [:]
+        agent.onPeerResolved = { name, session in resolved[name] = session }
         // "Docs" is a title but no peer's name; "Twin" is two peers.
         agent.apply([
             .toolUse(id: "t1", name: "SendMessage", input: ["to": "Docs", "message": "hi"]),
@@ -219,14 +223,17 @@ import Testing
             .toolResult(id: "t2", isError: false, text: "Sent"),
         ])
         #expect(s.router.chat.filter { $0.role == .receipt }.map(\.text) == ["→ Docs: hi", "→ Twin: hi"])
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        // Once both look-ups are done (not after some time): neither names one session, so nothing is addressed.
+        await settle { resolved.keys.contains("Docs") && resolved.keys.contains("Twin") }
+        #expect(resolved["Docs"] == .some(nil) && resolved["Twin"] == .some(nil))
         #expect(s.router.chat.allSatisfy { $0.sessionID == nil })
         #expect(s.router.cards.allSatisfy { $0.isOpen })
         // "name [ref]" tells the twins apart.
         agent.apply([.toolUse(id: "t3", name: "SendMessage", input: ["to": "Twin [local_c]", "message": "hi"]),
                      .toolResult(id: "t3", isError: false, text: "Sent")])
-        await settle { s.router.chat.last?.sessionID != nil }
-        #expect(s.router.chat.last?.sessionID == "local_c")
+        await settle { resolved.keys.contains("Twin [local_c]") }
+        #expect(resolved["Twin [local_c]"] == .some("local_c"))
+        #expect(s.router.chat.last { $0.role == .receipt }?.sessionID == "local_c")
         #expect(s.router.cards.first { $0.id == "local_c#t1" }?.addressedBy == .router)
     }
 

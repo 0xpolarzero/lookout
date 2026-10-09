@@ -291,6 +291,8 @@ struct SettingsView: View {
             .onAppear { Announce.say("Couldn't take the Router out of Claude Code") }
         }
         if store.router.enabled {
+            toggle("Router only", detail: "Hide the session tiles; the Router stands in for them",
+                   isOn: Binding(get: { store.router.routerOnly }, set: { store.setRouterOnly($0) }))
             VStack(alignment: .leading, spacing: 4) {
                 routerLine(hookStatus.0, color: hookStatus.1)
                 let plugin = Self.pluginLine(store.routerPluginStatus, error: store.routerPluginError)

@@ -169,6 +169,8 @@ struct RouterContext: Equatable {
     /// Each process started, and each one gone (tests follow them).
     @ObservationIgnored var onSpawn: ((Int32) -> Void)?
     @ObservationIgnored var onExit: ((Int32) -> Void)?
+    /// Each look-up of a name in the registry, once applied (tests wait on it instead of on time).
+    @ObservationIgnored var onPeerResolved: ((String, String?) -> Void)?
     /// Called off the main thread before a start writes its config, with the start's generation (tests hold it there).
     @ObservationIgnored var beforeConfigWrite: (@Sendable (Int) -> Void)?
 
@@ -251,9 +253,9 @@ struct RouterContext: Equatable {
     /// Looks again off the main thread (the app updates its copy now and then).
     func refreshClaudeCode() {
         guard let root = codeRoot else { return }
-        Task.detached(priority: .utility) {
-            let found = Self.find(in: root)
-            await MainActor.run { [weak self] in self?.setClaudeCode(found) }
+        Task { [weak self] in
+            let found = await OffMain.run { Self.find(in: root) }
+            self?.setClaudeCode(found)
         }
     }
 
@@ -312,13 +314,12 @@ struct RouterContext: Equatable {
         guard let card, let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true) else {
             return ready(item.id, Self.header(text, reply: reply, projects: tagged))
         }
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let peer = ClaudePeers.read(dir: dir)[card.sessionID].flatMap { $0.name.isEmpty ? nil : $0.name }
-            await MainActor.run { [weak self] in
-                var named = reply
-                named.peer = peer
-                self?.ready(item.id, Self.header(text, reply: named, projects: tagged))
-            }
+        let host = card.sessionID
+        Task { [weak self] in
+            let peer = await OffMain.run { ClaudePeers.read(dir: dir)[host].flatMap { $0.name.isEmpty ? nil : $0.name } }
+            var named = reply
+            named.peer = peer
+            self?.ready(item.id, Self.header(text, reply: named, projects: tagged))
         }
     }
 
@@ -512,8 +513,8 @@ struct RouterContext: Equatable {
         let gen = generation
         let root = codeRoot
         // Finding the binary and writing the config touch the disk: off the main thread.
-        Task.detached(priority: .utility) { [weak self] in
-            let found = root.flatMap(Self.find)
+        Task { [weak self] in
+            let found = await OffMain.run { root.flatMap(Self.find) }
             await MainActor.run { [weak self] in
                 guard let self, gen == self.generation else { return }
                 self.setClaudeCode(found)
@@ -546,9 +547,9 @@ struct RouterContext: Equatable {
                 let data = server.config(port: port)
                 let gate = Self.gateSettings()
                 let beforeWrite = beforeConfigWrite
-                Task.detached(priority: .utility) { [weak self] in
-                    beforeWrite?(gen)
-                    let error: String? = {
+                Task { [weak self] in
+                    let error: String? = await OffMain.run {
+                        beforeWrite?(gen)
                         do {
                             try FileManager.default.createDirectory(at: paths.routerHome, withIntermediateDirectories: true,
                                                                     attributes: [.posixPermissions: 0o700])
@@ -559,7 +560,7 @@ struct RouterContext: Equatable {
                         } catch {
                             return error.localizedDescription
                         }
-                    }()
+                    }
                     await MainActor.run { [weak self] in
                         guard let self, gen == self.generation else {
                             // Superseded meanwhile: its file goes (the token in it is of a stopped server).
@@ -858,10 +859,15 @@ struct RouterContext: Equatable {
 
     /// Reads the registry off the main thread, answers on it.
     private func resolvePeer(_ name: String, _ then: @escaping @MainActor (String?) -> Void) {
-        guard let dir = store?.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true) else { return then(nil) }
-        Task.detached(priority: .userInitiated) {
-            let session = Self.peerSession(name, peers: ClaudePeers.read(dir: dir))
-            await MainActor.run { then(session) }
+        guard let dir = store?.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true) else {
+            then(nil)
+            onPeerResolved?(name, nil)
+            return
+        }
+        Task { [weak self] in
+            let session = await OffMain.run { Self.peerSession(name, peers: ClaudePeers.read(dir: dir)) }
+            then(session)
+            self?.onPeerResolved?(name, session)
         }
     }
 

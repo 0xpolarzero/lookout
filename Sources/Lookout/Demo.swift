@@ -22,6 +22,8 @@ enum Demo {
         case updateAvailable, updateDownloading, updateReady
         // The Router: cards of each kind (a question with its form) and a chat with receipts; and the Router switched off.
         case router, routerOff
+        // Router only: the session tiles gone, the Router standing in for them.
+        case routerOnly
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -205,6 +207,10 @@ enum Demo {
             router(store, now)
         case .routerOff:
             agents(store, now)
+        case .routerOnly:
+            agents(store, now)
+            router(store, now)
+            store.router.routerOnly = true
         }
     }
 
@@ -268,6 +274,8 @@ enum Demo {
             RouterMessage(role: .error, text: "SendMessage to Game recommendations: not delivered (the session isn't open in Claude)",
                           date: now.addingTimeInterval(-10), sessionID: "local_demo-games"),
         ]
+        // The scenario shows the tiles too; `routerOnly` hides them.
+        state.routerOnly = false
         store.router = state
     }
 

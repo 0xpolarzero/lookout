@@ -77,7 +77,8 @@ private final class Client: @unchecked Sendable {
     }
 
     private func off<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
-        await Task.detached(operation: work).value
+        // Blocking socket reads go on a dispatch queue, never on Swift's shared pool (which other tests need).
+        await OffMain.run(work)
     }
 
     @Test func aRequestIsAnsweredAndTheConnectionKept() async throws {
@@ -187,11 +188,11 @@ private final class Client: @unchecked Sendable {
             return RouterRPC.Reply(status: 202, body: nil)
         }
         let request = post(server.token, "{}")
-        let reading = Task.detached { () -> (String, Bool) in
+        let reading = Task { await OffMain.run { () -> (String, Bool) in
             guard let c = Client(port: port) else { return ("", false) }
             c.send(request)
             return c.readToEnd()
-        }
+        } }
         while !gate.waiting { try await Task.sleep(nanoseconds: 5_000_000) }
         server.stop()
         try await Task.sleep(nanoseconds: 50_000_000)

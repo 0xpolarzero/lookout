@@ -204,6 +204,32 @@ final class HubKeys {
         self.hub = hub
     }
 
+    /// Router only switched (or the Router): no focus stays on the sessions that went, and no session they hid stays picked.
+    func followSessionsHidden() {
+        guard store.sessionsHidden else { return }
+        if hub.focus == .agents { hub.focus = nil }
+        if hub.section == .agents { hub.section = nil }
+        if let selection = hub.selection, selection.hasPrefix("a:"), !targets().contains(selection) {
+            hub.selection = nil
+            hub.keyboardSelection = nil
+        }
+        if let id = ui.drawerSelection, !targets().contains("a:" + id) { ui.drawerSelection = nil }
+    }
+
+    /// The session switcher's key: kept open on the sessions, the first that needs you picked. In Router only, with no
+    /// tiles to pick from, the search takes the keyboard instead: type to find any session, Return opens it.
+    func showSessions() {
+        guard store.agents.enabled else { return }
+        hub.go(.main)
+        hub.pinned = true
+        if store.sessionsHidden {
+            hub.focus = nil
+            hub.startSearch()
+            return
+        }
+        if let first = store.sessionShortcutPick { select("a:" + first.id) }
+    }
+
     /// The keep-open key: opens (and keeps open), or closes.
     func toggleTap() {
         if HotKeys.debug { NSLog("Lookout keys: tap, pinned %d", hub.pinned ? 1 : 0) }
@@ -320,7 +346,8 @@ final class HubKeys {
 
     /// What the bound actions do to the row that is picked. False when `shortcut` is none of them, or no row is picked.
     private func rowCommand(_ shortcut: Shortcut, targets: [String]) -> Bool {
-        guard let selection = hub.selection else { return false }
+        // Only a row that is listed now: one a filter, a search or Router only hides is left alone.
+        guard let selection = hub.selection, targets.contains(selection) else { return false }
         let id = String(selection.dropFirst(2))
         if selection.hasPrefix("i:"), let item = store.items.first(where: { $0.id == id }) {
             if shortcut == store.shortcut(.openItem) { store.open(item) }
@@ -512,7 +539,10 @@ struct LookoutHub: View {
         .motion(Self.refocus, value: hub.focus)
         .contextMenu {
             Toggle("Keep Open", isOn: $hub.pinned)
-            if store.routerOn { Button("Open Router") { openRouter(nil) } }
+            if store.routerOn {
+                Button("Open Router") { openRouter(nil) }
+                Toggle("Router Only", isOn: Binding(get: { store.router.routerOnly }, set: { store.setRouterOnly($0) }))
+            }
             Button("Settings…") { hub.go(.settings) }
             Button("Repositories…") { hub.go(.repos) }
             if store.updater.isRelease {
@@ -527,6 +557,8 @@ struct LookoutHub: View {
         }
         .environment(\.colorScheme, .dark)
         .background(SelectionSync(ui: ui, hub: hub))
+        // Router only taking the sessions away: their focus and pick go with them.
+        .onChange(of: store.sessionsHidden, initial: true) { HubKeys(store: store, ui: ui, hub: hub).followSessionsHidden() }
         .background(UpdateAnnouncer(updater: store.updater))
     }
 
@@ -704,13 +736,21 @@ struct LookoutHub: View {
             VStack(alignment: side, spacing: 0) {
                 row(cell: { routerCell }, detail: { routerHeader })
                 if showsDetail && !shrunk(.router) {
-                    row(cell: { EmptyView() }, detail: { routerStatusRow }).transition(.hubReveal)
+                    Group {
+                        // Router only: what works, where the sessions' rows would be (it says what the status line would).
+                        if store.sessionsHidden {
+                            row(cell: { EmptyView() }, detail: { routerWorking.padding(.bottom, 4) })
+                        } else {
+                            row(cell: { EmptyView() }, detail: { routerStatusRow })
+                        }
+                    }
+                    .transition(.hubReveal)
                 }
             }
             .modifier(probe(.router))
             .opacity(searching ? 0.4 : 1)
         }
-        if store.agents.enabled {
+        if showsSessions {
             sectionDivider
             VStack(alignment: side, spacing: 0) { agentRowsView }
                 .modifier(probe(.agents))
@@ -787,7 +827,7 @@ struct LookoutHub: View {
     /// No section focused: what's left once the fixed parts are laid out, inbox first.
     var sharedCaps: (inbox: CGFloat, agents: CGFloat) {
         let free = max(160, maxLength - 360 - ciExtra)
-        guard store.agents.enabled else { return (free, 0) }
+        guard showsSessions else { return (free, 0) }
         // Whole 36pt session rows, so the last one showing is never cut through its tile.
         let agents = max(2, (free * 0.45 / 36).rounded(.down)) * 36
         return (free - agents, agents)
@@ -867,7 +907,7 @@ struct LookoutHub: View {
                 .modifier(probe(.router))
                 .opacity(searching ? 0.4 : 1)
             }
-            if store.agents.enabled {
+            if showsSessions {
                 stripDivider
                 HStack(spacing: 8) {
                     claudeMark
@@ -969,7 +1009,7 @@ struct LookoutHub: View {
                                     .frame(width: columnWidth(.router), alignment: .topLeading)
                                     .opacity(searching ? 0.4 : 1)
                                 }
-                                if store.agents.enabled {
+                                if showsSessions {
                                     columnDivider
                                     // As wide as its segment (with the controls after it), whatever its text would like.
                                     agentsColumn.frame(minWidth: columnWidth(.agents), idealWidth: columnWidth(.agents),
@@ -1134,7 +1174,12 @@ struct LookoutHub: View {
         switch section {
         case .inbox: return Self.inboxSegment
         case .ci: return Self.githubWidth - Self.inboxSegment - 1
-        case .router: return routerHasColumn ? Self.routerWidth : Self.routerCompact
+        case .router:
+            guard routerHasColumn else { return Self.routerCompact }
+            guard !showsSessions else { return Self.routerWidth }
+            // Router only: the room the sessions' column had, up to a side column's width.
+            let room = maxWidth - Self.githubWidth - 1 - 1 - stripTrailingWidth - 2 * Self.inset
+            return max(Self.routerWidth, min(Self.detail, room))
         default:
             // As much as the screen has left after the measured controls and update button, and the margins (and the
             // Router's segment, when it has one: next to its bare cell, the sessions make do with a little less).
@@ -1146,11 +1191,18 @@ struct LookoutHub: View {
     }
 
     /// Along the top and bottom, whether the screen has room for the Router's column beside the sessions' narrowest.
-    var routerHasColumn: Bool { Self.routerColumnFits(maxWidth: maxWidth, trailing: stripTrailingWidth) }
-
-    static func routerColumnFits(maxWidth: CGFloat, trailing: CGFloat) -> Bool {
-        maxWidth >= githubWidth + 1 + routerWidth + 1 + agentsMin + trailing + 2 * inset
+    var routerHasColumn: Bool {
+        Self.routerColumnFits(maxWidth: maxWidth, trailing: stripTrailingWidth, sessions: showsSessions)
     }
+
+    /// `sessions`: the sessions' column is beside it (not in Router only).
+    static func routerColumnFits(maxWidth: CGFloat, trailing: CGFloat, sessions: Bool = true) -> Bool {
+        maxWidth >= githubWidth + 1 + routerWidth + (sessions ? 1 + agentsMin : 0) + trailing + 2 * inset
+    }
+
+    /// The sessions' section (tiles, rows, column): there with the extension on, except in Router only, where a search
+    /// still brings the sessions it finds.
+    var showsSessions: Bool { store.agents.enabled && (!store.sessionsHidden || searching) }
 
     static let githubWidth: CGFloat = 570
     /// Along the top and bottom, the Router's segment and the column under it.
@@ -1290,6 +1342,9 @@ struct ClaudeNotice: View {
         switch store.claudeLink {
         case .missing, .unreadable:
             HStack(spacing: 6) { ClaudeLinkStatus(store: store) }
+                // One element for VoiceOver: what is wrong, said as shown.
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(store.claudeLink == .missing ? "Claude's sessions not found" : "Can't read Claude's sessions")
                 .font(Theme.Typography.meta)
                 .foregroundStyle(Theme.red)
                 .frame(maxWidth: .infinity, alignment: .leading)

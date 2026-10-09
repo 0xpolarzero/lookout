@@ -1,5 +1,23 @@
 import Foundation
 
+// MARK: - Off the main thread
+
+/// Blocking work (reading files, a hook a test holds) on a dispatch queue, never on Swift's small shared pool of threads:
+/// a held or slow read there would hold up every other task in the app.
+enum OffMain {
+    static func run<T>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { (done: CheckedContinuation<T, Never>) in
+            let box = UncheckedBox(work)
+            DispatchQueue.global(qos: .userInitiated).async { done.resume(returning: box.value()) }
+        }
+    }
+
+    private struct UncheckedBox<T>: @unchecked Sendable {
+        let value: () -> T
+        init(_ value: @escaping () -> T) { self.value = value }
+    }
+}
+
 // MARK: - Running a CLI once
 
 /// Runs a program to its end, off the main thread: stdin given, stdout and the exit status back. One deadline covers it
@@ -270,7 +288,7 @@ enum SessionStart {
         while Date() < deadline {
             try Task.checkCancellation()
             try await check()
-            let peers = await Task.detached(priority: .userInitiated) { ClaudePeers.read(dir: dir) }.value
+            let peers = await OffMain.run { ClaudePeers.read(dir: dir) }
             if let peer = peers[host] { return peer.name }
             try await Task.sleep(nanoseconds: 250_000_000)
         }

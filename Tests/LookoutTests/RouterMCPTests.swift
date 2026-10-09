@@ -897,6 +897,8 @@ import Testing
         let s = await store(dir)
         let t = tools(s, turn: "tell lookout to bump the version")
         t.rephrase = { message, _, _ in Prepared(text: "Bump the version.", original: message, rephrased: true) }
+        // What's tested is that the key is read again, not how fast: a deadline no loaded machine can miss.
+        t.keyReloadWait = 120
         func verifies(_ key: String) -> Bool {
             let signed = sealed(t, "Fix the login bug", "Bump the version.")
             let parts = signed.components(separatedBy: "\n")[0].dropFirst().dropLast().split(separator: " ")

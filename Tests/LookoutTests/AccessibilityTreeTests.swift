@@ -8,6 +8,8 @@ struct AXNode {
     let role: String
     let label: String
     let children: [AXNode]
+    /// What a static text says (its value, not its label).
+    var value = ""
 
     /// This element and everything under it.
     var all: [AXNode] { [self] + children.flatMap(\.all) }
@@ -68,11 +70,13 @@ enum AccessibilityTree {
 
     private static func node(_ element: Any) -> AXNode {
         guard let object = element as? NSObject else { return AXNode(role: "?", label: "", children: []) }
+        func value() -> String { (object.value(forKey: "accessibilityValue") as? String) ?? "" }
         func string(_ key: String) -> String { (object.value(forKey: key) as? String) ?? "" }
         let role = string("accessibilityRole")
         // A scroll bar's parts are the system's own.
         let children = role == "AXScrollBar" ? [] : ((object.value(forKey: "accessibilityChildren") as? [Any]) ?? []).map(node)
-        return AXNode(role: role, label: string("accessibilityLabel"), children: children)
+        return AXNode(role: role, label: string("accessibilityLabel"), children: children,
+                      value: role == "AXStaticText" ? value() : "")
     }
 }
 
@@ -115,6 +119,8 @@ enum AccessibilityTree {
         missing += try await unnamed("update ready", scenario: .updateReady) { _, hub in hub.pinned = true }
         missing += try await unnamed("many sessions", scenario: .sessionsManyNew) { _, hub in hub.pinned = true; hub.focus = .agents }
         missing += try await unnamed("peek router", scenario: .router) { _, hub in hub.section = .router }
+        missing += try await unnamed("peek router only", scenario: .routerOnly) { _, hub in hub.section = .router }
+        missing += try await unnamed("router only kept open", edge: .top, scenario: .routerOnly) { _, hub in hub.pinned = true }
         for edge in [DockEdge.right, .top] {
             missing += try await unnamed("router kept open", edge: edge, scenario: .router) { _, hub in hub.pinned = true }
         }

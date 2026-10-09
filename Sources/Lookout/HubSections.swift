@@ -305,14 +305,25 @@ extension LookoutHub {
                     .foregroundStyle(Theme.tertiary).padding(.horizontal, Theme.Space.md).padding(.top, 2)
             }
         }
+        if store.sessionsHidden { routerWorking }
         Hairline(inset: Theme.Space.md).padding(.vertical, Theme.Space.xs)
         routerFooter
+    }
+
+    /// Router only: what is working, under the cards (the sessions' section is gone), and Claude's files failing to read,
+    /// which the sessions' header would otherwise say: a broken read never goes silent.
+    var routerWorking: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ClaudeNotice(store: store).padding(.horizontal, Theme.Space.md)
+            RouterWorkingList(store: store)
+        }
     }
 
     /// What is running, in one line, and the button to the window.
     var routerFooter: some View {
         HStack(spacing: 8) {
-            RouterStatusView(store: store).layoutPriority(-1)
+            // Router only: the Working list above says it already.
+            if !store.sessionsHidden { RouterStatusView(store: store).layoutPriority(-1) }
             Spacer(minLength: 0)
             ActionButton("Open Router") { openRouter(nil) }
                 .fixedSize()
@@ -335,9 +346,11 @@ extension LookoutHub {
     var routerColumn: some View {
         let cards = store.openRouterCards
         return VStack(alignment: .leading, spacing: 1) {
-            RouterStatusView(store: store, lines: 3)
-                .padding(.horizontal, Theme.Space.md)
-                .padding(.vertical, Theme.Space.sm)
+            if !store.sessionsHidden {
+                RouterStatusView(store: store, lines: 3)
+                    .padding(.horizontal, Theme.Space.md)
+                    .padding(.vertical, Theme.Space.sm)
+            }
             if cards.isEmpty {
                 Text("Nothing needs you").font(Theme.Typography.body).foregroundStyle(Theme.tertiary)
                     .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
@@ -347,6 +360,7 @@ extension LookoutHub {
                 Text("\(cards.count - Self.routerColumnLimit) more").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
                     .padding(.horizontal, Theme.Space.md).padding(.top, 2)
             }
+            if store.sessionsHidden { routerWorking.padding(.top, 6) }
         }
         .padding(.horizontal, Self.inset)
         .padding(.vertical, Theme.Space.sm)

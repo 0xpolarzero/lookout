@@ -374,10 +374,7 @@ final class HubController {
 
     /// The session switcher shortcut: open on the sessions, the first one that needs you picked.
     func showSessions() {
-        guard store.agents.enabled else { return }
-        hub.go(.main)
-        hub.pinned = true
-        if let first = store.sessionShortcutPick { keys.select("a:" + first.id) }
+        keys.showSessions()
     }
 
     /// The Router's window takes the keyboard: the hub closes, as if left, so the window isn't under an open view.

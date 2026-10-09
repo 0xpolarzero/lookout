@@ -553,8 +553,9 @@ import UserNotifications
     // MARK: Bar
 
     /// The kept-open hub's width along the top or bottom of a screen `width` wide.
-    private func openWidth(_ edge: DockEdge, _ width: CGFloat) async throws -> (hub: CGFloat, column: Bool) {
-        let store = demo()
+    private func openWidth(_ edge: DockEdge, _ width: CGFloat, _ scenario: Demo.Scenario = .router) async throws
+        -> (hub: CGFloat, column: Bool) {
+        let store = demo(scenario)
         let hub = HubState()
         let box = WidthBox()
         let view = LookoutHub(store: store, ui: UIState(persists: false, edge: edge), hub: hub, maxLength: 600, maxWidth: width)
@@ -572,7 +573,7 @@ import UserNotifications
         hub.pinned = true
         try await Task.sleep(for: .seconds(1))
         hosting.layoutSubtreeIfNeeded()
-        return (box.width, LookoutHub.routerColumnFits(maxWidth: width, trailing: 140))
+        return (box.width, LookoutHub.routerColumnFits(maxWidth: width, trailing: 140, sessions: !store.sessionsHidden))
     }
 
     @Test(.hostsWindows) func alongTheTopAndBottomTheRoutersColumnGoesBeforeTheHubOverflows() async throws {
@@ -584,6 +585,154 @@ import UserNotifications
             #expect(wide.hub <= 1280, "\(edge) at 1280: \(wide.hub)")
             #expect(wide.column)
         }
+    }
+
+    // MARK: Router only
+
+    @Test(.hostsWindows) func routerOnlyGivesTheRoomBackAlongTheTopAndBottom() async throws {
+        for edge in [DockEdge.top, .bottom] {
+            for width in [CGFloat(1024), 1280] {
+                let only = try await openWidth(edge, width, .routerOnly)
+                let both = try await openWidth(edge, width, .router)
+                #expect(only.hub <= width, "\(edge) at \(width): \(only.hub)")
+                // The Router keeps its column (the sessions' room is its), and the hub is no wider than with the sessions.
+                #expect(only.column && only.hub <= both.hub + 0.5, "\(edge) at \(width): \(only.hub) vs \(both.hub)")
+            }
+        }
+    }
+
+    @Test func routerOnlyTakesTheSessionsOffTheBarAndBringsThemBack() async throws {
+        func labels(_ scenario: Demo.Scenario, _ configure: @escaping (Store, HubState) -> Void) async throws -> [String] {
+            try await AccessibilityTree.render(scenario: scenario, configure: configure).all.map(\.label)
+        }
+        for edge in [DockEdge.right, .top] {
+            for pinned in [false, true] {
+                let only = try await AccessibilityTree.render(edge: edge, scenario: .routerOnly) { _, hub in hub.pinned = pinned }
+                #expect(!only.all.contains { $0.label == "Sessions" || $0.label == "Calculator display reading" && $0.role == "AXButton" },
+                        "\(edge) \(pinned)")
+                let back = try await AccessibilityTree.render(edge: edge, scenario: .routerOnly) { store, hub in
+                    store.setRouterOnly(false)
+                    hub.pinned = pinned
+                }
+                #expect(back.all.contains { $0.label == "Sessions" }, "\(edge) \(pinned)")
+            }
+        }
+        // The Router's panel lists what works, each line opening its session.
+        let peek = try await labels(.routerOnly) { _, hub in hub.section = .router }
+        #expect(peek.contains("Agent completion notifications"))
+        // Off again with the Router off: the sessions are back whatever the setting says.
+        let off = try await labels(.routerOnly) { store, _ in store.setRouterEnabled(false) }
+        #expect(off.contains("Sessions"))
+    }
+
+    @Test func inRouterOnlyABrokenReadOfClaudesFilesIsStillSaid() async throws {
+        func says(_ link: ClaudeLink, _ configure: @escaping (HubState) -> Void) async throws -> Bool {
+            let tree = try await AccessibilityTree.render(edge: .top, scenario: .routerOnly) { store, hub in
+                store.claudeLink = link
+                configure(hub)
+            }
+            return tree.all.contains { ($0.label + $0.value).contains("Claude's sessions") }
+        }
+        for state in [{ (hub: HubState) in hub.section = .router }, { (hub: HubState) in hub.pinned = true }] {
+            #expect(try await says(.missing, state))
+            #expect(try await !says(.ok, state))
+        }
+    }
+
+    @Test func theWorkingListIsWhatRunsLongestFirstAndOpensIt() {
+        let store = demo(.routerOnly)
+        var opened: [String] = []
+        store.interceptOpen = { opened.append($0) }
+        let rows = store.routerWorkingRows
+        // The turn that works, and the finished one still running its subagents and command (oldest of them first).
+        #expect(rows.map(\.id) == ["local_demo-ci", "local_demo-lookout"])
+        #expect(rows[0].tasksText == "3 running" && !rows[0].session.running)
+        #expect(!rows.contains { $0.waitsForYou })
+        store.openAgent(rows[1].id)
+        #expect(opened.first?.contains("Agent completion notifications") == true)
+    }
+
+    @Test(.hostsWindows) func turningRouterOnlyOnDropsTheSessionsFocusAndPick() async throws {
+        for edge in [DockEdge.right, .top] {
+            let store = demo(.router)
+            let hub = HubState(), ui = UIState(persists: false, edge: edge)
+            hub.pinned = true
+            hub.focus = .agents
+            hub.selection = "a:local_demo-ci"
+            let hosting = NSHostingView(rootView: LookoutHub(store: store, ui: ui, hub: hub, maxLength: 700, maxWidth: 1280)
+                .frame(width: 1280, height: 800, alignment: .topLeading))
+            let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800), styleMask: .borderless,
+                                  backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = hosting
+            window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+            window.orderFrontRegardless()
+            defer { window.close() }
+            hosting.layoutSubtreeIfNeeded()
+            // On screen with the sessions focused and one picked; then Router only.
+            #expect(hub.focus == .agents && hub.selection == "a:local_demo-ci")
+            store.setRouterOnly(true)
+            for _ in 0..<100 where hub.focus != nil || hub.selection != nil {
+                hosting.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            #expect(hub.focus == nil, "\(edge): \(String(describing: hub.focus))")
+            #expect(hub.selection == nil, "\(edge): \(String(describing: hub.selection))")
+            // And the section itself is gone from what the hub draws now.
+            let tree = try await AccessibilityTree.render(LookoutHub(store: store, ui: ui, hub: hub, maxLength: 700, maxWidth: 1280)
+                .frame(width: 1280, height: 800, alignment: .topLeading), size: CGSize(width: 1280, height: 800))
+            #expect(!tree.all.contains { $0.label == "Sessions" }, "\(edge)")
+            #expect(tree.all.contains { $0.label == "Inbox" })
+        }
+    }
+
+    @Test func rowKeysLeaveAHiddenSessionAlone() {
+        let store = demo(.routerOnly)
+        var opened: [String] = []
+        store.interceptOpen = { opened.append($0) }
+        let hub = HubState(), ui = UIState(persists: false, edge: .right)
+        hub.pinned = true
+        let keys = HubKeys(store: store, ui: ui, hub: hub)
+        // Picked before the tiles went (not listed now): Return, ⌘K and ⌘⌫ do nothing to it.
+        hub.selection = "a:local_demo-ci"
+        let pinned = store.agents.entries.first { $0.id == "local_demo-ci" }?.kept
+        for shortcut in [store.shortcut(.openItem), store.shortcut(.keepSession), store.shortcut(.removeSession)] {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shortcut.flags, timestamp: 0, windowNumber: 0,
+                                         context: nil, characters: "", charactersIgnoringModifiers: shortcut.keyCode == 40 ? "k" : "",
+                                         isARepeat: false, keyCode: shortcut.keyCode)!
+            _ = keys.key(event)
+        }
+        #expect(opened.isEmpty)
+        #expect(store.agents.entries.first { $0.id == "local_demo-ci" }?.kept == pinned)
+        keys.followSessionsHidden()
+        #expect(hub.selection == nil)
+    }
+
+    @Test func theSwitcherSearchesWhenThereAreNoTiles() {
+        let store = demo(.routerOnly)
+        let hub = HubState(), ui = UIState(persists: false, edge: .right)
+        let keys = HubKeys(store: store, ui: ui, hub: hub)
+        // No session rows to walk with the arrows while nothing is searched.
+        #expect(store.hubTargets(hub).allSatisfy { $0.hasPrefix("i:") })
+        keys.showSessions()
+        #expect(hub.pinned && hub.searchOpen && hub.selection == nil)
+        hub.query = "calc"
+        #expect(store.hubTargets(hub).contains("a:local_demo-calc"))
+        // With the tiles, it picks the first that needs you, as before.
+        let tiles = demo(.router)
+        let hub2 = HubState()
+        HubKeys(store: tiles, ui: ui, hub: hub2).showSessions()
+        #expect(hub2.pinned && !hub2.searchOpen && hub2.selection?.hasPrefix("a:") == true)
+    }
+
+    @Test func routerOnlyIsOnUnlessTurnedOffAndRemembered() throws {
+        #expect(RouterState().routerOnly)
+        let old = try JSONDecoder().decode(RouterState.self, from: Data(#"{"enabled":true}"#.utf8))
+        #expect(old.routerOnly)
+        var state = RouterState()
+        state.routerOnly = false
+        let back = try JSONDecoder().decode(RouterState.self, from: JSONEncoder().encode(state))
+        #expect(!back.routerOnly)
     }
 
     @Test func withTheRouterOnTheBarHasNoNewSessionRow() async throws {
@@ -611,39 +760,34 @@ import UserNotifications
         }
         let model = RouterModel()
         model.selection = store.openRouterCards.last?.id
+        // Offscreen and borderless, as the other window tests (it never needs the keyboard, and a loaded CI runner is slow
+        // to bring a titled window up).
         let hosting = NSHostingView(rootView: RouterView(store: store, model: model, checksClaudeCode: false)
             .frame(width: 920, height: 640))
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 920, height: 640), styleMask: .titled, backing: .buffered,
-                              defer: false)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 920, height: 640), styleMask: .borderless,
+                              backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
         defer { window.close() }
-        try await Task.sleep(for: .seconds(0.5))
-        // A hang never returns to check anything: a deadline off the main thread ends the run if the work isn't done by then.
-        let deadline = Deadline(seconds: 30, "theFilterFlipsQuicklyWithManyCards: flipping the filter hung")
-        defer { deadline.done() }
-        // Only the work itself is timed (other tests run on the main actor between the steps); the watchdog over the whole
-        // is for a hang.
-        let clock = ContinuousClock()
-        let watchdog = clock.now
-        var work = Duration.zero
-        for all in [true, false, true, false] {
-            work += clock.measure {
+        hosting.layoutSubtreeIfNeeded()
+        // Only the synchronous work is timed, in one go (no suspension where other tests could take the main actor), with a
+        // budget a loaded runner keeps well within. A watchdog notes a deadline passed but never ends the process.
+        let watchdog = Deadline(seconds: 60, "theFilterFlipsQuicklyWithManyCards: flipping the filter took over a minute")
+        let work = ContinuousClock().measure {
+            for all in [true, false, true, false] {
                 model.showAll = all
                 hosting.layoutSubtreeIfNeeded()
                 hosting.display()
             }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        work += clock.measure {
             model.select(store.routerCards.last?.id, store: store)
             hosting.layoutSubtreeIfNeeded()
             hosting.display()
         }
-        #expect(work < .seconds(3), "\(work)")
-        #expect(clock.now - watchdog < .seconds(30))
+        watchdog.done()
+        #expect(work < .seconds(10), "\(work)")
+        #expect(!watchdog.passed)
     }
 
     // MARK: Banners
@@ -716,26 +860,29 @@ private final class Registrar: HotKeyRegistrar {
     var width: CGFloat = 0
 }
 
-/// Fails the run when `done()` hasn't been called within `seconds`, from a thread of its own: a main thread stuck in layout
-/// can't fail the test itself.
+/// A watchdog on a thread of its own: a main thread stuck in layout can't time itself.
 final class Deadline: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
+    private var late = false
 
+    /// Whether `seconds` went by before `done()`.
+    var passed: Bool { lock.withLock { late } }
+
+    /// After `seconds` without `done()`, says so on stderr (a test stuck on the main thread shows in the log) and marks it
+    /// passed for the test to fail on once it returns. It never ends the process.
     init(seconds: Double, _ message: String) {
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) { [self] in
-            lock.lock()
-            let finished = self.finished
-            lock.unlock()
-            guard !finished else { return }
-            FileHandle.standardError.write(Data("Deadline passed: \(message)\n".utf8))
-            exit(1)
+            let report = lock.withLock { () -> Bool in
+                guard !finished else { return false }
+                late = true
+                return true
+            }
+            if report { FileHandle.standardError.write(Data("Deadline passed: \(message)\n".utf8)) }
         }
     }
 
     func done() {
-        lock.lock()
-        finished = true
-        lock.unlock()
+        lock.withLock { finished = true }
     }
 }

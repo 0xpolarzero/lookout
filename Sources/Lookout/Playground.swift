@@ -381,6 +381,13 @@ enum PlaygroundShots {
         var shots = Shot.edges("rest-router") { $0.scenario = .router }
         shots += Shot.edges("peek-router") { $0.scenario = .router; $0.section = .router }
         shots += Shot.edges("open-router") { $0.scenario = .router; $0.pinned = true }
+        shots += Shot.edges("rest-router-only") { $0.scenario = .routerOnly }
+        shots += Shot.edges("peek-router-only") { $0.scenario = .routerOnly; $0.section = .router }
+        shots += Shot.edges("open-router-only") { $0.scenario = .routerOnly; $0.pinned = true }
+        shots += Shot.edges("search-router-only", on: .rightAndTop) { $0.scenario = .routerOnly; $0.pinned = true; $0.query = "lcu" }
+        shots += Shot.edges("open-router-only-1024", on: [.top, .bottom]) {
+            $0.scenario = .routerOnly; $0.pinned = true; $0.size = CGSize(width: 1024, height: 720)
+        }
         shots += Shot.edges("focus-agents-router", on: .rightAndTop) { $0.scenario = .router; $0.pinned = true; $0.focus = .agents }
         // A 1024-wide screen: the Router keeps its cell, its column goes, nothing overflows.
         shots += Shot.edges("open-router-1024", on: [.top, .bottom]) {

@@ -16,6 +16,26 @@ extension Store {
         return (folderName(folder), projectColor(folder))
     }
 
+    /// Router only, with the Router on: the bar has no session tiles (see `LookoutHub.showsSessions`).
+    var sessionsHidden: Bool { routerOn && router.routerOnly }
+
+    func setRouterOnly(_ on: Bool) {
+        guard router.routerOnly != on else { return }
+        router.routerOnly = on
+    }
+
+    /// The sessions working now (not those stopped on you), and those whose turn is over with subagents or commands still
+    /// running (the tiles count them as working too); the longest running first.
+    var routerWorkingRows: [AgentRow] {
+        allAgentRows.filter { ($0.session.running && !$0.waitsForYou) || (!$0.session.running && !$0.tasks.isEmpty) }
+            .sorted { (Self.workingStart($0) ?? .distantFuture) < (Self.workingStart($1) ?? .distantFuture) }
+    }
+
+    /// Since when a row in the Working list works: its turn, or the oldest thing it left running.
+    static func workingStart(_ row: AgentRow) -> Date? {
+        row.session.running ? row.workingSince : row.tasks.map(\.since).min()
+    }
+
     /// The cards the window lists: the open ones, or all of them.
     func routerCards(all: Bool) -> [RouterCard] { all ? routerCards : openRouterCards }
 
@@ -1149,5 +1169,63 @@ enum RouterMentions {
             return a.name < b.name
         }
         return hits.prefix(limit).map { (folder: $0.folder, name: $0.name) }
+    }
+}
+
+/// Router only: the sessions working now, under the Router's cards (the bar has no tiles to say so). One line each: the
+/// project's colour, the title, what it is doing and for how long (on the minute); a click opens it in Claude.
+struct RouterWorkingList: View {
+    let store: Store
+    /// Rows shown before the rest are counted.
+    var limit = 5
+
+    var body: some View {
+        let rows = store.routerWorkingRows
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                Eyebrow("Working", count: rows.count).padding(.horizontal, Theme.Space.md).padding(.top, 4).padding(.bottom, 2)
+                MinuteTicking { now in
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(rows.prefix(limit)) { WorkingLine(row: $0, store: store, now: now) }
+                    }
+                }
+                if rows.count > limit {
+                    Text("\(rows.count - limit) more").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
+                        .padding(.horizontal, Theme.Space.md)
+                }
+            }
+        }
+    }
+}
+
+private struct WorkingLine: View {
+    let row: AgentRow
+    let store: Store
+    let now: Date
+    @State private var hover = false
+
+    var body: some View {
+        // A turn that is over but left things running: how many, since the oldest of them.
+        let start = Store.workingStart(row)
+        let since = RouterStatusLine.minutes(now.timeIntervalSince(start ?? now))
+        let doing = row.session.running ? row.activity?.text ?? "Working" : row.tasksText ?? "Working"
+        Button { store.openAgent(row.id) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(row.color ?? Theme.tertiary).frame(width: 6, height: 6).accessibilityHidden(true)
+                Text(row.session.title).font(Theme.Typography.bodyMedium).foregroundStyle(Theme.text).lineLimit(1)
+                    .layoutPriority(1)
+                Text(doing).font(Theme.Typography.meta).foregroundStyle(row.session.running ? Theme.secondary : Theme.claude)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 4)
+                Text(since).font(Theme.Typography.caption.monospacedDigit()).foregroundStyle(Theme.claude)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .rowHighlight(hover)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(row.session.title)
+        .accessibilityValue("working, \(row.projectName), \(doing), \(since)")
+        .accessibilityHint("Opens it in Claude")
     }
 }

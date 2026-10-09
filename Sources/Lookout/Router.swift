@@ -23,6 +23,8 @@ struct RouterState: Codable, Equatable {
     var waitTools: [String: String] = [:]
     /// Waits whose form Lookout's hook was seen holding (session → the wait's ms): that form going away ends the wait.
     var formSeen: [String: Int64] = [:]
+    /// "Router only": the bar shows no session tiles, the Router stands in for them (on unless turned off).
+    var routerOnly = true
 
     init() {}
 
@@ -37,6 +39,7 @@ struct RouterState: Codable, Equatable {
         waits = (try? c.decodeIfPresent([String: Int64].self, forKey: .waits)) ?? [:]
         waitTools = (try? c.decodeIfPresent([String: String].self, forKey: .waitTools)) ?? [:]
         formSeen = (try? c.decodeIfPresent([String: Int64].self, forKey: .formSeen)) ?? [:]
+        routerOnly = (try? c.decodeIfPresent(Bool.self, forKey: .routerOnly)) ?? true
     }
 }
 

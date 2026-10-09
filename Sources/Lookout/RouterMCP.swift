@@ -706,7 +706,7 @@ final class RouterMCPServer: @unchecked Sendable {
     /// The sessions that live processes have registered, read off the main thread.
     private func peers(_ store: Store) async -> [String: ClaudePeers.Peer] {
         guard let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true) else { return [:] }
-        return await Task.detached(priority: .userInitiated) { ClaudePeers.read(dir: dir) }.value
+        return await OffMain.run { ClaudePeers.read(dir: dir) }
     }
 
     /// Dates read from disk may be anything: bounded before they're turned into whole seconds.
@@ -995,10 +995,10 @@ final class RouterMCPServer: @unchecked Sendable {
     private func target(_ store: Store, _ query: String) async throws
         -> (session: ClaudeSession, to: String, reachable: Bool, cli: String?) {
         let dir = store.routerFiles?.claudeDir.appendingPathComponent("sessions", isDirectory: true)
-        let (peers, clis) = await Task.detached(priority: .userInitiated) { () -> ([String: ClaudePeers.Peer], [String: Set<String>]) in
+        let (peers, clis) = await OffMain.run { () -> ([String: ClaudePeers.Peer], [String: Set<String>]) in
             guard let dir else { return ([:], [:]) }
             return (ClaudePeers.read(dir: dir), Self.cliSessions(dir: dir))
-        }.value
+        }
         let titled = store.claudeSessions.values.filter { !$0.isArchived && $0.title.lowercased() == query.lowercased() }
         guard let session = store.claudeSessions[query]
             ?? RouterAgent.peerSession(query, peers: peers).flatMap({ store.claudeSessions[$0] })
