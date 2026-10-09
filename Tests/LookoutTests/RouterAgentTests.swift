@@ -169,8 +169,8 @@ import Testing
     }
 
     /// Waits until `until` holds, for as long as a loaded machine may take (a watchdog, not a timing assumption).
-    private func settle(_ until: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(60)
+    private func settle(timeout: TimeInterval = 60, _ until: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
         while !until(), Date() < deadline { try? await Task.sleep(nanoseconds: 10_000_000) }
     }
 
@@ -374,6 +374,7 @@ import Testing
         let dir = TempDir()
         let s = store(dir)
         let agent = RouterAgent(store: s)
+        agent.quitWait = 30
         agent.codeRoot = fake(dir, stubborn(dir))
         agent.killAfter = 0.3
         let events = follow(agent)
@@ -398,6 +399,7 @@ import Testing
         let dir = TempDir()
         let s = store(dir)
         let agent = RouterAgent(store: s)
+        agent.quitWait = 30
         agent.codeRoot = fake(dir, stubborn(dir))
         agent.killAfter = 0.1
         let events = follow(agent)
@@ -425,7 +427,7 @@ import Testing
         let agent = RouterAgent(store: s)
         agent.codeRoot = fake(dir, stubborn(dir))
         agent.killAfter = 60
-        agent.quitWait = 5
+        agent.quitWait = 30
         let events = follow(agent)
         agent.send("one")
         await settle { events.spawned.count == 1 }
@@ -481,12 +483,14 @@ import Testing
         let loaded = dir.path("loaded.json"), path = dir.path("path.txt")
         agent.codeRoot = fake(dir, """
         while [ $# -gt 0 ]; do
-          if [ "$1" = "--mcp-config" ]; then cp "$2" '\(loaded.path)'; printf '%s' "$2" > '\(path.path)'; fi
+          if [ "$1" = "--mcp-config" ]; then printf '%s' "$2" > '\(path.path).tmp'; cp "$2" '\(loaded.path).tmp'; mv '\(loaded.path).tmp' '\(loaded.path)'; mv '\(path.path).tmp' '\(path.path)'; fi
           shift
         done
         exec cat > /dev/null
         """)
         let events = follow(agent)
+        var discarded: [Int] = []
+        agent.onConfigDiscarded = { discarded.append($0) }
         // The first start's write is held until the second has started its process.
         let held = Held()
         agent.beforeConfigWrite = { gen in
@@ -497,12 +501,15 @@ import Testing
         await settle { held.firstGen != nil }
         agent.stop()
         agent.send("b")
-        await settle { events.spawned.count == 1 && FileManager.default.fileExists(atPath: loaded.path) }
+        // The fake has copied what it loaded, and said where from (both written whole).
+        await settle { events.spawned.count == 1 && FileManager.default.fileExists(atPath: path.path) }
         held.release()
         let home = dir.path("support/router")
         let used = URL(fileURLWithPath: (try? String(contentsOf: path, encoding: .utf8)) ?? "")
-        // The late write lands in its own file, which is then removed; the file in use is untouched.
-        await settle { ((try? FileManager.default.contentsOfDirectory(atPath: home.path)) ?? []).filter { $0.hasPrefix("mcp") } == [used.lastPathComponent] }
+        // The late write lands in its own file, which is then removed (waited for as an event); the file in use is untouched.
+        let first = try #require(held.firstGen)
+        await settle { discarded.contains(first) }
+        #expect(discarded.contains(first))
         #expect((try? FileManager.default.contentsOfDirectory(atPath: home.path))?.filter { $0.hasPrefix("mcp") } == [used.lastPathComponent])
         #expect(used.lastPathComponent != "mcp-\(held.firstGen ?? -1).json")
         #expect(try Data(contentsOf: used) == Data(contentsOf: loaded))
@@ -677,7 +684,13 @@ import Testing
         agent.send("two")
         agent.send("three")
         #expect(agent.queuedCount == 3)
-        await settle { lines(log).count == 3 && events.log.filter { $0.hasPrefix("exit") }.count == 3 }
+        // Step by step, each with its own generous watchdog (a restart is a whole start: binary, server, config, spawn):
+        // a process starts, takes its message, dies; the next one starts for what waits.
+        for n in 1...3 {
+            await settle(timeout: 180) { events.spawned.count >= n }
+            await settle(timeout: 180) { lines(log).count >= n }
+            await settle(timeout: 180) { events.log.filter { $0.hasPrefix("exit") }.count >= n }
+        }
         let got = lines(log)
         // One message per process, in order, each process gone before the next.
         #expect(got.map(\.text) == ["one", "two", "three"])
@@ -704,14 +717,16 @@ import Testing
         let events = follow(agent)
         agent.send("one")
         agent.send("two")
-        // The fresh process gets "one" again, first; "two" waits for its turn.
-        await settle { events.spawned.count == 2 && lines(log).count == 1 }
+        // The first exits on the failed resume; a fresh one starts and gets "one" again, first; "two" waits for its turn.
+        await settle(timeout: 180) { events.log.filter { $0.hasPrefix("exit") }.count >= 1 }
+        await settle(timeout: 180) { events.spawned.count == 2 }
+        await settle(timeout: 180) { lines(log).count == 1 }
         #expect(lines(log).map(\.text) == ["one"] && agent.queuedCount == 1)
         #expect(s.router.claudeSessionID == nil && !events.overlap)
         #expect(s.router.chat.contains { $0.role == .error && $0.text.contains("Couldn't resume") })
         #expect(events.log.firstIndex(of: "exit \(events.spawned[0])")! < events.log.firstIndex(of: "spawn \(events.spawned[1])")!)
         agent.apply([.started(sessionID: "fresh"), .result(isError: false, text: "")])
-        await settle { lines(log).count == 2 }
+        await settle(timeout: 180) { lines(log).count == 2 }
         #expect(lines(log).map(\.text) == ["one", "two"] && agent.queuedCount == 0)
         #expect(Set(lines(log).map(\.pid)) == [String(events.spawned[1])])
         agent.shutdown()
@@ -819,7 +834,7 @@ import Testing
         let agent = RouterAgent(store: s)
         let file = stubbornHaiku(dir, agent)
         agent.tools.beginTurn("tell lookout to ship")
-        agent.quitWait = 4
+        agent.quitWait = 30
         let preparing = Task { await agent.tools.call("prepare", ["session": "Lookout dev"]) }
         await settle { FileManager.default.fileExists(atPath: file.path) }
         let helper = pid(file)
@@ -881,7 +896,7 @@ import Testing
             let s = store(dir)
             let agent = RouterAgent(store: s)
             let file = stubbornHaiku(dir, agent)
-            agent.quitWait = 4
+            agent.quitWait = 30
             agent.tools.beginTurn("tell lookout to ship")
             let preparing = Task { await agent.tools.call("prepare", ["session": "Lookout dev"]) }
             await settle { FileManager.default.fileExists(atPath: file.path) }

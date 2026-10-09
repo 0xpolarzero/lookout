@@ -303,18 +303,26 @@ import UserNotifications
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
-        try await Task.sleep(for: .seconds(0.5))
-        // Other tests' windows may hold the keyboard: the composer's own field is given it here.
+        // Other tests' windows may hold the keyboard: the composer's own field is given it here, once it is drawn.
         func fields(_ view: NSView) -> [NSTextField] { (view as? NSTextField).map { [$0] } ?? [] + view.subviews.flatMap(fields) }
-        let composer = fields(hosting).first { $0.placeholderString?.hasPrefix("Message the Router") == true }
-        for _ in 0..<20 where !(window.firstResponder is NSTextView) {
-            if let composer { window.makeFirstResponder(composer) }
-            try await Task.sleep(for: .milliseconds(100))
+        func findComposer() -> NSTextField? { fields(hosting).first { $0.placeholderString?.hasPrefix("Message the Router") == true } }
+        await waitUntil { findComposer() != nil }
+        // The composer asks for the keyboard as it appears, two main-queue hops later, and focusing a field selects all of
+        // it: that is done with before the test types and moves the caret, so it can't land in the middle.
+        for _ in 0..<3 {
+            await drainMainQueue()
+            hosting.layoutSubtreeIfNeeded()
+        }
+        await waitUntilSteady(turns: 10) { (window.firstResponder as? NSTextView)?.selectedRange() }
+        let composer = findComposer()
+        await waitUntil {
+            if !(window.firstResponder is NSTextView), let composer { window.makeFirstResponder(composer) }
+            return window.firstResponder is NSTextView
         }
         let field = try #require(window.firstResponder as? NSTextView)
         /// What the view does happens on its next update, which other tests' work on the main actor can hold back.
         func settle(_ done: () -> Bool) async throws {
-            for _ in 0..<50 where !done() { try await Task.sleep(for: .milliseconds(100)) }
+            await waitUntil(done)
         }
         field.insertText("ask @mi about it", replacementRange: NSRange(location: 0, length: 0))
         try await settle { model.draft == "ask @mi about it" }
@@ -322,6 +330,12 @@ import UserNotifications
         field.setSelectedRange(NSRange(location: 7, length: 0))
         try await settle { !model.suggestions(store).isEmpty }
         #expect(model.suggestions(store).first?.name == "microsandbox")
+        // The composer losing the keyboard (here, as SwiftUI may take it from a field in a window that isn't key) ends its
+        // editing, which moves the editor's selection: that is not the composer's caret moving.
+        window.makeFirstResponder(nil)
+        await drainMainQueue()
+        await waitUntilSteady(turns: 10) { model.caret }
+        #expect(model.caret == 7 && model.suggestions(store).first?.name == "microsandbox")
         // Other text views moving their caret (another window's, one elsewhere in this window, even holding the same text)
         // leave the composer's alone.
         let other = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 200, height: 100), styleMask: .titled, backing: .buffered,
@@ -337,12 +351,15 @@ import UserNotifications
             view.string = "ask @mi about it"
             view.setSelectedRange(NSRange(location: 1, length: 0))
         }
-        try await Task.sleep(for: .milliseconds(300))
+        // Whatever the view does with those notifications it does on its next updates: once the caret has read the same over
+        // several turns of the main actor, it has had them.
+        await drainMainQueue()
+        await waitUntilSteady(turns: 10) { model.caret }
         #expect(model.caret == 7 && model.suggestions(store).first?.name == "microsandbox")
         // The composer's own caret moving away still counts (given the keyboard again if the others took it).
-        for _ in 0..<20 where window.firstResponder !== field {
-            if let composer { window.makeFirstResponder(composer) }
-            try await Task.sleep(for: .milliseconds(100))
+        await waitUntil {
+            if window.firstResponder !== field, let composer { window.makeFirstResponder(composer) }
+            return window.firstResponder === field
         }
         let own = try #require(window.firstResponder as? NSTextView)
         own.setSelectedRange(NSRange(location: 1, length: 0))
@@ -569,9 +586,23 @@ import UserNotifications
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
         defer { window.close() }
-        try await Task.sleep(for: .seconds(0.3))
+        await waitUntil {
+            hosting.layoutSubtreeIfNeeded()
+            return box.width > 0
+        }
+        await waitUntilSteady { box.width }
+        let rest = box.width
         hub.pinned = true
-        try await Task.sleep(for: .seconds(1))
+        // Kept open, the strip spans its columns: wider than at rest.
+        await waitUntil {
+            hosting.layoutSubtreeIfNeeded()
+            return box.width > rest
+        }
+        // Until the width settles where pinning took it, however slowly the machine lays it out.
+        await waitUntilSteady(turns: 10) {
+            hosting.layoutSubtreeIfNeeded()
+            return box.width
+        }
         hosting.layoutSubtreeIfNeeded()
         return (box.width, LookoutHub.routerColumnFits(maxWidth: width, trailing: 140, sessions: !store.sessionsHidden))
     }
@@ -672,9 +703,9 @@ import UserNotifications
             // On screen with the sessions focused and one picked; then Router only.
             #expect(hub.focus == .agents && hub.selection == "a:local_demo-ci")
             store.setRouterOnly(true)
-            for _ in 0..<100 where hub.focus != nil || hub.selection != nil {
+            await waitUntil {
                 hosting.layoutSubtreeIfNeeded()
-                try await Task.sleep(for: .milliseconds(50))
+                return hub.focus == nil && hub.selection == nil
             }
             #expect(hub.focus == nil, "\(edge): \(String(describing: hub.focus))")
             #expect(hub.selection == nil, "\(edge): \(String(describing: hub.selection))")

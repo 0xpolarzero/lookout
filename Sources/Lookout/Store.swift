@@ -159,6 +159,9 @@ final class Store {
     @ObservationIgnored private var sleeper: Task<Void, Never>?
     /// When the sleeper is due to wake.
     @ObservationIgnored private var sleeperWakes: Date?
+    /// The reset an immediate check was already made for (see `pollAll`): never twice for the same one, so a check that
+    /// fails (offline, keeping the spent budget and that reset) can't start another at once, and another.
+    @ObservationIgnored private var retriedReset: Date?
     @ObservationIgnored private var sleepObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var saveDirty = false
@@ -476,6 +479,11 @@ final class Store {
             sleeper = task
             sleeperWakes = Date(timeIntervalSinceNow: seconds)
             await task.value
+            // Over: nothing is asleep until the next one (unless another sleep has taken its place meanwhile).
+            if sleeper == task {
+                sleeper = nil
+                sleeperWakes = nil
+            }
         }
     }
 
@@ -697,6 +705,9 @@ final class Store {
 
     /// Playground: report what would open instead of opening it.
     @ObservationIgnored var interceptOpen: ((String) -> Void)?
+    /// Where this store's own announcements go (VoiceOver, through `Announce`): a test listens to its store alone here,
+    /// so what other stores say meanwhile (other tests running beside it) never reaches it.
+    @ObservationIgnored var announce: (_ text: String, _ again: Bool) -> Void = { Announce.say($0, again: $1) }
 
     func open(_ item: InboxItem) {
         if let interceptOpen { interceptOpen("Open on GitHub · \(item.title)") } else { Link.open(item.url) }
@@ -845,7 +856,7 @@ final class Store {
         authError = reason
         guard awaitingSignIn else { return }
         awaitingSignIn = false
-        Announce.say(reason, again: true)
+        announce(reason, true)
     }
 
     /// Revoked or expired: forget the token and who it was, so the next look resolves one again
@@ -975,8 +986,18 @@ final class Store {
             lastSync = Date()
             if rateRemaining != gh.rateRemaining { rateRemaining = gh.rateRemaining }
             rateResetsAt = gh.rateResetsAt
-            // A reset learned now (a refresh by hand) may come before the wake the sleeper was set for: it sets that again.
-            if gh.rateRemaining == 0, let reset = rateResetsAt, reset > Date(), let wakes = sleeperWakes, reset < wakes { sleeper?.cancel() }
+            // A reset learned now (a refresh by hand) may come before the wake the sleeper was set for: it sets that again. One
+            // already passed by the time this poll is over (a slow poll) means the calls are back: the loop checks now, once
+            // for that reset.
+            if gh.rateRemaining == 0, let reset = rateResetsAt, let wakes = sleeperWakes, reset < wakes {
+                if reset > Date() {
+                    sleeper?.cancel()
+                } else if retriedReset != reset {
+                    retriedReset = reset
+                    pollNow = true
+                    sleeper?.cancel()
+                }
+            }
             prune()
             if persistedRevision != savedRevision { save() }
             if refreshQueued {

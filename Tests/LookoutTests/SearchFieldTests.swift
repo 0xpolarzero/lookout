@@ -202,16 +202,17 @@ import Testing
 
     @Test func typingWithTheSearchClosedPutsTheKeysInTheFieldInOrder() async throws {
         let ui = UIState(persists: false, edge: .right)
-        let (window, host) = mounted(InboxSearchField(hub: hub, ui: ui, store: store, count: "1 item"))
+        let (window, host) = await mounted(InboxSearchField(hub: hub, ui: ui, store: store, count: "1 item"))
         defer { window.close() }
-        await settle()
+        await waitUntil { host.first(NSTextField.self) != nil }
+        await settle(host)
         unfocus(window)
         // Two keys, the second before the field has the keyboard: both are the field's, in order.
         #expect(press(kVK_ANSI_Z, [], "z", in: window) && press(kVK_ANSI_I, [], "i", in: window))
         #expect(hub.query.isEmpty && hub.searchOpen && hub.pendingKeys.count == 2)
         focus(host, in: window)
         hub.typePendingKeys()
-        await settle()
+        await waitUntil { hub.query == "zi" && hub.pendingKeys.isEmpty && hub.selection != nil }
         #expect(hub.query == "zi" && hub.pendingKeys.isEmpty)
         #expect(hub.selection != nil && hub.selection == store.hubTargets(hub).first)
     }
@@ -220,9 +221,10 @@ import Testing
         // An accent key carries no characters, so it can't be typed for the field: the event itself goes to it. (Composing
         // the accent is the text system's, which a synthetic event can't drive: the layout and the field are native.)
         let ui = UIState(persists: false, edge: .right)
-        let (window, host) = mounted(InboxSearchField(hub: hub, ui: ui, store: store, count: ""))
+        let (window, host) = await mounted(InboxSearchField(hub: hub, ui: ui, store: store, count: ""))
         defer { window.close() }
-        await settle()
+        await waitUntil { host.first(NSTextField.self) != nil }
+        await settle(host)
         unfocus(window)
         let dead = try #require(Self.deadKeyEvent(in: window), "the current layout has no dead key")
         #expect(dead.characters == "" && !hub.searchOpen)
@@ -244,9 +246,13 @@ import Testing
         window.makeFirstResponder(host.first(NSTextField.self))
     }
 
-    /// Lets what SwiftUI and the field defer to the next turns of the main queue happen.
-    private func settle() async {
-        for _ in 0..<20 { try? await Task.sleep(for: .milliseconds(20)) }
+    /// Lets what SwiftUI and the field defer to the next turns of the main queue happen (the field asks for the keyboard
+    /// two hops after it appears): ordered, not timed, so a slow machine only makes it later.
+    private func settle(_ host: NSView) async {
+        for _ in 0..<4 {
+            await drainMainQueue()
+            host.layoutSubtreeIfNeeded()
+        }
     }
 
     /// An event of a key that is a dead key on the current layout, found as the system finds it.
@@ -263,14 +269,14 @@ import Testing
     }
 
     /// A window showing `view` with the search field's editor up, as the hub does.
-    private func mounted<V: View>(_ view: V) -> (NSWindow, NSHostingView<some View>) {
+    private func mounted<V: View>(_ view: V) async -> (NSWindow, NSHostingView<some View>) {
         let host = NSHostingView(rootView: view.frame(width: 300))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 60), styleMask: .titled, backing: .buffered, defer: false)
         window.contentView = host
         window.isReleasedWhenClosed = false
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
-        for _ in 0..<30 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)); host.layoutSubtreeIfNeeded() }
+        host.layoutSubtreeIfNeeded()
         return (window, host)
     }
 
@@ -291,7 +297,7 @@ import Testing
 /// The field itself, mounted: what is typed into it lands in the query, as it would from a paste or an input method.
 @MainActor
 @Suite(.hostsWindows) struct SearchFieldView {
-    @Test func whatTheFieldIsGivenLandsInTheQueryAndPicksTheFirstResult() throws {
+    @Test func whatTheFieldIsGivenLandsInTheQueryAndPicksTheFirstResult() async throws {
         let store = Store()
         Demo.populate(store, .agents)
         let hub = HubState()
@@ -305,7 +311,10 @@ import Testing
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
         defer { window.close() }
-        for _ in 0..<20 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)); host.layoutSubtreeIfNeeded() }
+        await waitUntil {
+            host.layoutSubtreeIfNeeded()
+            return host.first(NSTextField.self)?.stringValue == "z"
+        }
         // A real text field, not drawn text.
         let field = try #require(host.first(NSTextField.self))
         #expect(field.isEditable && field.stringValue == "z")
@@ -313,7 +322,7 @@ import Testing
         let editor = try #require(window.firstResponder as? NSTextView)
         editor.moveToEndOfDocument(nil)
         editor.insertText("ig", replacementRange: NSRange(location: NSNotFound, length: 0))
-        for _ in 0..<20 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        await waitUntil { hub.query == "zig" && hub.selection != nil }
         #expect(hub.query == "zig")
         #expect(hub.selection != nil && hub.selection == store.hubTargets(hub).first)
     }

@@ -90,10 +90,7 @@ import Testing
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
-        func settle() -> CGFloat {
-            for _ in 0..<8 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded() }
-            return hosting.fittingSize.height
-        }
+        func settle() -> CGFloat { steadyHeight(hosting) }
         #expect(abs(settle() - 120) < 1)
         count.n = 100
         let grown = settle()
@@ -110,11 +107,7 @@ import Testing
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
-        for _ in 0..<8 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-            hosting.layoutSubtreeIfNeeded()
-        }
-        let h = hosting.fittingSize.height
+        let h = steadyHeight(hosting)
         window.contentView = nil
         window.orderOut(nil)
         return h
@@ -170,8 +163,7 @@ import Testing
         var out: [CGFloat] = []
         for n in counts {
             count.n = n
-            for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded() }
-            out.append(hosting.fittingSize.height)
+            out.append(steadyHeight(hosting))
         }
         window.contentView = nil
         window.orderOut(nil)
@@ -234,8 +226,7 @@ import Testing
         var out: [CGFloat] = []
         for n in [200, 3, 200] {
             count.n = n
-            for _ in 0..<10 { RunLoop.current.run(until: Date().addingTimeInterval(0.05)); hosting.layoutSubtreeIfNeeded() }
-            out.append(hosting.fittingSize.height)
+            out.append(steadyHeight(hosting))
         }
         window.contentView = nil
         window.orderOut(nil)
@@ -275,4 +266,21 @@ import Testing
         #expect(HubController.edge(in: ["Lookout", "--edge"]) == nil)
         #expect(HubController.edge(in: ["Lookout", "--edge", "middle"]) == nil)
     }
+}
+
+/// A hosted view's height once its layout has settled: the run loop turned (a measured list takes a few passes) until the
+/// height reads the same over several turns, at least as many turns as before. Counted in turns, not time, so a slow
+/// machine only takes longer; a watchdog of a minute ends a layout that never settles.
+@MainActor func steadyHeight(_ hosting: NSView, turns: Int = 6) -> CGFloat {
+    let deadline = Date().addingTimeInterval(60)
+    var last = -1.0, same = 0, passes = 0
+    while (same < turns || passes < 8), Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        hosting.layoutSubtreeIfNeeded()
+        let h = hosting.fittingSize.height
+        same = h == last ? same + 1 : 0
+        last = h
+        passes += 1
+    }
+    return last
 }

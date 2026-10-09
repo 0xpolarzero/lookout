@@ -55,6 +55,11 @@ enum OneShot {
 
         fileprivate func finish() { lock.withLock { done = true } }
 
+        private var inputDone = false
+        /// The program's input was written whole or given up, and its pipe closed.
+        var isInputClosed: Bool { lock.withLock { inputDone } }
+        fileprivate func inputClosed() { lock.withLock { inputDone = true } }
+
         fileprivate func exited() { lock.withLock { gone = true } }
 
         var isCancelled: Bool { lock.withLock { cancelled } }
@@ -100,29 +105,29 @@ enum OneShot {
         process.standardOutput = stdout
         process.standardError = stderr
         process.terminationHandler = { _ in handle.wake.signal() }
-        // Both pipes are drained as they fill (a chatty program never blocks on a full pipe); their ends are counted.
-        let out = Collector(), err = Collector()
-        let ended = DispatchSemaphore(value: 0)
-        for (pipe, into) in [(stdout, out), (stderr, err)] {
-            pipe.fileHandleForReading.readabilityHandler = { file in
-                let chunk = file.availableData
-                if chunk.isEmpty {
-                    file.readabilityHandler = nil
-                    ended.signal()
-                } else {
-                    into.add(chunk)
-                }
-            }
-        }
+        // One reader per pipe, each the only one ever to touch its descriptor: checked read(2), never a FileHandle
+        // callback (which can't be stopped while one is under way). Stopped and waited for before the pipe is closed.
+        let out = PipeReader(stdout.fileHandleForReading), err = PipeReader(stderr.fileHandleForReading)
         signal(SIGPIPE, SIG_IGN)
         try process.run()
         handle.started(process.processIdentifier)
         defer { if !process.isRunning { handle.exited() } }
-        // Written on its own thread: a program that doesn't read its input can't hold this one.
-        let writer = stdin.fileHandleForWriting
-        DispatchQueue.global(qos: .utility).async {
-            try? writer.write(contentsOf: input)
-            try? writer.close()
+        out.start()
+        err.start()
+        defer {
+            // Quiesced first (the reader finishes its read and its bounded last drain), then closed.
+            for reader in [out, err] { reader.stop() }
+            for reader in [out, err] { reader.waitDone() }
+            try? stdout.fileHandleForReading.close()
+            try? stderr.fileHandleForReading.close()
+        }
+        // Written on its own thread, without blocking, and stopped with the run: a program (or a descendant holding its
+        // stdin) that never reads can't keep a thread, the descriptor or the input alive after it.
+        let writer = PipeWriter(stdin.fileHandleForWriting, input) { handle.inputClosed() }
+        writer.start()
+        defer {
+            writer.stop()
+            writer.waitDone()
         }
         while process.isRunning {
             if handle.isCancelled {
@@ -136,12 +141,10 @@ enum OneShot {
         }
         // The output may trail the exit a moment; a child holding the pipes isn't waited for beyond the grace.
         let tail = min(deadline, .now() + grace)
-        var open = 2
-        while open > 0, ended.wait(timeout: tail) == .success { open -= 1 }
-        for pipe in [stdout, stderr] {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            try? pipe.fileHandleForReading.close()
-        }
+        _ = out.waitEOF(until: tail)
+        _ = err.waitEOF(until: tail)
+        for reader in [out, err] { reader.stop() }
+        for reader in [out, err] { reader.waitDone() }
         return Output(stdout: out.data, stderr: err.data, status: process.terminationStatus)
     }
 
@@ -156,11 +159,155 @@ enum OneShot {
         while process.isRunning, Date() < killed { usleep(10_000) }
     }
 
-    private final class Collector: @unchecked Sendable {
+    /// Writes a program's input on a thread of its own: non-blocking writes when the pipe takes them (poll), EINTR and
+    /// EAGAIN retried, stopped when asked; the pipe is closed when it's done either way.
+    final class PipeWriter: @unchecked Sendable {
+        private let file: FileHandle
+        private let data: Data
+        private let closed: @Sendable () -> Void
+        private let lock = NSLock()
+        private var stopping = false
+        private let done = DispatchSemaphore(value: 0)
+
+        init(_ file: FileHandle, _ data: Data, closed: @escaping @Sendable () -> Void) {
+            self.file = file
+            self.data = data
+            self.closed = closed
+        }
+
+        func start() {
+            let thread = Thread { [self] in loop() }
+            thread.qualityOfService = .utility
+            thread.start()
+        }
+
+        func stop() { lock.withLock { stopping = true } }
+
+        func waitDone() {
+            done.wait()
+            done.signal()
+        }
+
+        private var isStopping: Bool { lock.withLock { stopping } }
+
+        private func loop() {
+            let fd = file.fileDescriptor
+            defer {
+                try? file.close()
+                closed()
+                done.signal()
+            }
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            var offset = 0
+            data.withUnsafeBytes { bytes in
+                while offset < bytes.count, !isStopping {
+                    var poller = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                    let ready = poll(&poller, 1, 50)
+                    if ready < 0 { if errno == EINTR { continue } else { return } }
+                    if ready == 0 { continue }
+                    if poller.revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0 { return }
+                    let n = write(fd, bytes.baseAddress! + offset, bytes.count - offset)
+                    if n > 0 { offset += n; continue }
+                    if n < 0, errno == EINTR || errno == EAGAIN { continue }
+                    return
+                }
+            }
+        }
+    }
+
+    /// Reads one pipe on a thread of its own: polls, reads what's there (EINTR and EAGAIN retried), stops at its end or
+    /// when asked. Asked to stop, it drains what's already in the pipe, bounded in bytes and time (a descendant still
+    /// feeding it can't keep it going), then says it's done.
+    final class PipeReader: @unchecked Sendable {
+        static let maxBytes = 8 << 20
+        static let drainBytes = 1 << 20
+        static let drainTime: TimeInterval = 0.2
+
+        private let fd: Int32
         private let lock = NSLock()
         private var buffer = Data()
+        private var stopping = false
+        private let ended = DispatchSemaphore(value: 0)
+        private let done = DispatchSemaphore(value: 0)
+        private var reachedEnd = false
+        /// Called around each read (tests hold a read in flight to see the stop wait for it).
+        var aroundRead: (() -> Void)?
+
+        init(_ file: FileHandle) { fd = file.fileDescriptor }
+
         var data: Data { lock.withLock { buffer } }
-        func add(_ chunk: Data) { lock.withLock { buffer.append(chunk) } }
+
+        func start() {
+            let thread = Thread { [self] in loop() }
+            thread.qualityOfService = .userInitiated
+            thread.start()
+        }
+
+        func stop() { lock.withLock { stopping = true } }
+
+        /// The pipe's end was reached by `until`.
+        func waitEOF(until: DispatchTime) -> Bool {
+            if lock.withLock({ reachedEnd }) { return true }
+            guard ended.wait(timeout: until) == .success else { return false }
+            ended.signal()
+            return true
+        }
+
+        /// Blocks until the reader has finished (its read under way and its last drain included).
+        func waitDone() {
+            done.wait()
+            done.signal()
+        }
+
+        private var isStopping: Bool { lock.withLock { stopping } }
+
+        private func append(_ bytes: UnsafeMutableRawBufferPointer, _ n: Int) {
+            lock.withLock {
+                guard buffer.count < Self.maxBytes else { return }
+                buffer.append(contentsOf: UnsafeRawBufferPointer(rebasing: bytes[0..<min(n, Self.maxBytes - buffer.count)]))
+            }
+        }
+
+        /// One read: bytes read, 0 at the end, nil when there's nothing now (or an error).
+        private func readOnce(_ chunk: UnsafeMutableRawBufferPointer) -> Int? {
+            while true {
+                aroundRead?()
+                let n = read(fd, chunk.baseAddress, chunk.count)
+                if n >= 0 { return n }
+                if errno == EINTR { continue }
+                return nil
+            }
+        }
+
+        private func loop() {
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            let chunk = UnsafeMutableRawBufferPointer.allocate(byteCount: 65536, alignment: 1)
+            defer {
+                chunk.deallocate()
+                done.signal()
+            }
+            while !isStopping {
+                var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                let ready = poll(&poller, 1, 50)
+                if ready < 0 { if errno == EINTR { continue } else { break } }
+                if ready == 0 { continue }
+                guard let n = readOnce(chunk) else { continue }
+                if n == 0 {
+                    lock.withLock { reachedEnd = true }
+                    ended.signal()
+                    return
+                }
+                append(chunk, n)
+            }
+            // Stopping: what's already there, within the bounds.
+            let started = Date()
+            var total = 0
+            while total < Self.drainBytes, Date().timeIntervalSince(started) < Self.drainTime,
+                  let n = readOnce(chunk), n > 0 {
+                append(chunk, n)
+                total += n
+            }
+        }
     }
 
     /// `--output-format json`'s `result` text, or why the run failed.

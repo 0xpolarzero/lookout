@@ -69,7 +69,7 @@ import Testing
         s.resolveToken = { ("new", .keychain) }
         answer(s) { _ in throw URLError(.notConnectedToInternet) }
         s.setToken("new")
-        for _ in 0..<500 where !s.unreachable || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { s.unreachable && !s.isSyncing }
         #expect(s.authError == nil && s.unreachable && s.gh.token == "new")
     }
 
@@ -92,7 +92,7 @@ import Testing
         gate.open()
         await poll.value
         #expect(s.me == nil || s.me?.login == "b")
-        for _ in 0..<500 where s.me?.login != "b" || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { s.me?.login == "b" && !s.isSyncing }
         #expect(s.me?.login == "b" && s.gh.token == "B" && s.authError == nil)
     }
 
@@ -100,24 +100,87 @@ import Testing
         let s = store()
         s.me = GHUser(login: "me", avatarUrl: nil, type: nil)
         s.repos = [RepoConfig(fullName: "a/one")]
-        let reset = Date(timeIntervalSince1970: Date().addingTimeInterval(2).timeIntervalSince1970.rounded(.up))
-        let exhausted = OSAllocatedUnfairLock(initialState: false)
-        let afterReset = OSAllocatedUnfairLock(initialState: 0)
+        // Before the refresh by hand there's budget to spare. During it every request finds it spent, the reset a few
+        // seconds after that request (as GitHub's always is when nothing is left: never one already passed, whatever the
+        // machine's speed). After it, a request is the loop's own, and counts once the reset has passed.
+        struct Phase { var manual = false; var manualAsked = 0; var reset: Date?; var woken = 0 }
+        let phase = OSAllocatedUnfairLock(initialState: Phase())
         answer(s) { _ in
-            let spent = exhausted.withLock { $0 } && Date() < reset
-            if exhausted.withLock({ $0 }), !spent { afterReset.withLock { $0 += 1 } }
-            return .init(200, "[]", headers: [
-                "x-ratelimit-resource": "core", "x-ratelimit-remaining": spent ? "0" : "4000",
-                "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970)),
-            ])
+            let (spent, reset) = phase.withLock { p -> (Bool, Date?) in
+                if p.manual {
+                    p.manualAsked += 1
+                    p.reset = Date(timeIntervalSince1970: Date().addingTimeInterval(5).timeIntervalSince1970.rounded(.up))
+                    return (true, p.reset)
+                }
+                guard let reset = p.reset else { return (false, nil) }
+                if Date() >= reset { p.woken += 1 }
+                return (Date() < reset, reset)
+            }
+            var headers = ["x-ratelimit-resource": "core", "x-ratelimit-remaining": spent ? "0" : "4000"]
+            if let reset { headers["x-ratelimit-reset"] = String(Int(reset.timeIntervalSince1970)) }
+            return .init(200, "[]", headers: headers)
         }
         // Checking every minute: the loop is asleep for most of one when the refresh by hand finds the budget spent.
         s.restartPolling()
         defer { s.stopPolling() }
-        while s.lastSync == nil || s.isSyncing { try? await Task.sleep(for: .milliseconds(10)) }
-        exhausted.withLock { $0 = true }
+        await waitUntil { s.lastSync != nil && !s.isSyncing }
+        phase.withLock { $0.manual = true }
         s.refreshNow()
-        for _ in 0..<600 where afterReset.withLock({ $0 }) == 0 { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(afterReset.withLock { $0 } > 0)
+        // The refresh by hand has asked (and found the budget spent) and is over.
+        await waitUntil { phase.withLock { $0.manualAsked } > 0 && !s.isSyncing }
+        #expect(phase.withLock { $0.manualAsked } > 0)
+        phase.withLock { $0.manual = false }
+        // The loop's own next check would be a minute after that sync; the reset brings it forward (to the reset, or at once
+        // if the refresh was so slow the reset passed meanwhile). The watchdog ends ten seconds short of the minute, which is
+        // what tells the two apart.
+        await waitUntil(within: 50) { phase.withLock { $0.woken } > 0 }
+        #expect(phase.withLock { $0.woken } > 0)
+    }
+
+    @Test func aResetThatPassedDuringASlowRefreshIsCheckedOnceNotOverAndOver() async {
+        let s = store()
+        s.me = GHUser(login: "me", avatarUrl: nil, type: nil)
+        s.repos = [RepoConfig(fullName: "a/one")]
+        // Checking every hour: whatever the observation below takes on a slow runner, no scheduled check falls inside it, so
+        // any check it sees is an immediate one.
+        s.settings.pollInterval = 3600
+        // The refresh by hand finds the budget spent, its answer held until that reset has passed; then GitHub can't be
+        // reached (no rate headers: the spent budget and its reset are what the client keeps).
+        struct Phase { var manual = false; var reset: Date?; var offline = false; var after = 0 }
+        let phase = OSAllocatedUnfairLock(initialState: Phase())
+        let gate = StubbedGitHub.Gate()
+        // `after` counts the polls begun once the held answer is let go: each poll begins with the repo's issues (the rest of
+        // the held poll's own requests come after its issues, and aren't counted).
+        answer(s) { req in
+            let now = phase.withLock { p -> (spent: Bool, reset: Date?, offline: Bool) in
+                if p.offline {
+                    if req.url?.path == "/repos/a/one/issues" { p.after += 1 }
+                    return (false, nil, true)
+                }
+                guard p.manual else { return (false, nil, false) }
+                p.reset = Date(timeIntervalSince1970: Date().addingTimeInterval(1).timeIntervalSince1970.rounded(.up))
+                return (true, p.reset, false)
+            }
+            if now.offline { throw URLError(.notConnectedToInternet) }
+            guard now.spent, let reset = now.reset else { return .init(200, "[]") }
+            return .init(200, "[]", headers: ["x-ratelimit-resource": "core", "x-ratelimit-remaining": "0",
+                                              "x-ratelimit-reset": String(Int(reset.timeIntervalSince1970))], gate: gate)
+        }
+        s.restartPolling()
+        defer { s.stopPolling() }
+        await waitUntil { s.lastSync != nil && !s.isSyncing }
+        phase.withLock { $0.manual = true }
+        s.refreshNow()
+        await waitUntil { gate.held > 0 }
+        // The reset passes while the answer is held.
+        await waitUntil { phase.withLock { $0.reset }.map { Date() > $0 } ?? false }
+        phase.withLock { $0.manual = false; $0.offline = true }
+        gate.open()
+        // One check at once for that reset: it fails offline.
+        await waitUntil { phase.withLock { $0.after } > 0 && !s.isSyncing }
+        #expect(phase.withLock { $0.after } == 1)
+        // Then the loop goes back to its interval: no check after check (any would come within a few turns).
+        for _ in 0..<100 { try? await Task.sleep(for: .milliseconds(20)) }
+        #expect(phase.withLock { $0.after } == 1)
     }
 }

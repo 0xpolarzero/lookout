@@ -12,9 +12,8 @@ import Testing
         let flag = Flag()
         withObservationTracking { _ = store.isSnoozed } onChange: { flag.set() }
         #expect(store.isSnoozed)
-        try await Task.sleep(for: .seconds(0.9))
         // Other suites keep the main actor busy for a while, which is when the expiry gets to run.
-        for _ in 0..<500 where !flag.value { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { flag.value }
         // The banner and the Notifications row, which read it, are told once the time has passed.
         #expect(flag.value && !store.isSnoozed)
     }

@@ -169,6 +169,8 @@ struct RouterContext: Equatable {
     /// Each process started, and each one gone (tests follow them).
     @ObservationIgnored var onSpawn: ((Int32) -> Void)?
     @ObservationIgnored var onExit: ((Int32) -> Void)?
+    /// A superseded start's config files were removed (tests wait on it).
+    @ObservationIgnored var onConfigDiscarded: ((Int) -> Void)?
     /// Each look-up of a name in the registry, once applied (tests wait on it instead of on time).
     @ObservationIgnored var onPeerResolved: ((String, String?) -> Void)?
     /// Called off the main thread before a start writes its config, with the start's generation (tests hold it there).
@@ -566,6 +568,7 @@ struct RouterContext: Equatable {
                             // Superseded meanwhile: its file goes (the token in it is of a stopped server).
                             try? FileManager.default.removeItem(at: config)
                             try? FileManager.default.removeItem(at: settings)
+                            self?.onConfigDiscarded?(gen)
                             return
                         }
                         if let error { return self.fail("The Router couldn't start: \(error)") }

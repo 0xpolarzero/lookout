@@ -54,35 +54,61 @@ import Testing
     }
 
     /// A control's focus, which a test moves.
-    @MainActor @Observable final class Focus { var on = false }
+    @MainActor @Observable final class Focus {
+        var on = false
+        /// The view is on screen, its focus watched: a change from here on is seen.
+        var appeared = false
+    }
+
+    /// The second a focused control waits before its tip shows, held by the test: it says when it is waited on, and
+    /// ends when the test lets it.
+    @MainActor final class Delay {
+        private(set) var waiting = 0
+        private var held: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            waiting += 1
+            await withCheckedContinuation { held.append($0) }
+        }
+
+        func pass() {
+            held.forEach { $0.resume() }
+            held = []
+        }
+    }
 
     struct Tipped: View {
         let focus: Focus
+        let delay: Delay
 
         var body: some View {
             Color.clear.frame(width: 40, height: 40)
                 .tip("Settings", "⌘,", focused: focus.on)
                 .tipSpace()
                 .frame(width: 200, height: 100)
+                .environment(\.tipFocusDelay, { [delay] in await delay.wait() })
+                .onAppear { focus.appeared = true }
         }
     }
 
     @MainActor @Test func aControlsTipShowsOnceItHasHadKeyboardFocusForASecondAndGoesWithIt() async throws {
         _ = NSApplication.shared
         let focus = Focus()
+        let delay = Delay()
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 200, height: 100), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: Tipped(focus: focus))
+        window.contentView = NSHostingView(rootView: Tipped(focus: focus, delay: delay))
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
         defer { window.close(); TipCenter.visible?.dismiss() }
-        try await Task.sleep(for: .milliseconds(200))
+        try await eventually { focus.appeared }
         #expect(TipCenter.visible == nil)
         focus.on = true
-        // Not at once: a Tab through a row of controls doesn't flash each one's tip.
-        try await Task.sleep(for: .milliseconds(400))
+        // Not at once: a Tab through a row of controls doesn't flash each one's tip. The second is the test's to end, so
+        // however slow the machine, the tip is still waiting for it here.
+        try await eventually { delay.waiting == 1 }
         #expect(TipCenter.visible == nil)
-        // Waited for rather than slept on: a busy machine (CI, parallel suites) can run the second late.
+        delay.pass()
         try await eventually { TipCenter.visible != nil }
         #expect(TipCenter.visible?.current?.title == "Settings")
         focus.on = false
@@ -91,7 +117,7 @@ import Testing
     }
 }
 
-/// Waits for `condition`, which something the test started brings about.
-@MainActor private func eventually(_ condition: () -> Bool) async throws {
-    for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+/// Waits for `condition`, which something the test started brings about (see `waitUntil`).
+@MainActor private func eventually(within: TimeInterval = 60, _ condition: () -> Bool) async throws {
+    await waitUntil(within: within, condition)
 }

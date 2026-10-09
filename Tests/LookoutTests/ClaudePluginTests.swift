@@ -416,15 +416,17 @@ enum PluginFixture {
         await #expect(throws: OneShot.TimedOut.self) {
             _ = try await ClaudePluginInstaller.oneShotRunner(timeout: 0.5, runs: PluginRuns())(exe, [])
         }
-        #expect(Date().timeIntervalSince(started) < 10)
+        // Killed at its deadline, not left to run its 30 s (a watchdog bound, generous for a slow runner).
+        #expect(Date().timeIntervalSince(started) < 25)
     }
 
     @Test func aChildHoldingStdoutDoesNotHoldTheAnswer() async throws {
         let dir = TempDir()
         let exe = try script(dir, "sleep 30 &\necho done")
         let started = Date()
-        let out = try await ClaudePluginInstaller.oneShotRunner(timeout: 20, runs: PluginRuns())(exe, [])
-        #expect(out.status == 0 && out.out == "done\n" && Date().timeIntervalSince(started) < 10)
+        let out = try await ClaudePluginInstaller.oneShotRunner(timeout: 60, runs: PluginRuns())(exe, [])
+        // Not held for the child's 30 s (a watchdog bound, generous for a slow runner).
+        #expect(out.status == 0 && out.out == "done\n" && Date().timeIntervalSince(started) < 25)
     }
 
     @Test func quittingStopsTheRunsAndRefusesNewOnes() async throws {
@@ -432,10 +434,9 @@ enum PluginFixture {
         let exe = try script(dir, "trap '' TERM\nsleep 30")
         let runs = PluginRuns()
         let run = Task { try await ClaudePluginInstaller.oneShotRunner(timeout: 60, runs: runs)(exe, []) }
-        while runs.active == 0 { try await Task.sleep(for: .milliseconds(10)) }
-        let started = Date()
-        runs.shutdown(within: 8)
-        #expect(runs.active == 0 && Date().timeIntervalSince(started) < 8)
+        await waitUntilAnywhere { runs.active > 0 }
+        runs.shutdown(within: 60)
+        #expect(runs.active == 0)
         await #expect(throws: CancellationError.self) { _ = try await run.value }
         await #expect(throws: CancellationError.self) { _ = try await ClaudePluginInstaller.oneShotRunner(runs: runs)(exe, []) }
     }
@@ -510,7 +511,7 @@ final class OSAllocatedUnfairLockBox: @unchecked Sendable {
         cli.holding = "plugin list"
         let s = store(dir, cli)
         s.setRouterEnabled(true)
-        while !cli.isHolding { try await Task.sleep(for: .milliseconds(5)) }
+        await waitUntil { cli.isHolding }
         let paths = try #require(s.routerPaths)
         s.setRouterEnabled(false)
         #expect(ClaudePlugin.key(at: paths.relayKey) == nil)

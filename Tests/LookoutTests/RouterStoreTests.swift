@@ -145,7 +145,7 @@ import Testing
                                       "tool_input": sampleInput, "created_at": 1, "pid": 1]
         try JSONSerialization.data(withJSONObject: pending).write(to: forms.appendingPathComponent("cli-local_a-1-1.json"))
         s.formBridge.refresh()
-        for _ in 0..<200 where s.pendingForms.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { !s.pendingForms.isEmpty }
         #expect(s.pendingForms["cli-local_a"]?.questions.count == 2)
         let form = try #require(s.pendingForms["cli-local_a"])
         try s.formBridge.answer(form, answers: ["Which database?": "SQLite", "Which features?": "Auth"])
@@ -180,7 +180,7 @@ import Testing
         record["tool_use_id"] = call
         try! JSONSerialization.data(withJSONObject: record).write(to: forms.appendingPathComponent("\(key).json"))
         s.formBridge.refresh()
-        for _ in 0..<300 where s.pendingForms["cli-local_a"]?.id != key { try? await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { s.pendingForms["cli-local_a"]?.id == key }
     }
 
     /// The hook lets go of every form.
@@ -189,7 +189,7 @@ import Testing
         for file in (try? FileManager.default.contentsOfDirectory(at: forms, includingPropertiesForKeys: nil)) ?? []
             where file.pathExtension == "json" { try? FileManager.default.removeItem(at: file) }
         s.formBridge.refresh()
-        for _ in 0..<300 where !s.pendingForms.isEmpty || !s.routerFormsLoaded { try? await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { s.pendingForms.isEmpty && s.routerFormsLoaded }
     }
 
     @Test func aFormBelongsOnlyToTheCardOfItsOwnCall() async throws {
@@ -342,7 +342,7 @@ import Testing
         s.setRouterEnabled(true, now: now.addingTimeInterval(7300))
         await s.routerHookWork?.value
         // The hook still holds the form: the bridge reads it again.
-        for _ in 0..<300 where s.pendingForms.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        await waitUntil { !s.pendingForms.isEmpty }
         s.feedRouter(now: now.addingTimeInterval(7301))
         let card = try #require(s.openRouterCards.first)
         #expect(card.kind == .question && s.router.waits["local_a"] == card.waitMs && s.pendingForm(for: card) != nil)

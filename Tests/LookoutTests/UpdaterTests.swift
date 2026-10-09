@@ -26,7 +26,7 @@ import Testing
         #expect(updater.release?.checksum == nil)
         updater.download()
         // It fails before fetching anything, so it settles without the network.
-        for _ in 0..<100 { if updater.phase != .downloading { break }; try await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil { updater.phase != .downloading }
         guard case .failed(let message) = updater.phase else { Issue.record("phase \(updater.phase)"); return }
         #expect(message.contains("no checksum"))
         #expect(updater.stagedPath == nil)
@@ -37,12 +37,12 @@ import Testing
         let page = URL(string: "https://example.com")!
         updater.latest = { Updater.Release(version: "9.9.9", zip: page, checksum: nil, page: page) }
         await updater.update(manual: manual)
-        for _ in 0..<100 { if case .downloading = updater.phase { try await Task.sleep(for: .milliseconds(20)) } else { break } }
+        await waitUntil { updater.phase != .downloading }
         guard case .failed(let message) = updater.phase else { Issue.record("phase \(updater.phase)"); return }
         #expect(message.contains("no checksum"))
         // The next check tries again rather than leaving the failure for good.
         await updater.update(manual: manual)
-        for _ in 0..<100 { if case .downloading = updater.phase { try await Task.sleep(for: .milliseconds(20)) } else { break } }
+        await waitUntil { updater.phase != .downloading }
         guard case .failed = updater.phase else { Issue.record("phase \(updater.phase)"); return }
     }
 
@@ -198,9 +198,9 @@ import Testing
             }
         }
 
-        /// Waits (briefly) for what runs in the background.
+        /// Waits for what runs in the background (see `waitUntil`).
         func settle(_ done: () -> Bool) async throws {
-            for _ in 0..<200 where !done() { try await Task.sleep(for: .milliseconds(10)) }
+            await waitUntil(done)
         }
     }
 

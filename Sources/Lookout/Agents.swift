@@ -808,7 +808,7 @@ extension Store {
         iconTask = nil
         let rejected = (error as? JevClient.Failure)?.message.contains("API key") == true
         iconsPausedUntil = rejected ? .distantFuture : Date().addingTimeInterval(600)
-        if rejected, let said = iconError { Announce.say(said) }
+        if rejected, let said = iconError { announce(said, false) }
         scheduleClaudeTick()
     }
 

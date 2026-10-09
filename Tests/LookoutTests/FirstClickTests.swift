@@ -31,18 +31,24 @@ import Testing
     }
 
     /// Hosts `content` in a panel like the hub's, makes another window key, then clicks the panel's middle once.
-    private func firstClick(on content: some View) async {
+    /// Waits for `until` (what the click does) rather than a fixed time: a slow runner gets there later, not never.
+    private func firstClick(on content: some View, until: () -> Bool) async {
         let panel = FloatingPanel(size: NSSize(width: 320, height: 80))
         panel.allowsKey = true
-        panel.contentView = NSHostingView(rootView: content.frame(width: 320, height: 80))
+        let hosting = NSHostingView(rootView: content.frame(width: 320, height: 80))
+        panel.contentView = hosting
         panel.setFrameOrigin(NSPoint(x: 300, y: 300))
         panel.orderFrontRegardless()
         let other = NSWindow(contentRect: NSRect(x: 700, y: 300, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
         other.makeKeyAndOrderFront(nil)
-        try? await Task.sleep(for: .milliseconds(200))
+        // The row drawn (its elements built) before it is clicked, however slowly; the panel isn't key meanwhile.
+        await waitUntil {
+            hosting.layoutSubtreeIfNeeded()
+            return !(hosting.accessibilityChildren() ?? []).isEmpty
+        }
         #expect(!panel.isKeyWindow)
         click(panel, at: NSPoint(x: 100, y: 40))
-        try? await Task.sleep(for: .milliseconds(200))
+        await waitUntil(until)
         panel.orderOut(nil)
         other.orderOut(nil)
     }
@@ -51,7 +57,7 @@ import Testing
         await EventLoop.hold()
         let (s, opened) = store()
         let row = try! #require(s.agentRows.pending.first)
-        await firstClick(on: DrawerRow(row: row, store: s, ui: UIState(persists: false, edge: .right), inHub: true))
+        await firstClick(on: DrawerRow(row: row, store: s, ui: UIState(persists: false, edge: .right), inHub: true)) { !opened().isEmpty }
         #expect(opened() == ["Open in Claude · Session a"])
     }
 
@@ -59,7 +65,7 @@ import Testing
         await EventLoop.hold()
         let (s, opened) = store()
         let row = try! #require(s.agentRows.pending.first)
-        await firstClick(on: SessionBlock(row: row, twoLines: false, store: s, ui: UIState(persists: false, edge: .right), hub: HubState()))
+        await firstClick(on: SessionBlock(row: row, twoLines: false, store: s, ui: UIState(persists: false, edge: .right), hub: HubState())) { !opened().isEmpty }
         #expect(opened() == ["Open in Claude · Session a"])
     }
 }

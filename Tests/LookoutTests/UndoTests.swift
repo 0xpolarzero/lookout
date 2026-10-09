@@ -121,7 +121,7 @@ import Testing
         #expect(!press(in: window))
     }
 
-    @Test func theFocusedUndoButtonKeepsSpaceAndReturn() throws {
+    @Test func theFocusedUndoButtonKeepsSpaceAndReturn() async throws {
         let s = store([item("1"), item("2")])
         let ui = UIState(persists: false, edge: .right)
         let hub = HubState()
@@ -142,7 +142,11 @@ import Testing
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
         defer { window.close() }
-        for _ in 0..<20 { RunLoop.current.run(until: Date().addingTimeInterval(0.02)); host.layoutSubtreeIfNeeded() }
+        // Until its button is laid out, however slowly.
+        await waitUntil {
+            host.layoutSubtreeIfNeeded()
+            return host.first(NSButton.self) != nil
+        }
         let undo = try #require(host.first(NSButton.self))
         #expect(window.makeFirstResponder(undo))
         // Space and Return are the button's: the picked row is not marked read, and the button still activates.
@@ -179,7 +183,7 @@ private final class Gate {
     }
 }
 
-/// Waits for `condition`, which something the test started brings about.
+/// Waits for `condition`, which something the test started brings about (see `waitUntil`).
 @MainActor private func eventually(_ condition: () -> Bool) async throws {
-    for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+    await waitUntil(condition)
 }

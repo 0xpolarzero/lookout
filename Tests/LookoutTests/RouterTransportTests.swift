@@ -16,7 +16,8 @@ private final class Client: @unchecked Sendable {
         let ok = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
         }
-        var timeout = timeval(tv_sec: 30, tv_usec: 0)
+        // A watchdog, not a timing: a slow CI runner may take long, a broken server still ends the test.
+        var timeout = timeval(tv_sec: 300, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
@@ -62,11 +63,20 @@ private final class Client: @unchecked Sendable {
 /// The MCP server on a real socket: what it takes, what it refuses, and how long it waits.
 @MainActor
 @Suite struct RouterTransport {
-    private func start(_ limits: RouterMCPServer.Limits = .init(),
+    /// The server's own deadlines, generous here: only the tests of those deadlines set short ones.
+    nonisolated private static var generous: RouterMCPServer.Limits {
+        var limits = RouterMCPServer.Limits()
+        limits.requestTimeout = 300
+        limits.idleTimeout = 300
+        return limits
+    }
+
+    private func start(_ limits: RouterMCPServer.Limits = generous, deadlines: Events? = nil,
                        handle: @escaping @MainActor (Data) async -> RouterRPC.Reply = { body in
                            await RouterRPC.handle(body, tools: RouterTools.specs) { _, _ in nil }
                        }) async throws -> (RouterMCPServer, UInt16) {
         let server = RouterMCPServer(limits: limits, handle: handle)
+        if let deadlines { server.onDeadline = { deadlines.add($0) } }
         let port: UInt16 = try await withCheckedThrowingContinuation { c in server.start { c.resume(with: $0) } }
         return (server, port)
     }
@@ -138,12 +148,13 @@ private final class Client: @unchecked Sendable {
     }
 
     @Test func connectionsAreCapped() async throws {
-        var limits = RouterMCPServer.Limits()
+        var limits = Self.generous
         limits.maxConnections = 2
         let (server, port) = try await start(limits)
         defer { server.stop() }
         let held = await off { [Client(port: port), Client(port: port)] }
-        for _ in 0..<100 where server.connectionCount() < 2 { try await Task.sleep(nanoseconds: 10_000_000) }
+        let until = Date().addingTimeInterval(120)
+        while server.connectionCount() < 2, Date() < until { try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(server.connectionCount() == 2)
         let third = await off { () -> (String, Bool) in
             guard let c = Client(port: port) else { return ("", false) }
@@ -153,37 +164,41 @@ private final class Client: @unchecked Sendable {
         #expect(held.count == 2)
     }
 
-    @Test func aSlowRequestAndAnIdleConnectionAreClosed() async throws {
+    @Test func aSlowRequestAndAnIdleConnectionAreClosedByTheirDeadlines() async throws {
         var limits = RouterMCPServer.Limits()
         limits.requestTimeout = 0.3
         limits.idleTimeout = 0.5
-        let (server, port) = try await start(limits)
+        let deadlines = Events()
+        let (server, port) = try await start(limits, deadlines: deadlines)
         defer { server.stop() }
-        // Half a head, then nothing.
-        let slow = await off { () -> (Bool, TimeInterval) in
-            guard let c = Client(port: port) else { return (false, 0) }
-            let start = Date()
+        // Half a head, then nothing: closed, and by the request deadline (the server says so; no time is measured).
+        let slow = await off { () -> Bool in
+            guard let c = Client(port: port) else { return false }
             c.send("POST /mcp HTTP/1.1\r\nHost: 127")
-            return (c.readToEnd().closed, Date().timeIntervalSince(start))
+            return c.readToEnd().closed
         }
-        #expect(slow.0 && slow.1 < 2)
-        // A request answered, then quiet on the kept connection.
+        #expect(slow)
+        await deadlines.wait { $0.contains("request") }
+        #expect(deadlines.all == ["request"])
+        // A request answered, then quiet on the kept connection: closed by the idle deadline.
         let request = post(server.token, #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
-        let idle = await off { () -> (String, Bool, TimeInterval) in
-            guard let c = Client(port: port) else { return ("", false, 0) }
+        let idle = await off { () -> (String, Bool) in
+            guard let c = Client(port: port) else { return ("", false) }
             c.send(request)
-            let reply = c.readResponse()
-            let start = Date()
-            return (reply, c.readToEnd().closed, Date().timeIntervalSince(start))
+            return (c.readResponse(), c.readToEnd().closed)
         }
-        #expect(idle.0.hasPrefix("HTTP/1.1 200") && idle.1 && idle.2 >= 0.3 && idle.2 < 2)
+        #expect(idle.0.hasPrefix("HTTP/1.1 200") && idle.1)
+        await deadlines.wait { $0.contains("idle") }
+        #expect(deadlines.all == ["request", "idle"])
     }
 
     @Test func stoppingCancelsTheRequestsBeingAnswered() async throws {
         let gate = RouterGate()
+        let cancelled = FormWriter.Flag()
         var sawCancel: Bool?
         let (server, port) = try await start { _ in
-            await gate.wait()
+            // The handler hears the cancellation as it happens (acknowledged), and finishes only when let go.
+            await withTaskCancellationHandler { await gate.wait() } onCancel: { cancelled.set() }
             sawCancel = Task.isCancelled
             return RouterRPC.Reply(status: 202, body: nil)
         }
@@ -195,19 +210,22 @@ private final class Client: @unchecked Sendable {
         } }
         while !gate.waiting { try await Task.sleep(nanoseconds: 5_000_000) }
         server.stop()
-        try await Task.sleep(nanoseconds: 50_000_000)
+        // Stopping cancelled the request being answered: waited for, not assumed after a pause.
+        let until = Date().addingTimeInterval(120)
+        while !cancelled.isSet, Date() < until { try await Task.sleep(nanoseconds: 5_000_000) }
+        #expect(cancelled.isSet)
         gate.open()
         let reply = await reading.value
-        for _ in 0..<100 where sawCancel == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+        while sawCancel == nil, Date() < until { try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(sawCancel == true)
         // The connection is dropped without the answer.
         #expect(reply.0.isEmpty && reply.1)
     }
 
     @Test func aRequestLateInAnIdleSpellGetsItsOwnDeadline() async throws {
-        var limits = RouterMCPServer.Limits()
-        limits.idleTimeout = 1
-        limits.requestTimeout = 5
+        // Wide margins for a slow machine: idle 10 s; the request starts 1 s in and ends 12 s in.
+        var limits = Self.generous
+        limits.idleTimeout = 10
         let (server, port) = try await start(limits)
         defer { server.stop() }
         let ping = #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#
@@ -219,12 +237,26 @@ private final class Client: @unchecked Sendable {
             guard let c = Client(port: port) else { return "" }
             c.send(request)
             _ = c.readResponse()
-            Thread.sleep(forTimeInterval: 0.5)
+            Thread.sleep(forTimeInterval: 1)
             c.send(first)
-            Thread.sleep(forTimeInterval: 0.8)
+            Thread.sleep(forTimeInterval: 11)
             c.send(second)
             return c.readResponse()
         }
         #expect(reply.hasPrefix("HTTP/1.1 200 OK"))
+    }
+}
+
+/// What a server's deadlines did, in order (from its queue), and a wait for it.
+final class Events: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String] = []
+    var all: [String] { lock.withLock { items } }
+    func add(_ item: String) { lock.withLock { items.append(item) } }
+
+    /// Until `done` holds, with a watchdog for a slow machine.
+    func wait(_ done: ([String]) -> Bool) async {
+        let until = Date().addingTimeInterval(120)
+        while !done(all), Date() < until { try? await Task.sleep(nanoseconds: 10_000_000) }
     }
 }

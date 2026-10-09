@@ -171,7 +171,8 @@ import Testing
         ] as [String: Any])
         try? pending.write(to: dir.path("support/forms/cli-local_a-1-1.json"))
         s.formBridge.refresh()
-        for _ in 0..<200 where s.pendingForms.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+        await waitUntil(within: 120) { !s.pendingForms.isEmpty }
+        #expect(!s.pendingForms.isEmpty, "the bridge never read the form")
         // A live process for one of them.
         let sessions = dir.path("claude/sessions")
         try? FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
@@ -851,11 +852,12 @@ import Testing
         let t = tools(s, turn: "start a session in lookout to bump the version")
         t.rephrase = { message, _, _ in Prepared(text: "Bump the version.", original: message, rephrased: true) }
         t.starter = { _, title in SessionStart.Started(sessionID: "local_late", peer: title) }
-        t.pluginWait = 5
+        t.pluginWait = 120
         let presence = dir.path("support/plugin-sessions/late")
         // Its plugin says it runs a moment after the session appears (on a queue of its own: not Swift's busy pool).
+        let support = dir.path("support"), claude = dir.path("claude")
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {
-            PluginFixture.live(presence.lastPathComponent, support: dir.path("support"), claude: dir.path("claude"))
+            PluginFixture.live(presence.lastPathComponent, support: support, claude: claude)
         }
         let out = try #require(await t.call("start_session", ["project": "lookout", "title": "Bump it"]))
         #expect(!out.isError, "\(out.text)")
@@ -936,13 +938,15 @@ import Testing
         s.relayKeyCache = nil
         // The read never finishes, yet the prepare returns (signed if the store's own read got there, else refused).
         let out = try #require(await t.call("prepare", ["session": "local_a"]))
-        #expect(held.waiting)
         #expect(out.isError ? out.text.contains("couldn't sign") : t.prepared["Fix the login bug"] != nil)
-        // The race itself returns at its deadline, whatever the loser does (timed off the main thread).
+        // Its reload did start (it may start after the deadline already passed): waited for, then let go.
+        await waitUntil(within: 120) { held.waiting }
+        #expect(held.waiting)
         // The race itself ends by its deadline, whatever the loser does: it says which side won (no timing measured).
+        // Its deadline armed once the work is under way, so this is the deadline beating work that has started.
         let stuck = RouterGate()
-        let deadlineWon = await RouterTools.race(deadline: 0.05) { await stuck.wait() }
-        #expect(deadlineWon)
+        let deadlineWon = await RouterTools.race(deadline: 0.05, armWhenStarted: true) { await stuck.wait() }
+        #expect(deadlineWon && stuck.waiting)
         #expect(await RouterTools.race(deadline: 30) {} == false)
         held.open()
         stuck.open()

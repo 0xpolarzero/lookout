@@ -216,6 +216,8 @@ final class RouterMCPServer: @unchecked Sendable {
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var stopped = false
     private let handle: @MainActor (Data) async -> RouterRPC.Reply
+    /// A connection closed by its deadline ("idle" or "request"): tests wait on it instead of timing it.
+    var onDeadline: (@Sendable (String) -> Void)?
 
     init(limits: Limits = Limits(), handle: @escaping @MainActor (Data) async -> RouterRPC.Reply) {
         var bytes = [UInt8](repeating: 0, count: 32)
@@ -300,6 +302,7 @@ final class RouterMCPServer: @unchecked Sendable {
 
     private func accept(_ nw: NWConnection) {
         let connection = Connection(nw: nw, queue: queue)
+        connection.onDeadline = onDeadline
         guard !stopped, connections.count < limits.maxConnections else {
             nw.start(queue: queue)
             connection.send(MiniHTTP.response(503, keepAlive: false)) { connection.close() }
@@ -407,6 +410,9 @@ final class RouterMCPServer: @unchecked Sendable {
         enum Mode { case none, idle, request }
         private(set) var mode = Mode.none
 
+        /// A deadline closed the connection: "idle" or "request".
+        var onDeadline: (@Sendable (String) -> Void)?
+
         init(nw: NWConnection, queue: DispatchQueue) {
             self.nw = nw
             self.queue = queue
@@ -416,9 +422,13 @@ final class RouterMCPServer: @unchecked Sendable {
         func arm(_ seconds: TimeInterval, _ mode: Mode) {
             self.mode = mode
             deadline?.cancel()
-            let item = DispatchWorkItem { [weak self] in self?.close() }
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, !self.closed else { return }
+                self.close()
+                self.onDeadline?(mode == .idle ? "idle" : "request")
+            }
             deadline = item
-            queue.asyncAfter(deadline: .now() + seconds, execute: item)
+            queue.asyncAfter(deadline: .now() + RouterTools.bounded(seconds), execute: item)
         }
 
         func disarm() {
@@ -1051,16 +1061,23 @@ final class RouterMCPServer: @unchecked Sendable {
     /// its own (what it does late is only a cache filled for next time), the caller isn't held by it.
     /// True when the deadline came first.
     @discardableResult
-    static func race(deadline: TimeInterval, _ work: @escaping @MainActor () async -> Void) async -> Bool {
+    /// `armWhenStarted`: the deadline counts from when `work` begins, not from the call (tests use it to know the work
+    /// was under way when the deadline won).
+    static func race(deadline: TimeInterval, armWhenStarted: Bool = false,
+                     _ work: @escaping @MainActor () async -> Void) async -> Bool {
         let once = Once()
         return await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+            let arm = {
+                DispatchQueue.global().asyncAfter(deadline: .now() + Self.bounded(deadline)) {
+                    if once.claim() { done.resume(returning: true) }
+                }
+            }
             Task { @MainActor in
+                if armWhenStarted { arm() }
                 await work()
                 if once.claim() { done.resume(returning: false) }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.bounded(deadline)) {
-                if once.claim() { done.resume(returning: true) }
-            }
+            if !armWhenStarted { arm() }
         }
     }
 

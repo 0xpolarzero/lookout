@@ -161,26 +161,31 @@ import Testing
         return (store, answers)
     }
 
-    /// Lets the main actor turn until `condition` holds (counted in turns, not timed).
+    /// Lets the main actor turn until `condition` holds (see `waitUntil`).
     private func eventually(_ condition: () -> Bool) async throws {
-        for _ in 0..<1500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+        await waitUntil(condition)
     }
 
     @Test func checksForOneRepoWhileOneIsUnderWayShareItsAnswer() async throws {
         let (store, answers) = store()
-        async let first: () = { try? await store.syncCI("a/x") }()
-        async let second: () = { try? await store.syncCI("a/x") }()
-        try await eventually { answers.waiting.count == 1 }
-        async let third: () = { try? await store.syncCI("a/x") }()
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(answers.asked == 1)
-        answers.settle(0, with: status(.failure, sha: "s1"))
+        // Each caller is on the main actor when it says it has started, and starts or finds the check in the same turn (no
+        // suspension before it looks): once all three have said so, and the check has asked, all three are in it.
+        var started = 0
+        async let first: () = { @MainActor in started += 1; try? await store.syncCI("a/x") }()
+        async let second: () = { @MainActor in started += 1; try? await store.syncCI("a/x") }()
+        try await eventually { started == 2 && answers.waiting.count == 1 }
+        async let third: () = { @MainActor in started += 1; try? await store.syncCI("a/x") }()
+        try await eventually { started == 3 }
+        #expect(answers.asked == 1 && answers.waiting.count == 1)
+        // Every check asked is answered (one, when they share it), so a failure here fails rather than hangs.
+        let asked = answers.waiting.count
+        for i in 0..<asked { answers.settle(i, with: status(.failure, sha: "s1")) }
         _ = await (first, second, third)
         #expect(store.ci["a/x"]?.sha == "s1")
         // Once it has answered, the next check asks again.
         async let next: () = { try? await store.syncCI("a/x") }()
-        try await eventually { answers.waiting.count == 2 }
-        answers.settle(1, with: status(.success, sha: "s2"))
+        try await eventually { answers.waiting.count == asked + 1 }
+        answers.settle(asked, with: status(.success, sha: "s2"))
         await next
         #expect(store.ci["a/x"]?.sha == "s2")
     }
@@ -331,7 +336,8 @@ import Testing
         static func reduce(value: inout [CGFloat], nextValue: () -> [CGFloat]) { value += nextValue() }
     }
 
-    @MainActor private func chipWidths(_ chips: [(String, [String])], flow width: CGFloat) -> [CGFloat] {
+    /// Each chip's width once the flow has laid them all out and the widths stop changing, however slow the machine.
+    @MainActor private func chipWidths(_ chips: [(String, [String])], flow width: CGFloat) async -> [CGFloat] {
         var seen: [CGFloat] = []
         let flow = FlowLayout(spacing: 5) {
             ForEach(chips.indices, id: \.self) { i in
@@ -347,17 +353,21 @@ import Testing
         host.frame = CGRect(x: 0, y: 0, width: width, height: 400)
         let window = NSWindow(contentRect: host.frame, styleMask: [], backing: .buffered, defer: true)
         window.contentView = host
-        for _ in 0..<5 {
+        await waitUntil {
             host.layoutSubtreeIfNeeded()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            return seen.count == chips.count
+        }
+        await waitUntilSteady {
+            host.layoutSubtreeIfNeeded()
+            return seen
         }
         return seen
     }
 
-    @MainActor @Test func wideFailingNamesStayInsideTheFlowTheCIPanelGivesThem() {
+    @MainActor @Test func wideFailingNamesStayInsideTheFlowTheCIPanelGivesThem() async {
         // The horizontal panel gives its chips about 208 pt; a long repo name and wide failing names are more than that.
         let wide = ["WWWWWWWWWWWWWWW", "MMMMMMMMMMMMMMM", "OOOOOOOOOOOOOOO"]
-        let widths = chipWidths([("a/swift-format", wide), ("a/another-long-repository-name", wide), ("a/x", ["build"])], flow: 208)
+        let widths = await chipWidths([("a/swift-format", wide), ("a/another-long-repository-name", wide), ("a/x", ["build"])], flow: 208)
         #expect(widths.count == 3)
         #expect(widths.allSatisfy { $0 <= 208 })
     }

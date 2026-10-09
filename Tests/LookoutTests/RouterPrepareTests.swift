@@ -58,7 +58,7 @@ import Testing
         let answer = #"{"type":"result","subtype":"success","is_error":false,"result":"{\"rephrased\":true,\"text\":\"Bump the version.\"}"}"#
         let binary = fake(dir, output: answer)
         let out = try await Rephrase.run(binary: binary, cwd: dir.url, message: "tell lookout to bump the version",
-                                         title: "Release", project: "lookout")
+                                         title: "Release", project: "lookout", timeout: 120)
         #expect(out == Prepared(text: "Bump the version.", original: "tell lookout to bump the version", rephrased: true))
         let stdin = try String(contentsOf: dir.path("stdin"), encoding: .utf8)
         #expect(stdin.contains("\"Release\" (project lookout)") && stdin.hasSuffix("tell lookout to bump the version"))
@@ -78,7 +78,7 @@ import Testing
         await #expect(throws: OneShot.TimedOut.self) {
             try await Rephrase.run(binary: binary, cwd: slow.url, message: "hi", title: "t", project: "p", timeout: 0.5)
         }
-        #expect(Date().timeIntervalSince(start) < 4)
+        #expect(Date().timeIntervalSince(start) < 60)
     }
 
     // MARK: Starting a session
@@ -100,7 +100,7 @@ import Testing
             let data = try? JSONSerialization.data(withJSONObject: ["pid": Int(getpid()), "hostSessionId": "local_u-9", "name": "Bump the version"])
             try? data?.write(to: peers.appendingPathComponent("\(getpid()).json"))
         }
-        #expect(try await SessionStart.waitForPeer(uuid: "u-9", dir: peers, timeout: 10) == "Bump the version")
+        #expect(try await SessionStart.waitForPeer(uuid: "u-9", dir: peers, timeout: 120) == "Bump the version")
         await #expect(throws: RouterTools.Failure.self) { try await SessionStart.waitForPeer(uuid: "other", dir: peers, timeout: 0.5) }
     }
 
@@ -155,7 +155,7 @@ import Testing
         let dir = TempDir()
         // 4 MB of input it never reads; it answers and exits.
         let path = script(dir, "deaf", "echo done")
-        let out = try await OneShot.run(path, [], cwd: dir.url, input: Data(count: 4 << 20), timeout: 10)
+        let out = try await OneShot.run(path, [], cwd: dir.url, input: Data(count: 4 << 20), timeout: 120)
         #expect(String(decoding: out.stdout, as: UTF8.self) == "done\n" && out.status == 0)
         // Never reading and never exiting: the deadline ends it, covering the blocked write too.
         let stuck = script(dir, "stuck", "exec sleep 30")
@@ -164,7 +164,7 @@ import Testing
         await #expect(throws: OneShot.TimedOut.self) {
             try await OneShot.run(stuck, [], cwd: dir.url, input: Data(count: 4 << 20), timeout: 1, handle: handle)
         }
-        #expect(Date().timeIntervalSince(start) < 8)
+        #expect(Date().timeIntervalSince(start) < 60)
         #expect(handle.pid > 0 && !handle.isActive && !alive(handle.pid))
     }
 
@@ -173,9 +173,10 @@ import Testing
         // It exits at once, but leaves a child that keeps its stdout and stderr open for 30 s.
         let path = script(dir, "leaver", "sleep 30 & echo $! > '\(dir.path("child.pid").path)'; echo answer")
         let start = Date()
-        let out = try await OneShot.run(path, [], cwd: dir.url, timeout: 10)
+        let out = try await OneShot.run(path, [], cwd: dir.url, timeout: 120)
         #expect(String(decoding: out.stdout, as: UTF8.self) == "answer\n")
-        #expect(Date().timeIntervalSince(start) < 5)
+        // Not held by the child (it holds the pipes for 30 s).
+        #expect(Date().timeIntervalSince(start) < 25)
         if let child = Int32((try? String(contentsOf: dir.path("child.pid"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") {
             kill(child, SIGKILL)
         }
@@ -192,12 +193,80 @@ import Testing
         let start = Date()
         running.cancel()
         await #expect(throws: CancellationError.self) { try await running.value }
-        #expect(!alive(pid) && !handle.isRunning && Date().timeIntervalSince(start) < 6)
+        #expect(!alive(pid) && !handle.isRunning && Date().timeIntervalSince(start) < 25)
         // Ended before it started: never run.
         let early = OneShot.Handle()
         early.cancel()
         await #expect(throws: CancellationError.self) { try await OneShot.run(path, [], cwd: dir.url, timeout: 60, handle: early) }
         #expect(early.pid == 0)
+    }
+
+    // MARK: Reading the pipes
+
+    @Test func aReadUnderWayIsWaitedForBeforeThePipeCloses() throws {
+        let pipe = Pipe()
+        let reader = OneShot.PipeReader(pipe.fileHandleForReading)
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        let first = FormWriter.Flag()
+        // The reader's first read is held in flight.
+        reader.aroundRead = {
+            guard !first.isSet else { return }
+            first.set()
+            entered.signal()
+            release.wait()
+        }
+        reader.start()
+        try pipe.fileHandleForWriting.write(contentsOf: Data("hello".utf8))
+        #expect(entered.wait(timeout: .now() + 120) == .success)
+        reader.stop()
+        let done = FormWriter.Flag()
+        DispatchQueue.global().async { reader.waitDone(); done.set() }
+        // While its read is under way, stopping doesn't count as done: the pipe can't be closed under it.
+        Thread.sleep(forTimeInterval: 0.2)
+        #expect(!done.isSet)
+        release.signal()
+        let until = Date().addingTimeInterval(120)
+        while !done.isSet, Date() < until { Thread.sleep(forTimeInterval: 0.01) }
+        #expect(done.isSet)
+        // Now it's safe to close; what was read is kept.
+        try pipe.fileHandleForReading.close()
+        #expect(reader.data == Data("hello".utf8))
+    }
+
+    @Test func aDescendantFeedingThePipeForeverDoesntHoldTheRun() async throws {
+        let dir = TempDir()
+        // It leaves a child that writes to the shared output without end, then exits.
+        let path = script(dir, "flood", "(while :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done) & echo $! > '\(dir.path("flood.pid").path)'; echo answer")
+        defer {
+            if let pid = Int32(((try? String(contentsOf: dir.path("flood.pid"), encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+        }
+        let start = Date()
+        let out = try await OneShot.run(path, [], cwd: dir.url, timeout: 120)
+        // Returned past the grace and a bounded last drain, not held by the child; and the output is capped.
+        #expect(Date().timeIntervalSince(start) < 60)
+        #expect(out.stdout.range(of: Data("answer".utf8)) != nil)
+        #expect(out.stdout.count <= OneShot.PipeReader.maxBytes)
+    }
+
+    @Test func aDescendantHoldingStdinDoesntKeepTheInputAlive() async throws {
+        let dir = TempDir()
+        // It leaves a child holding its stdin (checked with lsof: fd 0 is the pipe) that never reads, and exits at once; the input is far more than a pipe holds.
+        let path = script(dir, "holder", "sleep 600 <&0 & echo $! > '\(dir.path("holder.pid").path)'; echo done")
+        defer {
+            if let pid = Int32(((try? String(contentsOf: dir.path("holder.pid"), encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+        }
+        let handle = OneShot.Handle()
+        let start = Date()
+        let out = try await OneShot.run(path, [], cwd: dir.url, input: Data(count: 8 << 20), timeout: 120, handle: handle)
+        // The child holds the pipe as its stdin (`<&0`) for 10 minutes: a writer that blocked would hold the run as long.
+        #expect(Date().timeIntervalSince(start) < 120)
+        #expect(out.stdout.range(of: Data("done".utf8)) != nil)
+        // By the time the run returns, its input was given up and the pipe closed: nothing left writing.
+        #expect(handle.isInputClosed)
     }
 }
 

@@ -4,7 +4,7 @@ import Testing
 @testable import Lookout
 
 /// One element of the accessibility tree VoiceOver would read, as SwiftUI builds it for a hosted view.
-struct AXNode {
+struct AXNode: Equatable {
     let role: String
     let label: String
     let children: [AXNode]
@@ -30,6 +30,7 @@ enum AccessibilityTree {
 
     /// The tree of a hub on `edge`, in the state `configure` asks for once it is on screen.
     static func render(edge: DockEdge = .right, scenario: Demo.Scenario = .agents, size: CGSize = CGSize(width: 1000, height: 800),
+                       ready: (AXNode) -> Bool = hasControls,
                        configure: (Store, HubState) -> Void = { _, _ in }) async throws -> AXNode {
         _ = enabled
         let store = Store()
@@ -48,13 +49,12 @@ enum AccessibilityTree {
         window.orderFrontRegardless()
         defer { window.close() }
         configure(store, hub)
-        try await Task.sleep(for: .seconds(0.7))
-        hosting.layoutSubtreeIfNeeded()
-        return node(hosting)
+        return await settled(hosting, ready: ready)
     }
 
     /// The tree of any view, in a window of its own (the Router's window, say).
-    static func render<V: View>(_ view: V, size: CGSize = CGSize(width: 920, height: 640)) async throws -> AXNode {
+    static func render<V: View>(_ view: V, size: CGSize = CGSize(width: 920, height: 640),
+                                ready: (AXNode) -> Bool = hasControls) async throws -> AXNode {
         _ = enabled
         let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
@@ -63,9 +63,33 @@ enum AccessibilityTree {
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()
         defer { window.close() }
-        try await Task.sleep(for: .seconds(0.7))
+        return await settled(hosting, ready: ready)
+    }
+
+    /// What a tree must have before it is read at all: some controls (an empty tree, before SwiftUI has built it, has no
+    /// unnamed control either).
+    nonisolated static func hasControls(_ tree: AXNode) -> Bool {
+        tree.all.contains { AXNode.controls.contains($0.role) }
+    }
+
+    /// The tree once it is `ready` and the same over several turns of the main actor in a row (SwiftUI has drawn what it had
+    /// pending), however slow the machine; a watchdog of a minute, past which the test fails.
+    private static func settled(_ hosting: NSView, ready: (AXNode) -> Bool) async -> AXNode {
+        let deadline = Date().addingTimeInterval(60)
+        var last: AXNode?, same = 0
+        while Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+            hosting.layoutSubtreeIfNeeded()
+            let tree = node(hosting)
+            same = ready(tree) && tree == last ? same + 1 : 0
+            last = tree
+            if same >= 5 { return tree }
+        }
+        // Never ready, or never still: the tree read now would prove nothing (an empty one has no unnamed control).
         hosting.layoutSubtreeIfNeeded()
-        return node(hosting)
+        let tree = node(hosting)
+        Issue.record("The accessibility tree wasn't ready and steady within a minute (\(ready(tree) ? "still changing" : "no controls"))")
+        return tree
     }
 
     private static func node(_ element: Any) -> AXNode {

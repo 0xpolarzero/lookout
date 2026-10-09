@@ -361,6 +361,7 @@ private struct Tip: ViewModifier {
     @Environment(\.tipCenter) private var center
     @Environment(\.previewTip) private var previewTip
     @Environment(\.systemHelp) private var systemHelp
+    @Environment(\.tipFocusDelay) private var focusDelay
 
     @ViewBuilder func body(content: Content) -> some View {
         // No tooltip layer above (or one too small to host the bubble): the system tooltip says the same.
@@ -397,8 +398,9 @@ private struct Tip: ViewModifier {
             .onChange(of: focused) { _, focused in
                 pending?.cancel()
                 if focused {
+                    let delay = focusDelay
                     pending = Task {
-                        try? await Task.sleep(for: .seconds(1))
+                        await delay()
                         guard !Task.isCancelled else { return }
                         show()
                     }
@@ -465,6 +467,8 @@ enum TipSpace {
 
 extension EnvironmentValues {
     @Entry var systemHelp = false
+    /// How long a control has to keep the keyboard focus before its tip shows (a second); a test holds it open instead.
+    @Entry var tipFocusDelay: @Sendable () async -> Void = { try? await Task.sleep(for: .seconds(1)) }
     @Entry var tipCenter: TipCenter? = nil
 }
 

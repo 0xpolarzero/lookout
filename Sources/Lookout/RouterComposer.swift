@@ -57,8 +57,11 @@ struct RouterComposer: View {
         .onDisappear { model.composerFocused = false }
         // The @ suggestions follow the caret, wherever it is in the text.
         .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { note in
-            // Only the composer's own editor: in its window, where its field is (not another window's, nor a form's "Other…").
-            guard let editor = note.object as? NSTextView, anchor.owns(editor) else { return }
+            // Only the composer's own editor, while it edits: in its window, where its field is (not another window's, nor a
+            // form's "Other…"), and still the window's first responder (ending its editing, when the composer loses the
+            // keyboard, moves the editor's selection; that isn't the caret moving).
+            guard let editor = note.object as? NSTextView, anchor.owns(editor), editor.window?.firstResponder === editor
+            else { return }
             model.followCaret(editor)
         }
         .onChange(of: model.caretRequest) { _, request in

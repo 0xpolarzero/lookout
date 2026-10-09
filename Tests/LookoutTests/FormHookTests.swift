@@ -229,7 +229,8 @@ import Testing
         var polls = 0
         let started = Date()
         let held = FormHook.readInput(fd: fds[0], stopped: { polls += 1; return polls > 3 })
-        #expect(held == nil && Date().timeIntervalSince(started) < 2)
+        // Ended by the signal, not by its own 60 s limit (a watchdog bound: any runner is far quicker).
+        #expect(held == nil && Date().timeIntervalSince(started) < 50)
         // Or the time limit.
         #expect(FormHook.readInput(fd: fds[0], timeout: 0.3, stopped: { false }) == nil)
         // Closed: what was written.
@@ -259,10 +260,10 @@ import Testing
         try process.run()
         defer { Self.reap(process) }
         // Ready once it catches SIGTERM: before that (the binary still loading), the signal would kill it outright.
-        let ready = Self.waitUntil(within: 30) { Self.catches(SIGTERM, pid: process.processIdentifier) || !process.isRunning }
+        let ready = Self.waitUntil(within: 60) { Self.catches(SIGTERM, pid: process.processIdentifier) || !process.isRunning }
         #expect(ready && process.isRunning)
         process.terminate()
-        let quit = Self.waitForExit(process, within: 30)
+        let quit = Self.waitForExit(process, within: 60)
         Self.reap(process)
         try? stdin.fileHandleForWriting.close()
         #expect(quit && process.terminationReason == .exit && process.terminationStatus == 0)
@@ -311,7 +312,7 @@ import Testing
         defer { Self.reap(process) }
         stdin.fileHandleForWriting.write(request(transcript: nil, tool: "Bash"))
         try stdin.fileHandleForWriting.close()
-        let quit = Self.waitForExit(process, within: 30)
+        let quit = Self.waitForExit(process, within: 60)
         Self.reap(process)
         #expect(quit && process.terminationStatus == 0)
         #expect(stdout.fileHandleForReading.readDataToEndOfFile().isEmpty)
