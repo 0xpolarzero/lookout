@@ -176,7 +176,64 @@ private func threads(_ body: Data) -> Any {
             ]]]] },
         ])
         try? await s.syncConversations("a/r")
+        // The search of the threads I've been in wasn't answered either.
         #expect(s.items.map(\.forYou) == [nil])
+    }
+
+    /// Someone else's thread with earlier pages of comments I can't see, and a search of the threads I've been in.
+    private func cutOffThread(joined: [Int], mine: Bool = false) {
+        let now = Date().addingTimeInterval(-600)
+        StubGitHub.reset([
+            "/repos/a/r/issues": { _ in [] },
+            "/repos/a/r/issues/comments": { _ in
+                [comment(1, on: 7, by: "them", at: now)] + (mine ? [comment(2, on: 7, by: "me", at: now.addingTimeInterval(-60))] : [])
+            },
+            "/repos/a/r/pulls/comments": { _ in [] },
+            "/graphql": { _ in ["data": ["repository": ["n7": [
+                "title": "Seven", "author": ["login": "other"],
+                "comments": ["pageInfo": ["hasPreviousPage": true], "nodes": []], "reviews": ["nodes": []],
+            ]]]] },
+            "/search/issues": { _ in
+                ["total_count": joined.count, "incomplete_results": false, "items": joined.map { ["number": $0] }]
+            },
+        ])
+    }
+
+    @Test func aCutOffThreadIWasNeverInIsDropped() async {
+        let (s, _) = store()
+        cutOffThread(joined: [3])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.isEmpty)
+        #expect(StubGitHub.paths.filter { $0 == "/search/issues" }.count == 1)
+    }
+
+    @Test func aCutOffThreadIWasInIsMine() async {
+        let (s, _) = store()
+        cutOffThread(joined: [7])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.map(\.forYou) == [true])
+    }
+
+    @Test func theThreadsIWasInAreSearchedOnceAnHour() async {
+        let (s, _) = store()
+        cutOffThread(joined: [])
+        try? await s.syncConversations("a/r")
+        s.repos[0].cursors = [:]
+        StubGitHub.paths = []
+        try? await s.syncConversations("a/r")
+        #expect(StubGitHub.paths.filter { $0 == "/search/issues" }.count == 0)
+    }
+
+    @Test func myCommentSeenBySyncCountsBeforeSearchHasIt() async {
+        let (s, _) = store()
+        cutOffThread(joined: [])
+        try? await s.syncConversations("a/r")
+        #expect(s.items.isEmpty)
+        // Now I comment on 7 and someone answers; the search, asked an hour ago at most, doesn't know yet.
+        cutOffThread(joined: [], mine: true)
+        s.repos[0].cursors = [:]
+        try? await s.syncConversations("a/r")
+        #expect(s.items.map(\.forYou) == [true])
     }
 
     @Test func anErrorWithoutAPathLeavesTheWholeBatchUnknown() async {

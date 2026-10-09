@@ -196,6 +196,8 @@ final class Store {
     @ObservationIgnored private var transcriptWatcher: FolderWatcher?
     @ObservationIgnored private var sessionsWatcher: FolderWatcher?
     @ObservationIgnored private var dotsWatcher: FolderWatcher?
+    /// Per repo, the threads I've been in (see `refreshJoined`).
+    @ObservationIgnored private var joined: [String: Joined] = [:]
     @ObservationIgnored var claudeTimer: Timer?
     @ObservationIgnored private var claudeObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var screensAsleep = false
@@ -851,6 +853,7 @@ final class Store {
         removeItems { $0.repo == repo.fullName && $0.kind != .reviewRequested }
         notifier.removeBanners(of: repo.fullName)
         ci[repo.fullName] = nil
+        joined[repo.fullName] = nil
         // Polls never visit it again, so its fault would outlive it (the gear's badge, the banner, Settings).
         conversationErrors[repo.fullName] = nil
         ciErrors[repo.fullName] = nil
@@ -1083,6 +1086,15 @@ final class Store {
         let reviewNumbers = Set(added.filter { $0.kind == .reviewComment }.map(\.number))
         let info: [Int: ThreadInfo]? = needInfo.isEmpty ? [:]
             : try? await fetchThreads(name, Array(needInfo), participation: true, reviewThreads: reviewNumbers, me: me)
+        // Threads too long to see my part in whole ask the search for the threads I've been in, once an hour at most.
+        let cutOff = added.contains { item in
+            guard commentKinds.contains(item.kind), let thread = info?[item.number] else { return false }
+            return item.kind == .reviewComment ? thread.reviewThreadsTruncated : thread.activityTruncated
+        }
+        if cutOff { await refreshJoined(name, me: me) }
+        // What I just said may not be searchable yet; the sync saw it.
+        if !myReplies.isEmpty { joined[name]?.numbers.formUnion(myReplies.map(\.number)) }
+        let joinedNow = cutOff ? joined[name] : nil
         // The repo may have been stopped, or set to follow something else, while the answers were out: nothing of them is
         // kept, counted or told (the cursors stay, so a repo that is still watched asks again).
         guard isCurrent(repo) else { return }
@@ -1095,7 +1107,7 @@ final class Store {
             if let title = thread?.title { added[i].title = title }
             let isMentioned = mentioned.contains(added[i].id)
             if commentKinds.contains(added[i].kind) {
-                added[i].forYou = Self.relevance(added[i], thread: thread, mentioned: isMentioned, me: me)
+                added[i].forYou = Self.relevance(added[i], thread: thread, mentioned: isMentioned, me: me, joined: joinedNow)
             }
         }
         if !repo.allComments {
@@ -1125,6 +1137,37 @@ final class Store {
         // From the stored copies: a reply above may have settled an item that just arrived.
         let arrived = Set(added.map(\.id))
         announce(items.filter { arrived.contains($0.id) && $0.state == .unread && $0.createdAt > repo.addedAt })
+    }
+
+    /// The issues and PRs of a repo I've commented on or reviewed: for threads too long to see my part in (see `relevance`).
+    struct Joined {
+        var numbers: Set<Int>
+        /// The search answered everything: a thread missing from `numbers` is one I've never been in.
+        var complete: Bool
+        var at = Date()
+    }
+
+    /// One search, asked again after an hour; in between, my comments seen by the sync are added as they come.
+    private func refreshJoined(_ name: String, me: String) async {
+        if let known = joined[name], Date().timeIntervalSince(known.at) < 3600 { return }
+        struct Found: Decodable { let number: Int }
+        var numbers = Set<Int>()
+        var complete = false
+        // Search answers 1,000 results at most.
+        for page in 1...10 {
+            guard let found: GHSearch<Found> = try? await gh.get("/search/issues", [
+                "q": "repo:\(name) commenter:\(me)", "per_page": "100", "page": "\(page)",
+            ]) else { return }
+            numbers.formUnion(found.items.map(\.number))
+            if found.incompleteResults == true { break }
+            if found.items.count < 100 || found.totalCount.map({ numbers.count >= $0 }) == true {
+                complete = true
+                break
+            }
+        }
+        // The repo may have been stopped while the search was out.
+        guard repos.contains(where: { $0.fullName == name }) else { return }
+        joined[name] = Joined(numbers: numbers, complete: complete)
     }
 
     struct ThreadInfo {
@@ -1221,11 +1264,18 @@ final class Store {
     }
 
     /// `isRelevant`, or nil when the thread was cut off before it could say: only a whole view can rule a comment out.
-    nonisolated static func relevance(_ item: InboxItem, thread: ThreadInfo?, mentioned: Bool, me: String) -> Bool? {
+    /// A cut-off thread is settled by `joined`, the threads I've been in: one I was never in isn't mine.
+    nonisolated static func relevance(_ item: InboxItem, thread: ThreadInfo?, mentioned: Bool, me: String,
+                                      joined: Joined? = nil) -> Bool? {
         if isRelevant(item, thread: thread, mentioned: mentioned, me: me) { return true }
         guard let thread else { return nil }
         let cut = item.kind == .reviewComment ? thread.reviewThreadsTruncated : thread.activityTruncated
-        return cut ? nil : false
+        guard cut else { return false }
+        guard let joined else { return nil }
+        if !joined.numbers.contains(item.number) { return joined.complete ? false : nil }
+        // In it, and nowhere in the part seen: so before all of that, this comment included. Which review thread
+        // I was in is still unknown.
+        return item.kind == .reviewComment || !thread.activity.isEmpty ? nil : true
     }
 
     nonisolated static func mentions(_ body: String?, _ me: String) -> Bool {

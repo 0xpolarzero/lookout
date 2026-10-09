@@ -68,4 +68,24 @@ private func comment(_ kind: EventKind, at offset: TimeInterval, root: Int? = ni
         #expect(!Store.mentions("see github.com/@0xpolarzero2", me))
         #expect(!Store.mentions(nil, me))
     }
+
+    @Test func aCutOffThreadIsSettledByTheThreadsIWasIn() {
+        var thread = Store.ThreadInfo(title: "t", author: "other")
+        thread.activityTruncated = true
+        thread.reviewThreadsTruncated = true
+        let issue = comment(.issueComment, at: 0), review = comment(.reviewComment, at: 0, root: 9)
+        let never = Store.Joined(numbers: [2], complete: true)
+        #expect(Store.relevance(issue, thread: thread, mentioned: false, me: me, joined: never) == false)
+        #expect(Store.relevance(review, thread: thread, mentioned: false, me: me, joined: never) == false)
+        // Past what the search could answer, a missing thread proves nothing.
+        let partial = Store.Joined(numbers: [2], complete: false)
+        #expect(Store.relevance(issue, thread: thread, mentioned: false, me: me, joined: partial) == nil)
+        let was = Store.Joined(numbers: [1], complete: true)
+        #expect(Store.relevance(issue, thread: thread, mentioned: false, me: me, joined: was) == true)
+        // Which review thread I was in is still unknown.
+        #expect(Store.relevance(review, thread: thread, mentioned: false, me: me, joined: was) == nil)
+        // My part seen comes after this comment: whether there's an earlier one is unknown.
+        thread.activity = [t0.addingTimeInterval(60)]
+        #expect(Store.relevance(issue, thread: thread, mentioned: false, me: me, joined: was) == nil)
+    }
 }
