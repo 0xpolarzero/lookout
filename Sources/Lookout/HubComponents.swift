@@ -648,6 +648,7 @@ struct SessionBlock: View {
         .motion(Theme.Motion.hover, value: selected)
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(row.id) }
+        .opensOnFirstClick()
         // One button for the card (named, with its state); the hover actions stay reachable inside it.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.session.title)

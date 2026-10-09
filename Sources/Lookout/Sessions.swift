@@ -493,6 +493,7 @@ struct DrawerRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { store.openAgent(row.id) }
+        .opensOnFirstClick()
         .onHover { if $0 { ui.drawerSelection = row.id } }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.session.title)
@@ -535,6 +536,15 @@ struct DrawerRow: View {
                 }
             }
         }
+    }
+}
+
+extension View {
+    /// Its taps also take the click that makes the window key. The hub is never key while you hover it from another
+    /// app, and a tap gesture otherwise spends that first click on making it key: a row needed two clicks to open.
+    /// (Buttons already take it.)
+    @ViewBuilder func opensOnFirstClick() -> some View {
+        if #available(macOS 15, *) { allowsWindowActivationEvents(true) } else { self }
     }
 }
 
