@@ -25,15 +25,10 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
 
-      # The summary line is required: a test process that ends partway through can still exit 0, and a run that stopped
-      # early must never count as a pass.
       # Bounded: a test that hangs can't hold the runner (the slowest full run takes a few minutes).
       - name: Test
         timeout-minutes: 20
-        run: |
-          set -o pipefail
-          swift test 2>&1 | tee test.log
-          grep -Eq "Test run with [0-9]+ tests? .*passed" test.log || { echo "::error::The test run ended without its summary"; exit 1; }
+        run: ./scripts/test.sh
 
       # One certificate for every release: macOS keeps Accessibility access across updates, and the in-app
       # updater only installs a release signed by the same certificate as the running app.

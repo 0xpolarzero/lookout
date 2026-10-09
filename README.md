@@ -47,6 +47,8 @@ Push a version tag; the `Release` workflow tests, builds a universal app and pub
 
     git tag v0.2.0 && git push origin v0.2.0
 
+The `Test` workflow runs the same tests (`scripts/test.sh`, on the same runner) on every push to `main`, so a test that fails only there shows up before a release.
+
 Releases are signed with one self-signed certificate, so macOS keeps Lookout's Accessibility access across updates and the updater can check a release is ours. Set it up once:
 
 1. In Keychain Access: Certificate Assistant → Create a Certificate, name **Lookout Dev**, identity type *Self-Signed Root*, certificate type *Code Signing*.

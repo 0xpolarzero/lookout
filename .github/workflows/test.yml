@@ -1,0 +1,21 @@
+name: Test
+
+# Every push to main runs the suite on the release runner, so a test that only fails there shows up before a release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      # Bounded: a test that hangs can't hold the runner (the slowest full run takes a few minutes).
+      - name: Test
+        timeout-minutes: 20
+        run: ./scripts/test.sh
