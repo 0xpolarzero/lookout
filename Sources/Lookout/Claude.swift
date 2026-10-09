@@ -38,6 +38,10 @@ struct ClaudeActivity: Hashable {
     var since: Date
     /// Stopped mid-turn on you: a question, or a plan to approve.
     var waitsForYou = false
+    /// The tool it waits on you with (`AskUserQuestion`, `ExitPlanMode`): tells a question from a plan.
+    var tool: String? = nil
+    /// That call's id in the transcript: what ties a card to the form Lookout's hook holds for the same call.
+    var toolUseID: String? = nil
 }
 
 /// A subagent or shell command a session started in the background, still running.
@@ -236,8 +240,10 @@ enum Claude {
             if type == "assistant" {
                 if let tool = parts.last(where: { $0["type"] as? String == "tool_use" }) {
                     let name = tool["name"] as? String ?? ""
+                    let waits = ["AskUserQuestion", "ExitPlanMode"].contains(name)
                     return ClaudeActivity(text: describe(tool: name, input: tool["input"] as? [String: Any] ?? [:]),
-                                          since: since, waitsForYou: ["AskUserQuestion", "ExitPlanMode"].contains(name))
+                                          since: since, waitsForYou: waits, tool: waits ? name : nil,
+                                          toolUseID: waits ? tool["id"] as? String : nil)
                 }
                 return ClaudeActivity(text: parts.contains { $0["type"] as? String == "text" } ? "Writing" : "Thinking", since: since)
             }

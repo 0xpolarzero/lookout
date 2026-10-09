@@ -20,6 +20,8 @@ enum Demo {
         case sessionsManyNew, sessionsWaiting10
         // The update tile.
         case updateAvailable, updateDownloading, updateReady
+        // The Router: cards of each kind (a question with its form) and a chat with receipts; and the Router switched off.
+        case router, routerOff
     }
 
     static func populate(_ store: Store, _ scenario: Scenario = .busy) {
@@ -198,7 +200,75 @@ enum Demo {
         case .updateReady:
             agents(store, now)
             store.updater.preview(.ready, version: "0.5.0")
+        case .router:
+            agents(store, now)
+            router(store, now)
+        case .routerOff:
+            agents(store, now)
         }
+    }
+
+    /// The Router on, over the `agents` sessions: the one that asks is stopped on its question (whose form Lookout holds),
+    /// a plan and a stuck turn wait, a turn is done, older cards are addressed; a short chat with what the Router did.
+    private static func router(_ store: Store, _ now: Date) {
+        let lcu = blockedAgentID
+        store.claudeSessions[lcu]?.running = true
+        store.claudeSessions[lcu]?.cliID = "cli-demo-lcu"
+        store.claudeActivity[lcu] = ClaudeActivity(text: "Should updates install silently, or ask first each time?",
+                                                   since: now.addingTimeInterval(-120), waitsForYou: true, tool: "AskUserQuestion",
+                                                   toolUseID: "toolu_demo_lcu")
+        let question = "Should updates install silently, or ask first each time?"
+        store.pendingForms["cli-demo-lcu"] = PendingForm(
+            id: "cli-demo-lcu-1-1", cliSessionID: "cli-demo-lcu", transcriptPath: "",
+            questions: [PendingForm.Question(question: question, header: "Updates", multiSelect: false, options: [
+                PendingForm.Option(label: "Install silently", description: "Download and install in the background"),
+                PendingForm.Option(label: "Ask first", description: "Show a prompt before each update"),
+            ])],
+            createdAt: now.addingTimeInterval(-60), pid: 0, toolUseID: "toolu_demo_lcu")
+        func card(_ session: String, _ kind: RouterCard.Kind, _ text: String, minutes: Double, addressed: RouterCard.Addressed? = nil)
+            -> RouterCard {
+            let s = store.claudeSessions[session]
+            let at = now.addingTimeInterval(-minutes * 60)
+            // Ids as the feed makes them: a wait by when it began, a turn by its number.
+            let id = kind.isTurn ? "\(session)#t\(s?.completedTurns ?? 0)" : "\(session)#w\(RouterFeed.Stamp.ms(at))"
+            return RouterCard(id: id, sessionID: session, kind: kind,
+                              title: s?.title ?? session, folder: s?.folder, text: text, createdAt: at,
+                              addressedAt: addressed == nil ? nil : at.addingTimeInterval(120), addressedBy: addressed)
+        }
+        var state = RouterState()
+        state.enabled = true
+        state.enabledAt = now.addingTimeInterval(-86400)
+        state.cards = [
+            card("local_demo-transfer", .done, "Transfer is done; both remotes point at the new org.", minutes: 12, addressed: .router),
+            card("local_demo-games", .question, "Single-player immersion or online squads?", minutes: 30, addressed: .answered),
+            card("local_demo-ci", .done, "Fixed the flaky sandbox test; **CI is green** on the branch.", minutes: 4),
+            card("local_demo-linux", .plan, "Run the JavaScript sandbox in a Firecracker microVM on Linux", minutes: 9),
+            card("local_demo-calc", .stuck, "Can't reach the staging database: the VPN is down.", minutes: 6),
+            card(lcu, .question, question, minutes: 2),
+        ]
+        state.cards[state.cards.count - 1].toolUseID = "toolu_demo_lcu"
+        // The question is the wait the session is on now, so its form shows on its card.
+        state.waits[lcu] = state.cards.last?.waitMs
+        state.chat = [
+            RouterMessage(role: .you, text: "what needs me?", date: now.addingTimeInterval(-300)),
+            RouterMessage(role: .router, text: "**3 need you**: *LCU update notifications* asks how updates install; the Linux "
+                          + "sandbox has a plan to approve; *Calculator display reading* is stuck on the VPN.\nDone: CI failure diagnosis.",
+                          date: now.addingTimeInterval(-290)),
+            RouterMessage(role: .you, text: "transfer: remove the old remote", date: now.addingTimeInterval(-200)),
+            RouterMessage(role: .receipt, text: "→ Repository ownership transfer setup: Remove the old remote.",
+                          date: now.addingTimeInterval(-195), sessionID: "local_demo-transfer",
+                          original: "transfer: remove the old remote"),
+            RouterMessage(role: .peer, text: "Removed `old-origin`; only the new org's remote is left. I also checked the branch "
+                          + "protection rules on the new org: `main` requires one review and passing checks, as before. The deploy key "
+                          + "was carried over, and the webhook for CI now points at the new repository. Two open PRs still target the "
+                          + "old fork; I left them alone.", date: now.addingTimeInterval(-60), sessionID: "local_demo-transfer"),
+            RouterMessage(role: .you, text: "start a session to bump the version", date: now.addingTimeInterval(-30),
+                          projects: ["/Users/me/code/lookout"]),
+            RouterMessage(role: .receipt, text: "Cancelled before sending", date: now.addingTimeInterval(-28)),
+            RouterMessage(role: .error, text: "SendMessage to Game recommendations: not delivered (the session isn't open in Claude)",
+                          date: now.addingTimeInterval(-10), sessionID: "local_demo-games"),
+        ]
+        store.router = state
     }
 
     /// Only the bot items and the finished ones left: nothing is for you.

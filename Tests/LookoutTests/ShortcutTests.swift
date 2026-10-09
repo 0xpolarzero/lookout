@@ -232,7 +232,7 @@ import Testing
         #expect(store.restoreDefaultShortcuts() == nil)
         #expect(!store.hasCustomShortcuts)
         for action in ShortcutAction.allCases { #expect(store.shortcut(action) == action.defaultShortcut) }
-        #expect(Set(registered) == [.togglePanel, .sessionSwitcher])
+        #expect(Set(registered) == [.togglePanel, .sessionSwitcher, .router])
     }
 
     @MainActor @Test func restoreDefaultsAfterSwappingTheGlobalKeysRegistersBothDefaults() {

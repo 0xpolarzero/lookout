@@ -719,3 +719,62 @@ struct ReorderIf: ViewModifier {
         if enabled { content.modifier(AgentReorder(row: row, store: store)) } else { content }
     }
 }
+
+/// The Router in the bar: its symbol, and on its corner how many cards are open, amber while one needs you (a question, a
+/// plan, a stuck turn), blue when they are only finished turns, nothing at zero. A click opens the Router's window.
+struct RouterCell: View {
+    let needsYou: Int
+    let done: Int
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) { RouterCellLabel(needsYou: needsYou, done: done) }
+            .buttonStyle(.plain)
+            .focused($focused)
+            .accessibilityLabel("Router")
+            .accessibilityValue([needsYou > 0 ? "\(needsYou) need you" : nil, done > 0 ? "\(done) done" : nil]
+                .compactMap { $0 }.joined(separator: ", ").nonEmpty ?? "Nothing open")
+            .accessibilityHint("Opens the Router window")
+            .motion(.snappy, value: needsYou + done)
+    }
+}
+
+private struct RouterCellLabel: View {
+    let needsYou: Int
+    let done: Int
+    @State private var hover = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        let open = needsYou + done
+        Image(systemName: "arrow.triangle.branch")
+            .font(Theme.Typography.glyph(14))
+            .foregroundStyle(hover ? Theme.text : Theme.secondary)
+            .frame(width: 28, height: 28)
+            .background(Tile.shape(28).fill(hover ? Theme.Fill.hover : Theme.Fill.rest))
+            .overlay(alignment: .topTrailing) {
+                if open > 0 {
+                    Text(open > 99 ? "99+" : "\(open)")
+                        .font(Theme.Typography.badge)
+                        .foregroundStyle(Theme.onTint)
+                        .contentTransition(reduce ? .opacity : .numericText(value: Double(open)))
+                        .padding(.horizontal, 4)
+                        .frame(minWidth: 15, minHeight: 15)
+                        .background(Capsule().fill(needsYou > 0 ? Theme.amber : Theme.accent))
+                        .background(Capsule().fill(Theme.bg).padding(-1.5))
+                        .offset(x: 6, y: -5)
+                        .transition(.scaleFade(0.6, reduce: reduce))
+                }
+            }
+            .frame(width: Theme.Metrics.line, height: Theme.Metrics.line)
+            .contentShape(Rectangle())
+            .onHover { hover = $0 }
+            .motion(Theme.Motion.hover, value: hover)
+    }
+}
+
+extension String {
+    /// nil for an empty string, for `??` defaults.
+    var nonEmpty: String? { isEmpty ? nil : self }
+}

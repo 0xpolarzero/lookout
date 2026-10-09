@@ -450,6 +450,9 @@ struct LookoutHub: View {
     /// for; a first guess until it's measured.
     @State var stripTrailingWidth: CGFloat = 140
     @Environment(\.accessibilityReduceMotion) var reduce
+    /// Opens the Router's window (on a card, from a card's row).
+    @Environment(\.openRouter) var openRouter
+    @Environment(\.pickRouterCard) var pickRouterCard
 
     /// The bar's depth: a cell's width on the sides, the strip's height along the top and bottom.
     static let cell = Theme.Metrics.bar
@@ -509,6 +512,7 @@ struct LookoutHub: View {
         .motion(Self.refocus, value: hub.focus)
         .contextMenu {
             Toggle("Keep Open", isOn: $hub.pinned)
+            if store.routerOn { Button("Open Router") { openRouter(nil) } }
             Button("Settings…") { hub.go(.settings) }
             Button("Repositories…") { hub.go(.repos) }
             if store.updater.isRelease {
@@ -694,6 +698,18 @@ struct LookoutHub: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { if ciHeight != $0 { ciHeight = $0 } }
         // A search doesn't look in CI.
         .opacity(searching ? 0.4 : 1)
+        // The Router, just before the sessions it works on: its cell and counts; kept open, what is running too.
+        if store.routerOn {
+            sectionDivider
+            VStack(alignment: side, spacing: 0) {
+                row(cell: { routerCell }, detail: { routerHeader })
+                if showsDetail && !shrunk(.router) {
+                    row(cell: { EmptyView() }, detail: { routerStatusRow }).transition(.hubReveal)
+                }
+            }
+            .modifier(probe(.router))
+            .opacity(searching ? 0.4 : 1)
+        }
         if store.agents.enabled {
             sectionDivider
             VStack(alignment: side, spacing: 0) { agentRowsView }
@@ -723,7 +739,8 @@ struct LookoutHub: View {
                 // The sessions scroll with their tiles, so each stays beside its row.
                 CappedScroll(cap: caps.agents, hub: hub) { sessionRows }
                     .frame(width: Self.cell + Self.detail)
-                row(cell: { newSessionCell }, detail: { newSessionDetail })
+                // With the Router on, it starts sessions (with their first message): no second way here.
+                if !store.routerOn { row(cell: { newSessionCell }, detail: { newSessionDetail }) }
             }
             .transition(.hubReveal)
         } else {
@@ -833,6 +850,23 @@ struct LookoutHub: View {
             .frame(maxHeight: .infinity)
             .modifier(probe(.ci))
             .opacity(searching ? 0.4 : 1)
+            if store.routerOn {
+                stripDivider
+                HStack(spacing: 8) {
+                    routerCell
+                    // On a narrow screen, only the cell: its column under the strip goes too (the window has the cards).
+                    if wide && routerHasColumn { routerHeader.transition(.hubReveal) }
+                }
+                .padding(.leading, Self.inset + 1)
+                .padding(.trailing, Self.inset)
+                .frame(width: wide ? columnWidth(.router) : nil, alignment: .leading)
+                .frame(maxHeight: .infinity)
+                // The whole segment opens the window, not only its cell.
+                .contentShape(Rectangle())
+                .onTapGesture { openRouter(nil) }
+                .modifier(probe(.router))
+                .opacity(searching ? 0.4 : 1)
+            }
             if store.agents.enabled {
                 stripDivider
                 HStack(spacing: 8) {
@@ -927,6 +961,14 @@ struct LookoutHub: View {
                                 }
                                 .frame(width: Self.githubWidth, alignment: .topLeading)
                                 .frame(maxHeight: .infinity, alignment: .top)
+                                if store.routerOn {
+                                    columnDivider
+                                    Group {
+                                        if routerHasColumn { routerColumn } else { Color.clear }
+                                    }
+                                    .frame(width: columnWidth(.router), alignment: .topLeading)
+                                    .opacity(searching ? 0.4 : 1)
+                                }
                                 if store.agents.enabled {
                                     columnDivider
                                     // As wide as its segment (with the controls after it), whatever its text would like.
@@ -1022,10 +1064,12 @@ struct LookoutHub: View {
             // At the bottom, whatever height the column gets; a line keeps a row the list cuts off from running into
             // the new session row.
             Spacer(minLength: 0)
-            Hairline(inset: Self.inset + 10).padding(.bottom, Theme.Space.xs)
-            NewSessionRow(store: store, style: .twoLines)
-                .padding(.horizontal, Self.inset)
-                .padding(.bottom, Self.newSessionBlock - Theme.Space.xs - 44)
+            if !store.routerOn {
+                Hairline(inset: Self.inset + 10).padding(.bottom, Theme.Space.xs)
+                NewSessionRow(store: store, style: .twoLines)
+                    .padding(.horizontal, Self.inset)
+                    .padding(.bottom, Self.newSessionBlock - Theme.Space.xs - 44)
+            }
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
@@ -1090,14 +1134,29 @@ struct LookoutHub: View {
         switch section {
         case .inbox: return Self.inboxSegment
         case .ci: return Self.githubWidth - Self.inboxSegment - 1
+        case .router: return routerHasColumn ? Self.routerWidth : Self.routerCompact
         default:
-            // As much as the screen has left after the measured controls and update button, and the margins.
-            let room = maxWidth - Self.githubWidth - 1 - stripTrailingWidth - 2 * Self.inset
-            return max(Self.agentsMin, min(Self.detail, room))
+            // As much as the screen has left after the measured controls and update button, and the margins (and the
+            // Router's segment, when it has one: next to its bare cell, the sessions make do with a little less).
+            let router = store.routerOn ? columnWidth(.router) + 1 : 0
+            let least = store.routerOn && !routerHasColumn ? Self.agentsMin - Self.routerCompact - 1 : Self.agentsMin
+            let room = maxWidth - Self.githubWidth - 1 - router - stripTrailingWidth - 2 * Self.inset
+            return max(least, min(Self.detail, room))
         }
     }
 
+    /// Along the top and bottom, whether the screen has room for the Router's column beside the sessions' narrowest.
+    var routerHasColumn: Bool { Self.routerColumnFits(maxWidth: maxWidth, trailing: stripTrailingWidth) }
+
+    static func routerColumnFits(maxWidth: CGFloat, trailing: CGFloat) -> Bool {
+        maxWidth >= githubWidth + 1 + routerWidth + 1 + agentsMin + trailing + 2 * inset
+    }
+
     static let githubWidth: CGFloat = 570
+    /// Along the top and bottom, the Router's segment and the column under it.
+    static let routerWidth: CGFloat = 260
+    /// Its segment with no column: the bare cell, padded like the others.
+    static let routerCompact: CGFloat = Theme.Metrics.line + 2 * Theme.Metrics.inset + 1
     /// The inbox's segment of that column (CI's takes the rest), and the narrowest the sessions' column gets.
     static let inboxSegment: CGFloat = 370
     static let agentsMin: CGFloat = 260

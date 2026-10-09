@@ -205,6 +205,7 @@ struct PersistedState: Codable {
     var ci: [String: CIStatus]
     var settings: AppSettings
     var agents: AgentsState?
+    var router: RouterState?
 }
 
 enum InboxFilter: String, CaseIterable {

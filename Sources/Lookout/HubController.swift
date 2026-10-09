@@ -88,10 +88,14 @@ struct HubRoot: View {
     let hub: HubState
     let layout: HubLayout
     var maxLength: CGFloat
+    var openRouter: (String?) -> Void = { _ in }
+    var pickRouterCard: (String) -> Void = { _ in }
 
     var body: some View {
         GeometryReader { geo in content(in: geo.size) }
             .coordinateSpace(.named(LookoutHub.rootSpace))
+            .environment(\.openRouter, openRouter)
+            .environment(\.pickRouterCard, pickRouterCard)
             // Tooltips are drawn over the whole window, outside the hub's clipped shape, so they're never cut off.
             .tipSpace()
     }
@@ -153,6 +157,14 @@ final class HubController {
     fileprivate static let debug = ProcessInfo.processInfo.environment["LOOKOUT_DEBUG"] != nil
     private let trigger = HoverTrigger(size: NSSize(width: 10, height: 10))
     private var globalMouse: Any?
+    /// Opens the Router's window (the app's delegate owns it).
+    var openRouter: (String?) -> Void = { _ in } {
+        didSet { host.rootView.openRouter = { [weak self] in self?.routerOpened($0) } }
+    }
+    /// Picks a card in the Router's window.
+    var pickRouterCard: (String) -> Void = { _ in } {
+        didSet { host.rootView.pickRouterCard = pickRouterCard }
+    }
 
     /// The edge `--edge` names, if it names one.
     nonisolated static func edge(in arguments: [String]) -> DockEdge? {
@@ -222,7 +234,8 @@ final class HubController {
     private func dock() {
         let (frame, maxLength) = dockFrame()
         layout.floating = false
-        host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout, maxLength: maxLength)
+        host.rootView = HubRoot(store: store, ui: ui, hub: hub, layout: layout, maxLength: maxLength,
+                                openRouter: { [weak self] in self?.routerOpened($0) }, pickRouterCard: pickRouterCard)
         window.setFrame(frame, display: true)
         syncTrigger()
     }
@@ -365,6 +378,15 @@ final class HubController {
         hub.go(.main)
         hub.pinned = true
         if let first = store.sessionShortcutPick { keys.select("a:" + first.id) }
+    }
+
+    /// The Router's window takes the keyboard: the hub closes, as if left, so the window isn't under an open view.
+    private func routerOpened(_ card: String?) {
+        hub.section = nil
+        hub.endSearch()
+        // The keyboard goes to the window, so nothing hands it back to the app before.
+        hub.pinned = false
+        openRouter(card)
     }
 
     /// A summary banner's click: the full view on the inbox, to see what arrived.

@@ -14,6 +14,9 @@ struct PlaygroundView: View {
     /// The "Lookout playground" card: hidden in shots, where it is no part of what is looked at.
     var showsExplainer = true
     var minSize = CGSize(width: 1280, height: 820)
+    /// Opens the Router's window; a toast says so when there is none (in shots).
+    var openRouter: ((String?) -> Void)? = nil
+    var pickRouterCard: ((String) -> Void)? = nil
     @State private var behindClicks = 0
     @State private var leaveTask: Task<Void, Never>?
 
@@ -41,6 +44,10 @@ struct PlaygroundView: View {
             }
         }
         .frame(minWidth: minSize.width, minHeight: minSize.height)
+        .environment(\.pickRouterCard) { card in pickRouterCard?(card) }
+        .environment(\.openRouter) { [hub] card in
+            if let openRouter { openRouter(card) } else { hub.toast = "Open the Router" + (card.map { " on \($0)" } ?? "") }
+        }
         // As in the app: tooltips over the whole window, outside the hub's clipped shape.
         .tipSpace()
         .animation(.easeOut(duration: 0.2), value: hub.toast)
@@ -152,12 +159,17 @@ final class Playground: NSObject, NSWindowDelegate {
     private var monitor: Any?
     private var tap = ModifierTap()
     private lazy var keys = HubKeys(store: store, ui: ui, hub: hub)
+    private lazy var router = RouterWindowController(store: store)
 
     func run() {
-        Demo.populate(store, .agents)
+        Demo.populate(store, .router)
         store.agents.expanded = true
         store.interceptOpen = { [hub] text in hub.toast = text }
-        let view = PlaygroundView(store: store, ui: ui, hub: hub)
+        let view = PlaygroundView(store: store, ui: ui, hub: hub, openRouter: { [weak self] card in self?.router.show(card: card) },
+                                  pickRouterCard: { [weak self] card in
+                                      guard let self else { return }
+                                      self.router.model.select(card, store: self.store)
+                                  })
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
                           styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "Lookout playground"
@@ -175,7 +187,10 @@ final class Playground: NSObject, NSWindowDelegate {
         }
     }
 
-    func windowWillClose(_ notification: Notification) { NSApp.terminate(nil) }
+    func windowWillClose(_ notification: Notification) {
+        // The Router's window closing is not the playground's.
+        if (notification.object as? NSWindow) === window { NSApp.terminate(nil) }
+    }
 
     /// True when the event was consumed.
     private func handle(_ event: NSEvent) -> Bool {
@@ -223,6 +238,18 @@ extension [DockEdge] {
     static let rightAndTop: [DockEdge] = [.right, .top]
 }
 
+/// The Router's window in a shot: every card or only the open ones, and the card picked.
+struct RouterWindowShot {
+    var all = false
+    /// The open question picked, its form showing.
+    var picksQuestion = false
+    /// The question's form answered from the window ("Sent", and what was sent).
+    var answered = false
+    /// The composer mid-message: replying to the question, a project tagged, and an @ being typed.
+    var composing = false
+    static let size = CGSize(width: 920, height: 640)
+}
+
 /// What a shot has picked, for the row actions to show.
 enum ShotSelection {
     /// The newest inbox item that needs you.
@@ -256,6 +283,10 @@ struct Shot {
     var tip: String?
     var size = Shot.standard
     var environment = ShotEnvironment()
+    /// Settings scrolled to this section (by its id).
+    var settingsSection: String?
+    /// The Router's window instead of the playground (the edge only names the shot).
+    var routerWindow: RouterWindowShot?
 
     /// The same shot on each of these edges, named `<edge>-<state>`.
     static func edges(_ state: String, on edges: [DockEdge] = .all, _ configure: (inout Shot) -> Void = { _ in }) -> [Shot] {
@@ -344,6 +375,36 @@ enum PlaygroundShots {
             + Shot.edges("open-\(slug)", on: .rightAndTop) { $0.pinned = true; $0.environment = environment }
     }
 
+    /// The Router: its cell at rest, its panel and kept open on every edge; its window, with the cards open or all, the
+    /// question's form picked, under Increase Contrast, and switched off.
+    private static let routerShots: [Shot] = {
+        var shots = Shot.edges("rest-router") { $0.scenario = .router }
+        shots += Shot.edges("peek-router") { $0.scenario = .router; $0.section = .router }
+        shots += Shot.edges("open-router") { $0.scenario = .router; $0.pinned = true }
+        shots += Shot.edges("focus-agents-router", on: .rightAndTop) { $0.scenario = .router; $0.pinned = true; $0.focus = .agents }
+        // A 1024-wide screen: the Router keeps its cell, its column goes, nothing overflows.
+        shots += Shot.edges("open-router-1024", on: [.top, .bottom]) {
+            $0.scenario = .router; $0.pinned = true; $0.size = CGSize(width: 1024, height: 720)
+        }
+        shots += Shot.edges("open-router-720", on: .rightAndTop) { $0.scenario = .router; $0.pinned = true; $0.size = Shot.hd }
+        shots += Shot.edges("settings-router", on: [.right]) { $0.scenario = .router; $0.pinned = true; $0.page = .settings
+            $0.settingsSection = SettingsView.routerID
+        }
+        let window = { (name: String, configure: (inout Shot) -> Void) -> Shot in
+            var shot = Shot(name: "right-router-window\(name)", scenario: .router, routerWindow: RouterWindowShot())
+            configure(&shot)
+            return shot
+        }
+        shots.append(window("") { $0.routerWindow?.picksQuestion = true })
+        shots.append(window("-all") { $0.routerWindow?.all = true })
+        shots.append(window("-contrast") { $0.environment = .contrast })
+        shots.append(window("-off") { $0.scenario = .routerOff })
+        shots.append(window("-answered") { $0.routerWindow?.answered = true })
+        shots.append(window("-composing") { $0.routerWindow?.composing = true })
+
+        return shots
+    }()
+
     /// Every shot, in the order they are rendered.
     static let catalog: [Shot] = {
         var shots = baseline + inbox
@@ -355,6 +416,7 @@ enum PlaygroundShots {
         shots += environmentShots("contrast", .contrast)
         shots += environmentShots("motion", .motion)
         shots += environmentShots("differentiate", .differentiate)
+        shots += routerShots
         // A 1280x720 screen: the hub must fit its edge without overflowing.
         shots += Shot.edges("open-720", on: .rightAndTop) { $0.pinned = true; $0.size = Shot.hd }
         shots += Shot.edges("open-sessions-12-720", on: .rightAndTop) { $0.pinned = true; $0.scenario = .sessions12; $0.size = Shot.hd }
@@ -399,11 +461,13 @@ enum PlaygroundShots {
         let store = Store()
         Demo.populate(store, shot.scenario)
         store.agents.expanded = true
+        if let router = shot.routerWindow { return openRouterWindow(router, store: store, environment: shot.environment) }
         let ui = UIState(persists: false, edge: shot.edge)
         let hub = HubState()
         // Kept open a moment after showing at rest, as in use: the hub measures the bar at rest first.
         if shot.pinned { Task { try? await Task.sleep(for: .seconds(0.5)); hub.pinned = true } }
         hub.page = shot.page
+        if let section = shot.settingsSection { hub.settingsScroll = ScrollRequest(id: section, seq: 1) }
         hub.query = shot.query
         hub.focus = shot.focus
         hub.section = shot.section
@@ -418,6 +482,36 @@ enum PlaygroundShots {
         hosting.frame.size = shot.size
         let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        return window
+    }
+
+    /// The Router's window, offscreen, as `RouterWindowController` shows it.
+    private static func openRouterWindow(_ shot: RouterWindowShot, store: Store, environment: ShotEnvironment) -> NSWindow {
+        let model = RouterModel()
+        model.showAll = shot.all
+        if shot.picksQuestion { model.selection = store.openRouterCards.first { $0.kind == .question }?.id }
+        if shot.composing, let card = store.openRouterCards.first(where: { $0.kind == .question }) {
+            model.replyTo = card.id
+            model.projects = ["/Users/me/code/lookout"]
+            model.draft = "yes, ask first; and tell @mi"
+        }
+        if shot.answered, let card = store.openRouterCards.first(where: { $0.kind == .question }),
+           let form = store.pendingForm(for: card) {
+            model.sent.insert(form.id)
+            model.delivered[form.id] = [form.questions[0].question: "Ask first"]
+        }
+        let size = RouterWindowShot.size
+        let root = RouterView(store: store, model: model, checksClaudeCode: false)
+            .shotEnvironment(environment)
+            .frame(width: size.width, height: size.height)
+        let hosting = NSHostingView(rootView: root)
+        hosting.frame.size = size
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
         window.orderFrontRegardless()

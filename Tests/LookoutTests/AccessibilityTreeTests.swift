@@ -51,6 +51,21 @@ enum AccessibilityTree {
         return node(hosting)
     }
 
+    /// The tree of any view, in a window of its own (the Router's window, say).
+    static func render<V: View>(_ view: V, size: CGSize = CGSize(width: 920, height: 640)) async throws -> AXNode {
+        _ = enabled
+        let hosting = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.setFrameOrigin(NSPoint(x: -5000, y: -5000))
+        window.orderFrontRegardless()
+        defer { window.close() }
+        try await Task.sleep(for: .seconds(0.7))
+        hosting.layoutSubtreeIfNeeded()
+        return node(hosting)
+    }
+
     private static func node(_ element: Any) -> AXNode {
         guard let object = element as? NSObject else { return AXNode(role: "?", label: "", children: []) }
         func string(_ key: String) -> String { (object.value(forKey: key) as? String) ?? "" }
@@ -99,6 +114,23 @@ enum AccessibilityTree {
         missing += try await unnamed("signed out", scenario: .signedOut) { _, hub in hub.pinned = true }
         missing += try await unnamed("update ready", scenario: .updateReady) { _, hub in hub.pinned = true }
         missing += try await unnamed("many sessions", scenario: .sessionsManyNew) { _, hub in hub.pinned = true; hub.focus = .agents }
+        missing += try await unnamed("peek router", scenario: .router) { _, hub in hub.section = .router }
+        for edge in [DockEdge.right, .top] {
+            missing += try await unnamed("router kept open", edge: edge, scenario: .router) { _, hub in hub.pinned = true }
+        }
         #expect(missing.isEmpty, "\(missing)")
+    }
+
+    @Test func theRouterWindowNamesEveryControl() async throws {
+        let store = Store()
+        Demo.populate(store, .router)
+        let model = RouterModel()
+        model.selection = store.openRouterCards.first { $0.kind == .question }?.id
+        let tree = try await AccessibilityTree.render(RouterView(store: store, model: model))
+        let controls = tree.all.filter { AXNode.controls.contains($0.role) }
+        #expect(controls.count > 5, "\(tree.all.map(\.role))")
+        let unnamed = controls.filter { $0.label.isEmpty }.map(\.role)
+        #expect(unnamed.isEmpty, "\(unnamed)")
+        #expect(tree.all.contains { $0.label == "Message the Router" })
     }
 }

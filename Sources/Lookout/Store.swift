@@ -56,6 +56,29 @@ final class Store {
             save()
         }
     }
+    /// The Router (see Router.swift): its cards and its chat.
+    var router = RouterState() {
+        didSet {
+            routerRevision &+= 1
+            persistedRevision &+= 1
+            if oldValue.cards != router.cards { countCardChanges(from: oldValue.cards) }
+            save()
+        }
+    }
+    /// Bumped on every change to `router`: a cheap memo/animation key.
+    private(set) var routerRevision = 0
+    /// How many times each card has changed (see `countCardChanges`).
+    @ObservationIgnored var cardRevisions: [String: Int] = [:]
+    /// The question forms Lookout's hook holds, by Claude Code session id (`ClaudeSession.cliID`).
+    var pendingForms: [String: PendingForm] = [:]
+    /// Why installing or removing the form hook failed, if it did.
+    var routerHookError: String?
+    /// The form hook as last checked (nil until the Router has been switched on in this run).
+    var routerHookStatus: FormHookInstaller.Status?
+    /// Lookout's Claude Code plugin as last checked (nil until the Router has been switched on in this run, or in a test
+    /// that stands in no CLI), and why installing or removing it failed, if it did.
+    var routerPluginStatus: ClaudePluginInstaller.Status?
+    var routerPluginError: String?
     /// Every project's name, with as much of its path as tells it from another of the same name (`customer-a/app`): worked
     /// out when the folders change, not by each view that names a project. Only a change in it redraws what reads it.
     var folderNames: [String: String] = [:]
@@ -173,6 +196,32 @@ final class Store {
     /// one still stored does nothing, and Settings says so.
     var refusedShortcuts: [ShortcutAction: Shortcut] = [:]
     @ObservationIgnored var onAgentsEnabledChange: ((Bool) -> Void)?
+    /// Cards the feed just made (for banners).
+    @ObservationIgnored var onNewRouterCards: (([RouterCard]) -> Void)?
+    /// Whether the Claude app is in front (tests answer for it).
+    @ObservationIgnored var claudeIsFrontmost: () -> Bool = { Claude.isFrontmost }
+    /// The Router was just switched on: its open cards are settled against how things are now at the next feed.
+    @ObservationIgnored var routerReconcilePending = false
+    /// The forms folder has been read since the Router was switched on: until then no form is known to be gone.
+    @ObservationIgnored var routerFormsLoaded = false
+    @ObservationIgnored let formBridge = FormBridge()
+    @ObservationIgnored lazy var routerAgent = RouterAgent(store: self)
+    /// Where the Router's files go, in a test (see `routerFiles`).
+    @ObservationIgnored var routerPaths: RouterPaths?
+    /// The executable the hook runs; this one unless a test says otherwise.
+    @ObservationIgnored var routerExecutable: String?
+    /// The latest install or removal of the hook (each waits for the one before).
+    @ObservationIgnored var routerHookWork: Task<Void, Never>?
+    /// Runs Claude Code's CLI for the plugin; a test stands one in (without one, a test run leaves the plugin alone).
+    @ObservationIgnored var routerPluginRunner: ClaudePluginInstaller.Runner?
+    /// Who may make the relay key (see `RelayKeyFence`), and the key as last read (see `signRelay`).
+    @ObservationIgnored let relayKeyFence = RelayKeyFence()
+    @ObservationIgnored var relayKeyCache: RelayKeyCache?
+    @ObservationIgnored var pluginQuitObserver: NSObjectProtocol?
+    /// Where Claude Code's binary is; the newest copy the Claude app bundles unless a test says otherwise.
+    @ObservationIgnored var routerClaudeBinary: (@Sendable () -> String?)?
+    /// The app's version, which the plugin's is stamped with.
+    @ObservationIgnored var routerAppVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0-dev"
     @ObservationIgnored let activityReader = Claude.ActivityReader()
     @ObservationIgnored lazy var claudeFeed = ClaudeFeed(activityReader: activityReader)
     /// Derived rows, rebuilt after any change to the agents or what was read (see Agents.swift).
@@ -240,6 +289,7 @@ final class Store {
         observeSleep()
         restartPolling()
         watchClaude()
+        startRouter()
         Task.detached(priority: .utility) {
             let key = Keychain.read(Keychain.typesafe) ?? ""
             await MainActor.run { [weak self] in
@@ -463,6 +513,7 @@ final class Store {
         ci = state.ci
         settings = state.settings
         agents = state.agents ?? AgentsState()
+        router = state.router ?? RouterState()
         savedRevision = persistedRevision
     }
 
@@ -495,7 +546,8 @@ final class Store {
         }
         guard let url = file else { return }
         saveDirty = false
-        let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents))
+        let box = SnapshotBox(state: PersistedState(repos: repos, items: items, ci: ci, settings: settings, agents: agents,
+                                                       router: router))
         let write: @Sendable () -> Void = {
             let enc = JSONEncoder()
             enc.dateEncodingStrategy = .iso8601

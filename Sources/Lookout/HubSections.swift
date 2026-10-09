@@ -253,6 +253,108 @@ extension LookoutHub {
         .frame(maxWidth: .infinity, minHeight: tight ? Self.ciLineHeight : Theme.Metrics.line, alignment: .leading)
     }
 
+    // MARK: Router
+
+    /// The Router's cell in the bar; a click opens its window.
+    var routerCell: some View {
+        let counts = store.routerCounts
+        return RouterCell(needsYou: counts.needsYou, done: counts.done) { openRouter(nil) }
+    }
+
+    /// "Router", then what's open (amber for what needs you, blue for finished turns). The whole line opens its window.
+    var routerHeader: some View {
+        sectionHeader("Router", status: routerStatusParts)
+            .contentShape(Rectangle())
+            .onTapGesture { openRouter(nil) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Opens the Router window · \(store.shortcut(.router).display)")
+            .accessibilityAction { openRouter(nil) }
+    }
+
+    /// A card clicked on the bar: its session opens in Claude, and it is the one picked in the Router's window.
+    func openRouterCard(_ id: String) {
+        store.openCard(id)
+        pickRouterCard(id)
+    }
+
+    var routerStatusParts: [(String, Color)] {
+        let counts = store.routerCounts
+        var status: [(String, Color)] = []
+        if counts.needsYou > 0 { status.append(("\(counts.needsYou) need you", Theme.amber)) }
+        if counts.done > 0 { status.append(("\(counts.done) done", Theme.accent)) }
+        return status.isEmpty ? [("nothing open", Theme.tertiary)] : status
+    }
+
+    /// Open cards a panel lists before the rest are left to the window.
+    static let routerCardLimit = 5
+
+    /// The Router in its panel: the header, the latest open cards, then the status line and the way to the window.
+    @ViewBuilder var peekRouter: some View {
+        let cards = store.openRouterCards
+        routerHeader.frame(height: Self.peekLine)
+        if cards.isEmpty {
+            Text("Nothing needs you").font(Theme.Typography.body).foregroundStyle(Theme.tertiary)
+                .padding(.horizontal, Theme.Space.md).frame(height: Theme.Metrics.line)
+        } else {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(cards.prefix(Self.routerCardLimit)) { RouterCardLine(card: $0, store: store) { openRouterCard($0) } }
+            }
+            if cards.count > Self.routerCardLimit {
+                Text("\(cards.count - Self.routerCardLimit) more in the Router").font(Theme.Typography.meta)
+                    .foregroundStyle(Theme.tertiary).padding(.horizontal, Theme.Space.md).padding(.top, 2)
+            }
+        }
+        Hairline(inset: Theme.Space.md).padding(.vertical, Theme.Space.xs)
+        routerFooter
+    }
+
+    /// What is running, in one line, and the button to the window.
+    var routerFooter: some View {
+        HStack(spacing: 8) {
+            RouterStatusView(store: store).layoutPriority(-1)
+            Spacer(minLength: 0)
+            ActionButton("Open Router") { openRouter(nil) }
+                .fixedSize()
+                .tip("Open Router", "Cards and the chat · \(store.shortcut(.router).display)")
+        }
+        .padding(.leading, Theme.Space.md)
+        .frame(minHeight: Theme.Metrics.line)
+    }
+
+    /// Kept open beside the bar: under the header, the status line.
+    var routerStatusRow: some View {
+        RouterStatusView(store: store)
+            .padding(.horizontal, Theme.Space.md)
+            .frame(maxWidth: .infinity, minHeight: 22, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .onTapGesture { openRouter(nil) }
+    }
+
+    /// Along the top and bottom, kept open: the column under the Router's segment, the status line over the latest cards.
+    var routerColumn: some View {
+        let cards = store.openRouterCards
+        return VStack(alignment: .leading, spacing: 1) {
+            RouterStatusView(store: store, lines: 3)
+                .padding(.horizontal, Theme.Space.md)
+                .padding(.vertical, Theme.Space.sm)
+            if cards.isEmpty {
+                Text("Nothing needs you").font(Theme.Typography.body).foregroundStyle(Theme.tertiary)
+                    .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+            }
+            ForEach(cards.prefix(Self.routerColumnLimit)) { RouterCardLine(card: $0, store: store, narrow: true) { openRouterCard($0) } }
+            if cards.count > Self.routerColumnLimit {
+                Text("\(cards.count - Self.routerColumnLimit) more").font(Theme.Typography.meta).foregroundStyle(Theme.tertiary)
+                    .padding(.horizontal, Theme.Space.md).padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, Self.inset)
+        .padding(.vertical, Theme.Space.sm)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    static let routerColumnLimit = 4
+
     // MARK: Agents
 
     var claudeMark: some View {

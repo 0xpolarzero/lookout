@@ -362,6 +362,8 @@ enum LaunchAtLogin {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store!
     private var hub: HubController?
+    /// The Router's window, made the first time it is shown.
+    private var router: RouterWindowController?
     private lazy var hotKeys = HotKeys()
     private var globalShortcuts: GlobalShortcuts?
     private var playground: Playground?
@@ -398,7 +400,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             store.start()
         }
+        let router = RouterWindowController(store: store)
+        self.router = router
         hub = HubController(store: store, demo: CommandLine.arguments.contains("--demo"))
+        hub?.openRouter = { [weak router] in router?.show(card: $0) }
+        hub?.pickRouterCard = { [weak router, weak store] id in if let store { router?.model.select(id, store: store) } }
+        // Banners for new cards that need you; a demo posts none.
+        if !CommandLine.arguments.contains("--demo") {
+            RouterBanners.attach(store: store, windowIsKey: { [weak router] in router?.isKey ?? false }) { [weak router] card in
+                router?.show(card: card)
+            }
+        }
         // Demo: the keep-open key on right ⌘ (not saved), to try tap and double-tap.
         if CommandLine.arguments.contains("--demo"), hub != nil {
             store.settings.shortcuts = [ShortcutAction.togglePanel.rawValue: Shortcut(keyCode: 54)]
@@ -411,6 +423,7 @@ store.onRecordingShortcutChange = { [weak self] on in self?.globalShortcuts?.sus
             switch action {
             case .togglePanel: self?.hub?.toggleShortcut()
             case .sessionSwitcher: self?.hub?.showSessions()
+            case .router: if self?.store.routerOn == true { self?.router?.show() }
             default: break
             }
         }
@@ -432,6 +445,8 @@ store.onRecordingShortcutChange = { [weak self] on in self?.globalShortcuts?.sus
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // The Router's process goes with the app.
+        store?.routerAgent.shutdown()
         store?.flushSave()
     }
 

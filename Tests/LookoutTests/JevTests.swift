@@ -80,9 +80,16 @@ final class StubProtocol: URLProtocol {
         let criteria = try #require(question["criteria"] as? [String: Any])
         #expect(criteria["debug"] as? String == "Bugs and tests")
         #expect(criteria["code"] is NSNull)
-        // No probabilities in the answer: the choice gets them all.
-        StubProtocol.response = Data(#"{"answers":{"pick":{"choice":"code"}}}"#.utf8)
-        #expect(try await client().choose(["code", "debug"], for: [:], instructions: "").probabilities == ["code": 1])
+        // No probabilities, or ones that aren't a distribution over the options: an error, never made up.
+        for bad in [#"{"answers":{"pick":{"choice":"code"}}}"#,
+                    #"{"answers":{"pick":{"choice":"code","probabilities":{}}}}"#,
+                    #"{"answers":{"pick":{"choice":"code","probabilities":{"code":0.5,"debug":0.2}}}}"#,
+                    #"{"answers":{"pick":{"choice":"code","probabilities":{"code":1,"other":0}}}}"#,
+                    #"{"answers":{"pick":{"choice":"code","probabilities":{"code":true}}}}"#,
+                    #"{"answers":{"pick":{"choice":"code","probabilities":{"code":1.5,"debug":-0.5}}}}"#] {
+            StubProtocol.response = Data(bad.utf8)
+            await #expect(throws: JevClient.Failure.self) { try await client().choose(["code", "debug"], for: [:], instructions: "") }
+        }
     }
 
     @Test func iconCategoriesFitJev() {

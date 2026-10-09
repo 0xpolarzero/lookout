@@ -62,11 +62,21 @@ struct JevClient {
               let key = pick["choice"] as? String, let option = keys[key] else {
             throw Failure(message: "Unexpected answer from TypeSafe")
         }
-        var probabilities: [String: Double] = [:]
-        for (key, p) in pick["probabilities"] as? [String: Double] ?? [:] {
-            if let option = keys[key] { probabilities[option] = p }
+        // The distribution is what callers decide on: one that is missing or doesn't add up is an error, never made up.
+        guard let raw = pick["probabilities"] as? [String: Any], !raw.isEmpty else {
+            throw Failure(message: "TypeSafe's answer has no probabilities")
         }
-        if probabilities.isEmpty { probabilities[option] = 1 }
+        var probabilities: [String: Double] = [:]
+        for (key, value) in raw {
+            guard let option = keys[key], let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  number.doubleValue.isFinite, (0...1).contains(number.doubleValue) else {
+                throw Failure(message: "TypeSafe's probabilities are invalid")
+            }
+            probabilities[option] = number.doubleValue
+        }
+        guard (0.98...1.02).contains(probabilities.values.reduce(0, +)) else {
+            throw Failure(message: "TypeSafe's probabilities don't add up")
+        }
         return Choice(choice: option, confidence: (pick["confidence"] as? Double) ?? 0, probabilities: probabilities)
     }
 }

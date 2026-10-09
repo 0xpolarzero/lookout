@@ -4,7 +4,7 @@ import SwiftUI
 // itself never moves, so what you're pointing at stays under the pointer. The whole view (every section at once)
 // is the pinned one.
 
-enum HubSection: Hashable { case inbox, ci, agents, controls }
+enum HubSection: Hashable { case inbox, ci, router, agents, controls }
 
 struct PeekMeasure: Equatable {
     let section: HubSection
@@ -232,6 +232,8 @@ extension LookoutHub {
                 peekInbox.padding(.top, 4)
             case .ci:
                 peekCI
+            case .router:
+                peekRouter
             case .agents:
                 let sections = agentSections
                 agentsHeader.frame(height: Self.peekLine)
@@ -248,7 +250,7 @@ extension LookoutHub {
                             .modifier(ReorderIf(enabled: section.group == .pinned && !searching, row: r, store: store))
                     }
                 }
-                NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.row)
+                if !store.routerOn { NewSessionRow(store: store, style: .detail).frame(height: Theme.Metrics.row) }
             default:
                 // (The controls have their own panel.)
                 EmptyView()
@@ -266,13 +268,15 @@ extension LookoutHub {
                 peekInbox
             case .ci:
                 peekCI
+            case .router:
+                peekRouter
             case .agents:
                 agentsHeader.frame(height: Self.peekLine)
                 ClaudeNotice(store: store).padding(.horizontal, 8)
                 CappedScroll(cap: maxLength - Self.cell - 120, hub: hub) {
                     VStack(alignment: .leading, spacing: 2) { agentGroupList(agentSections) }
                 }
-                NewSessionRow(store: store, style: .twoLines)
+                if !store.routerOn { NewSessionRow(store: store, style: .twoLines) }
             default:
                 EmptyView()
             }

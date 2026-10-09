@@ -127,7 +127,7 @@ struct ModifierTap {
 }
 
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case togglePanel, sessionSwitcher, openItem, toggleRead, discard, markAllRead, refresh, keepSession, removeSession
+    case togglePanel, sessionSwitcher, router, openItem, toggleRead, discard, markAllRead, refresh, keepSession, removeSession
 
     var id: String { rawValue }
 
@@ -140,16 +140,20 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .markAllRead: "Mark all as read"
         case .refresh: "Refresh now"
         case .sessionSwitcher: "Switch Claude session"
+        case .router: "Open the Router"
         case .keepSession: "Pin or unpin a session"
         case .removeSession: "Hide a session until its next activity"
         }
     }
 
     /// Works from any app (registered system-wide) rather than only while the panel has focus.
-    var isGlobal: Bool { self == .togglePanel || self == .sessionSwitcher }
+    var isGlobal: Bool { self == .togglePanel || self == .sessionSwitcher || self == .router }
 
     /// Only meaningful with the Claude sessions extension on.
-    var isAgents: Bool { self == .sessionSwitcher || self == .keepSession || self == .removeSession }
+    var isAgents: Bool { self == .sessionSwitcher || self == .keepSession || self == .removeSession || self == .router }
+
+    /// Only meaningful with the Router on (see `Store.routerOn`).
+    var isRouter: Bool { self == .router }
 
     var defaultShortcut: Shortcut {
         switch self {
@@ -160,6 +164,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .markAllRead: Shortcut(keyCode: UInt16(kVK_Space), modifiers: [.option])
         case .refresh: Shortcut(keyCode: UInt16(kVK_ANSI_R), modifiers: [.command])
         case .sessionSwitcher: Shortcut(keyCode: UInt16(kVK_ANSI_S), modifiers: [.control, .option])
+        case .router: Shortcut(keyCode: UInt16(kVK_ANSI_R), modifiers: [.control, .option])
         case .keepSession: Shortcut(keyCode: UInt16(kVK_ANSI_K), modifiers: [.command])
         // ⌘⌫ rather than a bare ⌫: removing a session is easy to hit by accident and awkward to undo.
         case .removeSession: Shortcut(keyCode: UInt16(kVK_Delete), modifiers: [.command])
@@ -236,11 +241,17 @@ extension HotKeys: HotKeyRegistrar {}
 
 extension ShortcutAction {
     /// The registration a global action holds, one per action.
-    var hotKeyID: UInt32 { self == .togglePanel ? 1 : 2 }
+    var hotKeyID: UInt32 {
+        switch self {
+        case .togglePanel: 1
+        case .router: 3
+        default: 2
+        }
+    }
 }
 
-/// Keeps the registrar in step with the store's global shortcuts: one registration per action, and the session
-/// switcher only while the Claude extension is on, and none for a shortcut that was cleared.
+/// Keeps the registrar in step with the store's global shortcuts: one registration per action, the session switcher only
+/// while the Claude extension is on, the Router's only while it is on, and none for a shortcut that was cleared.
 @MainActor
 final class GlobalShortcuts {
     private let store: Store
@@ -263,11 +274,26 @@ final class GlobalShortcuts {
         for action in ShortcutAction.allCases where action.isGlobal && !register(action) { announceRefusal(action) }
         store.onGlobalShortcutChange = { [weak self] action, shortcut in self?.register(action, shortcut) ?? true }
         store.onAgentsEnabledChange = { [weak self] _ in
-            guard let self, !self.register(.sessionSwitcher) else { return }
+            guard let self else { return }
             // Turning the extension on is what registers it, and nothing on screen says it did not take: the recorder only
             // does in Settings.
-            self.announceRefusal(.sessionSwitcher)
+            if !self.register(.sessionSwitcher) { self.announceRefusal(.sessionSwitcher) }
         }
+        routerOn = store.routerOn
+        followRouter()
+    }
+
+    /// Whether the Router's key is registered as on, so only turning it on or off registers it again.
+    private var routerOn = false
+
+    /// The Router's key follows the Router being on: registered when it turns on, released when it turns off.
+    private func followRouter() {
+        let on = withObservationTracking { store.routerOn } onChange: { [weak self] in
+            DispatchQueue.main.async { self?.followRouter() }
+        }
+        guard on != routerOn else { return }
+        routerOn = on
+        if !register(.router), on { announceRefusal(.router) }
     }
 
     /// Releases the system-wide keys while a shortcut is recorded, and takes them back after. A key another app claimed
@@ -289,7 +315,8 @@ final class GlobalShortcuts {
     func register(_ action: ShortcutAction, _ shortcut: Shortcut? = nil) -> Bool {
         guard action.isGlobal else { return true }
         let shortcut = shortcut ?? store.shortcut(action)
-        let wanted = action == .sessionSwitcher && !store.agents.enabled ? nil : shortcut
+        let off = (action == .sessionSwitcher && !store.agents.enabled) || (action == .router && !store.routerOn)
+        let wanted = off ? nil : shortcut
         let taken = registrar.set(action.hotKeyID, wanted.flatMap { $0.isUnassigned ? nil : $0 }) { [perform] in
             DispatchQueue.main.async { perform(action) }
         }

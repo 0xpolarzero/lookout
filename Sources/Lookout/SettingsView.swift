@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var notificationsBlocked = false
 
     static let updatesID = "updates"
+    /// The Router's lines in Extensions (shots scroll there).
+    static let routerID = "router"
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -184,7 +186,7 @@ struct SettingsView: View {
 
     private var shortcuts: some View {
         section("Shortcuts") {
-            ForEach(ShortcutAction.allCases.filter { !$0.isAgents || store.agents.enabled }) { action in
+            ForEach(ShortcutAction.allCases.filter { (!$0.isAgents || store.agents.enabled) && (!$0.isRouter || store.routerOn) }) { action in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(action.title).font(Theme.Typography.body)
@@ -250,10 +252,92 @@ struct SettingsView: View {
                 sessionIcons
                 Hairline()
                 hint("Your Claude Code sessions on the bar: what is working, done or waiting. "
-                     + "Sessions with new activity arrive as pending; keep the ones you use. Read-only: Lookout never writes to the app.")
+                     + "Sessions with new activity arrive as pending; keep the ones you use. Lookout never writes to the app's files.")
+                Hairline()
+                router
             } else {
                 hint("Your Claude Code sessions on the bar, to see which are working, done or waiting, and jump between them.")
             }
+        }
+    }
+
+    /// The Router: its switch, then what it needs and how each part is doing (the hook, Claude Code, routing).
+    @ViewBuilder private var router: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch").font(Theme.Typography.glyph(10, .bold)).foregroundStyle(Theme.secondary)
+                    Text("Router").font(Theme.Typography.body)
+                }
+                Text("One chat above your sessions: what needs you, and your answers passed on")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.tertiary)
+            }
+            Spacer()
+            Toggle("Router", isOn: Binding(get: { store.router.enabled }, set: { store.setRouterEnabled($0) }))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+        }
+        .id(Self.routerID)
+        // Off, but taking the hook or the plugin out failed: that stays in sight, with a way to try again.
+        if !store.router.enabled, let error = store.routerRemovalError {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Couldn't take the Router out of Claude Code: \(error)")
+                    .font(Theme.Typography.meta).foregroundStyle(Theme.red).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                ActionButton("Try again") { store.retryRouterRemoval() }
+            }
+            .onAppear { Announce.say("Couldn't take the Router out of Claude Code") }
+        }
+        if store.router.enabled {
+            VStack(alignment: .leading, spacing: 4) {
+                routerLine(hookStatus.0, color: hookStatus.1)
+                let plugin = Self.pluginLine(store.routerPluginStatus, error: store.routerPluginError)
+                routerLine(plugin.0, color: plugin.1)
+                routerLine(claudeCodeStatus.0, color: claudeCodeStatus.1)
+                routerLine(store.hasTypesafeKey ? "Routing helped by Jev, with your TypeSafe key"
+                           : "Routing without help: a TypeSafe key (under Icons) lets Jev pick the session", color: Theme.tertiary)
+            }
+            hint("Lookout adds a hook to Claude Code's settings (`~/.claude/settings.json`) so a session's questions can be answered "
+                 + "here, and a Claude Code plugin so your messages reach sessions as yours; turning the Router off takes both out. The Router is a Claude Code session Lookout runs: it only messages your "
+                 + "sessions, answers their forms and starts new ones when you ask. \(store.shortcut(.router).display) opens it.")
+        }
+    }
+
+    /// Lookout's Claude Code plugin, which makes your words arrive in a session as yours.
+    static func pluginLine(_ status: ClaudePluginInstaller.Status?, error: String?) -> (String, Color) {
+        if let error { return ("Lookout's Claude Code plugin: \(error)", Theme.red) }
+        return switch status {
+        case .installed: ("Lookout's Claude Code plugin: installed: your messages reach sessions as yours. Sessions already "
+                          + "open pick it up when restarted (or /reload-plugins).", Theme.green)
+        case .outdated: ("Lookout's Claude Code plugin is from another copy of Lookout: installing it again", Theme.amber)
+        case .notInstalled: ("Lookout's Claude Code plugin isn't installed: messages can't reach sessions", Theme.amber)
+        case .noClaudeCode: ("Lookout's Claude Code plugin needs Claude Code, which comes with the Claude desktop app", Theme.amber)
+        case nil: ("Lookout's Claude Code plugin will be installed", Theme.tertiary)
+        }
+    }
+
+    private var hookStatus: (String, Color) {
+        if let error = store.routerHookError { return ("Form hook: \(error)", Theme.red) }
+        return switch store.routerHookStatus {
+        case .installed: ("Form hook installed", Theme.green)
+        case .outdated: ("Form hook points at another copy of Lookout: installing it again", Theme.amber)
+        case .notInstalled: ("Form hook not installed", Theme.amber)
+        case nil: ("Form hook will be installed", Theme.tertiary)
+        }
+    }
+
+    private var claudeCodeStatus: (String, Color) {
+        if let found = store.routerAgent.claudeCode { return ("Claude Code \(found.version), from the Claude app", Theme.tertiary) }
+        return ("Claude Code not found: it comes with the Claude desktop app", Theme.amber)
+    }
+
+    private func routerLine(_ text: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle().fill(color).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(text).font(Theme.Typography.meta).foregroundStyle(color == Theme.tertiary ? Theme.tertiary : color)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -518,5 +602,48 @@ struct ActionButton: View {
                 .overlay(Theme.Radius.shape(Theme.Radius.md).strokeBorder(Theme.stroke))
         }
         .buttonStyle(HoverFillButtonStyle(rest: Theme.Fill.field, hover: Theme.Fill.selected, pressed: Theme.Fill.pressed))
+    }
+}
+
+extension Store {
+    /// With the Router off, why taking its hook or plugin out of Claude Code failed (nil when it didn't).
+    var routerRemovalError: String? {
+        guard !router.enabled else { return nil }
+        return [routerHookError, routerPluginError].compactMap { $0 }.first
+    }
+
+    /// Takes the hook and the plugin out again (after a failure, with the Router off), off the main thread, after any switch
+    /// still under way; the errors clear when it works.
+    func retryRouterRemoval() {
+        guard !router.enabled, let paths = routerFiles else { return }
+        let executable = routerExecutable ?? Bundle.main.executablePath ?? CommandLine.arguments[0]
+        let runner = routerPluginRunner ?? (UnderTest.isRunning ? nil : ClaudePluginInstaller.processRunner)
+        let findBinary = routerClaudeBinary
+            ?? { RouterAgent.find(in: Claude.root.appendingPathComponent("claude-code", isDirectory: true))?.path }
+        let version = ClaudePlugin.version(app: routerAppVersion)
+        let previous = routerHookWork
+        routerHookWork = Task { [weak self] in
+            await previous?.value
+            let hook = await Task.detached(priority: .utility) { () -> (FormHookInstaller.Status, String?) in
+                let installer = FormHookInstaller(claudeDir: paths.claudeDir)
+                do {
+                    try FormBridge.setEnabled(false, dir: paths.forms)
+                    try installer.uninstall()
+                    return (installer.status(executable: executable), nil)
+                } catch {
+                    return (installer.status(executable: executable), error.localizedDescription)
+                }
+            }.value
+            guard let self, !self.router.enabled else { return }
+            if self.routerHookStatus != hook.0 { self.routerHookStatus = hook.0 }
+            if self.routerHookError != hook.1 { self.routerHookError = hook.1 }
+            guard let runner else { return }
+            let plugin = await Task.detached(priority: .utility) {
+                Store.switchPlugin(on: false, install: true, paths: paths, version: version, binary: findBinary(), run: runner)
+            }.value
+            guard !self.router.enabled else { return }
+            if self.routerPluginStatus != plugin.0 { self.routerPluginStatus = plugin.0 }
+            if self.routerPluginError != plugin.1 { self.routerPluginError = plugin.1 }
+        }
     }
 }
