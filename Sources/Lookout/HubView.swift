@@ -143,6 +143,11 @@ final class HubState {
 
     /// Where that section's panel is (in the hub's window), so the window takes the mouse there too.
     @ObservationIgnored var panelFrame: CGRect = .zero
+    /// The panel's frame while one is showing. Not cleared when a panel goes: one closing (still fading out) as the
+    /// next opens would clear the new one's frame, leaving the window deaf to the pointer over most of it.
+    var openPanelFrame: CGRect? {
+        section != nil && !quiet && !expanded && panelFrame != .zero ? panelFrame : nil
+    }
 
     /// The whole view, every section at once: kept open (right ⌘, a page, the context menu).
     var expanded: Bool { pinned }

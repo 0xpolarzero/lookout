@@ -300,7 +300,7 @@ final class HubController {
         guard dragStart == nil else { return }
         let mouse = NSEvent.mouseLocation
         let inside = hubScreenFrame.insetBy(dx: -1, dy: -1).contains(mouse)
-            || (hub.panelFrame != .zero && screenFrame(hub.panelFrame).insetBy(dx: -2, dy: -2).contains(mouse))
+            || hub.openPanelFrame.map { screenFrame($0).insetBy(dx: -2, dy: -2).contains(mouse) } == true
         // A window-server call, so only when it changes.
         setAcceptsMouse(inside)
         if inside == hub.hovering {

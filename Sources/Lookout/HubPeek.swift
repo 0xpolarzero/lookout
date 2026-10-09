@@ -101,8 +101,10 @@ extension LookoutHub {
                 .overlay(alignment: seamAlignment) { seam(place) }
                 .fixedSize()
                 .onHover { overPanel = $0; hoverChanged() }
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.rootSpace)) } action: { hub.panelFrame = $0 }
-                .onDisappear { hub.panelFrame = .zero }
+                // Only the current section's: one still fading out mustn't report where it was.
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.rootSpace)) } action: {
+                    if hub.section == section { hub.panelFrame = $0 }
+                }
                 // Hidden until it's been measured and placed, so it never shows up in the wrong spot first.
                 .opacity(place == nil ? 0 : 1)
                 .transition(peekTransition)
