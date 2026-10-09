@@ -1,0 +1,764 @@
+// Lookout, island concept. A standalone SwiftUI prototype rendered to PNGs:
+//   swiftc -O -parse-as-library Island.swift -o /tmp/island && /tmp/island <out dir>
+import AppKit
+import SwiftUI
+
+// MARK: - Tokens
+
+/// Warm neutral greys (Linear's 2026 refresh moved off blue-grey), one accent, one attention colour.
+enum T {
+    static let ink = Color.black                                   // the island: the notch's own black
+    static let raised = Color(red: 0.085, green: 0.083, blue: 0.08)
+    static let hover = Color(red: 0.115, green: 0.112, blue: 0.108)
+    static let line = Color.white.opacity(0.065)
+    static let text = Color(red: 0.93, green: 0.925, blue: 0.91)
+    static let text2 = Color(red: 0.60, green: 0.595, blue: 0.58)
+    static let text3 = Color(red: 0.40, green: 0.395, blue: 0.385)
+    static let accent = Color(red: 0.45, green: 0.47, blue: 0.93)   // indigo, for done and the one primary action
+    static let amber = Color(red: 0.93, green: 0.68, blue: 0.27)    // only for what needs you
+    static let red = Color(red: 0.90, green: 0.38, blue: 0.36)
+    static let green = Color(red: 0.36, green: 0.72, blue: 0.50)
+    static let violet = Color(red: 0.62, green: 0.54, blue: 0.92)
+
+    static func body(_ w: Font.Weight = .regular) -> Font { .system(size: 13, weight: w) }
+    static func meta(_ w: Font.Weight = .regular) -> Font { .system(size: 12, weight: w) }
+    static let micro = Font.system(size: 11, weight: .medium)
+}
+
+// MARK: - Status glyphs (Linear-style, drawn, 14pt)
+
+enum Kind { case question, plan, done, stuck, working, quiet, failing, passing, running }
+
+struct Glyph: View {
+    let kind: Kind
+    var size: CGFloat = 14
+    var body: some View {
+        let s = size, lw = max(1.2, s * 0.1)
+        ZStack {
+            switch kind {
+            case .question:
+                Circle().fill(T.amber)
+                Text("?").font(.system(size: s * 0.66, weight: .heavy, design: .rounded)).foregroundStyle(.black).offset(y: -s * 0.02)
+            case .plan:
+                Circle().strokeBorder(T.violet, lineWidth: lw)
+                Pie(fraction: 0.75).fill(T.violet).padding(s * 0.24)
+            case .done:
+                Circle().fill(T.accent)
+                Image(systemName: "checkmark").font(.system(size: s * 0.48, weight: .black)).foregroundStyle(.black)
+            case .stuck:
+                Circle().fill(T.red)
+                Text("!").font(.system(size: s * 0.66, weight: .heavy, design: .rounded)).foregroundStyle(.black)
+            case .working:
+                Circle().strokeBorder(T.text2, lineWidth: lw)
+                Pie(fraction: 0.5).fill(T.text2).padding(s * 0.24)
+            case .quiet:
+                Circle().fill(T.text3)
+                Image(systemName: "checkmark").font(.system(size: s * 0.48, weight: .black)).foregroundStyle(.black)
+            case .failing:
+                Circle().fill(T.red)
+                Image(systemName: "xmark").font(.system(size: s * 0.44, weight: .black)).foregroundStyle(.black)
+            case .passing:
+                Circle().fill(T.green)
+                Image(systemName: "checkmark").font(.system(size: s * 0.48, weight: .black)).foregroundStyle(.black)
+            case .running:
+                Circle().strokeBorder(T.text2, style: StrokeStyle(lineWidth: lw, dash: [s * 0.14, s * 0.12]))
+                Pie(fraction: 0.33).fill(T.text2).padding(s * 0.24)
+            }
+        }
+        .frame(width: s, height: s)
+    }
+}
+
+struct Pie: Shape {
+    var fraction: Double
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let c = CGPoint(x: r.midX, y: r.midY)
+        p.move(to: c)
+        p.addArc(center: c, radius: r.width / 2, startAngle: .degrees(-90), endAngle: .degrees(-90 + 360 * fraction), clockwise: false)
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// A project, as Linear shows a team since the refresh: a letter, no coloured tile.
+struct Mono: View {
+    let name: String
+    var body: some View {
+        Text(name.prefix(1).uppercased())
+            .font(.system(size: 9.5, weight: .semibold)).foregroundStyle(T.text2)
+            .frame(width: 16, height: 16)
+            .background(RoundedRectangle(cornerRadius: 4.5).strokeBorder(T.line.opacity(2), lineWidth: 1))
+    }
+}
+
+struct Key: View {
+    let k: String
+    var body: some View {
+        Text(k).font(.system(size: 10.5, weight: .medium)).foregroundStyle(T.text3)
+            .padding(.horizontal, 4).frame(minWidth: 17, minHeight: 17)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.055)))
+    }
+}
+
+struct Primary: View {
+    let title: String; let key: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(T.meta(.medium)).foregroundStyle(.white)
+            Text(key).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+        }
+        .padding(.horizontal, 11).frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: 7).fill(T.accent))
+    }
+}
+
+struct Secondary: View {
+    let title: String; var key: String? = nil
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(T.meta(.medium)).foregroundStyle(T.text)
+            if let key { Text(key).font(.system(size: 11, weight: .medium)).foregroundStyle(T.text3) }
+        }
+        .padding(.horizontal, 11).frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: 7).fill(T.hover))
+    }
+}
+
+// MARK: - The island's shape
+
+/// Flat on top, flared into the screen's edge like the notch, rounded below.
+struct IslandShape: Shape {
+    var radius: CGFloat
+    var flare: CGFloat = 9
+    func path(in r: CGRect) -> Path {
+        let w = r.width, h = r.height, f = flare, R = min(radius, h / 2)
+        var p = Path()
+        p.move(to: .zero)
+        p.addQuadCurve(to: CGPoint(x: f, y: f), control: CGPoint(x: f, y: 0))
+        p.addLine(to: CGPoint(x: f, y: h - R))
+        p.addQuadCurve(to: CGPoint(x: f + R, y: h), control: CGPoint(x: f, y: h))
+        p.addLine(to: CGPoint(x: w - f - R, y: h))
+        p.addQuadCurve(to: CGPoint(x: w - f, y: h - R), control: CGPoint(x: w - f, y: h))
+        p.addLine(to: CGPoint(x: w - f, y: f))
+        p.addQuadCurve(to: CGPoint(x: w, y: 0), control: CGPoint(x: w - f, y: 0))
+        p.closeSubpath()
+        return p
+    }
+}
+
+struct Island<Content: View>: View {
+    var width: CGFloat
+    var radius: CGFloat = 22
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .frame(width: width - 18)
+            .padding(.horizontal, 9)
+            .background(IslandShape(radius: radius).fill(T.ink))
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 14)
+    }
+}
+
+/// The row that sits beside the camera: what's left and right of the notch.
+struct Ears<L: View, R: View>: View {
+    @ViewBuilder var left: L
+    @ViewBuilder var right: R
+    var body: some View {
+        HStack(spacing: 0) {
+            left.frame(maxWidth: .infinity, alignment: .leading)
+            Color.clear.frame(width: Notch.size.width)
+            right.frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(height: Notch.size.height)
+        .padding(.horizontal, 14)
+    }
+}
+
+enum Notch { static let size = CGSize(width: 192, height: 32) }
+
+// MARK: - Screen (a 14" MacBook Pro, its top part)
+
+struct Screen<Content: View>: View {
+
+    var size = CGSize(width: 1512, height: 982)
+    var wallpaper = "/System/Library/Desktop Pictures/Sonoma.heic"
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            if let img = NSImage(contentsOfFile: wallpaper) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill).frame(width: size.width, height: size.height).clipped()
+            }
+            appBehind.offset(x: -210, y: 150)
+            menuBar
+            content
+        }
+        .frame(width: size.width, height: size.height, alignment: .top)
+        .clipped()
+    }
+
+    var menuBar: some View {
+        HStack(spacing: 20) {
+            Image(systemName: "apple.logo").font(.system(size: 14))
+            Text("Claude").font(.system(size: 13, weight: .bold))
+            ForEach(["File", "Edit", "View", "Window", "Help"], id: \.self) { Text($0).font(.system(size: 13)) }
+            Spacer()
+            Image(systemName: "wifi").font(.system(size: 13))
+            Image(systemName: "battery.75percent").font(.system(size: 15))
+            Image(systemName: "switch.2").font(.system(size: 12))
+            Text("Thu 9 Oct  14:32").font(.system(size: 13))
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .shadow(color: .black.opacity(0.25), radius: 2)
+        .padding(.horizontal, 18)
+        .frame(height: Notch.size.height)
+        .overlay {
+            // The camera housing: Lookout's island grows out of it.
+            IslandShape(radius: 10, flare: 0).fill(.black).frame(width: Notch.size.width, height: Notch.size.height)
+        }
+    }
+
+    var appBehind: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) { ForEach(0..<3) { _ in Circle().fill(Color.white.opacity(0.18)).frame(width: 12, height: 12) } }
+                .padding(14)
+            ForEach([0.5, 0.82, 0.7, 0.4, 0.76, 0.6], id: \.self) { w in
+                RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)).frame(width: 620 * w, height: 10).padding(.horizontal, 22).padding(.vertical, 9)
+            }
+            Spacer()
+        }
+        .frame(width: 760, height: 560, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.13)))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.08)))
+        .shadow(color: .black.opacity(0.3), radius: 30, y: 10)
+    }
+}
+
+// MARK: - Data
+
+struct Card: Identifiable {
+    let id = UUID()
+    let kind: Kind; let title: String; let project: String; let ago: String; let line: String
+}
+
+let cards: [Card] = [
+    .init(kind: .question, title: "Database migration plan", project: "api-server", ago: "2m", line: "Which database should the new jobs table live in?"),
+    .init(kind: .plan, title: "Update notifications", project: "lcu", ago: "9m", line: "Plan ready · 4 steps"),
+    .init(kind: .stuck, title: "Landing page", project: "web", ago: "14m", line: "Needs STRIPE_KEY, which isn't set in this shell"),
+    .init(kind: .done, title: "CI failure diagnosis", project: "lookout", ago: "4m", line: "Fixed the flaky sandbox test; CI is green on the branch"),
+]
+
+// MARK: - Shared pieces
+
+struct CardRow: View {
+    let card: Card
+    var selected = false
+    var twoLines = true
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Glyph(kind: card.kind).padding(.top, 1.5)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(card.title).font(T.body(.medium)).foregroundStyle(T.text).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(card.ago).font(T.meta()).foregroundStyle(T.text3).monospacedDigit()
+                }
+                if twoLines {
+                    HStack(spacing: 5) {
+                        Text(card.project).foregroundStyle(T.text2)
+                        Text("·").foregroundStyle(T.text3)
+                        Text(card.line).foregroundStyle(T.text3).lineLimit(1)
+                    }
+                    .font(T.meta())
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 9).fill(selected ? T.hover : .clear))
+    }
+}
+
+struct WorkingLine: View {
+    let project: String; let what: String; let time: String
+    var body: some View {
+        HStack(spacing: 10) {
+            Glyph(kind: .working, size: 12).frame(width: 14)
+            Text(project).font(T.meta(.medium)).foregroundStyle(T.text2)
+            Text(what).font(T.meta()).foregroundStyle(T.text3).lineLimit(1)
+            Spacer()
+            Text(time).font(T.meta()).foregroundStyle(T.text3).monospacedDigit()
+        }
+        .padding(.horizontal, 10).frame(height: 24)
+    }
+}
+
+// MARK: - 1. At rest
+
+struct Rest: View {
+    var attention: Bool
+    var body: some View {
+        Screen {
+            if attention {
+                Island(width: 440, radius: 12) {
+                    Ears {
+                        HStack(spacing: 7) {
+                            Glyph(kind: .question, size: 13)
+                            Text("api-server").font(T.meta(.medium)).foregroundStyle(T.text).fixedSize()
+                        }
+                    } right: {
+                        HStack(spacing: 10) {
+                            HStack(spacing: 5) { Glyph(kind: .working, size: 12); Text("2").font(T.meta(.medium)).foregroundStyle(T.text2) }
+                            Text("4").font(T.meta(.semibold)).foregroundStyle(.black).frame(minWidth: 17, minHeight: 17)
+                                .background(Capsule().fill(T.amber))
+                        }
+                    }
+                }
+            } else {
+                Island(width: 300, radius: 12) {
+                    Ears { EmptyView() } right: {
+                        HStack(spacing: 5) { Glyph(kind: .working, size: 12); Text("2").font(T.meta(.medium)).foregroundStyle(T.text2) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 2. Glance (hover)
+
+struct Glance: View {
+    var body: some View {
+        Screen {
+            Island(width: 468, radius: 24) {
+                VStack(spacing: 0) {
+                    Ears {
+                        Text("For you").font(T.meta(.medium)).foregroundStyle(T.text2)
+                    } right: {
+                        Key(k: "⌃⌥R")
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(cards) { CardRow(card: $0, selected: $0.kind == .question) }
+                    }
+                    .padding(.horizontal, 6).padding(.top, 6)
+                    Rectangle().fill(T.line).frame(height: 1).padding(.horizontal, 16).padding(.vertical, 8)
+                    VStack(spacing: 0) {
+                        WorkingLine(project: "zig", what: "Running zig build test", time: "12m")
+                        WorkingLine(project: "lookout", what: "3 left running", time: "")
+                    }
+                    .padding(.horizontal, 6).padding(.bottom, 12)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 3. Question arrives (the island speaks)
+
+struct Arrival: View {
+    var body: some View {
+        Screen {
+            Island(width: 520, radius: 26) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Ears {
+                        HStack(spacing: 7) { Glyph(kind: .question, size: 13); Text("api-server").font(T.meta(.medium)).foregroundStyle(T.text) }
+                    } right: {
+                        Text("now").font(T.meta()).foregroundStyle(T.text3)
+                    }
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Which database should the new jobs table live in?")
+                            .font(.system(size: 17, weight: .semibold)).tracking(-0.2).foregroundStyle(T.text)
+                        HStack(spacing: 6) {
+                            ForEach(Array(["Postgres", "SQLite", "Redis"].enumerated()), id: \.offset) { i, o in
+                                HStack(spacing: 7) { Key(k: "\(i + 1)"); Text(o).font(T.body(.medium)).foregroundStyle(T.text) }
+                                    .padding(.leading, 6).padding(.trailing, 12).frame(height: 32)
+                                    .background(RoundedRectangle(cornerRadius: 9).fill(T.raised))
+                            }
+                            Spacer()
+                            Text("Reply").font(T.meta(.medium)).foregroundStyle(T.text2)
+                            Key(k: "↵")
+                        }
+                    }
+                    .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 18)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 4. The Router (the island, fully open)
+
+enum Space: String, CaseIterable { case forYou = "For you", inbox = "Inbox", ci = "CI" }
+
+struct SpaceBar: View {
+    var current: Space
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Space.allCases, id: \.self) { s in
+                HStack(spacing: 6) {
+                    Text(s.rawValue).font(T.meta(.medium)).foregroundStyle(s == current ? T.text : T.text3)
+                    switch s {
+                    case .forYou: Text("4").font(T.micro).foregroundStyle(s == current ? T.amber : T.text3)
+                    case .inbox: Text("5").font(T.micro).foregroundStyle(T.text3)
+                    case .ci: Circle().fill(T.red).frame(width: 5, height: 5)
+                    }
+                }
+                .padding(.horizontal, 10).frame(height: 24)
+                .background(Capsule().fill(s == current ? T.hover : .clear))
+            }
+        }
+    }
+}
+
+struct RouterTop: View {
+    var space: Space
+    var body: some View {
+        Ears {
+            SpaceBar(current: space)
+        } right: {
+            HStack(spacing: 7) {
+                Glyph(kind: .working, size: 12)
+                Text("2 working").font(T.meta()).foregroundStyle(T.text2)
+            }
+        }
+    }
+}
+
+struct Composer: View {
+    var to: String?
+    var text: String? = nil
+    var body: some View {
+        HStack(spacing: 8) {
+            if let to {
+                HStack(spacing: 5) { Mono(name: to); Text(to).font(T.meta(.medium)).foregroundStyle(T.text) }
+                    .padding(.leading, 3).padding(.trailing, 8).frame(height: 22)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(T.hover))
+            }
+            if let text {
+                (Text(text).foregroundStyle(T.text) + Text("|").foregroundStyle(T.accent)).font(T.body())
+            } else {
+                Text(to == nil ? "Tell the Router, or @ a session" : "Reply, or tell the Router").font(T.body()).foregroundStyle(T.text3)
+            }
+            Spacer()
+            Key(k: "@")
+            Key(k: "↵")
+        }
+        .padding(.horizontal, 10).frame(height: 40)
+        .background(RoundedRectangle(cornerRadius: 11).fill(T.raised))
+        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(T.line))
+    }
+}
+
+/// An entry in a card's thread: what happened, said small, as Linear's issue activity.
+struct Activity: View {
+    var icon: AnyView
+    var who: String
+    var what: String
+    var time: String
+    var quote: String? = nil
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            icon.frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Text(who).font(T.meta(.medium)).foregroundStyle(T.text2)
+                    Text(what).font(T.meta()).foregroundStyle(T.text3)
+                    Text("·").foregroundStyle(T.text3).font(T.meta())
+                    Text(time).font(T.meta()).foregroundStyle(T.text3)
+                }
+                if let quote {
+                    Text(quote).font(T.body()).foregroundStyle(T.text).lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12).padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 9).fill(T.raised))
+                }
+            }
+        }
+    }
+}
+
+struct RouterOpen: View {
+    var focus: Kind = .question
+    var body: some View {
+        Screen {
+            Island(width: 900, radius: 28) {
+                VStack(spacing: 0) {
+                    RouterTop(space: .forYou)
+                    HStack(alignment: .top, spacing: 0) {
+                        list.frame(width: 300)
+                        Rectangle().fill(T.line).frame(width: 1).padding(.vertical, 6)
+                        VStack(spacing: 0) {
+                            if focus == .question { question } else { plan }
+                            Spacer(minLength: 0)
+                            Composer(to: focus == .question ? "api-server" : "lcu",
+                                     text: focus == .question ? nil : "approve, but skip the rollback tests")
+                                .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 22)
+                        }
+                    }
+                    .frame(height: 640)
+                }
+            }
+        }
+    }
+
+    var list: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
+                ForEach(cards) { CardRow(card: $0, selected: $0.kind == focus) }
+            }
+            Text("Working").font(T.meta(.medium)).foregroundStyle(T.text3).padding(.horizontal, 10).padding(.top, 18).padding(.bottom, 4)
+            WorkingLine(project: "zig", what: "zig build test", time: "12m")
+            WorkingLine(project: "lookout", what: "3 left running", time: "")
+            Spacer()
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left").font(.system(size: 11.5)).foregroundStyle(T.text3).frame(width: 14)
+                Text("Router").font(T.meta(.medium)).foregroundStyle(T.text2)
+                Text("1 conversation today").font(T.meta()).foregroundStyle(T.text3)
+            }
+            .padding(.horizontal, 10).frame(height: 30)
+        }
+        .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 14)
+    }
+
+    var question: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Glyph(kind: .question)
+                Text("Question").font(T.meta(.medium)).foregroundStyle(T.amber)
+                Text("·").foregroundStyle(T.text3)
+                Mono(name: "api-server")
+                Text("api-server").font(T.meta()).foregroundStyle(T.text2)
+                Text("·").foregroundStyle(T.text3)
+                Text("Database migration plan").font(T.meta()).foregroundStyle(T.text2)
+                Spacer()
+                Text("Open in Claude").font(T.meta()).foregroundStyle(T.text3)
+                Key(k: "⌘O")
+            }
+            Text("Which database should the new jobs table live in?")
+                .font(.system(size: 22, weight: .semibold)).tracking(-0.4).foregroundStyle(T.text)
+                .padding(.top, 18)
+            Text("Planning the migration for the background jobs. The rest of the schema is already on Postgres.")
+                .font(T.body()).foregroundStyle(T.text2).lineSpacing(3).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+            VStack(spacing: 2) {
+                option(1, "Postgres", "Already in the stack; one migration path", selected: true)
+                option(2, "SQLite", "Single file, simplest for local dev")
+                option(3, "Redis", "Fast, not durable by default")
+                option(4, "Other…", nil)
+            }
+            .padding(.top, 20)
+            HStack(spacing: 8) {
+                Primary(title: "Answer", key: "⌘↵")
+                Secondary(title: "Mark addressed", key: "E")
+            }
+            .padding(.top, 16)
+            Rectangle().fill(T.line).frame(height: 1).padding(.top, 26).padding(.bottom, 18)
+            VStack(alignment: .leading, spacing: 16) {
+                Activity(icon: AnyView(Glyph(kind: .question, size: 13)), who: "api-server", what: "asked", time: "2m")
+                Activity(icon: AnyView(Image(systemName: "arrow.turn.down.right").font(.system(size: 11)).foregroundStyle(T.text3)),
+                         who: "You", what: "via the Router", time: "1m", quote: "What did you already try?")
+                Activity(icon: AnyView(Mono(name: "api-server")), who: "api-server", what: "replied", time: "now",
+                         quote: "A local SQLite prototype. It works, but prod would need a second migration path.")
+            }
+        }
+        .padding(.horizontal, 28).padding(.top, 14)
+    }
+
+    func option(_ n: Int, _ title: String, _ detail: String?, selected: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Key(k: "\(n)")
+            Text(title).font(T.body(.medium)).foregroundStyle(n == 4 ? T.text3 : T.text)
+            if let detail { Text(detail).font(T.meta()).foregroundStyle(T.text3) }
+            Spacer()
+            if selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(T.accent) }
+        }
+        .padding(.horizontal, 10).frame(height: 36)
+        .background(RoundedRectangle(cornerRadius: 9).fill(selected ? T.hover : .clear))
+    }
+
+    var plan: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Glyph(kind: .plan)
+                Text("Plan").font(T.meta(.medium)).foregroundStyle(T.violet)
+                Text("·").foregroundStyle(T.text3)
+                Mono(name: "lcu")
+                Text("lcu").font(T.meta()).foregroundStyle(T.text2)
+                Text("·").foregroundStyle(T.text3)
+                Text("9m").font(T.meta()).foregroundStyle(T.text3)
+                Spacer()
+                Text("Open in Claude").font(T.meta()).foregroundStyle(T.text3)
+                Key(k: "⌘O")
+            }
+            Text("Update notifications").font(.system(size: 22, weight: .semibold)).tracking(-0.4).foregroundStyle(T.text).padding(.top, 18)
+            Text("Ask before installing an update, never install silently.").font(T.body()).foregroundStyle(T.text2).padding(.top, 8)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(["Poll releases hourly and on wake", "Ask before installing, with an \"Always\" option",
+                               "Verify the signature before swapping the binary", "Tests for the prompt and the rollback"].enumerated()),
+                        id: \.offset) { i, s in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("\(i + 1)").font(T.meta(.medium)).foregroundStyle(T.text3).monospacedDigit().frame(width: 12, alignment: .trailing)
+                        Text(s).font(T.body()).foregroundStyle(i == 3 ? T.text3 : T.text).strikethrough(i == 3, color: T.text3)
+                    }
+                    .padding(.vertical, 8)
+                    if i < 3 { Rectangle().fill(T.line).frame(height: 1).padding(.leading, 24) }
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 11).fill(T.raised))
+            .padding(.top, 20)
+            HStack(spacing: 8) {
+                Primary(title: "Approve", key: "⌘↵")
+                Secondary(title: "Keep planning")
+            }
+            .padding(.top, 16)
+            Text("Your reply goes with the approval: step 4 is crossed out as you said.").font(T.meta()).foregroundStyle(T.text3).padding(.top, 14)
+        }
+        .padding(.horizontal, 28).padding(.top, 14)
+    }
+}
+
+// MARK: - 5. Inbox (GitHub), in the same island
+
+struct InboxOpen: View {
+    let rows: [(String, String, String, String, String, Kind)] = [
+        ("andrewrk", "std.Io: add vectored reads to File", "zig#21877", "Review comment", "3m", .question),
+        ("allevato", "Respect trailing comma config in collection literals", "swift-format#1042", "Comment on your PR", "18m", .question),
+        ("mattt", "Pill overlaps the Dock when it's on the right", "lookout#12", "New issue", "42m", .question),
+        ("ahoppen", "Add --lines option to format a range", "swift-format#1051", "Review requested", "1h", .question),
+        ("kylef", "Add GitHub Enterprise host setting", "lookout#15", "New pull request", "1h", .question),
+    ]
+    var body: some View {
+        Screen {
+            Island(width: 900, radius: 28) {
+                VStack(spacing: 0) {
+                    RouterTop(space: .inbox)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("Today").font(T.meta(.medium)).foregroundStyle(T.text3)
+                            Spacer()
+                            HStack(spacing: 14) {
+                                Text("Unread").font(T.meta(.medium)).foregroundStyle(T.text)
+                                Text("Bots 2").font(T.meta()).foregroundStyle(T.text3)
+                                Text("Done").font(T.meta()).foregroundStyle(T.text3)
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.bottom, 6)
+                        ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
+                            HStack(spacing: 12) {
+                                Circle().fill(i < 3 ? T.accent : .clear).frame(width: 6, height: 6)
+                                avatar(r.0)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(r.1).font(T.body(.medium)).foregroundStyle(i < 3 ? T.text : T.text2).lineLimit(1)
+                                    HStack(spacing: 5) {
+                                        Text(r.0).foregroundStyle(T.text2)
+                                        Text(r.3.lowercased()).foregroundStyle(T.text3)
+                                        Text("·").foregroundStyle(T.text3)
+                                        Text(r.2).foregroundStyle(T.text3)
+                                    }
+                                    .font(T.meta())
+                                }
+                                Spacer()
+                                if i == 0 {
+                                    HStack(spacing: 6) { Key(k: "↵"); Key(k: "E"); Key(k: "⌫") }
+                                } else {
+                                    Text(r.4).font(T.meta()).foregroundStyle(T.text3).monospacedDigit()
+                                }
+                            }
+                            .padding(.horizontal, 12).frame(height: 54)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(i == 0 ? T.hover : .clear))
+                        }
+                        Rectangle().fill(T.line).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 14)
+                        Text("Main branches").font(T.meta(.medium)).foregroundStyle(T.text3).padding(.horizontal, 12).padding(.bottom, 8)
+                        HStack(spacing: 22) {
+                            ci(.failing, "swift-format", "2 checks")
+                            ci(.running, "zig", "4m")
+                            ci(.passing, "lookout", nil)
+                            ci(.passing, "lcu", nil)
+                        }
+                        .padding(.horizontal, 12)
+                    }
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 20)
+                }
+            }
+        }
+    }
+
+    func avatar(_ name: String) -> some View {
+        Group {
+            if let img = NSImage(contentsOfFile: "/tmp/island-proto/avatars/\(name).png") {
+                Image(nsImage: img).resizable()
+            } else { Circle().fill(T.hover) }
+        }
+        .frame(width: 26, height: 26).clipShape(Circle())
+    }
+
+    func ci(_ k: Kind, _ name: String, _ detail: String?) -> some View {
+        HStack(spacing: 7) {
+            Glyph(kind: k, size: 13)
+            Text(name).font(T.meta(.medium)).foregroundStyle(T.text2)
+            if let detail { Text(detail).font(T.meta()).foregroundStyle(k == .failing ? T.red : T.text3) }
+        }
+    }
+}
+
+// MARK: - 6. Glyphs, up close
+
+struct GlyphSheet: View {
+    var body: some View {
+        let items: [(Kind, String, String)] = [
+            (.question, "Needs you", "the only amber"), (.plan, "Plan to approve", "three quarters ready"),
+            (.stuck, "Stuck", ""), (.done, "Done, unread", ""), (.working, "Working", "fills as it runs"),
+            (.quiet, "Addressed", ""), (.failing, "CI failing", ""), (.running, "CI running", ""), (.passing, "CI passing", ""),
+        ]
+        VStack(alignment: .leading, spacing: 28) {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(220), alignment: .leading), count: 3), alignment: .leading, spacing: 26) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+                    HStack(spacing: 14) {
+                        Glyph(kind: it.0, size: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(it.1).font(T.body(.medium)).foregroundStyle(T.text)
+                            if !it.2.isEmpty { Text(it.2).font(T.meta()).foregroundStyle(T.text3) }
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 12) {
+                ForEach([Kind.question, .plan, .stuck, .done, .working, .quiet, .failing, .running, .passing], id: \.self) { Glyph(kind: $0) }
+                Text("at 14pt, as in lists").font(T.meta()).foregroundStyle(T.text3).padding(.leading, 6)
+            }
+        }
+        .padding(44)
+        .frame(width: 800, alignment: .leading)
+        .background(T.ink)
+    }
+}
+
+// MARK: - Render
+
+@main
+struct Render {
+    @MainActor static func main() {
+        let dir = CommandLine.arguments.dropFirst().first ?? "shots"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let top = CGSize(width: 1512, height: 982)
+        save(Rest(attention: false), "1a-rest-quiet", dir, crop: CGRect(x: 356, y: 0, width: 800, height: 220))
+        save(Rest(attention: true), "1b-rest-needs-you", dir, crop: CGRect(x: 356, y: 0, width: 800, height: 220))
+        save(Arrival(), "2-question-arrives", dir, crop: CGRect(x: 256, y: 0, width: 1000, height: 340))
+        save(Glance(), "3-glance", dir, crop: CGRect(x: 256, y: 0, width: 1000, height: 480))
+        save(RouterOpen(focus: .question), "4-router-question", dir, crop: CGRect(origin: .zero, size: top))
+        save(RouterOpen(focus: .plan), "5-router-plan", dir, crop: CGRect(origin: .zero, size: top))
+        save(InboxOpen(), "6-inbox", dir, crop: CGRect(x: 0, y: 0, width: 1512, height: 720))
+        save(GlyphSheet(), "7-glyphs", dir, crop: nil)
+    }
+
+    @MainActor static func save<V: View>(_ view: V, _ name: String, _ dir: String, crop: CGRect?) {
+        let r = ImageRenderer(content: view.environment(\.colorScheme, .dark))
+        r.scale = 2
+        guard var cg = r.cgImage else { print("failed \(name)"); return }
+        if let crop, let c = cg.cropping(to: CGRect(x: crop.minX * 2, y: crop.minY * 2, width: crop.width * 2, height: crop.height * 2)) { cg = c }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
+        print("\(dir)/\(name).png")
+    }
+}

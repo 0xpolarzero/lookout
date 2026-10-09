@@ -31,8 +31,9 @@ import Testing
 
     private func update(_ state: inout RouterState, _ sessions: [ClaudeSession], activity: [String: ClaudeActivity] = [:],
                         muted: Set<String> = [], viewing: String? = nil, forms: [String: Set<String>]? = nil,
-                        now: Double) {
-        RouterFeed.update(&state, sessions: sessions, activity: activity, muted: muted, viewing: viewing, forms: forms, now: at(now))
+                        tasks: [String: [ClaudeTask]] = [:], inventory: Set<String>? = nil, now: Double) {
+        RouterFeed.update(&state, sessions: sessions, activity: activity, muted: muted, viewing: viewing, forms: forms, tasks: tasks,
+                          inventory: inventory, now: at(now))
     }
 
     @Test func theFirstSightOfASessionOnlyRecordsIt() {
@@ -60,14 +61,25 @@ import Testing
         #expect(state.cards.map(\.kind) == [.stuck])
     }
 
-    @Test func theSummaryIsFilledInWhenItComesLater() {
+    @Test func aTurnIsCardedOnceItsSummaryIsWritten() {
+        // The count goes up first, the session still counting as running until the app writes the summary: no card yet.
         var state = seen([session(turns: 1)])
         update(&state, [session(turns: 2, summary: nil, running: true)], now: 1)
+        #expect(state.cards.isEmpty)
+        update(&state, [session(turns: 2, summary: "Can't reach the server", blocked: true)], now: 2)
+        #expect(state.cards.map(\.id) == ["local_a#t2"])
+        #expect(state.cards.first?.text == "Can't reach the server" && state.cards.first?.kind == .stuck)
+        #expect(state.cards.first?.isOpen == true)
+    }
+
+    @Test func theSummaryIsFilledInWhenItComesLater() {
+        // A turn over with no summary yet (the app gave up counting it as running): the placeholder, then the summary.
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2, summary: nil, running: false)], now: 1)
         #expect(state.cards.first?.text == RouterFeed.placeholder && state.cards.first?.kind == .done)
         update(&state, [session(turns: 2, summary: "Can't reach the server", blocked: true)], now: 2)
         #expect(state.cards.count == 1)
         #expect(state.cards.first?.text == "Can't reach the server" && state.cards.first?.kind == .stuck)
-        #expect(state.cards.first?.isOpen == true)
     }
 
     @Test func aQuestionMakesOneCardUntilItIsAnswered() {
@@ -362,13 +374,11 @@ import Testing
         RouterFeed.update(&state, sessions: [a, b], activity: [:], muted: [], viewing: nil, now: made.addingTimeInterval(0.6))
         #expect(state.cards.map(\.addressedBy) == [.reply, .opened])
 
-        // A message just before the card, in the same second, is not a reply to it.
-        var fresh = seen([session(turns: 1)])
-        RouterFeed.update(&fresh, sessions: [session(turns: 2)], activity: [:], muted: [], viewing: nil, now: made)
-        var c = session(turns: 2)
-        c.lastUserMessage = made.addingTimeInterval(-0.1)
-        RouterFeed.reconcile(&fresh, sessions: [c], activity: [:], now: made.addingTimeInterval(1))
-        #expect(fresh.cards[0].isOpen)
+        // A message just before a card (one with nothing else to go by), in the same second, is not a reply to it.
+        let question = RouterCard(id: "local_a#w1", sessionID: "local_a", kind: .question, title: "", folder: nil, text: "",
+                                  createdAt: made)
+        #expect(!(RouterFeed.Stamp.ms(made.addingTimeInterval(-0.1)) > question.replyAfter))
+        #expect(RouterFeed.Stamp.ms(made.addingTimeInterval(0.5)) > question.replyAfter)
     }
 
     @Test func oldStateFilesWithDatesStillDecode() throws {
@@ -422,5 +432,108 @@ import Testing
         RouterFeed.reconcile(&loaded, sessions: [odd], activity: [:], now: at(2))
         _ = loaded.cards.map(\.createdAt)
         #expect(loaded.cards.count == 2)
+    }
+
+    // MARK: Turns that leave work running
+
+    private var subagent: [String: [ClaudeTask]] {
+        ["local_a": [ClaudeTask(id: "t1", kind: .agent, title: "Explore", since: at(0))]]
+    }
+
+    @Test func aTurnThatLeftWorkRunningIsCardedWhenTheWorkIsDone() {
+        var state = seen([session(turns: 1)])
+        // The turn is over, a subagent still runs: still working, no card.
+        update(&state, [session(turns: 2, summary: nil)], tasks: subagent, now: 1)
+        update(&state, [session(turns: 2, summary: "First summary")], tasks: subagent, now: 2)
+        #expect(state.cards.isEmpty && state.pendingTurns["local_a"]?.turns == 2)
+        // It's done: the card, with the summary as it is then.
+        update(&state, [session(turns: 2, summary: "Merged the fix", blocked: true)], now: 3)
+        #expect(state.cards.map(\.id) == ["local_a#t2"] && state.cards[0].kind == .stuck && state.cards[0].text == "Merged the fix")
+        #expect(state.cards[0].createdAt == at(3) && state.pendingTurns.isEmpty)
+        // Once: not again on the next read.
+        update(&state, [session(turns: 2, summary: "Merged the fix", blocked: true)], now: 4)
+        #expect(state.cards.count == 1)
+    }
+
+    @Test func aReplyWhileTheWorkRunsMeansNoCard() {
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2)], tasks: subagent, now: 1)
+        // You wrote to it meanwhile (a new turn under way, then over before the subagent is done).
+        update(&state, [session(turns: 2, message: 2, running: true)], now: 2)
+        update(&state, [session(turns: 2, message: 2)], tasks: subagent, now: 3)
+        update(&state, [session(turns: 2, message: 2)], now: 4)
+        #expect(state.cards.isEmpty && state.pendingTurns.isEmpty)
+    }
+
+    @Test func aNewerTurnMeanwhileGivesOneCardForTheLatest() {
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2)], tasks: subagent, now: 1)
+        // Another turn ended (still with work running), then everything is done.
+        update(&state, [session(turns: 3, message: 2)], tasks: subagent, now: 3)
+        update(&state, [session(turns: 3, message: 2, summary: "All done")], now: 4)
+        #expect(state.cards.map(\.id) == ["local_a#t3"] && state.cards[0].text == "All done")
+    }
+
+    @Test func aCardAlreadyMadeIsLeftAloneByWorkStartedLater() {
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2)], now: 1)
+        update(&state, [session(turns: 2)], tasks: subagent, now: 2)
+        #expect(state.cards.count == 1 && state.cards[0].isOpen && state.pendingTurns.isEmpty)
+    }
+
+    @Test func aPendingTurnSurvivesARelaunchAndTurningTheRouterOnAgain() throws {
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2)], tasks: subagent, now: 1)
+        let enc = JSONEncoder(), dec = JSONDecoder()
+        enc.dateEncodingStrategy = .iso8601
+        dec.dateDecodingStrategy = .iso8601
+        var loaded = try dec.decode(RouterState.self, from: enc.encode(state))
+        #expect(loaded.pendingTurns["local_a"]?.turns == 2)
+        // Switched off and on: the open cards are settled and every session seen afresh; the pending turn still waits.
+        RouterFeed.reconcile(&loaded, sessions: [session(turns: 2)], activity: [:], now: at(2))
+        update(&loaded, [session(turns: 2)], tasks: subagent, now: 3)
+        #expect(loaded.cards.isEmpty)
+        update(&loaded, [session(turns: 2)], now: 4)
+        #expect(loaded.cards.map(\.id) == ["local_a#t2"])
+    }
+
+    // MARK: Knowing whether a turn left work running
+
+    @Test func aLateSummaryThenLiveTasksThenNoneGivesOneCardAfterTheTasks() {
+        var state = seen([session(turns: 1)])
+        // The count goes up while the session still counts as running: what it leaves running isn't known yet.
+        update(&state, [session(turns: 2, summary: nil, running: true)], tasks: [:], inventory: [], now: 1)
+        #expect(state.cards.isEmpty)
+        // The summary is written; the read that sees it hasn't looked at its tasks yet.
+        update(&state, [session(turns: 2, summary: "Done it")], tasks: [:], inventory: [], now: 2)
+        #expect(state.cards.isEmpty)
+        // It has: a subagent still runs.
+        update(&state, [session(turns: 2, summary: "Done it")], tasks: subagent, inventory: ["local_a"], now: 3)
+        #expect(state.cards.isEmpty)
+        // Done: one card.
+        update(&state, [session(turns: 2, summary: "Done it")], tasks: [:], inventory: ["local_a"], now: 4)
+        update(&state, [session(turns: 2, summary: "Done it")], tasks: [:], inventory: ["local_a"], now: 5)
+        #expect(state.cards.map(\.id) == ["local_a#t2"] && state.cards[0].createdAt == at(4))
+    }
+
+    @Test func aLateSummaryAndNoTasksGivesTheCardOnceTheReadSaysNone() {
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2, summary: nil, running: true)], inventory: [], now: 1)
+        update(&state, [session(turns: 2, summary: "Done it")], inventory: [], now: 2)
+        #expect(state.cards.isEmpty)
+        update(&state, [session(turns: 2, summary: "Done it")], inventory: ["local_a"], now: 3)
+        #expect(state.cards.map(\.id) == ["local_a#t2"] && state.cards[0].createdAt == at(3))
+    }
+
+    @Test func aReplyTheStoreHadntReadWhenTheTasksEndedStillAddressesTheCard() {
+        // The turn ends with a command running. You reply; before the store reads the sessions again, a read of the tasks
+        // alone says the command is over, with the sessions as last read (no reply yet): the card is made then.
+        var state = seen([session(turns: 1)])
+        update(&state, [session(turns: 2)], tasks: subagent, inventory: ["local_a"], now: 1)
+        update(&state, [session(turns: 2)], tasks: [:], inventory: ["local_a"], now: 3)
+        #expect(state.cards.map(\.id) == ["local_a#t2"] && state.cards[0].isOpen)
+        // The next full read has your reply, sent before the card was made: it is a reply to that turn all the same.
+        update(&state, [session(turns: 2, message: 2.5, running: true)], now: 4)
+        #expect(state.cards[0].addressedBy == .reply)
     }
 }

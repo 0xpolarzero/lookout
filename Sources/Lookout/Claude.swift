@@ -303,13 +303,28 @@ enum Claude {
     static let agentTimeout: TimeInterval = 30 * 60
 
     /// Every task folder, by the session it belongs to.
-    static func taskFolders() -> [String: URL] {
+    static func taskFolders() -> [String: URL] { readTaskFolders() ?? [:] }
+
+    /// Every task folder, by session; nil when a folder couldn't be read (what's in it isn't known: not the same as none).
+    /// No root at all is none.
+    static func readTaskFolders(root: URL = tasksRoot) -> [String: URL]? {
         let fm = FileManager.default
+        guard fm.fileExists(atPath: root.path) else { return [:] }
+        guard let projects = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { return nil }
         var folders: [String: URL] = [:]
-        for project in (try? fm.contentsOfDirectory(at: tasksRoot, includingPropertiesForKeys: nil)) ?? [] {
-            for session in (try? fm.contentsOfDirectory(at: project, includingPropertiesForKeys: nil)) ?? [] {
+        for project in projects {
+            var isFolder: ObjCBool = false
+            guard fm.fileExists(atPath: project.path, isDirectory: &isFolder), isFolder.boolValue else { continue }
+            guard let sessions = try? fm.contentsOfDirectory(at: project, includingPropertiesForKeys: nil) else { return nil }
+            for session in sessions {
                 let tasks = session.appendingPathComponent("tasks", isDirectory: true)
-                if fm.fileExists(atPath: tasks.path) { folders[session.lastPathComponent] = tasks }
+                // No folder is none; one that can't be looked into (no permission) isn't known.
+                var info = stat()
+                if stat(tasks.path, &info) == 0 {
+                    folders[session.lastPathComponent] = tasks
+                } else if errno != ENOENT && errno != ENOTDIR {
+                    return nil
+                }
             }
         }
         return folders
@@ -371,9 +386,17 @@ enum Claude {
         }
 
         func tasks(in folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> [ClaudeTask] {
+            read(folder, transcript: transcript, openOutputs: openOutputs, now: now).tasks
+        }
+
+        /// The tasks, and whether that is the whole answer: a command listed only a moment ago and not open yet may be
+        /// about to start, so its session's background work isn't known yet.
+        func read(_ folder: URL, transcript: URL?, openOutputs: Set<String>, now: Date = Date()) -> (tasks: [ClaudeTask], certain: Bool) {
             let fm = FileManager.default
             let keys: [URLResourceKey] = [.isSymbolicLinkKey, .creationDateKey]
-            let entries = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
+            // A folder that can't be read says nothing: not "no tasks".
+            guard let entries = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else { return ([], false) }
+            var certain = true
             var tasks: [ClaudeTask] = []
             // The transcript is read in full at most once per call, and only for a command's title.
             var whole: Data??
@@ -410,7 +433,7 @@ enum Claude {
                 } else {
                     guard openOutputs.contains(entry.path) else {
                         // (A file only just listed may not be open yet.)
-                        if now.timeIntervalSince(since) > 5 { finished.insert(id) }
+                        if now.timeIntervalSince(since) > 5 { finished.insert(id) } else { certain = false }
                         continue
                     }
                     let title = titles[id] ?? transcriptData().flatMap { Claude.commandTitle(id, in: $0) } ?? "Background command"
@@ -418,7 +441,19 @@ enum Claude {
                     tasks.append(ClaudeTask(id: id, kind: .command, title: title, since: since))
                 }
             }
-            return tasks.sorted { $0.since < $1.since }
+            return (tasks.sorted { $0.since < $1.since }, certain)
+        }
+
+        /// When the newest command output in `folder` was made (subagents' links aside): a scan of open files older than
+        /// that hasn't seen it.
+        func newestCommand(in folder: URL) -> Date? {
+            let keys: [URLResourceKey] = [.isSymbolicLinkKey, .creationDateKey]
+            let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
+            return entries.compactMap { entry -> Date? in
+                guard entry.pathExtension == "output",
+                      let values = try? entry.resourceValues(forKeys: Set(keys)), values.isSymbolicLink != true else { return nil }
+                return values.creationDate
+            }.max()
         }
 
         private func activity(_ url: URL, _ modified: Date) -> ClaudeActivity? {
@@ -575,6 +610,9 @@ struct ClaudeSnapshot {
     var frontmost = false
     var activity: [String: ClaudeActivity]?
     var tasks: [String: [ClaudeTask]]?
+    /// The sessions `tasks` speaks for: those not running in this read, whose background work was looked at (none found is
+    /// an answer too).
+    var taskInventory: Set<String>?
     /// What the store looked like when the read was asked for (see `Store.applyClaude`).
     var stamp = ClaudeStamp()
 }
@@ -603,7 +641,6 @@ final class ClaudeFeed: @unchecked Sendable {
     // Only touched on `queue`.
     private var live: [ClaudeSession]?
     private var allSessions: [ClaudeSession]?
-    private var openCache: (Date, Set<String>)?
 
     init(activityReader: Claude.ActivityReader) { self.activityReader = activityReader }
 
@@ -685,32 +722,66 @@ final class ClaudeFeed: @unchecked Sendable {
             watched.insert(cli)
             if let found = activityReader.activity(for: cli) { activity[session.id] = found }
         }
-        var tasks: [String: [ClaudeTask]] = [:]
-        let folders = Claude.isRunning ? Claude.taskFolders() : [:]
-        let idle = sessions.filter { !$0.running && $0.cliID.map { folders[$0] != nil } == true }
-        if !idle.isEmpty {
-            // The process list is only worth walking while some command's fate is still unknown.
-            let open = idle.contains { $0.cliID.flatMap { folders[$0] }.map(taskReader.needsOpenOutputs) == true }
-                ? openOutputs() : []
-            for session in idle {
-                guard let cli = session.cliID, let folder = folders[cli] else { continue }
-                watched.insert(cli)
-                let found = taskReader.tasks(in: folder, transcript: activityReader.transcript(cli), openOutputs: open)
-                if !found.isEmpty { tasks[session.id] = found }
-            }
+        let folders = Claude.isRunning ? Claude.readTaskFolders() : [:]
+        let reader = activityReader
+        let found = Self.readTasks(sessions: sessions, folders: folders, reader: taskReader, outputs: openOutputs,
+                                   transcript: { reader.transcript($0) })
+        for session in sessions where !session.running {
+            if let cli = session.cliID, folders?[cli] != nil { watched.insert(cli) }
         }
         lock.lock()
         relevant = watched
         lock.unlock()
         snapshot.activity = activity
-        snapshot.tasks = tasks
+        snapshot.tasks = found.tasks
+        snapshot.taskInventory = found.inventory
         return snapshot
     }
 
-    private func openOutputs() -> Set<String> {
-        if let (at, set) = openCache, Date().timeIntervalSince(at) < 2 { return set }
-        let set = Claude.openTaskOutputs()
-        openCache = (Date(), set)
-        return set
+    private let openOutputs = OpenOutputs()
+
+    /// The background work of the sessions whose turn is over, and the ones that is the whole answer for: a session
+    /// counts only when every command in its folder is accounted for by a scan of open files made after its turn ended
+    /// (a scan from before can't have seen what it started last), or none needed one.
+    /// `folders` nil: they couldn't be read, and no session's work is known.
+    static func readTasks(sessions: [ClaudeSession], folders: [String: URL]?, reader: Claude.TaskReader, outputs: OpenOutputs,
+                          transcript: (String) -> URL?) -> (tasks: [String: [ClaudeTask]], inventory: Set<String>) {
+        guard let folders else { return ([:], []) }
+        let idle = sessions.filter { !$0.running }
+        let withFolders = idle.compactMap { s in s.cliID.flatMap { folders[$0] }.map { (s, $0) } }
+        // The process list is only worth walking while some command's fate is still unknown; a cached walk is used only if
+        // no command was started after it.
+        let needed = withFolders.filter { reader.needsOpenOutputs(in: $0.1) }
+        var scan: (at: Date, open: Set<String>)?
+        if !needed.isEmpty {
+            scan = outputs.get(newerThan: needed.compactMap { reader.newestCommand(in: $0.1) }.max())
+        }
+        var tasks: [String: [ClaudeTask]] = [:]
+        var inventory = Set(idle.filter { s in s.cliID.map { folders[$0] == nil } ?? true }.map(\.id))
+        let now = outputs.now()
+        for (session, folder) in withFolders {
+            let mustScan = needed.contains { $0.0.id == session.id }
+            let read = reader.read(folder, transcript: session.cliID.flatMap(transcript), openOutputs: scan?.open ?? [], now: now)
+            if !read.tasks.isEmpty { tasks[session.id] = read.tasks }
+            let seenAfterTurn = !mustScan || (scan.map { $0.at > session.lastActivity } ?? false)
+            if read.certain, seenAfterTurn { inventory.insert(session.id) }
+        }
+        return (tasks, inventory)
+    }
+}
+
+/// Which command outputs a process has open, from one walk of the process list kept for two seconds, unless a command was
+/// started after that walk (it can't have seen it). The walk and the clock are the tests' to give.
+final class OpenOutputs: @unchecked Sendable {
+    var scan: () -> Set<String> = { Claude.openTaskOutputs() }
+    var now: () -> Date = Date.init
+    private var cached: (at: Date, open: Set<String>)?
+
+    func get(newerThan newest: Date?) -> (at: Date, open: Set<String>) {
+        let now = now()
+        if let cached, now.timeIntervalSince(cached.at) < 2, newest.map({ $0 < cached.at }) ?? true { return cached }
+        let fresh = (at: now, open: scan())
+        cached = fresh
+        return fresh
     }
 }

@@ -731,3 +731,155 @@ import Testing
         #expect(s.folderNames["/w/app"] == "w/app" && s.folderNames["/x/app"] == "x/app" && runs == 3)
     }
 }
+
+/// Which sessions' background work is known: only from a scan of open files made after the session's turn ended, and never
+/// from a cached scan older than a command it hasn't seen.
+@Suite struct TaskInventory {
+    private let t0 = Date(timeIntervalSince1970: 2_000_000_000)
+
+    private func session(_ id: String, ended: Date, running: Bool = false) -> ClaudeSession {
+        ClaudeSession(id: id, title: id, folder: "/code/app", completedTurns: 1, lastActivity: ended, running: running, cliID: "cli-\(id)")
+    }
+
+    /// A command output in `folder`, made at `at`.
+    private func command(_ id: String, in folder: URL, at: Date) throws -> String {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("\(id).output")
+        try Data().write(to: url)
+        try FileManager.default.setAttributes([.creationDate: at, .modificationDate: at], ofItemAtPath: url.path)
+        // The path as the folder lists it (the temporary folder's /private prefix included), as a scan of open files says it.
+        let listed = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        return try #require(listed.first { $0.lastPathComponent == "\(id).output" }).path
+    }
+
+    @Test func aCommandStartedAfterTheCachedScanIsLookedForAgain() throws {
+        let dir = TempDir()
+        let a = dir.path("a"), b = dir.path("b")
+        let aOut = try command("ca", in: a, at: t0.addingTimeInterval(-10))
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+        var clock = t0, open: Set<String> = [aOut], scans = 0
+        let outputs = OpenOutputs()
+        outputs.now = { clock }
+        outputs.scan = { scans += 1; return open }
+        let reader = Claude.TaskReader()
+        let folders = ["cli-a": a, "cli-b": b]
+        // A's read walks the processes; B is working.
+        var read = ClaudeFeed.readTasks(sessions: [session("a", ended: t0.addingTimeInterval(-20)),
+                                                   session("b", ended: t0, running: true)],
+                                        folders: folders, reader: reader, outputs: outputs, transcript: { _ in nil })
+        #expect(scans == 1 && read.tasks["a"]?.count == 1 && read.inventory == ["a"])
+        // Within the cached walk's two seconds, B starts a command and its turn ends.
+        let bOut = try command("cb", in: b, at: t0.addingTimeInterval(0.5))
+        open.insert(bOut)
+        clock = t0.addingTimeInterval(1.5)
+        read = ClaudeFeed.readTasks(sessions: [session("a", ended: t0.addingTimeInterval(-20)), session("b", ended: t0.addingTimeInterval(1))],
+                                    folders: folders, reader: reader, outputs: outputs, transcript: { _ in nil })
+        // The walk is made again (the cached one hadn't seen it): B's command is found, and B is known to be busy.
+        #expect(scans == 2)
+        #expect(read.tasks["b"]?.map(\.id) == ["cb"] && read.inventory.contains("b"))
+    }
+
+    @Test func aTurnThatEndedAfterTheCachedScanIsUnknownUntilANewOne() throws {
+        let dir = TempDir()
+        let b = dir.path("b")
+        let bOut = try command("cb", in: b, at: t0.addingTimeInterval(-3))
+        var clock = t0, scans = 0
+        let outputs = OpenOutputs()
+        outputs.now = { clock }
+        outputs.scan = { scans += 1; return [bOut] }
+        let reader = Claude.TaskReader()
+        // A walk at t0 (B still working: its command already running).
+        _ = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(-1))], folders: ["cli-b": b], reader: reader,
+                                 outputs: outputs, transcript: { _ in nil })
+        #expect(scans == 1)
+        // B's turn ends at t0 + 1; the cached walk (from before) is used: what it left running isn't known yet.
+        clock = t0.addingTimeInterval(1.5)
+        var read = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(1))], folders: ["cli-b": b],
+                                        reader: reader, outputs: outputs, transcript: { _ in nil })
+        #expect(scans == 1 && !read.inventory.contains("b"))
+        // A walk after it: known.
+        clock = t0.addingTimeInterval(2.5)
+        read = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(1))], folders: ["cli-b": b], reader: reader,
+                                    outputs: outputs, transcript: { _ in nil })
+        #expect(scans == 2 && read.inventory.contains("b") && read.tasks["b"]?.map(\.id) == ["cb"])
+    }
+
+    @Test func aCommandListedButNotOpenYetLeavesTheSessionUnknown() throws {
+        let dir = TempDir()
+        let b = dir.path("b")
+        _ = try command("cb", in: b, at: t0.addingTimeInterval(-1))
+        let outputs = OpenOutputs()
+        outputs.now = { self.t0 }
+        outputs.scan = { [] }
+        let read = ClaudeFeed.readTasks(sessions: [session("b", ended: t0.addingTimeInterval(-2))], folders: ["cli-b": b],
+                                        reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
+        #expect(read.tasks.isEmpty && !read.inventory.contains("b"))
+    }
+
+    @Test func aCommandStillInItsGraceIsKnownOnceTheReadAfterItComes() throws {
+        // Listed a second ago and not open: unknown now; the re-read the store schedules (past the grace) knows.
+        let dir = TempDir()
+        let b = dir.path("b")
+        _ = try command("cb", in: b, at: t0.addingTimeInterval(-1))
+        var clock = t0
+        let outputs = OpenOutputs()
+        outputs.now = { clock }
+        outputs.scan = { [] }
+        let reader = Claude.TaskReader()
+        let ended = session("b", ended: t0.addingTimeInterval(-2))
+        var read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: reader, outputs: outputs, transcript: { _ in nil })
+        #expect(!read.inventory.contains("b"))
+        clock = t0.addingTimeInterval(Store.inventoryRecheckDelay + 1)
+        read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: reader, outputs: outputs, transcript: { _ in nil })
+        #expect(read.inventory.contains("b") && read.tasks.isEmpty)
+    }
+
+    @Test func aFolderThatCantBeReadIsUnknownNotEmptyUntilItCanBe() throws {
+        let dir = TempDir()
+        let b = dir.path("b")
+        _ = try command("cb", in: b, at: t0.addingTimeInterval(-60))
+        let outputs = OpenOutputs()
+        outputs.now = { self.t0 }
+        outputs.scan = { [] }
+        let ended = session("b", ended: t0.addingTimeInterval(-30))
+        // The task folders couldn't be listed: nothing is known.
+        var read = ClaudeFeed.readTasks(sessions: [ended], folders: nil, reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
+        #expect(read.inventory.isEmpty)
+        // The session's own folder can't be read: unknown too.
+        chmod(b.path, 0)
+        defer { chmod(b.path, 0o755) }
+        read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
+        #expect(read.inventory.isEmpty)
+        // Readable again: known.
+        chmod(b.path, 0o755)
+        read = ClaudeFeed.readTasks(sessions: [ended], folders: ["cli-b": b], reader: Claude.TaskReader(), outputs: outputs, transcript: { _ in nil })
+        #expect(read.inventory == ["b"])
+    }
+
+    @Test func taskFoldersThatCantBeListedAreNotNone() throws {
+        let dir = TempDir()
+        #expect(Claude.readTaskFolders(root: dir.path("missing")) == [:])
+        let project = dir.path("root/project")
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("cli-a/tasks"), withIntermediateDirectories: true)
+        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
+        chmod(project.path, 0)
+        defer { chmod(project.path, 0o755) }
+        #expect(Claude.readTaskFolders(root: dir.path("root")) == nil)
+        chmod(project.path, 0o755)
+        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
+    }
+
+    @Test func aSessionFolderThatCantBeLookedIntoIsNotNone() throws {
+        let dir = TempDir()
+        let session = dir.path("root/project/cli-a")
+        try FileManager.default.createDirectory(at: session.appendingPathComponent("tasks"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir.path("root/project/cli-b"), withIntermediateDirectories: true)
+        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
+        // No execute permission on the session's folder: its tasks folder can't be looked for.
+        chmod(session.path, 0o600)
+        defer { chmod(session.path, 0o755) }
+        #expect(Claude.readTaskFolders(root: dir.path("root")) == nil)
+        chmod(session.path, 0o755)
+        #expect(Claude.readTaskFolders(root: dir.path("root"))?.keys.sorted() == ["cli-a"])
+    }
+}

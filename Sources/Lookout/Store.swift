@@ -207,6 +207,11 @@ final class Store {
     @ObservationIgnored var routerReconcilePending = false
     /// The forms folder has been read since the Router was switched on: until then no form is known to be gone.
     @ObservationIgnored var routerFormsLoaded = false
+    /// The sessions whose background work the last read looked at (see `ClaudeSnapshot.taskInventory`); nil until a read
+    /// has said (a test feeding sessions by hand: every one).
+    @ObservationIgnored var claudeTaskInventory: Set<String>?
+    /// Stands in for a read of the Claude app the Router asks for (see `requestClaudeRead`); tests count it.
+    @ObservationIgnored var onClaudeRead: (() -> Void)?
     @ObservationIgnored let formBridge = FormBridge()
     @ObservationIgnored lazy var routerAgent = RouterAgent(store: self)
     /// Where the Router's files go, in a test (see `routerFiles`).
@@ -367,6 +372,20 @@ final class Store {
     /// first moment something can expire (and none while the screens are asleep or nothing is running).
     func lastCICheck(_ name: String) -> Date? { ciCheckedAt[name] ?? ci[name]?.checkedAt }
 
+    /// How soon to read again because a session's background work isn't known yet (see `RouterFeed.update`): only while the
+    /// Router waits on a finished turn of a session that isn't running and the last read couldn't say. Nil otherwise (no tick
+    /// for it at rest).
+    var inventoryRecheck: TimeInterval? {
+        guard router.enabled, let inventory = claudeTaskInventory else { return nil }
+        let waiting = router.pendingTurns.keys.contains { id in
+            claudeSessions[id].map { !$0.running && !inventory.contains(id) } ?? false
+        }
+        return waiting ? Self.inventoryRecheckDelay : nil
+    }
+
+    /// Past the five seconds a command just listed has to show up open (see `Claude.TaskReader.read`).
+    nonisolated static let inventoryRecheckDelay: TimeInterval = 5
+
     func scheduleClaudeTick() {
         guard agents.enabled, persists, !screensAsleep else {
             claudeTimer?.invalidate()
@@ -382,6 +401,9 @@ final class Store {
         }
         // Sessions with background work: its end isn't always an event (a command's process just exits).
         if !claudeTasks.isEmpty { next = min(next ?? 60, 60) }
+        // A finished turn the Router waits to card while what it left running isn't known yet: read again soon (past the
+        // grace a just-listed command gets), until it is.
+        if let recheck = inventoryRecheck { next = min(next ?? recheck, recheck) }
         // Icon picking waits out a failure (a rejected key waits for a new one instead).
         if agents.iconsEnabled, iconsPausedUntil > now, iconsPausedUntil < .distantFuture {
             next = min(next ?? .infinity, iconsPausedUntil.timeIntervalSince(now))

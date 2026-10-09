@@ -559,7 +559,8 @@ extension Store {
         }
         if let next = snapshot.activity, next != claudeActivity { claudeActivity = next }
         if let next = snapshot.tasks, next != claudeTasks { claudeTasks = next }
-        if snapshot.sessions != nil || snapshot.activity != nil { feedRouter() }
+        if let inventory = snapshot.taskInventory { claudeTaskInventory = inventory }
+        if snapshot.sessions != nil || snapshot.activity != nil || snapshot.tasks != nil { feedRouter() }
         if snapshot.sessions != nil { pickIcons() }
         scheduleClaudeTick()
     }

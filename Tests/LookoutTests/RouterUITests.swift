@@ -638,13 +638,13 @@ import UserNotifications
         }
         for edge in [DockEdge.right, .top] {
             for pinned in [false, true] {
-                let only = try await AccessibilityTree.render(edge: edge, scenario: .routerOnly) { _, hub in hub.pinned = pinned }
+                let only = try await AccessibilityTree.render(edge: edge, scenario: .routerOnly, configure: { _, hub in hub.pinned = pinned })
                 #expect(!only.all.contains { $0.label == "Sessions" || $0.label == "Calculator display reading" && $0.role == "AXButton" },
                         "\(edge) \(pinned)")
-                let back = try await AccessibilityTree.render(edge: edge, scenario: .routerOnly) { store, hub in
+                let back = try await AccessibilityTree.render(edge: edge, scenario: .routerOnly, configure: { store, hub in
                     store.setRouterOnly(false)
                     hub.pinned = pinned
-                }
+                })
                 #expect(back.all.contains { $0.label == "Sessions" }, "\(edge) \(pinned)")
             }
         }
@@ -658,15 +658,25 @@ import UserNotifications
 
     @Test func inRouterOnlyABrokenReadOfClaudesFilesIsStillSaid() async throws {
         func says(_ link: ClaudeLink, _ configure: @escaping (HubState) -> Void) async throws -> Bool {
-            let tree = try await AccessibilityTree.render(edge: .top, scenario: .routerOnly) { store, hub in
+            let tree = try await AccessibilityTree.render(edge: .top, scenario: .routerOnly, configure: { store, hub in
                 store.claudeLink = link
                 configure(hub)
-            }
+            })
             return tree.all.contains { ($0.label + $0.value).contains("Claude's sessions") }
         }
         for state in [{ (hub: HubState) in hub.section = .router }, { (hub: HubState) in hub.pinned = true }] {
             #expect(try await says(.missing, state))
             #expect(try await !says(.ok, state))
+        }
+    }
+
+    @Test func theWindowListsWhatIsWorkingInBothModes() async throws {
+        for scenario in [Demo.Scenario.router, .routerOnly] {
+            let store = demo(scenario)
+            let tree = try await AccessibilityTree.render(RouterView(store: store, model: RouterModel(), checksClaudeCode: false))
+            // A line per working session, the one that left things running included, each a button that opens it.
+            let lines = tree.all.filter { $0.role == "AXButton" && ["Agent completion notifications", "CI failure diagnosis"].contains($0.label) }
+            #expect(lines.count == 2, "\(scenario): \(tree.all.map(\.label))")
         }
     }
 
@@ -768,7 +778,7 @@ import UserNotifications
 
     @Test func withTheRouterOnTheBarHasNoNewSessionRow() async throws {
         func hasNewSession(_ scenario: Demo.Scenario) async throws -> Bool {
-            let tree = try await AccessibilityTree.render(scenario: scenario) { _, hub in hub.pinned = true }
+            let tree = try await AccessibilityTree.render(scenario: scenario, configure: { _, hub in hub.pinned = true })
             return tree.all.contains { $0.label == "New session" }
         }
         #expect(try await hasNewSession(.routerOff))

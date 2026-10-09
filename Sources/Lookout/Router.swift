@@ -23,6 +23,16 @@ struct RouterState: Codable, Equatable {
     var waitTools: [String: String] = [:]
     /// Waits whose form Lookout's hook was seen holding (session → the wait's ms): that form going away ends the wait.
     var formSeen: [String: Int64] = [:]
+    /// Turns that ended while the session still had subagents or commands running (see `RouterFeed.update`): carded once
+    /// those are done, by session.
+    var pendingTurns: [String: PendingTurn] = [:]
+
+    struct PendingTurn: Codable, Equatable {
+        /// The turn's number (`completedTurns`).
+        var turns: Int
+        /// Your last message when it ended (ms): a newer one means you've moved on, and no card is made for it.
+        var message: Int64?
+    }
     /// "Router only": the bar shows no session tiles, the Router stands in for them (on unless turned off).
     var routerOnly = true
 
@@ -39,6 +49,7 @@ struct RouterState: Codable, Equatable {
         waits = (try? c.decodeIfPresent([String: Int64].self, forKey: .waits)) ?? [:]
         waitTools = (try? c.decodeIfPresent([String: String].self, forKey: .waitTools)) ?? [:]
         formSeen = (try? c.decodeIfPresent([String: Int64].self, forKey: .formSeen)) ?? [:]
+        pendingTurns = (try? c.decodeIfPresent([String: PendingTurn].self, forKey: .pendingTurns)) ?? [:]
         routerOnly = (try? c.decodeIfPresent(Bool.self, forKey: .routerOnly)) ?? true
     }
 }
@@ -93,6 +104,12 @@ struct RouterCard: Codable, Identifiable, Hashable {
     var addressedBy: Addressed?
     /// For a question or plan: the call it waits on (`tool_use` id), which ties it to the form Lookout's hook holds.
     var toolUseID: String?
+    /// For a turn card made once the turn could be told done (see `RouterFeed.update`): your last message when the turn
+    /// ended (ms). A later one is a reply to it, however late the card was made.
+    var turnMessage: Int64?
+
+    /// What a message (ms) must come after to be a reply to this card.
+    var replyAfter: Int64 { turnMessage ?? createdMs }
 
     var createdAt: Date {
         get { Date(timeIntervalSince1970: Double(createdMs) / 1000) }
@@ -102,7 +119,7 @@ struct RouterCard: Codable, Identifiable, Hashable {
     var isOpen: Bool { addressedAt == nil }
 
     init(id: String, sessionID: String, kind: Kind, title: String, folder: String?, text: String, createdAt: Date,
-         addressedAt: Date? = nil, addressedBy: Addressed? = nil, toolUseID: String? = nil) {
+         addressedAt: Date? = nil, addressedBy: Addressed? = nil, toolUseID: String? = nil, turnMessage: Int64? = nil) {
         self.id = id
         self.sessionID = sessionID
         self.kind = kind
@@ -113,10 +130,11 @@ struct RouterCard: Codable, Identifiable, Hashable {
         self.addressedAt = addressedAt
         self.addressedBy = addressedBy
         self.toolUseID = toolUseID
+        self.turnMessage = turnMessage
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionID, kind, title, folder, text, createdMs, createdAt, addressedAt, addressedBy, toolUseID
+        case id, sessionID, kind, title, folder, text, createdMs, createdAt, addressedAt, addressedBy, toolUseID, turnMessage
     }
 
     /// Files from before `createdMs` have `createdAt` (a date) instead.
@@ -136,6 +154,7 @@ struct RouterCard: Codable, Identifiable, Hashable {
         addressedAt = try c.decodeIfPresent(Date.self, forKey: .addressedAt)
         addressedBy = try c.decodeIfPresent(Addressed.self, forKey: .addressedBy)
         toolUseID = try c.decodeIfPresent(String.self, forKey: .toolUseID)
+        turnMessage = try? c.decodeIfPresent(Int64.self, forKey: .turnMessage)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -150,6 +169,7 @@ struct RouterCard: Codable, Identifiable, Hashable {
         try c.encodeIfPresent(addressedAt, forKey: .addressedAt)
         try c.encodeIfPresent(addressedBy, forKey: .addressedBy)
         try c.encodeIfPresent(toolUseID, forKey: .toolUseID)
+        try c.encodeIfPresent(turnMessage, forKey: .turnMessage)
     }
 
     /// The wait a question or plan card was made for (ms since 1970), from its id.
@@ -272,8 +292,13 @@ enum RouterFeed {
 
     /// `forms`: the calls (`tool_use` ids) whose forms Lookout's hook holds, by desktop session; nil until the forms folder
     /// has been read.
+    /// `tasks`: the subagents and commands sessions whose turn is over still have running (`Store.claudeTasks`), and
+    /// `inventory` the sessions that read looked at (nil: every one). A finished turn is carded only once its session is
+    /// no longer running (the app writes the summary after the count goes up) and its background work has been looked at
+    /// since: with some still running it is work under way, and the card waits until that is done.
     static func update(_ state: inout RouterState, sessions: [ClaudeSession], activity: [String: ClaudeActivity],
-                       muted: Set<String>, viewing: String?, forms: [String: Set<String>]? = nil, now: Date) {
+                       muted: Set<String>, viewing: String?, forms: [String: Set<String>]? = nil,
+                       tasks: [String: [ClaudeTask]] = [:], inventory: Set<String>? = nil, now: Date) {
         let live = Dictionary(sessions.filter { !$0.isArchived }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
 
         for i in state.cards.indices where state.cards[i].isOpen && live[state.cards[i].sessionID] == nil {
@@ -285,6 +310,7 @@ enum RouterFeed {
             let id = session.id
             let stamp = Stamp(session)
             let before = state.seen[id].flatMap(Stamp.init)
+            let busy = !(tasks[id] ?? []).isEmpty
             let previous = state.waits[id]
             let read = session.running ? activity[id] : nil
             let current = read.flatMap(wait)
@@ -301,7 +327,7 @@ enum RouterFeed {
             if let before {
                 // What addresses the cards there are, before any new one is made (a new one is newer than all of it).
                 if stamp.message != before.message, let message = stamp.message {
-                    address(&state, id, .reply, now) { message > $0.createdMs }
+                    address(&state, id, .reply, now) { message > $0.replyAfter }
                 }
                 if stamp.focus != before.focus, let focused = stamp.focus {
                     address(&state, id, .opened, now) { $0.kind.isTurn && focused > $0.createdMs }
@@ -312,16 +338,27 @@ enum RouterFeed {
 
                 // No card for what you watched happen in the app, nor for muted projects.
                 let quiet = id == viewing || muted.contains(session.folderKey)
-                if session.completedTurns > before.turns, !quiet {
-                    let blocked = session.summary?.blocked == true
-                    let detail = session.summary?.detail ?? ""
-                    add(&state, RouterCard(id: "\(id)#t\(session.completedTurns)", sessionID: id,
-                                           kind: blocked ? .stuck : .done, title: session.title, folder: session.folder,
-                                           text: detail.isEmpty ? placeholder : detail, createdAt: now), now)
+                if session.completedTurns > before.turns {
+                    // A newer turn: one still waiting is past (the usual rules apply to this one). It waits too, until it
+                    // can be told whether it left work running (decided below, at once when it can be).
+                    state.pendingTurns[id] = quiet ? nil : RouterState.PendingTurn(turns: session.completedTurns, message: stamp.message)
                 }
                 if let current, current.ms != previous, !quiet {
                     add(&state, RouterCard(id: "\(id)#w\(current.ms)", sessionID: id, kind: current.kind, title: session.title,
                                            folder: session.folder, text: current.text, createdAt: now, toolUseID: current.toolUseID), now)
+                }
+            }
+
+            // A turn waiting: carded once the session is no longer running, its background work looked at since, and none
+            // left (with the summary as it is then); forgotten if you've written since or another turn began.
+            if let pending = state.pendingTurns[id] {
+                if stamp.message != pending.message || session.completedTurns != pending.turns {
+                    state.pendingTurns[id] = nil
+                } else if !session.running, inventory?.contains(id) ?? true, !busy {
+                    state.pendingTurns[id] = nil
+                    if id != viewing, !muted.contains(session.folderKey) {
+                        addTurn(&state, session, turns: pending.turns, message: pending.message, now: now)
+                    }
                 }
             }
 
@@ -360,7 +397,17 @@ enum RouterFeed {
         state.waits = state.waits.filter { live[$0.key] != nil }
         state.waitTools = state.waitTools.filter { live[$0.key] != nil }
         state.formSeen = state.formSeen.filter { live[$0.key] != nil }
+        state.pendingTurns = state.pendingTurns.filter { live[$0.key] != nil }
         prune(&state)
+    }
+
+    /// The card of a finished turn, with the app's summary as it is now (or the placeholder until it's written).
+    private static func addTurn(_ state: inout RouterState, _ session: ClaudeSession, turns: Int, message: Int64?, now: Date) {
+        let blocked = session.summary?.blocked == true
+        let detail = session.summary?.detail ?? ""
+        add(&state, RouterCard(id: "\(session.id)#t\(turns)", sessionID: session.id, kind: blocked ? .stuck : .done,
+                               title: session.title, folder: session.folder, text: detail.isEmpty ? placeholder : detail,
+                               createdAt: now, turnMessage: message), now)
     }
 
     /// Turning the Router on again: what happened to the open cards while it was off is judged from how things are now
@@ -381,7 +428,7 @@ enum RouterFeed {
             if let session = live[card.sessionID] {
                 let stamp = Stamp(session)
                 let change = moved(session)
-                if let message = stamp.message, message > card.createdMs || (change.message && !card.kind.isTurn) {
+                if let message = stamp.message, message > card.replyAfter || (change.message && !card.kind.isTurn) {
                     by = .reply
                 } else if !card.kind.isTurn, change.turns {
                     by = .answered
@@ -514,7 +561,8 @@ extension Store {
             RouterFeed.reconcile(&state, sessions: Array(claudeSessions.values), activity: claudeActivity, forms: forms, now: now)
         }
         RouterFeed.update(&state, sessions: Array(claudeSessions.values), activity: claudeActivity,
-                          muted: Set(agents.mutedFolders), viewing: viewingNow, forms: forms, now: now)
+                          muted: Set(agents.mutedFolders), viewing: viewingNow, forms: forms, tasks: claudeTasks,
+                          inventory: claudeTaskInventory, now: now)
         guard state != router else { return }
         let known = Set(router.cards.map(\.id))
         router = state
@@ -566,7 +614,18 @@ extension Store {
         }
         router = state
         applyRouterSwitch(install: true)
-        if on { feedRouter(now: now) }
+        if on {
+            feedRouter(now: now)
+            // What it saved (a turn waiting to know what it left running, say) is decided by the next read: one now.
+            requestClaudeRead()
+        }
+    }
+
+    /// A read of the Claude app now; a test counts it instead (and a store that doesn't persist reads nothing on its own).
+    func requestClaudeRead() {
+        if let onClaudeRead { onClaudeRead(); return }
+        guard persists else { return }
+        refreshClaude()
     }
 
     /// At launch: the forms folder and its watcher, and the hook again if the app moved since it was installed.

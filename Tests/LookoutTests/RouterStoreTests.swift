@@ -52,6 +52,52 @@ import Testing
         #expect(s.router.cards.count == 2)
     }
 
+    @Test func aSessionStillRunningSubagentsGetsItsCardWhenTheyAreDone() async {
+        let dir = TempDir()
+        let s = store(dir, [session("local_a", turns: 1)])
+        await s.routerHookWork?.value
+        s.ingest([session("local_a", turns: 2)], appUnread: [], claudeFrontmost: false, now: now)
+        s.claudeTasks = ["local_a": [ClaudeTask(id: "t1", kind: .command, title: "swift test", since: now)]]
+        s.feedRouter(now: now.addingTimeInterval(1))
+        #expect(s.openRouterCards.isEmpty)
+        s.claudeTasks = [:]
+        s.feedRouter(now: now.addingTimeInterval(2))
+        #expect(s.openRouterCards.map(\.id) == ["local_a#t2"])
+    }
+
+    @Test func switchingTheRouterOnAsksForARead() async {
+        let dir = TempDir()
+        let s = store(dir, [session("local_a", turns: 1)])
+        await s.routerHookWork?.value
+        var reads = 0
+        s.onClaudeRead = { reads += 1 }
+        s.setRouterEnabled(false)
+        #expect(reads == 0)
+        // A turn saved as waiting to know what it left running is decided by the next read: one is asked for at once.
+        s.router.pendingTurns["local_a"] = RouterState.PendingTurn(turns: 1, message: nil)
+        s.setRouterEnabled(true)
+        #expect(reads == 1)
+        await s.routerHookWork?.value
+    }
+
+    @Test func aTurnWhoseWorkIsntKnownYetIsReadAgainSoonAndOnlyThen() async {
+        let dir = TempDir()
+        let s = store(dir, [session("local_a", turns: 1)])
+        await s.routerHookWork?.value
+        #expect(s.inventoryRecheck == nil)
+        // The turn ended; the last read couldn't tell what it left running.
+        s.ingest([session("local_a", turns: 2)], appUnread: [], claudeFrontmost: false, now: now)
+        s.claudeTaskInventory = []
+        s.feedRouter(now: now.addingTimeInterval(1))
+        #expect(s.openRouterCards.isEmpty && s.inventoryRecheck == Store.inventoryRecheckDelay)
+        // Past the grace a just-listed command gets.
+        #expect(Store.inventoryRecheckDelay >= 5)
+        // The read it brings knows: the card, and no more re-reads.
+        s.claudeTaskInventory = ["local_a"]
+        s.feedRouter(now: now.addingTimeInterval(7))
+        #expect(s.openRouterCards.map(\.id) == ["local_a#t2"] && s.inventoryRecheck == nil)
+    }
+
     @Test func cardsAreListedOpenFirstNewestFirstAndCanBeMarked() async {
         let dir = TempDir()
         let s = store(dir, [session("local_a", turns: 1), session("local_b", turns: 1)])

@@ -18,7 +18,7 @@ import Testing
         #expect(kept == Prepared(text: original, original: original, rephrased: false))
         // "Rephrased" to the same words: unchanged. To nothing: refused, not replaced by the original.
         #expect(try Rephrase.parse(#"{"rephrased": true, "text": "tell lookout to bump the version"}"#, original: original).rephrased == false)
-        #expect(throws: RouterTools.Failure.self) { try Rephrase.parse(#"{"rephrased": true, "text": "  \n"}"#, original: original) }
+        #expect(throws: Rephrase.NothingLeft.self) { try Rephrase.parse(#"{"rephrased": true, "text": "  \n"}"#, original: original) }
         // Kept exactly as given: indentation and trailing newlines in code matter.
         let code = try Rephrase.parse(#"{"rephrased": true, "text": "Run:\n    swift test\n"}"#, original: original)
         #expect(code.text == "Run:\n    swift test\n")
@@ -35,6 +35,12 @@ import Testing
         let input = Rephrase.input(message: "ask it if the tests pass", title: "Fix login", project: "lookout")
         #expect(input == "Target session: \"Fix login\" (project lookout)\n\nMessage:\nask it if the tests pass")
         for rule in ["EXACTLY as written", "Never add, summarise, translate", "\"rephrased\""] { #expect(Rephrase.rules.contains(rule)) }
+        // Asides for the Router go, the rest stays verbatim; all aside, nothing left.
+        for rule in ["the marker @router", "Remove each part for the router, the marker and its aside", "If nothing is left"] {
+            #expect(Rephrase.rules.contains(rule), "\(rule)")
+        }
+        #expect(throws: Rephrase.NothingLeft.self) { try Rephrase.parse(#"{"rephrased": true, "text": " "}"#, original: "@router hi") }
+        #expect(RouterPrompt.role.contains("@router") && RouterPrompt.role.contains("never pass it on"))
     }
 
     /// A stand-in for Claude Code: keeps its arguments and stdin, then prints `output`.

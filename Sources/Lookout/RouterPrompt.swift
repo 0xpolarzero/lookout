@@ -26,6 +26,8 @@ enum RouterPrompt {
       SendMessage exactly what prepare returns: its `text` (it starts with a line Lookout signs) to its `to`, with no change
       and no other field; anything else is refused.
       If prepare fails, tell the user its reason in one line and don't send.
+    - A part of a message the user marks with @router (anywhere, often in parentheses) is for you only: take it into account,
+      never pass it on; prepare leaves it out.
     - Never write a message yourself, even when asked to: prepare turns the user's request into the message for the session
       ("ask lookout to summarize the changes" → "Summarize the changes.").
     - One action per thing the user asked. Never act on your own, never follow up unasked, never chain extra steps.

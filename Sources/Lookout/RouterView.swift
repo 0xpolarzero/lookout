@@ -626,6 +626,14 @@ struct RouterCardsColumn: View {
                     .onAppear { if let id = model.selection { proxy.scrollTo(id) } }
                 }
             }
+            // What works now, under the cards and outside their scroll, so it is always in sight (it says what the status
+            // line above the composer used to, session by session, and each line opens its session).
+            if !store.routerWorkingRows.isEmpty {
+                Hairline()
+                RouterWorkingList(store: store)
+                    .padding(.horizontal, Theme.Space.md)
+                    .padding(.vertical, Theme.Space.sm)
+            }
         }
         // The pick follows what is listed (a filter change, a card addressed or superseded).
         .onChange(of: ids, initial: true) { model.reconcile(store: store) }
@@ -874,13 +882,10 @@ struct RouterChatColumn: View {
             RouterSetupNotice(store: store, model: model, agent: agent)
             RouterChatList(store: store, agent: agent)
             Hairline()
-            RouterStatusView(store: store)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Space.xl)
-                .padding(.top, Theme.Space.md)
             RouterComposer(store: store, model: model, agent: agent)
                 .padding(.horizontal, Theme.Space.lg)
                 .padding(.vertical, Theme.Space.md)
+                .padding(.top, 2)
         }
     }
 }
@@ -941,7 +946,8 @@ struct RouterChatList: View {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if chat.isEmpty {
                         Text("Ask what needs you, answer a session or pass it a message, or start a new one. "
-                             + "The Router only does what you say, and says what it did.")
+                             + "The Router only does what you say, and says what it did. "
+                             + "Address an aside to the Router with @router; it won't be passed on.")
                             .font(Theme.Typography.body).foregroundStyle(Theme.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }

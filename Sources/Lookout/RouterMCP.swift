@@ -973,6 +973,38 @@ final class RouterMCPServer: @unchecked Sendable {
         throw Failure("Unknown project “\(q)”. Projects: \(all.isEmpty ? "none" : all)")
     }
 
+    /// Whether `text` still holds the marker that addresses the Router: `@router` (any case) anywhere, unless it is part
+    /// of a word or address (a letter or digit right before it: `user@router.com`) or of a name or path (right after it a
+    /// letter, digit or `/`, or `.` `-` `_` `@` followed by a letter or digit: `@router.js`, `@router/core`, `@router-old`).
+    /// Anything else around it (spaces, brackets, quotes, emphasis, punctuation, backticks) leaves it the marker: one in code
+    /// is refused too, which is safe.
+    nonisolated static func hasRouterMarker(_ text: String) -> Bool {
+        let plain = Array(text)
+        let marker = Array("@router")
+        func word(_ c: Character) -> Bool { c.isLetter || c.isNumber }
+        var i = 0
+        while i + marker.count <= plain.count {
+            defer { i += 1 }
+            guard plain[i] == "@", String(plain[i..<(i + marker.count)]).lowercased() == "@router" else { continue }
+            if i > 0, word(plain[i - 1]) { continue }
+            let end = i + marker.count
+            if end < plain.count {
+                let after = plain[end]
+                if word(after) || after == "/" { continue }
+                if ".-_@".contains(after), end + 1 < plain.count, word(plain[end + 1]) { continue }
+            }
+            return true
+        }
+        return false
+    }
+
+    /// Refuses a message that still holds the marker (what was said to the Router never goes on).
+    private func noMarker(_ text: String) throws {
+        guard !Self.hasRouterMarker(text) else {
+            throw Failure("The message still has a part for the Router (@router); nothing was sent")
+        }
+    }
+
     /// Haiku, through the binary the agent found (or what a test put in), stopped with the turn.
     private func rephrased(_ store: Store, _ message: String, title: String, project: String) async throws -> Prepared {
         if let rephrase { return try await rephrase(message, title, project) }
@@ -987,6 +1019,8 @@ final class RouterMCPServer: @unchecked Sendable {
             }
         } catch is CancellationError {
             throw Failure("Stopped; nothing was done")
+        } catch let nothing as Rephrase.NothingLeft {
+            throw Failure(nothing.localizedDescription)
         } catch {
             throw Failure("Couldn't prepare the message (\(error.localizedDescription)); nothing was sent")
         }
@@ -1094,6 +1128,8 @@ final class RouterMCPServer: @unchecked Sendable {
     }
 
     private func signed(_ store: Store, _ ready: Prepared, title: String, cli: String?, ticket: Ticket) async throws -> Prepared {
+        // What the user says to the Router with @router never goes on: if any is still there, nothing is sent.
+        try noMarker(ready.text)
         guard store.routerPluginStatus == .installed else {
             throw Failure("Lookout's plugin isn't installed in Claude Code, so nothing can be sent (Settings → Router)")
         }
@@ -1185,8 +1221,9 @@ final class RouterMCPServer: @unchecked Sendable {
         guard store.routerPluginStatus == .installed else {
             throw Failure("Lookout's plugin isn't installed in Claude Code, so nothing can be sent (Settings → Router)")
         }
-        // Prepared first: if Haiku fails (or you stop), no session is made.
+        // Prepared first: if Haiku fails (or you stop), or a part for the Router is left in it, no session is made.
         var ready = try await rephrased(store, message, title: title, project: name)
+        try noMarker(ready.text)
         try live(ticket)
         let started: SessionStart.Started
         if let starter {

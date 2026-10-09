@@ -338,6 +338,11 @@ struct Prepared: Equatable, Sendable {
 /// Haiku, run once per message, decides whether a message needs rephrasing for its target, and how. It only ever removes
 /// addressing: the rules forbid anything else.
 enum Rephrase {
+    /// Everything in the message was for the Router (`@router` asides): nothing to pass on.
+    struct NothingLeft: LocalizedError {
+        var errorDescription: String? { "Nothing to pass on: everything in the message was for the Router" }
+    }
+
     static let model = "claude-haiku-5-5"
     static let timeout: TimeInterval = 20
 
@@ -351,6 +356,11 @@ enum Rephrase {
     (c) It holds parts for several sessions or projects ("lookout: add a badge; api: rotate the keys"): keep only the part \
     meant for the target (by its title or project), verbatim, without its addressing, and drop every other part \
     (for a target in project lookout → "Add a badge").
+    (d) It has parts the user addresses to the router with the marker @router, anywhere: in parentheses, mid-sentence or \
+    at the end ("Bump the version and push (@router this one is slow, don't wait on it)" → "Bump the version and push"). \
+    The marker is @router standing alone as a word: never a name or path that contains it (@router.js, \
+    src/@router/index.ts, the package scope @router/core, user@router.com); leave those as they are. Remove each part for the router, the marker and its aside (and the parentheses around it), and keep everything \
+    else verbatim. If nothing is left, answer {"rephrased": true, "text": ""}.
     Never add, summarise, translate, fix typos or change the style. Keep code, paths, names and the language as they are.
     Answer with JSON only: {"rephrased": true|false, "text": "…"}. When nothing applies: {"rephrased": false, "text": \
     <the message unchanged>}.
@@ -376,9 +386,7 @@ enum Rephrase {
         }
         guard rephrased, out != original else { return Prepared(text: original, original: original, rephrased: false) }
         // Kept as given (whitespace in code matters); nothing left of the message is no message.
-        guard !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw RouterTools.Failure("Haiku left nothing of the message")
-        }
+        guard !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NothingLeft() }
         return Prepared(text: out, original: original, rephrased: true)
     }
 

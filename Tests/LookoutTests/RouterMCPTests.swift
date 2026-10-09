@@ -1019,6 +1019,86 @@ import Testing
         try await FormWriter.write(form, answers: ["Which database?": "Postgres"], dir: forms)
         #expect(try answer(dir) == ["Which database?": "Postgres"])
     }
+
+    // MARK: @router asides
+
+    @Test func anAsideForTheRouterNeverGoesOn() async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        let t = tools(s, turn: "Bump the version and push (@router this one is slow, don't wait on it)")
+        // Haiku left the aside in: refused, nothing prepared.
+        t.rephrase = { message, _, _ in Prepared(text: message, original: message, rephrased: false) }
+        let kept = try #require(await t.call("prepare", ["session": "local_a"]))
+        #expect(kept.isError && kept.text.contains("@router") && t.prepared.isEmpty)
+        // Any case.
+        t.rephrase = { message, _, _ in Prepared(text: "Bump it (@ROUTER later)", original: message, rephrased: true) }
+        #expect(await t.call("prepare", ["session": "local_a"])?.isError == true)
+        // Haiku took it out: it goes, without the aside.
+        t.rephrase = { message, _, _ in Prepared(text: "Bump the version and push", original: message, rephrased: true) }
+        #expect(await t.call("prepare", ["session": "local_a"])?.isError == false)
+        #expect(t.prepared["Fix the login bug"]?.body == "Bump the version and push")
+        // A new session's first message is held to the same, before any session is made.
+        var started = 0
+        t.starter = { _, title in started += 1; return SessionStart.Started(sessionID: "local_new", peer: title) }
+        t.rephrase = { message, _, _ in Prepared(text: "Ship it (@router quietly)", original: message, rephrased: true) }
+        #expect(await t.call("start_session", ["project": "lookout", "title": "Ship it"])?.isError == true)
+        #expect(t.prepared["Ship it"] == nil && started == 0)
+    }
+
+    @Test func aMessageThatIsAllAsideHasNothingToPassOn() async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        let t = tools(s, turn: "@router what needs me?")
+        // Haiku's answer for it, read by the real parser.
+        t.rephrase = { message, _, _ in try Rephrase.parse(#"{"rephrased": true, "text": ""}"#, original: message) }
+        let out = try #require(await t.call("prepare", ["session": "local_a"]))
+        #expect(out.isError && out.text.hasPrefix("Nothing to pass on"))
+        #expect(t.prepared.isEmpty)
+    }
+
+    @Test(arguments: [
+        "Bump it (@router this one is slow)", "@router what needs me?", "Ship it @router quietly", "Ship it @router.",
+        "Ship it @router, then wait", "Ship it (@router)", "Ship it [@router later]", "say \"@router hi\"", "Bump it @ROUTER",
+        "Ship it\n@router: later", "Ship it @router: later", "Ship it {@router note}",
+        // After punctuation or formatting.
+        "**@router quietly**", ";@router quietly", "—@router quietly", "_@router_", "\"@router", ",@router", "x.@router",
+        "--@router", "Ship it (@router)!", "``a`` @router b",
+        // In code too: refused, which is safe.
+        "Use `@router` here", "``code with `@router` inside``", "See ```\n@router hi\n```", "Use ``@router`` here",
+        "```swift\nlet a = \"@router\"\n```",
+    ])
+    func theMarkerIsCaught(_ text: String) {
+        #expect(RouterTools.hasRouterMarker(text), "\(text)")
+    }
+
+    @Test(arguments: [
+        "Fix @router.js", "Edit src/@router/index.ts", "Install @router/core", "Mail user@router.com",
+        "Rename @router-old", "Rename @router_old", "Ping @routers", "Fix @router.js.", "No marker at all", "a@router b",
+        // A name in code is still a name.
+        "Import `@router/core`", "```\nimport x from '@router/core'\n```",
+    ])
+    func namesAreNotTheMarker(_ text: String) {
+        #expect(!RouterTools.hasRouterMarker(text), "\(text)")
+    }
+
+    @Test func theRuleTellsHaikuTheSameMarker() {
+        for gone in ["outside code", "backticks"] { #expect(!Rephrase.rules.contains(gone), "\(gone)") }
+        for part in ["standing alone as a word", "@router.js", "src/@router/index.ts", "@router/core",
+                     "user@router.com", "leave those as they are"] {
+            #expect(Rephrase.rules.contains(part), "\(part)")
+        }
+    }
+
+    @Test(arguments: ["**@router quietly**", ";@router quietly", "—@router quietly", "_@router_", "\"@router", ",@router"])
+    func anEvasionIsRefusedByPrepare(_ text: String) async throws {
+        let dir = TempDir()
+        let s = await store(dir)
+        let t = tools(s, turn: "Ship it " + text)
+        t.rephrase = { message, _, _ in Prepared(text: "Ship it " + text, original: message, rephrased: true) }
+        let out = try #require(await t.call("prepare", ["session": "local_a"]))
+        #expect(out.isError && out.text.contains("@router") && t.prepared.isEmpty, "\(text)")
+    }
+
 }
 
 /// Holds an async call until the test lets it go.
